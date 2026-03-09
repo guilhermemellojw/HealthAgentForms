@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Sync
@@ -57,6 +58,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
+    onOpenAdmin: () -> Unit = {},
+    isAdmin: Boolean = false,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     // Intercept system back button
@@ -543,6 +546,26 @@ fun SettingsScreen(
                     )
                     
                     Spacer(modifier = Modifier.height(8.dp))
+
+                    if (isAdmin) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                        ListItem(
+                            headlineContent = { Text("Painel do Administrador") },
+                            supportingContent = { Text("Ver dados sincronizados de todos os agentes") },
+                            leadingContent = { Icon(Icons.Default.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                    onOpenAdmin()
+                                }
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                 }
             }
 

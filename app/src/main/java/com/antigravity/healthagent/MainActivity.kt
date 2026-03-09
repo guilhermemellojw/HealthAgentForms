@@ -107,10 +107,25 @@ fun MainScreen(loginViewModel: LoginViewModel) {
     var selectedTab by remember { mutableIntStateOf(2) }
     var showSettings by remember { mutableStateOf(false) }
     var showExitDialog by remember { mutableStateOf(false) }
+    var showAdmin by remember { mutableStateOf(false) }
 
-    if (showSettings) {
+    val authState by loginViewModel.authState.collectAsState()
+    val isAdmin = (authState as? AuthState.Authenticated)?.user?.isAdmin == true
+
+    if (showAdmin) {
+        val adminViewModel: com.antigravity.healthagent.ui.admin.AdminViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+        com.antigravity.healthagent.ui.admin.AdminDashboardScreen(
+            viewModel = adminViewModel,
+            onNavigateBack = { showAdmin = false }
+        )
+    } else if (showSettings) {
         com.antigravity.healthagent.ui.settings.SettingsScreen(
-            onNavigateBack = { showSettings = false }
+            onNavigateBack = { showSettings = false },
+            onOpenAdmin = {
+                showSettings = false
+                showAdmin = true
+            },
+            isAdmin = isAdmin
         )
     } else {
         val context = LocalContext.current
