@@ -1,6 +1,7 @@
 package com.antigravity.healthagent
 
 import android.app.Application
+import com.google.firebase.FirebaseApp
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import dagger.hilt.android.HiltAndroidApp
@@ -36,6 +37,7 @@ class HealthAgentApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        FirebaseApp.initializeApp(this)
         // WorkManager is initialized on-demand.
     }
 }
