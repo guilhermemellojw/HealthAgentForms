@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.DarkMode
@@ -518,6 +519,30 @@ fun SettingsScreen(
                     )
                     
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    
+                    val isSyncing by viewModel.isSyncing.collectAsState()
+                    
+                    ListItem(
+                        headlineContent = { Text("Sincronizar com a Nuvem") },
+                        supportingContent = { Text("Enviar dados atualizados para o servidor") },
+                        leadingContent = { 
+                            if (isSyncing) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Sync, contentDescription = null)
+                            }
+                        },
+                        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = !isSyncing) { 
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                viewModel.syncDataToCloud()
+                            }
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
 

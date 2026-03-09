@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Replace with your actual Web client ID from Google Cloud Console / Firebase -->
+    <string name="default_web_client_id">558585725380-je9r9sqf0ml6ej46t3i9fkh847uhjvdv.apps.googleusercontent.com</string>
+</resources>

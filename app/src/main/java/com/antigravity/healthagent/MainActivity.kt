@@ -43,6 +43,10 @@ import android.app.Activity
 import androidx.compose.runtime.LaunchedEffect
 import com.antigravity.healthagent.ui.components.AppExitDialog
 import com.antigravity.healthagent.utils.SoundManager
+import com.antigravity.healthagent.ui.auth.LoginScreen
+import com.antigravity.healthagent.ui.auth.LoginViewModel
+import com.antigravity.healthagent.ui.auth.AuthState
+import androidx.hilt.navigation.compose.hiltViewModel
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -54,22 +58,35 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            val viewModel: com.antigravity.healthagent.ui.home.HomeViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+            val viewModel: com.antigravity.healthagent.ui.home.HomeViewModel = hiltViewModel()
+            val loginViewModel: LoginViewModel = hiltViewModel()
             
             val themeMode by viewModel.themeMode.collectAsState()
             val themeColor by viewModel.themeColor.collectAsState()
             val solarMode by viewModel.solarMode.collectAsState()
+            
+            val authState by loginViewModel.authState.collectAsState()
 
             val tMode = themeMode
             val tColor = themeColor
 
-            if (tMode != null && tColor != null) {
+            if (tMode != null && tColor != null && authState !is AuthState.Loading) {
                 HealthAgentFormsTheme(
                     themeMode = tMode,
                     themeColor = tColor,
                     solarMode = solarMode
                 ) {
-                    MainScreen()
+                    when (authState) {
+                        is AuthState.Authenticated -> {
+                            MainScreen(loginViewModel)
+                        }
+                        else -> {
+                            LoginScreen(
+                                viewModel = loginViewModel,
+                                onLoginSuccess = { /* Automatically handled by state */ }
+                            )
+                        }
+                    }
                 }
             } else {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -86,7 +103,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen() {
+fun MainScreen(loginViewModel: LoginViewModel) {
     var selectedTab by remember { mutableIntStateOf(2) }
     var showSettings by remember { mutableStateOf(false) }
     var showExitDialog by remember { mutableStateOf(false) }
@@ -249,6 +266,6 @@ fun MainScreen() {
 @Composable
 fun HomePreview(){
     HealthAgentFormsTheme {
-        MainScreen()
+        // MainScreen() // Cannot easily preview without ViewModels
     }
 }

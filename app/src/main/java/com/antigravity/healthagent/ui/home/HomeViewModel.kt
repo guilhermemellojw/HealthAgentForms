@@ -7,7 +7,7 @@ import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.data.local.model.DayActivity
-import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.repository.StreetRepository
 import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
 import com.antigravity.healthagent.domain.usecase.DayManagementUseCase
@@ -20,6 +20,7 @@ import com.antigravity.healthagent.data.backup.BackupManager
 import com.antigravity.healthagent.data.backup.BackupData
 import com.antigravity.healthagent.utils.SemanalPdfGenerator
 import com.antigravity.healthagent.utils.BoletimPdfGenerator
+import com.antigravity.healthagent.domain.repository.SyncRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -34,6 +35,7 @@ import javax.inject.Inject
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val repository: HouseRepository,
+    private val syncRepository: SyncRepository,
     private val houseValidationUseCase: HouseValidationUseCase,
     val dayManagementUseCase: DayManagementUseCase,
     private val houseManagementUseCase: HouseManagementUseCase,
@@ -136,6 +138,9 @@ class HomeViewModel @Inject constructor(
 
     private val _showHistoryUnlockConfirmation = MutableStateFlow(false)
     val showHistoryUnlockConfirmation: StateFlow<Boolean> = _showHistoryUnlockConfirmation.asStateFlow()
+
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
 
     private val _moveConfirmationData = MutableStateFlow<Pair<House, String>?>(null)
     val moveConfirmationData: StateFlow<Pair<House, String>?> = _moveConfirmationData.asStateFlow()
@@ -737,6 +742,27 @@ class HomeViewModel @Inject constructor(
             if (validateCurrentDay(showDialog = true)) {
                 val summary = calculateAuditSummary(_data.value)
                 _showClosingAudit.value = summary
+            }
+        }
+    }
+
+    fun syncDataToCloud() {
+        if (_isSyncing.value) return
+        _isSyncing.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val houses = repository.getAllHousesOnce()
+                val activities = repository.getAllDayActivitiesOnce()
+                val result = syncRepository.pushLocalDataToCloud(houses, activities)
+                if (result.isSuccess) {
+                    _uiEvent.value = "Dados sincronizados com sucesso."
+                } else {
+                    _uiEvent.value = "Falha ao sincronizar: ${result.exceptionOrNull()?.message}"
+                }
+            } catch (e: Exception) {
+                _uiEvent.value = "Erro na sincronização."
+            } finally {
+                _isSyncing.value = false
             }
         }
     }
