@@ -6,6 +6,7 @@ interface AuthRepository {
     val currentUserAsync: Flow<AuthUser?>
     
     suspend fun signInWithGoogle(idToken: String): Result<AuthUser>
+    suspend fun signInWithEmailAndPassword(email: String, password: String): Result<AuthUser>
     suspend fun signOut()
     suspend fun isUserAdmin(): Boolean
 }

@@ -21,6 +21,9 @@ import com.antigravity.healthagent.R
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 
 @Composable
 fun LoginScreen(
@@ -30,6 +33,9 @@ fun LoginScreen(
     val authState by viewModel.authState.collectAsState()
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     
     // We navigate away when authenticated
     LaunchedEffect(authState) {
@@ -82,11 +88,64 @@ fun LoginScreen(
                     Text(
                         text = (authState as AuthState.Error).message,
                         color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
 
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("E-mail") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Senha") },
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true
+                )
+
                 Button(
+                    onClick = {
+                        if (email.isNotBlank() && password.isNotBlank()) {
+                            viewModel.signInWithEmailAndPassword(email, password)
+                        } else {
+                            viewModel.setError("Preencha e-mail e senha.")
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (authState is AuthState.Loading) {
+                        CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    } else {
+                        Text(
+                            text = "Entrar com E-mail",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Text(
+                    text = "OU",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedButton(
                     onClick = {
                         coroutineScope.launch {
                             try {
@@ -107,7 +166,7 @@ fun LoginScreen(
 
                                 val result = credentialManager.getCredential(
                                     request = request,
-                                    context = context as Activity
+                                    context = context
                                 )
                                 
                                 val credential = result.credential
@@ -116,9 +175,14 @@ fun LoginScreen(
                                     viewModel.signInWithGoogle(googleIdTokenCredential.idToken)
                                 } else {
                                     Log.e("LoginScreen", "Received an unexpected credential type.")
+                                    viewModel.setError("Credencial inesperada recebida.")
                                 }
                             } catch (e: GetCredentialException) {
                                 Log.e("LoginScreen", "Login failed", e)
+                                viewModel.setError("Erro no login Google. Verifique sua conta ou conexão.\nDetalhe: ${e.message}")
+                            } catch (e: Exception) {
+                                Log.e("LoginScreen", "Unknown error", e)
+                                viewModel.setError("Erro inesperado.\nDetalhe: ${e.message}")
                             }
                         }
                     },

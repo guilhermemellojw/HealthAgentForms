@@ -44,7 +44,30 @@ class AuthRepositoryImpl @Inject constructor(
             val authResult = auth.signInWithCredential(credential).await()
             val user = authResult.user ?: throw Exception("Login failed: User is null")
             
-            val isAdmin = checkAdminStatus(user)
+            val isAdmin = kotlinx.coroutines.withTimeoutOrNull(5000L) {
+                checkAdminStatus(user)
+            } ?: false
+            
+            Result.success(AuthUser(
+                uid = user.uid,
+                email = user.email,
+                displayName = user.displayName,
+                photoUrl = user.photoUrl.toString(),
+                isAdmin = isAdmin
+            ))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun signInWithEmailAndPassword(email: String, password: String): Result<AuthUser> {
+        return try {
+            val authResult = auth.signInWithEmailAndPassword(email, password).await()
+            val user = authResult.user ?: throw Exception("Login failed: User is null")
+            
+            val isAdmin = kotlinx.coroutines.withTimeoutOrNull(5000L) {
+                checkAdminStatus(user)
+            } ?: false
             
             Result.success(AuthUser(
                 uid = user.uid,

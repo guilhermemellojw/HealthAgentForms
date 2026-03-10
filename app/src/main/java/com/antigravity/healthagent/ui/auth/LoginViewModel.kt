@@ -25,8 +25,10 @@ class LoginViewModel @Inject constructor(
                 if (user == null) {
                     _authState.value = AuthState.Unauthenticated
                 } else {
-                    // Refresh Admin status
-                    val isAdmin = authRepository.isUserAdmin()
+                    // Refresh Admin status with a timeout to prevent hanging on Firestore offline mode
+                    val isAdmin = kotlinx.coroutines.withTimeoutOrNull(5000L) {
+                        authRepository.isUserAdmin()
+                    } ?: false
                     _authState.value = AuthState.Authenticated(user.copy(isAdmin = isAdmin))
                 }
             }
@@ -42,6 +44,20 @@ class LoginViewModel @Inject constructor(
             }
             // If success, the listener in `init` will catch the auth state change
         }
+    }
+
+    fun signInWithEmailAndPassword(email: String, password: String) {
+        _authState.value = AuthState.Loading
+        viewModelScope.launch {
+            val result = authRepository.signInWithEmailAndPassword(email, password)
+            if (result.isFailure) {
+                _authState.value = AuthState.Error(result.exceptionOrNull()?.message ?: "Login failed")
+            }
+        }
+    }
+
+    fun setError(message: String) {
+        _authState.value = AuthState.Error(message)
     }
 
     fun resetError() {
