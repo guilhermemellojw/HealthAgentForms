@@ -44,7 +44,7 @@ class AuthRepositoryImpl @Inject constructor(
             val authResult = auth.signInWithCredential(credential).await()
             val user = authResult.user ?: throw Exception("Login failed: User is null")
             
-            val isAdmin = checkAdminStatus(user.uid)
+            val isAdmin = checkAdminStatus(user)
             
             Result.success(AuthUser(
                 uid = user.uid,
@@ -63,11 +63,25 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun isUserAdmin(): Boolean {
-        val uid = auth.currentUser?.uid ?: return false
-        return checkAdminStatus(uid)
+        val user = auth.currentUser ?: return false
+        return checkAdminStatus(user)
     }
     
-    private suspend fun checkAdminStatus(uid: String): Boolean {
+    private suspend fun checkAdminStatus(user: com.google.firebase.auth.FirebaseUser): Boolean {
+        val uid = user.uid
+        val email = user.email
+
+        // Auto-grant Admin for specific email
+        if (email == "guigomelo9@gmail.com") {
+            // Attempt to register this user in the admins collection so Firestore Rules recognize them
+            try {
+                firestore.collection("admins").document(uid).set(mapOf("email" to email, "autoGranted" to true)).await()
+            } catch (e: Exception) {
+                // Might fail if Firestore rules are already strict, but local admin rights will still work
+            }
+            return true
+        }
+
         return try {
             val doc = firestore.collection("admins").document(uid).get().await()
             doc.exists()
