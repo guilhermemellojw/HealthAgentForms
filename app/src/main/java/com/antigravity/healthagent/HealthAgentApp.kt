@@ -37,7 +37,34 @@ class HealthAgentApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        com.antigravity.healthagent.context.AppContextHolder.setContext(this)
         FirebaseApp.initializeApp(this)
-        // WorkManager is initialized on-demand.
+        com.google.firebase.firestore.FirebaseFirestore.setLoggingEnabled(true)
+        
+        // Schedule periodic sync
+        schedulePeriodicSync()
+    }
+
+    private fun schedulePeriodicSync() {
+        val constraints = androidx.work.Constraints.Builder()
+            .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+            .build()
+
+        val syncRequest = androidx.work.PeriodicWorkRequestBuilder<com.antigravity.healthagent.data.sync.SyncWorker>(
+            1, java.util.concurrent.TimeUnit.HOURS
+        )
+            .setConstraints(constraints)
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.EXPONENTIAL,
+                androidx.work.WorkRequest.MIN_BACKOFF_MILLIS,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+            )
+            .build()
+
+        androidx.work.WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "PeriodicDataSync",
+            androidx.work.ExistingPeriodicWorkPolicy.KEEP,
+            syncRequest
+        )
     }
 }

@@ -99,6 +99,11 @@ class HomeViewModel @Inject constructor(
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    private val _isSupervisor = MutableStateFlow(false)
+    val isSupervisor: StateFlow<Boolean> = _isSupervisor.asStateFlow()
+
+    fun setSupervisor(value: Boolean) { _isSupervisor.value = value }
+
     // Global unfiltered list for initialization
     private val allHousesFlow = repository.getAllHouses()
 
@@ -790,6 +795,10 @@ class HomeViewModel @Inject constructor(
                 dayManagementUseCase.closeDay(audit.date, _agentName.value)
                 _showClosingAudit.value = null
                 _showGoalReached.value = true
+                
+                // Trigger immediate background sync
+                val context = com.antigravity.healthagent.context.getContext() // Assuming this helper exists or use DI
+                triggerImmediateSync()
             } catch (e: Exception) {
                 _uiEvent.value = "Erro ao fechar o dia: ${e.message}"
                 soundManager.playWarning()
@@ -1656,5 +1665,22 @@ class HomeViewModel @Inject constructor(
         return status == "NORMAL" || status.isBlank()
     }
 
+    fun triggerImmediateSync() {
+        try {
+            val context = com.antigravity.healthagent.context.getContext()
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
 
+            val syncRequest = androidx.work.OneTimeWorkRequestBuilder<com.antigravity.healthagent.data.sync.SyncWorker>()
+                .setConstraints(constraints)
+                .build()
+
+            androidx.work.WorkManager.getInstance(context).enqueue(syncRequest)
+        } catch (e: Exception) {
+            android.util.Log.e("HomeViewModel", "Failed to trigger sync", e)
+            // Fallback: manual sync trigger if background fails or context is missing
+            syncDataToCloud()
+        }
+    }
 }

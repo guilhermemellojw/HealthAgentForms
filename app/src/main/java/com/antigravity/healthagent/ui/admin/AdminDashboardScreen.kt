@@ -29,6 +29,9 @@ fun AdminDashboardScreen(
     onNavigateBack: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val users by viewModel.users.collectAsState()
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val tabs = listOf("Dados", "Usuários")
 
     androidx.activity.compose.BackHandler {
         onNavigateBack()
@@ -44,7 +47,7 @@ fun AdminDashboardScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { viewModel.loadAgentsData() }) {
+                    IconButton(onClick = { viewModel.refreshAll() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Atualizar", tint = MaterialTheme.colorScheme.onPrimary)
                     }
                 },
@@ -52,46 +55,130 @@ fun AdminDashboardScreen(
             )
         }
     ) { padding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            when (val state = uiState) {
-                is AdminUiState.Loading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                }
-                is AdminUiState.Error -> {
-                    Text(
-                        text = "Erro: ${state.message}",
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(16.dp)
+            TabRow(selectedTabIndex = selectedTab) {
+                tabs.forEachIndexed { index, title ->
+                    Tab(
+                        selected = selectedTab == index,
+                        onClick = { selectedTab = index },
+                        text = { Text(title) }
                     )
                 }
-                is AdminUiState.Success -> {
-                    if (state.agents.isEmpty()) {
-                        Text(
-                            text = "Nenhum dado de agente encontrado na nuvem.",
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier.align(Alignment.Center)
-                        )
-                    } else {
-                        LazyColumn(
-                            contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            items(state.agents) { agent ->
-                                AgentCard(agent = agent)
+            }
+
+            Box(modifier = Modifier.weight(1f)) {
+                if (selectedTab == 0) {
+                    when (val state = uiState) {
+                        is AdminUiState.Loading -> {
+                            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                        }
+                        is AdminUiState.Error -> {
+                            Text(
+                                text = "Erro: ${state.message}",
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .padding(16.dp)
+                            )
+                        }
+                        is AdminUiState.Success -> {
+                            if (state.agents.isEmpty()) {
+                                Text(
+                                    text = "Nenhum dado de agente encontrado na nuvem.",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.align(Alignment.Center)
+                                )
+                            } else {
+                                LazyColumn(
+                                    contentPadding = PaddingValues(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    items(state.agents) { agent ->
+                                        AgentCard(agent = agent)
+                                    }
+                                }
                             }
+                        }
+                    }
+                } else {
+                    // User Management Tab
+                    LazyColumn(
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(users) { user ->
+                            UserCard(
+                                user = user,
+                                onAuthorize = { viewModel.authorizeUser(user.uid, it) },
+                                onRoleChange = { viewModel.changeUserRole(user.uid, it) }
+                            )
                         }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+fun UserCard(
+    user: com.antigravity.healthagent.domain.repository.AuthUser,
+    onAuthorize: (Boolean) -> Unit,
+    onRoleChange: (com.antigravity.healthagent.domain.repository.UserRole) -> Unit
+) {
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(user.email ?: "Sem Email", fontWeight = FontWeight.Bold)
+                    Text("Papel: ${user.role.name}", style = MaterialTheme.typography.bodySmall)
+                }
+                
+                Switch(
+                    checked = user.isAuthorized,
+                    onCheckedChange = onAuthorize
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                UserRoleChip(
+                    label = "Agente",
+                    selected = user.role == com.antigravity.healthagent.domain.repository.UserRole.AGENT,
+                    onClick = { onRoleChange(com.antigravity.healthagent.domain.repository.UserRole.AGENT) }
+                )
+                UserRoleChip(
+                    label = "Supervisor",
+                    selected = user.role == com.antigravity.healthagent.domain.repository.UserRole.SUPERVISOR,
+                    onClick = { onRoleChange(com.antigravity.healthagent.domain.repository.UserRole.SUPERVISOR) }
+                )
+                UserRoleChip(
+                    label = "Admin",
+                    selected = user.role == com.antigravity.healthagent.domain.repository.UserRole.ADMIN,
+                    onClick = { onRoleChange(com.antigravity.healthagent.domain.repository.UserRole.ADMIN) }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun UserRoleChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) }
+    )
 }
 
 @Composable

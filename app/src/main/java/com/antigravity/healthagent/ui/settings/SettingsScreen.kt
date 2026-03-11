@@ -60,8 +60,10 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onOpenAdmin: () -> Unit = {},
     isAdmin: Boolean = false,
+    isSupervisor: Boolean = false,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
+    val canAccessAdmin = isAdmin || isSupervisor
     // Intercept system back button
     androidx.activity.compose.BackHandler {
         onNavigateBack()
@@ -547,12 +549,12 @@ fun SettingsScreen(
                     
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    if (isAdmin) {
+                    if (canAccessAdmin) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
                         ListItem(
-                            headlineContent = { Text("Painel do Administrador") },
-                            supportingContent = { Text("Ver dados sincronizados de todos os agentes") },
+                            headlineContent = { Text("Painel de Gestão") },
+                            supportingContent = { Text(if (isAdmin) "Ver e gerenciar dados de todos os agentes" else "Ver dados de todos os agentes") },
                             leadingContent = { Icon(Icons.Default.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                             colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
                             modifier = Modifier
@@ -569,32 +571,6 @@ fun SettingsScreen(
                 }
             }
 
-            item {
-                SettingsSection(
-                    title = "Backup Local Automático",
-                    icon = Icons.Outlined.Schedule
-                ) {
-                   Column {
-                       BackupFrequencyOption(
-                           label = "Diário",
-                           selected = selectedFrequency == BackupFrequency.DAILY,
-                           onClick = { viewModel.updateBackupFrequency(BackupFrequency.DAILY) }
-                       )
-                       HorizontalDivider()
-                       BackupFrequencyOption(
-                           label = "Semanal",
-                           selected = selectedFrequency == BackupFrequency.WEEKLY,
-                           onClick = { viewModel.updateBackupFrequency(BackupFrequency.WEEKLY) }
-                       )
-                       HorizontalDivider()
-                       BackupFrequencyOption(
-                           label = "Desativado",
-                           selected = selectedFrequency == BackupFrequency.OFF,
-                           onClick = { viewModel.updateBackupFrequency(BackupFrequency.OFF) }
-                       )
-                   }
-                }
-            }
 
 
             

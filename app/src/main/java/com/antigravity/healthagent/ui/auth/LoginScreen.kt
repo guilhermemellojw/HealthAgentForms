@@ -24,6 +24,8 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 
 @Composable
 fun LoginScreen(
@@ -33,9 +35,6 @@ fun LoginScreen(
     val authState by viewModel.authState.collectAsState()
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
     
     // We navigate away when authenticated
     LaunchedEffect(authState) {
@@ -77,134 +76,108 @@ fun LoginScreen(
                     modifier = Modifier.size(120.dp)
                 )
 
-                Text(
-                    text = "Para continuar e sincronizar seus dados, faça login com sua conta Google.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
                 if (authState is AuthState.Error) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = (authState as AuthState.Error).message,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+
+                if (authState is AuthState.WaitingForAuthorization) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = "Acesso Pendente",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = "Sua conta (${(authState as AuthState.WaitingForAuthorization).user.email}) está aguardando autorização de um administrador.",
+                            style = MaterialTheme.typography.bodyLarge,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(onClick = { viewModel.signOut() }) {
+                            Text("Sair e tentar outra conta")
+                        }
+                    }
+                } else {
                     Text(
-                        text = (authState as AuthState.Error).message,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        text = "Para continuar e sincronizar seus dados, faça login com sua conta Google.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
 
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    label = { Text("E-mail") },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    singleLine = true
-                )
-
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Senha") },
-                    modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    singleLine = true
-                )
-
-                Button(
-                    onClick = {
-                        if (email.isNotBlank() && password.isNotBlank()) {
-                            viewModel.signInWithEmailAndPassword(email, password)
-                        } else {
-                            viewModel.setError("Preencha e-mail e senha.")
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    if (authState is AuthState.Loading) {
-                        CircularProgressIndicator(
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    } else {
-                        Text(
-                            text = "Entrar com E-mail",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                Text(
-                    text = "OU",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                OutlinedButton(
-                    onClick = {
-                        coroutineScope.launch {
-                            try {
-                                val credentialManager = CredentialManager.create(context)
-                                
-                                // Note: For this to work in production, getString(R.string.default_web_client_id) 
-                                // needs to be configured via google-services.json process or manually.
-                                val webClientId = context.getString(R.string.default_web_client_id)
-                                
-                                val googleIdOption = GetGoogleIdOption.Builder()
-                                    .setFilterByAuthorizedAccounts(false)
-                                    .setServerClientId(webClientId)
-                                    .build()
-
-                                val request = GetCredentialRequest.Builder()
-                                    .addCredentialOption(googleIdOption)
-                                    .build()
-
-                                val result = credentialManager.getCredential(
-                                    request = request,
-                                    context = context
-                                )
-                                
-                                val credential = result.credential
-                                if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                                    val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                                    viewModel.signInWithGoogle(googleIdTokenCredential.idToken)
-                                } else {
-                                    Log.e("LoginScreen", "Received an unexpected credential type.")
-                                    viewModel.setError("Credencial inesperada recebida.")
+                    OutlinedButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                try {
+                                    val credentialManager = CredentialManager.create(context)
+                                    val webClientId = context.getString(R.string.default_web_client_id)
+                                    val googleIdOption = GetGoogleIdOption.Builder()
+                                        .setFilterByAuthorizedAccounts(false)
+                                        .setServerClientId(webClientId)
+                                        .setAutoSelectEnabled(true)
+                                        .setNonce("login_nonce_${System.currentTimeMillis()}")
+                                        .build()
+                                    val request = GetCredentialRequest.Builder()
+                                        .addCredentialOption(googleIdOption)
+                                        .build()
+                                    val result = credentialManager.getCredential(
+                                        request = request,
+                                        context = context
+                                    )
+                                    val credential = result.credential
+                                    if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                                        val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                                        viewModel.signInWithGoogle(googleIdTokenCredential.idToken)
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("LoginScreen", "Error during sign in", e)
+                                    viewModel.setError("Erro no login: ${e.message}")
                                 }
-                            } catch (e: GetCredentialException) {
-                                Log.e("LoginScreen", "Login failed", e)
-                                viewModel.setError("Erro no login Google. Verifique sua conta ou conexão.\nDetalhe: ${e.message}")
-                            } catch (e: Exception) {
-                                Log.e("LoginScreen", "Unknown error", e)
-                                viewModel.setError("Erro inesperado.\nDetalhe: ${e.message}")
                             }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        if (authState is AuthState.Loading) {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        } else {
+                            Text(
+                                text = "Entrar com Google",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    if (authState is AuthState.Loading) {
-                        CircularProgressIndicator(
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    } else {
-                        Text(
-                            text = "Entrar com Google",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
             }
         }
     }
+}
 }

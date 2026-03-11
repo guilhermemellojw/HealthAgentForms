@@ -104,6 +104,7 @@ fun HomeScreen(
 
     val uiEvent by viewModel.uiEvent.collectAsState()
     val isDayClosed by viewModel.isDayClosed.collectAsState()
+    val isSupervisor by viewModel.isSupervisor.collectAsState()
     val isEasyMode by viewModel.easyMode.collectAsState()
     val isSolarMode by viewModel.solarMode.collectAsState()
     val maxOpenHouses by viewModel.maxOpenHouses.collectAsState()
@@ -377,7 +378,7 @@ fun HomeScreen(
         }
     }
 
-    if (showLongPressMenu && houseToMove != null) {
+    if (showLongPressMenu && houseToMove != null && !isSupervisor) {
         AlertDialog(
             onDismissRequest = { showLongPressMenu = false; houseToMove = null },
             title = { Text("Opções do Imóvel") },
@@ -586,11 +587,12 @@ fun HomeScreen(
                         // Locker Icon
                         IconButton(
                             onClick = {
-                                if (isDayClosed) {
-                                    showUnlockDialog = true
-                                } else {
-                                    // Lock icon no longer triggers closing flow directly
-                                    viewModel.toggleDayLock()
+                                if (!isSupervisor) {
+                                    if (isDayClosed) {
+                                        showUnlockDialog = true
+                                    } else {
+                                        viewModel.toggleDayLock()
+                                    }
                                 }
                             },
                             modifier = Modifier
@@ -634,7 +636,7 @@ fun HomeScreen(
     },
 
         floatingActionButton = {
-            if (!isReorderMode && !isDayClosed) {
+            if (!isReorderMode && !isDayClosed && !isSupervisor) {
                 // Scroll Logic for FAB
                 val isScrollingUp = remember {
                     derivedStateOf {

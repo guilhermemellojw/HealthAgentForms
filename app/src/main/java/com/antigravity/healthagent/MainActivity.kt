@@ -110,7 +110,9 @@ fun MainScreen(loginViewModel: LoginViewModel) {
     var showAdmin by remember { mutableStateOf(false) }
 
     val authState by loginViewModel.authState.collectAsState()
-    val isAdmin = (authState as? AuthState.Authenticated)?.user?.isAdmin == true
+    val user = (authState as? AuthState.Authenticated)?.user
+    val isAdmin = user?.role == com.antigravity.healthagent.domain.repository.UserRole.ADMIN
+    val isSupervisor = user?.role == com.antigravity.healthagent.domain.repository.UserRole.SUPERVISOR
 
     if (showAdmin) {
         val adminViewModel: com.antigravity.healthagent.ui.admin.AdminViewModel = androidx.hilt.navigation.compose.hiltViewModel()
@@ -125,7 +127,8 @@ fun MainScreen(loginViewModel: LoginViewModel) {
                 showSettings = false
                 showAdmin = true
             },
-            isAdmin = isAdmin
+            isAdmin = isAdmin,
+            isSupervisor = isSupervisor
         )
     } else {
         val context = LocalContext.current
@@ -133,6 +136,12 @@ fun MainScreen(loginViewModel: LoginViewModel) {
         var backPressedTime by remember { mutableLongStateOf(0L) }
 
         val homeViewModel: com.antigravity.healthagent.ui.home.HomeViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+        
+        // Propagate role to HomeViewModel
+        LaunchedEffect(isSupervisor) {
+            homeViewModel.setSupervisor(isSupervisor)
+        }
+
         val daysWithErrors by homeViewModel.daysWithErrors.collectAsState()
         val navigationTab by homeViewModel.navigationTab.collectAsState()
         val isEasyMode by homeViewModel.easyMode.collectAsState()

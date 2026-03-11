@@ -13,7 +13,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class LoginViewModel @Inject constructor(
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val syncRepository: com.antigravity.healthagent.domain.repository.SyncRepository
 ) : ViewModel() {
 
     private val _authState = MutableStateFlow<AuthState>(AuthState.Loading)
@@ -24,12 +25,17 @@ class LoginViewModel @Inject constructor(
             authRepository.currentUserAsync.collect { user ->
                 if (user == null) {
                     _authState.value = AuthState.Unauthenticated
+                } else if (!user.isAuthorized) {
+                    _authState.value = AuthState.WaitingForAuthorization(user)
                 } else {
-                    // Refresh Admin status with a timeout to prevent hanging on Firestore offline mode
-                    val isAdmin = kotlinx.coroutines.withTimeoutOrNull(5000L) {
-                        authRepository.isUserAdmin()
-                    } ?: false
-                    _authState.value = AuthState.Authenticated(user.copy(isAdmin = isAdmin))
+                    // Authorized User: Trigger automatic data pull for multi-device sync
+                    // We check if we already have data locally or just pull anyway (upsert)
+                    _authState.value = AuthState.Authenticated(user)
+                    
+                    // Trigger sync in the background
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        syncRepository.pullCloudDataToLocal()
+                    }
                 }
             }
         }
@@ -39,17 +45,6 @@ class LoginViewModel @Inject constructor(
         _authState.value = AuthState.Loading
         viewModelScope.launch {
             val result = authRepository.signInWithGoogle(idToken)
-            if (result.isFailure) {
-                _authState.value = AuthState.Error(result.exceptionOrNull()?.message ?: "Login failed")
-            }
-            // If success, the listener in `init` will catch the auth state change
-        }
-    }
-
-    fun signInWithEmailAndPassword(email: String, password: String) {
-        _authState.value = AuthState.Loading
-        viewModelScope.launch {
-            val result = authRepository.signInWithEmailAndPassword(email, password)
             if (result.isFailure) {
                 _authState.value = AuthState.Error(result.exceptionOrNull()?.message ?: "Login failed")
             }
@@ -76,6 +71,7 @@ class LoginViewModel @Inject constructor(
 sealed class AuthState {
     object Loading : AuthState()
     object Unauthenticated : AuthState()
+    data class WaitingForAuthorization(val user: AuthUser) : AuthState()
     data class Authenticated(val user: AuthUser) : AuthState()
     data class Error(val message: String) : AuthState()
 }
