@@ -546,15 +546,14 @@ fun SettingsScreen(
                                 viewModel.syncDataToCloud()
                             }
                     )
-                    
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    if (canAccessAdmin) {
+                    if (isAdmin) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
                         ListItem(
-                            headlineContent = { Text("Painel de Gestão") },
-                            supportingContent = { Text(if (isAdmin) "Ver e gerenciar dados de todos os agentes" else "Ver dados de todos os agentes") },
+                            headlineContent = { Text("Painel de Gestão (Admin)") },
+                            supportingContent = { Text("Gerenciar acessos e permissões") },
                             leadingContent = { Icon(Icons.Default.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                             colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
                             modifier = Modifier
@@ -571,67 +570,68 @@ fun SettingsScreen(
                 }
             }
 
-
-
-            
-            // Danger Zone Section
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f)
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
+            // Danger Zone Section - Admin Only
+            if (isAdmin) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f)
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(bottom = 16.dp)
+                        Column(
+                            modifier = Modifier.padding(16.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Warning, // Need to add import or use Default.Warning
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(24.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(bottom = 16.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "Zona de Perigo",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+
+                            ListItem(
+                                headlineContent = { Text("Restaurar Backup", color = MaterialTheme.colorScheme.error) },
+                                supportingContent = { Text("Substitui TODOS os dados atuais", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                leadingContent = { Icon(Icons.Default.Restore, null, tint = MaterialTheme.colorScheme.error) },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                modifier = Modifier.clickable { 
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                    showRestoreConfirm = true 
+                                }
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = "Zona de Perigo",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.error
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.error.copy(alpha = 0.2f))
+
+                            ListItem(
+                                headlineContent = { Text("Apagar Tudo", color = MaterialTheme.colorScheme.error) },
+                                supportingContent = { Text("Exclui permanentemente o banco de dados", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                leadingContent = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                modifier = Modifier.clickable { 
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                    showEraseConfirm = true 
+                                }
                             )
                         }
-
-                        ListItem(
-                            headlineContent = { Text("Restaurar Backup", color = MaterialTheme.colorScheme.error) },
-                            supportingContent = { Text("Substitui TODOS os dados atuais", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                            leadingContent = { Icon(Icons.Default.Restore, null, tint = MaterialTheme.colorScheme.error) },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            modifier = Modifier.clickable { 
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                showRestoreConfirm = true 
-                            }
-                        )
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.error.copy(alpha = 0.2f))
-
-                        ListItem(
-                            headlineContent = { Text("Apagar Tudo", color = MaterialTheme.colorScheme.error) },
-                            supportingContent = { Text("Exclui permanentemente o banco de dados", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                            leadingContent = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            modifier = Modifier.clickable { 
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                showEraseConfirm = true 
-                            }
-                        )
                     }
                 }
+            }
+               }
             }
 
             // About Section

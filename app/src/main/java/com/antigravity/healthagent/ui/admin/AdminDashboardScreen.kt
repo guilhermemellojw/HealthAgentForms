@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Person
@@ -99,7 +100,13 @@ fun AdminDashboardScreen(
                                     modifier = Modifier.fillMaxSize()
                                 ) {
                                     items(state.agents) { agent ->
-                                        AgentCard(agent = agent)
+                                        AgentCard(
+                                            agent = agent,
+                                            onEditAgent = {
+                                                viewModel.selectAgentForEdit(it)
+                                                onNavigateBack() // Go back to production view
+                                            }
+                                        )
                                     }
                                 }
                             }
@@ -182,7 +189,7 @@ fun UserRoleChip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun AgentCard(agent: AgentData) {
+fun AgentCard(agent: AgentData, onEditAgent: (AgentData) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
 
     val formattedDate = remember(agent.lastSyncTime) {
@@ -253,6 +260,21 @@ fun AgentCard(agent: AgentData) {
                         DataStat(label = "Imóveis Visitados", value = "$totalHouses")
                         DataStat(label = "Com Foco", value = "$housesWithFocus", color = if (housesWithFocus > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
                         DataStat(label = "Dias Trabalhados", value = "$totalActivities")
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Button(
+                        onClick = { onEditAgent(agent) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("EDITAR PRODUÇÃO")
                     }
                 }
             }

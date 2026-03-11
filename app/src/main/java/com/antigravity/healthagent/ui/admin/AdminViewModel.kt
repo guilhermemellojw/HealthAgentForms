@@ -51,6 +51,13 @@ class AdminViewModel @Inject constructor(
         }
     }
 
+    private val _selectedAgentForEdit = MutableStateFlow<AgentData?>(null)
+    val selectedAgentForEdit: StateFlow<AgentData?> = _selectedAgentForEdit.asStateFlow()
+
+    fun selectAgentForEdit(agent: AgentData?) {
+        _selectedAgentForEdit.value = agent
+    }
+
     fun authorizeUser(uid: String, isAuthorized: Boolean) {
         viewModelScope.launch {
             val result = authRepository.authorizeUser(uid, isAuthorized)

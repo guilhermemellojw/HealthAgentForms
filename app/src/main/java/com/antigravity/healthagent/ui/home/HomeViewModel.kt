@@ -99,8 +99,15 @@ class HomeViewModel @Inject constructor(
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    private val _isSupervisor = MutableStateFlow(false)
-    val isSupervisor: StateFlow<Boolean> = _isSupervisor.asStateFlow()
+    private val _remoteAgent = MutableStateFlow<String?>(null)
+    val remoteAgent: StateFlow<String?> = _remoteAgent.asStateFlow()
+
+    fun setRemoteAgent(email: String?) {
+        _remoteAgent.value = email
+        if (email != null) {
+            _agentName.value = email
+        }
+    }
 
     fun setSupervisor(value: Boolean) { _isSupervisor.value = value }
 
@@ -756,6 +763,13 @@ class HomeViewModel @Inject constructor(
         _isSyncing.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                // 1. Pull from cloud first (Restore)
+                val pullResult = syncRepository.pullCloudDataToLocal()
+                if (pullResult.isSuccess) {
+                     android.util.Log.d("HomeViewModel", "Auto-restore successful")
+                }
+
+                // 2. Push local data to cloud
                 val houses = repository.getAllHousesOnce()
                 val activities = repository.getAllDayActivitiesOnce()
                 val result = syncRepository.pushLocalDataToCloud(houses, activities)
