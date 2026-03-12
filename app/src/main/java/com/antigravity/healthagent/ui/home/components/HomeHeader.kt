@@ -40,6 +40,7 @@ fun HomeHeader(
     tipo: Int,
     atividade: Int,
     agentName: String,
+    agentNamesList: List<String>,
     isDayClosed: Boolean,
     onUpdateHeader: (String, String, String, String, Int, String, String, Int) -> Unit,
     onUpdateBairro: (String) -> Unit,
@@ -221,7 +222,7 @@ fun HomeHeader(
 
                     CompactDropdown(
                         currentValue = agentName.uppercase(),
-                        options = AppConstants.AGENT_NAMES.map { it.uppercase() },
+                        options = agentNamesList.map { it.uppercase() },
                         onOptionSelected = { onUpdateAgentName(it.uppercase()) },
                         label = "Nome do Agente Responsável",
                         modifier = Modifier.fillMaxWidth(),

@@ -112,6 +112,9 @@ class HomeViewModel @Inject constructor(
         _remoteAgentUid.value = agent?.uid
     }
 
+    private val _agentNames = MutableStateFlow<List<String>>(emptyList())
+    val agentNames: StateFlow<List<String>> = _agentNames.asStateFlow()
+
     private val _isSupervisor = MutableStateFlow(false)
     val isSupervisor: StateFlow<Boolean> = _isSupervisor.asStateFlow()
 
@@ -620,6 +623,13 @@ class HomeViewModel @Inject constructor(
             }
         }
 
+        viewModelScope.launch {
+            val result = syncRepository.fetchAgentNames()
+            if (result.isSuccess) {
+                _agentNames.value = result.getOrNull() ?: emptyList()
+            }
+        }
+
         // Check for existing multi-day errors on startup
         viewModelScope.launch {
             daysWithErrors.filter { it.isNotEmpty() }.first()
@@ -779,13 +789,7 @@ class HomeViewModel @Inject constructor(
         val targetUid = _remoteAgentUid.value
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // 1. Pull from cloud first (Restore)
-                val pullResult = syncRepository.pullCloudDataToLocal(targetUid)
-                if (pullResult.isSuccess) {
-                     android.util.Log.d("HomeViewModel", "Auto-restore successful for ${targetUid ?: "current user"}")
-                }
- 
-                // 2. Push local data to cloud
+                // 1. Push local data to cloud
                 val houses = repository.getAllHousesOnce()
                 val activities = repository.getAllDayActivitiesOnce()
                 val result = syncRepository.pushLocalDataToCloud(houses, activities, targetUid)

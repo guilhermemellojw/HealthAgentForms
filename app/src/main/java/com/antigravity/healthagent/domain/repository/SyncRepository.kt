@@ -35,6 +35,21 @@ interface SyncRepository {
      * Deletes an agent entry from the cloud.
      */
     suspend fun deleteAgent(uid: String): Result<Unit>
+
+    /**
+     * Fetches all registered agent names from the cloud.
+     */
+    suspend fun fetchAgentNames(): Result<List<String>>
+
+    /**
+     * Adds a new agent name to the cloud registry.
+     */
+    suspend fun addAgentName(name: String): Result<Unit>
+
+    /**
+     * Deletes an agent name from the cloud registry.
+     */
+    suspend fun deleteAgentName(name: String): Result<Unit>
 }
 
 data class AgentData(

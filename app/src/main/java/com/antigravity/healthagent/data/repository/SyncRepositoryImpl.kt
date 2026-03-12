@@ -241,13 +241,67 @@ class SyncRepositoryImpl @Inject constructor(
             val operations = (houses.documents + activities.documents).map { it.reference }.toMutableList()
             operations.add(agentRef)
             
-            // Chunk deletions to stay within 500 limit
-            operations.chunked(400).forEach { chunk ->
-                val batch = firestore.batch()
-                for (ref in chunk) {
-                    batch.delete(ref)
+            // Also check for 'users' document associated if any (though usually handled by AuthRepository)
+            // For robustness, we focus on the AGENT data here.
+            
+            if (operations.isNotEmpty()) {
+                // Chunk deletions to stay within 500 limit
+                operations.chunked(400).forEach { chunk ->
+                    val batch = firestore.batch()
+                    for (ref in chunk) {
+                        batch.delete(ref)
+                    }
+                    batch.commit().await()
                 }
-                batch.commit().await()
+            }
+            
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun fetchAgentNames(): Result<List<String>> {
+        return try {
+            val snapshot = firestore.collection("metadata").document("agent_info")
+                .get().await()
+            
+            val names = snapshot.get("names") as? List<String> ?: emptyList()
+            Result.success(names.sorted())
+        } catch (e: Exception) {
+            // Fallback to AppConstants if Firestore metadata doesn't exist yet
+            Result.success(com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES)
+        }
+    }
+
+    override suspend fun addAgentName(name: String): Result<Unit> {
+        return try {
+            val normalizedName = name.trim()
+            if (normalizedName.isBlank()) return Result.failure(Exception("Nome não pode ser vazio"))
+
+            val docRef = firestore.collection("metadata").document("agent_info")
+            val snapshot = docRef.get().await()
+            
+            val currentNames = (snapshot.get("names") as? List<String> ?: emptyList()).toMutableList()
+            if (!currentNames.contains(normalizedName)) {
+                currentNames.add(normalizedName)
+                docRef.set(mapOf("names" to currentNames.sorted())).await()
+            }
+            
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun deleteAgentName(name: String): Result<Unit> {
+        return try {
+            val docRef = firestore.collection("metadata").document("agent_info")
+            val snapshot = docRef.get().await()
+            
+            val currentNames = (snapshot.get("names") as? List<String> ?: emptyList()).toMutableList()
+            if (currentNames.remove(name)) {
+                docRef.set(mapOf("names" to currentNames.sorted())).await()
             }
             
             Result.success(Unit)

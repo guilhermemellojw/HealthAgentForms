@@ -16,11 +16,14 @@ import kotlinx.coroutines.channels.awaitClose
 import com.google.firebase.firestore.Source
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.antigravity.healthagent.domain.repository.SyncRepository
+
 
 @Singleton
 class AuthRepositoryImpl @Inject constructor(
     private val auth: FirebaseAuth,
-    private val firestore: FirebaseFirestore
+    private val firestore: FirebaseFirestore,
+    private val syncRepository: SyncRepository
 ) : AuthRepository {
 
     init {
@@ -29,9 +32,12 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override val currentUserAsync: Flow<AuthUser?> = callbackFlow {
+        var firestoreListener: com.google.firebase.firestore.ListenerRegistration? = null
         val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             val firebaseUser = firebaseAuth.currentUser
             if (firebaseUser == null) {
+                firestoreListener?.remove()
+                firestoreListener = null
                 trySend(null)
             } else {
                 // Fetch full user data in a coroutine
@@ -39,6 +45,27 @@ class AuthRepositoryImpl @Inject constructor(
                     try {
                         val user = getFullUserData(firebaseUser)
                         trySend(user)
+
+                        firestoreListener?.remove()
+                        firestoreListener = firestore.collection("users").document(firebaseUser.uid)
+                            .addSnapshotListener { snapshot, error ->
+                                if (error != null || snapshot == null || !snapshot.exists()) return@addSnapshotListener
+                                
+                                val roleStr = snapshot.getString("role") ?: "AGENT"
+                                val isAuthorized = snapshot.getBoolean("isAuthorized") ?: false
+                                val finalRole = try { UserRole.valueOf(roleStr) } catch(e:Exception){ UserRole.AGENT }
+                                
+                                val updatedUser = AuthUser(
+                                    uid = firebaseUser.uid,
+                                    email = firebaseUser.email ?: "",
+                                    displayName = snapshot.getString("displayName") ?: firebaseUser.displayName,
+                                    photoUrl = firebaseUser.photoUrl?.toString(),
+                                    role = finalRole,
+                                    isAuthorized = isAuthorized,
+                                    agentName = snapshot.getString("agentName")
+                                )
+                                trySend(updatedUser)
+                            }
                     } catch (e: Exception) {
                         android.util.Log.e("AuthRepository", "Error fetching user data", e)
                         // If we can't get Firestore data, we still emit a basic user or null
@@ -48,7 +75,10 @@ class AuthRepositoryImpl @Inject constructor(
             }
         }
         auth.addAuthStateListener(listener)
-        awaitClose { auth.removeAuthStateListener(listener) }
+        awaitClose { 
+            auth.removeAuthStateListener(listener)
+            firestoreListener?.remove()
+        }
     }
 
     override suspend fun signInWithGoogle(idToken: String): Result<AuthUser> {
@@ -398,6 +428,9 @@ class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun deleteUser(uid: String): Result<Unit> {
         return try {
+            // Also clean up agent data (houses, activities) to prevent ghost data
+            syncRepository.deleteAgent(uid)
+            
             val batch = firestore.batch()
             batch.delete(firestore.collection("users").document(uid))
             batch.delete(firestore.collection("admins").document(uid))

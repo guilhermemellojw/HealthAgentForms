@@ -40,6 +40,7 @@ class AdminViewModel @Inject constructor(
         viewModelScope.launch {
             loadAgentsData()
             loadUsers()
+            loadAgentNames()
         }
     }
 
@@ -56,6 +57,40 @@ class AdminViewModel @Inject constructor(
         val result = authRepository.fetchAllUsers()
         if (result.isSuccess) {
             _users.value = result.getOrNull() ?: emptyList()
+        }
+    }
+
+    private val _agentNames = MutableStateFlow<List<String>>(emptyList())
+    val agentNames: StateFlow<List<String>> = _agentNames.asStateFlow()
+
+    private suspend fun loadAgentNames() {
+        val result = syncRepository.fetchAgentNames()
+        if (result.isSuccess) {
+            _agentNames.value = result.getOrNull() ?: emptyList()
+        }
+    }
+
+    fun addAgentName(name: String) {
+        viewModelScope.launch {
+            val result = syncRepository.addAgentName(name)
+            if (result.isSuccess) {
+                loadAgentNames()
+                _uiEvent.emit("Nome adicionado com sucesso")
+            } else {
+                _uiEvent.emit("Erro ao adicionar nome")
+            }
+        }
+    }
+
+    fun removeAgentName(name: String) {
+        viewModelScope.launch {
+            val result = syncRepository.deleteAgentName(name)
+            if (result.isSuccess) {
+                loadAgentNames()
+                _uiEvent.emit("Nome removido com sucesso")
+            } else {
+                _uiEvent.emit("Erro ao remover nome")
+            }
         }
     }
 

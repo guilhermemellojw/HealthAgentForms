@@ -39,9 +39,11 @@ fun AdminDashboardScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val users by viewModel.users.collectAsState()
+    val agentNames by viewModel.agentNames.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddUserDialog by remember { mutableStateOf(false) }
     var showAddAgentDialog by remember { mutableStateOf(false) }
+    var showAddNameDialog by remember { mutableStateOf(false) }
     var selectedUidForRestore by remember { mutableStateOf<String?>(null) }
     
     // Confirmation Dialog State
@@ -53,7 +55,7 @@ fun AdminDashboardScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val tabs = listOf("Dados", "Usuários")
+    val tabs = listOf("Dados", "Usuários", "Nomes")
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -106,8 +108,11 @@ fun AdminDashboardScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
-                    if (selectedTab == 0) showAddAgentDialog = true
-                    else showAddUserDialog = true
+                    when (selectedTab) {
+                        0 -> showAddAgentDialog = true
+                        1 -> showAddUserDialog = true
+                        2 -> showAddNameDialog = true
+                    }
                 },
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -182,7 +187,7 @@ fun AdminDashboardScreen(
                             }
                         }
                     }
-                } else {
+                } else if (selectedTab == 1) {
                     // User Management Tab
                     LazyColumn(
                         contentPadding = PaddingValues(16.dp),
@@ -192,6 +197,7 @@ fun AdminDashboardScreen(
                         items(users) { user ->
                             UserCard(
                                 user = user,
+                                agentNamesList = agentNames,
                                 onAuthorize = { viewModel.authorizeUser(user.uid, it) },
                                 onRoleChange = { viewModel.changeUserRole(user.uid, it) },
                                 onUpdateProfile = { updates -> viewModel.updateUserProfile(user.uid, updates) },
@@ -204,12 +210,43 @@ fun AdminDashboardScreen(
                             )
                         }
                     }
+                } else {
+                    // Names Management Tab
+                    LazyColumn(
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(agentNames) { name ->
+                            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    IconButton(
+                                        onClick = {
+                                            confirmTitle = "Excluir Nome"
+                                            confirmMessage = "Tem certeza que deseja remover '$name' da lista de agentes?"
+                                            onConfirmAction = { viewModel.removeAgentName(name) }
+                                            showConfirmDialog = true
+                                        },
+                                        colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Excluir")
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
     if (showAddUserDialog) {
         AddUserDialog(
+            agentNamesList = agentNames,
             onDismiss = { showAddUserDialog = false },
             onConfirm = { email, role, agentName, isAuthorized ->
                 viewModel.createUser(email, role, agentName, isAuthorized)
@@ -223,6 +260,7 @@ fun AdminDashboardScreen(
 
     if (showAddAgentDialog) {
         AddAgentDialog(
+            agentNamesList = agentNames,
             onDismiss = { showAddAgentDialog = false },
             onConfirm = { email, agentName ->
                 viewModel.createAgent(email, agentName)
@@ -230,6 +268,33 @@ fun AdminDashboardScreen(
                 scope.launch {
                     snackbarHostState.showSnackbar("Perfil de agente para $email criado!")
                 }
+            }
+        )
+    }
+
+    if (showAddNameDialog) {
+        var newName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showAddNameDialog = false },
+            title = { Text("Adicionar Nome de Agente") },
+            text = {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("Nome do Agente") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(onClick = { 
+                    viewModel.addAgentName(newName)
+                    showAddNameDialog = false 
+                }, enabled = newName.isNotBlank()) {
+                    Text("Adicionar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddNameDialog = false }) { Text("Cancelar") }
             }
         )
     }
@@ -279,6 +344,7 @@ fun GenericConfirmationDialog(
 @Composable
 fun UserCard(
     user: com.antigravity.healthagent.domain.repository.AuthUser,
+    agentNamesList: List<String>,
     onAuthorize: (Boolean) -> Unit,
     onRoleChange: (com.antigravity.healthagent.domain.repository.UserRole) -> Unit,
     onUpdateProfile: (Map<String, Any?>) -> Unit,
@@ -330,7 +396,7 @@ fun UserCard(
                                         expanded = false
                                     }
                                 )
-                                AppConstants.AGENT_NAMES.forEach { name ->
+                                agentNamesList.forEach { name ->
                                     DropdownMenuItem(
                                         text = { Text(name) },
                                         onClick = {
@@ -559,6 +625,7 @@ fun AgentCard(agent: AgentData, onEditAgent: (AgentData) -> Unit, onDeleteAgent:
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddUserDialog(
+    agentNamesList: List<String>,
     onDismiss: () -> Unit,
     onConfirm: (String, UserRole, String?, Boolean) -> Unit
 ) {
@@ -610,13 +677,13 @@ fun AddUserDialog(
                         value = agentName,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Vincular ao Agente (Opcional)") },
+                        label = { Text("Vincular ao Agente") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedAgent) },
                         modifier = Modifier.menuAnchor().fillMaxWidth()
                     )
                     ExposedDropdownMenu(expanded = expandedAgent, onDismissRequest = { expandedAgent = false }) {
                         DropdownMenuItem(text = { Text("Nenhum") }, onClick = { agentName = ""; expandedAgent = false })
-                        AppConstants.AGENT_NAMES.forEach { name ->
+                        agentNamesList.forEach { name ->
                             DropdownMenuItem(text = { Text(name) }, onClick = { agentName = name; expandedAgent = false })
                         }
                     }
@@ -642,6 +709,7 @@ fun AddUserDialog(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddAgentDialog(
+    agentNamesList: List<String>,
     onDismiss: () -> Unit,
     onConfirm: (String, String?) -> Unit
 ) {
@@ -675,7 +743,7 @@ fun AddAgentDialog(
                         modifier = Modifier.menuAnchor().fillMaxWidth()
                     )
                     ExposedDropdownMenu(expanded = expandedAgent, onDismissRequest = { expandedAgent = false }) {
-                        AppConstants.AGENT_NAMES.forEach { name ->
+                        agentNamesList.forEach { name ->
                             DropdownMenuItem(text = { Text(name) }, onClick = { agentName = name; expandedAgent = false })
                         }
                     }

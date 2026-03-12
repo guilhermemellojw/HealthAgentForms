@@ -833,7 +833,8 @@ fun HomeScreen(
                             isEasyMode = isEasyMode,
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
-                        
+                        val agentNames by viewModel.agentNames.collectAsState()
+
                         HomeHeader(
                             municipio = municipio,
                             data = data,
@@ -843,6 +844,7 @@ fun HomeScreen(
                             tipo = tipo,
                             atividade = atividade,
                             agentName = agentName,
+                            agentNamesList = agentNames,
                             isDayClosed = isDayClosed,
                             onUpdateHeader = { m, b, c, z, t, d, ci, a ->
                                 viewModel.updateHeader(m, b, c, z, t, d, ci, a)
