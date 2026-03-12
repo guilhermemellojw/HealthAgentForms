@@ -9,7 +9,11 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.*
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.*
@@ -385,17 +389,18 @@ fun PremiumCard(
     isSolarMode: Boolean = false,
     onClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(16.dp),
+    containerColor: Color = if (isSolarMode) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.18f).compositeOver(MaterialTheme.colorScheme.surface)
+    } else {
+        MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+    },
     content: @Composable ColumnScope.() -> Unit
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSolarMode) {
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.18f).compositeOver(MaterialTheme.colorScheme.surface)
-            } else {
-                MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
-            }
+            containerColor = containerColor
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
@@ -629,14 +634,75 @@ fun GlassCard(
     }
 }
 
+@Composable
+fun UserIconMenu(
+    user: com.antigravity.healthagent.domain.repository.AuthUser,
+    onLogout: () -> Unit,
+    onSwitchAccount: () -> Unit,
+    modifier: Modifier = Modifier,
+    tint: Color = MaterialTheme.colorScheme.onPrimary
+) {
+    var showUserMenu by remember { mutableStateOf(false) }
+    
+    Box(modifier = modifier) {
+        IconButton(onClick = { showUserMenu = true }) {
+            Icon(
+                imageVector = Icons.Default.Person,
+                contentDescription = "Perfil",
+                tint = tint,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+        DropdownMenu(
+            expanded = showUserMenu,
+            onDismissRequest = { showUserMenu = false }
+        ) {
+            DropdownMenuItem(
+                text = { 
+                    Column {
+                        Text(user.displayName ?: "Usuário", fontWeight = FontWeight.Bold)
+                        Text(user.email ?: "", style = MaterialTheme.typography.bodySmall)
+                        if (!user.agentName.isNullOrBlank()) {
+                            Text("Agente: ${user.agentName}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                },
+                onClick = { },
+                enabled = false
+            )
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Trocar Conta") },
+                onClick = { 
+                    showUserMenu = false
+                    onSwitchAccount()
+                },
+                leadingIcon = { Icon(Icons.Default.SwapHoriz, null) }
+            )
+            DropdownMenuItem(
+                text = { Text("Sair", color = MaterialTheme.colorScheme.error) },
+                onClick = { 
+                    showUserMenu = false
+                    onLogout()
+                },
+                leadingIcon = { Icon(Icons.Default.ExitToApp, null, tint = MaterialTheme.colorScheme.error) }
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GlassTopAppBar(
     title: @Composable () -> Unit,
     navigationIcon: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
-    scrollBehavior: TopAppBarScrollBehavior? = null
+    scrollBehavior: TopAppBarScrollBehavior? = null,
+    user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
+    onLogout: () -> Unit = {},
+    onSwitchAccount: () -> Unit = {}
 ) {
+    var showUserMenu by remember { mutableStateOf(false) }
     val containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
     
     Box(modifier = Modifier.fillMaxWidth()) {
@@ -658,7 +724,16 @@ fun GlassTopAppBar(
         CenterAlignedTopAppBar(
             title = title,
             navigationIcon = navigationIcon,
-            actions = actions,
+            actions = {
+                actions()
+                if (user != null) {
+                    UserIconMenu(
+                        user = user,
+                        onLogout = onLogout,
+                        onSwitchAccount = onSwitchAccount
+                    )
+                }
+            },
             scrollBehavior = scrollBehavior,
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                 containerColor = Color.Transparent,

@@ -57,7 +57,10 @@ import com.antigravity.healthagent.utils.formatStreetName
 @Composable
 fun BoletimScreen(
     viewModel: HomeViewModel = hiltViewModel(),
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
+    onLogout: () -> Unit = {},
+    onSwitchAccount: () -> Unit = {}
 ) {
     val boletimList by viewModel.boletimList.collectAsState()
     val agentName by viewModel.agentName.collectAsState()
@@ -317,7 +320,10 @@ fun BoletimScreen(
                             contentDescription = "Configurações"
                         )
                     }
-                }
+                },
+                user = user,
+                onLogout = onLogout,
+                onSwitchAccount = onSwitchAccount
             )
         }
     ) { paddingValues ->

@@ -26,10 +26,14 @@ import java.util.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SupervisorAgentsScreen(
-    viewModel: SupervisorViewModel = hiltViewModel()
+    viewModel: SupervisorViewModel = hiltViewModel(),
+    user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
+    onLogout: () -> Unit = {},
+    onSwitchAccount: () -> Unit = {}
 ) {
     val agents by viewModel.agents.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
 
     Scaffold(
         topBar = {
@@ -49,7 +53,10 @@ fun SupervisorAgentsScreen(
                             Icon(Icons.Default.Refresh, contentDescription = "Atualizar")
                         }
                     }
-                }
+                },
+                user = user,
+                onLogout = onLogout,
+                onSwitchAccount = onSwitchAccount
             )
         },
         containerColor = Color.Transparent
@@ -57,29 +64,56 @@ fun SupervisorAgentsScreen(
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
             MeshGradient(modifier = Modifier.fillMaxSize())
             
-            if (agents.isEmpty() && !isLoading) {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        Icons.Default.GroupOff, 
-                        contentDescription = null, 
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Nenhum agente encontrado.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Error Message
+                errorMessage?.let { error ->
+                    PremiumCard(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = error,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    items(agents) { agent ->
-                        SupervisorAgentCard(agent = agent)
+
+                if (agents.isEmpty() && !isLoading) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = if (errorMessage != null) Icons.Default.Error else Icons.Default.GroupOff, 
+                            contentDescription = null, 
+                            modifier = Modifier.size(64.dp),
+                            tint = if (errorMessage != null) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = if (errorMessage != null) "Erro ao carregar dados." else "Nenhum agente encontrado.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    val listPadding = if (errorMessage != null) 0.dp else 16.dp
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = listPadding, bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        items(agents) { agent ->
+                            SupervisorAgentCard(agent = agent)
+                        }
                     }
                 }
             }

@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -21,11 +22,15 @@ import com.antigravity.healthagent.ui.components.PremiumCard
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SupervisorSummaryScreen(
-    viewModel: SupervisorViewModel = hiltViewModel()
+    viewModel: SupervisorViewModel = hiltViewModel(),
+    user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
+    onLogout: () -> Unit = {},
+    onSwitchAccount: () -> Unit = {}
 ) {
     val summary by viewModel.aggregatedWeeklySummary.collectAsState()
     val weekRange by viewModel.weekRangeText.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
 
     Scaffold(
         topBar = {
@@ -45,7 +50,10 @@ fun SupervisorSummaryScreen(
                             Icon(Icons.Default.Refresh, contentDescription = "Atualizar")
                         }
                     }
-                }
+                },
+                user = user,
+                onLogout = onLogout,
+                onSwitchAccount = onSwitchAccount
             )
         },
         containerColor = Color.Transparent
@@ -60,6 +68,27 @@ fun SupervisorSummaryScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // Error Message
+                errorMessage?.let { error ->
+                    PremiumCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = error,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+
                 // Week Selector
                 PremiumCard(modifier = Modifier.fillMaxWidth()) {
                     Row(
@@ -106,21 +135,62 @@ fun SupervisorSummaryScreen(
                         
                         Spacer(modifier = Modifier.height(24.dp))
                         
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            StatItem(
-                                label = "IMÓVEIS",
-                                value = summary.totalHouses.toString(),
-                                icon = Icons.Default.Home
-                            )
-                            StatItem(
-                                label = "FOCOS",
-                                value = summary.totalFoci.toString(),
-                                icon = Icons.Default.Warning,
-                                color = if (summary.totalFoci > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                            )
+                        // Grid Layout for Stats
+                        Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                StatItem(
+                                    label = "TRABALHADOS",
+                                    value = summary.totalHouses.toString(),
+                                    icon = Icons.Default.Home,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                StatItem(
+                                    label = "TRATADOS",
+                                    value = summary.totalTratados.toString(),
+                                    icon = Icons.Default.WaterDrop,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                StatItem(
+                                    label = "COM FOCO",
+                                    value = summary.totalFoci.toString(),
+                                    icon = Icons.Default.Warning,
+                                    color = if (summary.totalFoci > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                StatItem(
+                                    label = "FECHADOS",
+                                    value = summary.totalFechados.toString(),
+                                    icon = Icons.Default.DoorFront,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                StatItem(
+                                    label = "ABANDONADOS",
+                                    value = summary.totalAbandonados.toString(),
+                                    icon = Icons.Default.House,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                StatItem(
+                                    label = "RECUSADOS",
+                                    value = summary.totalRecusados.toString(),
+                                    icon = Icons.Default.Block,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
                         
                         Spacer(modifier = Modifier.height(24.dp))
@@ -158,9 +228,13 @@ fun StatItem(
     label: String,
     value: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    color: Color = MaterialTheme.colorScheme.primary
+    color: Color = MaterialTheme.colorScheme.primary,
+    modifier: Modifier = Modifier
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
@@ -178,7 +252,8 @@ fun StatItem(
             text = label,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
         )
     }
 }

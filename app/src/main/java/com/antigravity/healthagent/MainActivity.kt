@@ -49,6 +49,16 @@ import com.antigravity.healthagent.ui.auth.LoginScreen
 import com.antigravity.healthagent.ui.auth.LoginViewModel
 import com.antigravity.healthagent.ui.auth.AuthState
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.material3.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.*
+import com.antigravity.healthagent.domain.repository.UserRole
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -144,7 +154,7 @@ fun MainScreen(loginViewModel: LoginViewModel) {
 
         // Sync local context with remote agent selection
         LaunchedEffect(selectedRemoteAgent) {
-            homeViewModel.setRemoteAgent(selectedRemoteAgent?.email)
+            homeViewModel.setRemoteAgent(selectedRemoteAgent)
             if (selectedRemoteAgent != null) {
                 // When an agent is selected for edit, pull THEIR data from cloud
                 homeViewModel.syncDataToCloud() // This now pulls and then pushes
@@ -222,44 +232,42 @@ fun MainScreen(loginViewModel: LoginViewModel) {
         Scaffold(
             topBar = {
                 if (!isSupervisor && selectedRemoteAgent != null) {
-                    androidx.compose.material3.Surface(
+                    Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
-                        modifier = androidx.compose.ui.Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        androidx.compose.foundation.layout.Row(
-                            modifier = androidx.compose.ui.Modifier
+                        Row(
+                            modifier = Modifier
                                 .padding(horizontal = 16.dp, vertical = 8.dp)
                                 .fillMaxWidth(),
-                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            androidx.compose.foundation.layout.Row(
-                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                                modifier = androidx.compose.ui.Modifier.weight(1f)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
                             ) {
                                 Icon(
                                     Icons.Default.Info, 
                                     contentDescription = null, 
                                     tint = MaterialTheme.colorScheme.error,
-                                    modifier = androidx.compose.ui.Modifier.size(20.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                androidx.compose.foundation.layout.Spacer(modifier = androidx.compose.ui.Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "Editando: ${selectedRemoteAgent?.email}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onErrorContainer,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                             TextButton(
                                 onClick = { 
                                     adminViewModel.selectAgentForEdit(null)
-                                    // Reset local name to admin's email
-                                    user?.email?.let { homeViewModel.setRemoteAgent(null) }
                                 },
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                                contentPadding = PaddingValues(0.dp)
                             ) {
                                 Text("SAIR", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error)
                             }
@@ -361,17 +369,40 @@ fun MainScreen(loginViewModel: LoginViewModel) {
             Box(modifier = Modifier.padding(paddingValues)) {
                 if (isSupervisor) {
                     when (selectedTab) {
-                        0 -> com.antigravity.healthagent.ui.supervisor.SupervisorSummaryScreen()
-                        1 -> com.antigravity.healthagent.ui.supervisor.SupervisorAgentsScreen()
+                        0 -> com.antigravity.healthagent.ui.supervisor.SupervisorSummaryScreen(
+                            user = user,
+                            onLogout = { loginViewModel.signOut() },
+                            onSwitchAccount = { loginViewModel.signOut() }
+                        )
+                        1 -> com.antigravity.healthagent.ui.supervisor.SupervisorAgentsScreen(
+                            user = user,
+                            onLogout = { loginViewModel.signOut() },
+                            onSwitchAccount = { loginViewModel.signOut() }
+                        )
                     }
                 } else {
                     when (selectedTab) {
-                        0 -> com.antigravity.healthagent.ui.home.HomeScreen()
-                        1 -> com.antigravity.healthagent.ui.rg.RGScreen()
-                        2 -> com.antigravity.healthagent.ui.boletim.BoletimScreen(
-                            onOpenSettings = { showSettings = true }
+                        0 -> com.antigravity.healthagent.ui.home.HomeScreen(
+                            user = user,
+                            onLogout = { loginViewModel.signOut() },
+                            onSwitchAccount = { loginViewModel.signOut() }
                         )
-                        3 -> SemanalScreen()
+                        1 -> com.antigravity.healthagent.ui.rg.RGScreen(
+                            user = user,
+                            onLogout = { loginViewModel.signOut() },
+                            onSwitchAccount = { loginViewModel.signOut() }
+                        )
+                        2 -> com.antigravity.healthagent.ui.boletim.BoletimScreen(
+                            onOpenSettings = { showSettings = true },
+                            user = user,
+                            onLogout = { loginViewModel.signOut() },
+                            onSwitchAccount = { loginViewModel.signOut() }
+                        )
+                        3 -> SemanalScreen(
+                            user = user,
+                            onLogout = { loginViewModel.signOut() },
+                            onSwitchAccount = { loginViewModel.signOut() }
+                        )
                         4 -> QuarteiroesScreen(isEasyMode = isEasyMode)
                     }
                 }

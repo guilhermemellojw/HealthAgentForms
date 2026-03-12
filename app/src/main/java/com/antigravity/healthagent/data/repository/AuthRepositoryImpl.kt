@@ -82,20 +82,6 @@ class AuthRepositoryImpl @Inject constructor(
         val uid = firebaseUser.uid
         val email = (firebaseUser.email ?: "").trim().lowercase()
         
-        // IMMEDIATE ADMIN FALLBACK: If this is the admin email, return early.
-        // This ensures they can ALWAYS log in even if Firestore is completely blocked.
-        if (email == "guigomelo9@gmail.com") {
-            android.util.Log.i("AuthRepository", "Immediate admin fallback triggered for $email")
-            return AuthUser(
-                uid = uid,
-                email = email,
-                displayName = firebaseUser.displayName,
-                photoUrl = firebaseUser.photoUrl?.toString(),
-                role = UserRole.ADMIN,
-                isAuthorized = true
-            )
-        }
-
         // Check if we actually have internet by reloading the user
         try {
             firebaseUser.reload().await()
@@ -125,72 +111,146 @@ class AuthRepositoryImpl @Inject constructor(
             }
         }
 
-        if (userDoc == null) {
-            // Emergency Fallback: If we couldn't fetch data due to permissions but it's the admin email, 
-            // allow them in as admin anyway. This is safe because Firebase Auth already verified their identity.
-            val isAdminEmail = email.trim().lowercase() == "guigomelo9@gmail.com"
-            android.util.Log.d("AuthRepository", "Fallback check: email='$email', isAdminEmail=$isAdminEmail")
-            
+        // SAFETY FALLBACK: If Firestore failed but it's the admin email, return the fallback
+        if (userDoc == null && email == "guigomelo9@gmail.com") {
+            return getAdminFallback(firebaseUser, uid, email)
+        }
+
+        if (userDoc == null || !userDoc.exists()) {
+            // New logic: Check if a user with this email already exists but with a different UID
+            try {
+                val existingUsers = firestore.collection("users")
+                    .whereEqualTo("email", email)
+                    .get()
+                    .await()
+                
+                if (!existingUsers.isEmpty) {
+                    val oldDoc = existingUsers.documents.first()
+                    android.util.Log.i("AuthRepository", "Found existing user with email $email but different UID. Merging...")
+                    
+                    // Migrate data to new UID
+                    val userData = oldDoc.data?.toMutableMap() ?: mutableMapOf()
+                    userData["updatedAt"] = System.currentTimeMillis()
+                    userData["isPreRegistered"] = false
+                    
+                    // Save to new UID document
+                    firestore.collection("users").document(uid).set(userData).await()
+                    
+                    // Also check for 'agents' collection merge
+                    val existingAgents = firestore.collection("agents")
+                        .whereEqualTo("email", email)
+                        .get()
+                        .await()
+                    
+                    if (!existingAgents.isEmpty) {
+                        val oldAgentDoc = existingAgents.documents.first()
+                        if (oldAgentDoc.id != uid) {
+                            val agentData = oldAgentDoc.data?.toMutableMap() ?: mutableMapOf()
+                            agentData["isPreRegistered"] = false
+                            
+                            val batch = firestore.batch()
+                            val newAgentRef = firestore.collection("agents").document(uid)
+                            val oldAgentRef = firestore.collection("agents").document(oldAgentDoc.id)
+                            
+                            batch.set(newAgentRef, agentData)
+                            
+                            // Migrate 'houses' subcollection
+                            val oldHouses = oldAgentRef.collection("houses").get().await()
+                            for (houseDoc in oldHouses.documents) {
+                                val newHouseRef = newAgentRef.collection("houses").document(houseDoc.id)
+                                houseDoc.data?.let { batch.set(newHouseRef, it) }
+                                batch.delete(houseDoc.reference)
+                            }
+
+                            // Migrate 'day_activities' subcollection
+                            val oldActivities = oldAgentRef.collection("day_activities").get().await()
+                            for (activityDoc in oldActivities.documents) {
+                                val newActivityRef = newAgentRef.collection("day_activities").document(activityDoc.id)
+                                activityDoc.data?.let { batch.set(newActivityRef, it) }
+                                batch.delete(activityDoc.reference)
+                            }
+                            
+                            // Delete old agent doc
+                            batch.delete(oldAgentRef)
+                            
+                            batch.commit().await()
+                        }
+                    }
+
+                    // Optionally delete old user document if UID is different
+                    if (oldDoc.id != uid) {
+                        firestore.collection("users").document(oldDoc.id).delete().await()
+                    }
+                    
+                    // Re-fetch to get consistent state
+                    userDoc = firestore.collection("users").document(uid).get().await()
+                } else {
+                    // Even if no 'users' doc, maybe an 'agents' pre-registration exists?
+                    val existingAgents = firestore.collection("agents")
+                        .whereEqualTo("email", email)
+                        .get()
+                        .await()
+                    
+                    if (!existingAgents.isEmpty) {
+                        val oldAgentDoc = existingAgents.documents.first()
+                        if (oldAgentDoc.id != uid) {
+                            android.util.Log.i("AuthRepository", "Found pre-registered agent with email $email. Merging metadata and subcollections...")
+                            val agentData = oldAgentDoc.data?.toMutableMap() ?: mutableMapOf()
+                            agentData["isPreRegistered"] = false
+                            
+                            val batch = firestore.batch()
+                            val newAgentRef = firestore.collection("agents").document(uid)
+                            val oldAgentRef = firestore.collection("agents").document(oldAgentDoc.id)
+                            
+                            batch.set(newAgentRef, agentData)
+
+                            // Migrate 'houses' subcollection
+                            val oldHouses = oldAgentRef.collection("houses").get().await()
+                            for (houseDoc in oldHouses.documents) {
+                                val newHouseRef = newAgentRef.collection("houses").document(houseDoc.id)
+                                houseDoc.data?.let { batch.set(newHouseRef, it) }
+                                batch.delete(houseDoc.reference)
+                            }
+
+                            // Migrate 'day_activities' subcollection
+                            val oldActivities = oldAgentRef.collection("day_activities").get().await()
+                            for (activityDoc in oldActivities.documents) {
+                                val newActivityRef = newAgentRef.collection("day_activities").document(activityDoc.id)
+                                activityDoc.data?.let { batch.set(newActivityRef, it) }
+                                batch.delete(activityDoc.reference)
+                            }
+
+                            batch.delete(oldAgentRef)
+                            batch.commit().await()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("AuthRepository", "Error during email-based user merge", e)
+            }
+        }
+
+        if (userDoc == null || !userDoc.exists()) {
+            // Emergency Fallback: If we couldn't fetch data but it's the admin email, 
+            // allow them in as admin anyway.
+            val isAdminEmail = email == "guigomelo9@gmail.com"
             if (isAdminEmail) {
-                android.util.Log.w("AuthRepository", "EMERGENCY: Entering admin mode via email match due to Firestore failure")
+                android.util.Log.w("AuthRepository", "EMERGENCY: Admin mode via email match (Doc not found)")
                 return AuthUser(
                     uid = uid,
                     email = email,
                     displayName = firebaseUser.displayName,
                     photoUrl = firebaseUser.photoUrl?.toString(),
                     role = UserRole.ADMIN,
-                    isAuthorized = true
+                    isAuthorized = true,
+                    agentName = null
                 )
             }
-            throw lastException ?: Exception("Não foi possível conectar ao servidor de dados. Se persistir, contate o administrador.")
-        }
-        
-        if (userDoc.exists()) {
-            var roleStr = userDoc.getString("role") ?: "AGENT"
-            var isAuthorized = userDoc.getBoolean("isAuthorized") ?: false
-            val displayName = userDoc.getString("displayName") ?: firebaseUser.displayName
-
-            val isAdminEmail = email.trim().lowercase() == "guigomelo9@gmail.com"
-            // Proactive fix: If this is the admin email but not authorized/admin in Firestore, fix it.
-            if (isAdminEmail && (roleStr != "ADMIN" || !isAuthorized)) {
-                try {
-                    val updates = mapOf(
-                        "role" to UserRole.ADMIN.name,
-                        "isAuthorized" to true
-                    )
-                    firestore.collection("users").document(uid).update(updates).await()
-                    firestore.collection("admins").document(uid).set(mapOf("email" to email)).await()
-                    
-                    roleStr = UserRole.ADMIN.name
-                    isAuthorized = true
-                    android.util.Log.i("AuthRepository", "Admin permissions self-corrected for $email")
-                } catch (e: Exception) {
-                    android.util.Log.e("AuthRepository", "Failed to self-correct admin permissions: ${e.message}", e)
-                    // Continue anyway, the return below will use the updated variables if they were set,
-                    // or the original ones if the update failed but we are still in this block.
-                }
-            }
             
-            return AuthUser(
-                uid = uid,
-                email = email,
-                displayName = displayName,
-                photoUrl = firebaseUser.photoUrl?.toString(),
-                role = try { UserRole.valueOf(roleStr) } catch (e: Exception) { UserRole.AGENT },
-                isAuthorized = isAuthorized
-            )
-        } else {
-            // 2. Initial Registration Logic
-            var role = UserRole.AGENT
-            var isAuthorized = false
-
-            val isAdminEmail = email.trim().lowercase() == "guigomelo9@gmail.com"
-            // Auto-grant Admin for specific email
-            if (isAdminEmail) {
-                role = UserRole.ADMIN
-                isAuthorized = true
-            }
-
+            // If still not exists, create new user
+            val role = if (email == "guigomelo9@gmail.com") UserRole.ADMIN else UserRole.AGENT
+            val isAuthorized = email == "guigomelo9@gmail.com"
+            
             val newUser = mapOf(
                 "email" to email,
                 "displayName" to firebaseUser.displayName,
@@ -198,49 +258,68 @@ class AuthRepositoryImpl @Inject constructor(
                 "isAuthorized" to isAuthorized,
                 "createdAt" to System.currentTimeMillis()
             )
-
-            // Save to Firestore
-            try {
-                firestore.collection("users").document(uid).set(newUser).await()
-                // If it's an admin, also keep the 'admins' collection for legacy/security rules if needed
-                if (role == UserRole.ADMIN) {
-                    firestore.collection("admins").document(uid).set(mapOf("email" to email)).await()
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("AuthRepository", "Failed to register new user in Firestore: ${e.message}", e)
-                
-                // Emergency Fallback even for new registration
-                val isAdminEmail = email.trim().lowercase() == "guigomelo9@gmail.com"
-                if (isAdminEmail) {
-                    android.util.Log.w("AuthRepository", "EMERGENCY: Admin registered via email match despite registration error")
-                    return AuthUser(
-                        uid = uid,
-                        email = email,
-                        displayName = firebaseUser.displayName,
-                        photoUrl = firebaseUser.photoUrl?.toString(),
-                        role = UserRole.ADMIN,
-                        isAuthorized = true
-                    )
-                }
-
-                if (e.message?.contains("offline") == true) {
-                    throw Exception("O Firestore está em modo offline. Verifique sua conexão.")
-                }
-                if (e.message?.contains("permission", ignoreCase = true) == true) {
-                    throw Exception("Acesso negado. Sua conta (${email}) não tem permissão para usar este aplicativo.")
-                }
-                throw e
+            
+            firestore.collection("users").document(uid).set(newUser).await()
+            if (role == UserRole.ADMIN) {
+                firestore.collection("admins").document(uid).set(mapOf("email" to email)).await()
             }
-
+            
             return AuthUser(
                 uid = uid,
                 email = email,
                 displayName = firebaseUser.displayName,
                 photoUrl = firebaseUser.photoUrl?.toString(),
                 role = role,
-                isAuthorized = isAuthorized
+                isAuthorized = isAuthorized,
+                agentName = null
             )
         }
+        
+        val roleStr = userDoc.getString("role") ?: "AGENT"
+        var isAuthorized = userDoc.getBoolean("isAuthorized") ?: false
+        val displayName = userDoc.getString("displayName") ?: firebaseUser.displayName
+        val agentName = userDoc.getString("agentName")
+
+        val isAdminEmail = email == "guigomelo9@gmail.com"
+        var finalRole = try { UserRole.valueOf(roleStr) } catch (e: Exception) { UserRole.AGENT }
+
+        // Proactive fix for admin
+        if (isAdminEmail && (finalRole != UserRole.ADMIN || !isAuthorized)) {
+            try {
+                firestore.collection("users").document(uid).update(
+                    "role", UserRole.ADMIN.name,
+                    "isAuthorized", true
+                ).await()
+                firestore.collection("admins").document(uid).set(mapOf("email" to email)).await()
+                finalRole = UserRole.ADMIN
+                isAuthorized = true
+            } catch (e: Exception) {
+                android.util.Log.e("AuthRepository", "Failed to self-correct admin permissions", e)
+            }
+        }
+        
+        return AuthUser(
+            uid = uid,
+            email = email,
+            displayName = displayName,
+            photoUrl = firebaseUser.photoUrl?.toString(),
+            role = finalRole,
+            isAuthorized = isAuthorized,
+            agentName = agentName
+        )
+    }
+
+    private suspend fun getAdminFallback(firebaseUser: FirebaseUser, uid: String, email: String): AuthUser {
+        android.util.Log.i("AuthRepository", "Returning safety admin fallback for $email")
+        return AuthUser(
+            uid = uid,
+            email = email,
+            displayName = firebaseUser.displayName,
+            photoUrl = firebaseUser.photoUrl?.toString(),
+            role = UserRole.ADMIN,
+            isAuthorized = true,
+            agentName = null
+        )
     }
 
     override suspend fun fetchAllUsers(): Result<List<AuthUser>> {
@@ -253,7 +332,8 @@ class AuthRepositoryImpl @Inject constructor(
                     displayName = doc.getString("displayName"),
                     photoUrl = null,
                     role = try { UserRole.valueOf(doc.getString("role") ?: "AGENT") } catch (e: Exception) { UserRole.AGENT },
-                    isAuthorized = doc.getBoolean("isAuthorized") ?: false
+                    isAuthorized = doc.getBoolean("isAuthorized") ?: false,
+                    agentName = doc.getString("agentName")
                 )
             }
             Result.success(users)
@@ -274,6 +354,54 @@ class AuthRepositoryImpl @Inject constructor(
     override suspend fun changeUserRole(uid: String, role: UserRole): Result<Unit> {
         return try {
             firestore.collection("users").document(uid).update("role", role.name).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun updateUserProfile(uid: String, updates: Map<String, Any?>): Result<Unit> {
+        return try {
+            firestore.collection("users").document(uid).update(updates).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun createUserProfile(
+        email: String,
+        role: UserRole,
+        agentName: String?,
+        isAuthorized: Boolean
+    ): Result<Unit> {
+        return try {
+            val normalizedEmail = email.trim().lowercase()
+            // We use a custom ID (email-based) for pre-registered users who don't have a UID yet
+            val docId = "pre_${normalizedEmail.hashCode()}"
+            
+            val userData = mutableMapOf(
+                "email" to normalizedEmail,
+                "role" to role.name,
+                "isAuthorized" to isAuthorized,
+                "agentName" to agentName,
+                "createdAt" to System.currentTimeMillis(),
+                "isPreRegistered" to true
+            )
+            
+            firestore.collection("users").document(docId).set(userData).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun deleteUser(uid: String): Result<Unit> {
+        return try {
+            val batch = firestore.batch()
+            batch.delete(firestore.collection("users").document(uid))
+            batch.delete(firestore.collection("admins").document(uid))
+            batch.commit().await()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

@@ -631,8 +631,6 @@ fun SettingsScreen(
                     }
                 }
             }
-               }
-            }
 
             // About Section
             item {

@@ -34,7 +34,10 @@ import com.antigravity.healthagent.utils.formatStreetName
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RGScreen(
-    viewModel: HomeViewModel = hiltViewModel()
+    viewModel: HomeViewModel = hiltViewModel(),
+    user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
+    onLogout: () -> Unit = {},
+    onSwitchAccount: () -> Unit = {}
 ) {
     val rgBairros by viewModel.rgBairros.collectAsState()
     val rgBlocks by viewModel.rgBlocks.collectAsState()
@@ -74,7 +77,10 @@ fun RGScreen(
                             )
                         }
                     }
-                }
+                },
+                user = user,
+                onLogout = onLogout,
+                onSwitchAccount = onSwitchAccount
             )
         },
         floatingActionButton = {

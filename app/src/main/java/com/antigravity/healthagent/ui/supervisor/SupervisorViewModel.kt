@@ -23,6 +23,9 @@ class SupervisorViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
     private val _currentWeekStart = MutableStateFlow(getMondayOfCurrentWeek())
     
     val weekRangeText = _currentWeekStart.map { start ->
@@ -45,9 +48,12 @@ class SupervisorViewModel @Inject constructor(
     fun refreshData() {
         viewModelScope.launch {
             _isLoading.value = true
+            _errorMessage.value = null
             val result = syncRepository.fetchAllAgentsData()
             if (result.isSuccess) {
                 _agents.value = result.getOrNull() ?: emptyList()
+            } else {
+                _errorMessage.value = result.exceptionOrNull()?.message ?: "Erro desconhecido ao carregar dados"
             }
             _isLoading.value = false
         }
@@ -70,16 +76,22 @@ class SupervisorViewModel @Inject constructor(
     }
 
     private fun getMondayOfCurrentWeek(): Date {
-        return Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-            if (time > Date()) {
-                add(Calendar.DAY_OF_YEAR, -7)
-            }
-        }.time
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        
+        // In Brazil/Latin settings, sometimes Sunday is the first day of the week.
+        // We want the Monday of the current "work week".
+        // If today is Sunday, we might want the Monday of the week that just ended.
+        val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
+        if (dayOfWeek == Calendar.SUNDAY) {
+            cal.add(Calendar.DAY_OF_YEAR, -6) // Go to previous Monday
+        } else {
+            cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+        }
+        return cal.time
     }
 
     private fun calculateAggregateSummary(agents: List<AgentData>, weekStart: Date): AggregateSummary {
@@ -92,35 +104,42 @@ class SupervisorViewModel @Inject constructor(
 
         var totalHouses = 0
         var totalFoci = 0
+        var totalTratados = 0
+        var totalFechados = 0
+        var totalAbandonados = 0
+        var totalRecusados = 0
         var activeAgentsCount = 0
-        val agentEmailSet = mutableSetOf<String>()
 
         agents.forEach { agent ->
             // Filter activities for this week
             val weekActivities = agent.activities.filter { it.date in weekDates }
             if (weekActivities.isNotEmpty()) {
                 activeAgentsCount++
-                agentEmailSet.add(agent.email)
                 
-                weekActivities.forEach { activity ->
-                    totalHouses += activity.totalHouses
-                    // Note: We need focus data. agent.houses has comFoco.
-                    // But agent.houses is the CURRENT stock of houses. 
-                    // activities usually represent a day's report.
-                    // If House object has the date it was visited, we can count focos per week.
-                }
+                val weekHouses = agent.houses.filter { it.data in weekDates }
                 
-                // Aggregate focos from houses visited this week
-                totalFoci += agent.houses.count { house ->
-                    // Assuming house.data is the visit date in "dd-MM-yyyy"
-                    house.data in weekDates && house.comFoco
+                totalHouses += weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE }
+                
+                totalFoci += weekHouses.count { it.comFoco }
+                
+                totalTratados += weekHouses.count { house ->
+                    house.a1 > 0 || house.a2 > 0 || house.b > 0 || house.c > 0 ||
+                    house.d1 > 0 || house.d2 > 0 || house.e > 0 || house.eliminados > 0
                 }
+
+                totalFechados += weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }
+                totalAbandonados += weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
+                totalRecusados += weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }
             }
         }
 
         return AggregateSummary(
             totalHouses = totalHouses,
             totalFoci = totalFoci,
+            totalTratados = totalTratados,
+            totalFechados = totalFechados,
+            totalAbandonados = totalAbandonados,
+            totalRecusados = totalRecusados,
             activeAgents = activeAgentsCount,
             totalAgents = agents.size
         )
@@ -130,6 +149,10 @@ class SupervisorViewModel @Inject constructor(
 data class AggregateSummary(
     val totalHouses: Int = 0,
     val totalFoci: Int = 0,
+    val totalTratados: Int = 0,
+    val totalFechados: Int = 0,
+    val totalAbandonados: Int = 0,
+    val totalRecusados: Int = 0,
     val activeAgents: Int = 0,
     val totalAgents: Int = 0
 )

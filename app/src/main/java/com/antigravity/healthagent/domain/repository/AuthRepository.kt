@@ -13,6 +13,9 @@ interface AuthRepository {
     suspend fun fetchAllUsers(): Result<List<AuthUser>>
     suspend fun authorizeUser(uid: String, isAuthorized: Boolean): Result<Unit>
     suspend fun changeUserRole(uid: String, role: UserRole): Result<Unit>
+    suspend fun updateUserProfile(uid: String, updates: Map<String, Any?>): Result<Unit>
+    suspend fun createUserProfile(email: String, role: UserRole, agentName: String?, isAuthorized: Boolean): Result<Unit>
+    suspend fun deleteUser(uid: String): Result<Unit>
 }
 
 enum class UserRole {
@@ -27,7 +30,8 @@ data class AuthUser(
     val displayName: String?,
     val photoUrl: String?,
     val role: UserRole = UserRole.AGENT,
-    val isAuthorized: Boolean = false
+    val isAuthorized: Boolean = false,
+    val agentName: String? = null
 ) {
     val isAdmin: Boolean get() = role == UserRole.ADMIN
     val isSupervisor: Boolean get() = role == UserRole.SUPERVISOR

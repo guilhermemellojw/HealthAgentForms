@@ -9,7 +9,12 @@ interface SyncRepository {
      * Pushes all local Room data (Houses, DayActivities) to the logged-in user's Firestore document.
      * Usually called manually, or after finishing a day.
      */
-    suspend fun pushLocalDataToCloud(houses: List<House>, activities: List<DayActivity>): Result<Unit>
+    suspend fun pushLocalDataToCloud(
+        houses: List<House>, 
+        activities: List<DayActivity>, 
+        targetUid: String? = null,
+        shouldReplace: Boolean = false
+    ): Result<Unit>
     
     /**
      * For Admin users to view all data submitted by all agents.
@@ -19,12 +24,23 @@ interface SyncRepository {
     /**
      * Pulls data from Firestore and replaces the local Room database content.
      */
-    suspend fun pullCloudDataToLocal(): Result<Unit>
+    suspend fun pullCloudDataToLocal(targetUid: String? = null): Result<Unit>
+
+    /**
+     * Pre-creates an agent entry in the cloud.
+     */
+    suspend fun createAgent(email: String, agentName: String? = null): Result<Unit>
+
+    /**
+     * Deletes an agent entry from the cloud.
+     */
+    suspend fun deleteAgent(uid: String): Result<Unit>
 }
 
 data class AgentData(
     val uid: String,
     val email: String,
+    val agentName: String? = null,
     val houses: List<House>,
     val activities: List<DayActivity>,
     val lastSyncTime: Long = 0L

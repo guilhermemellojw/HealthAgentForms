@@ -63,7 +63,10 @@ import com.antigravity.healthagent.ui.components.SituationLimitDialog
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
-    viewModel: HomeViewModel = hiltViewModel()
+    viewModel: HomeViewModel = hiltViewModel(),
+    user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
+    onLogout: () -> Unit = {},
+    onSwitchAccount: () -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
@@ -611,6 +614,14 @@ fun HomeScreen(
                                     // Given the custom themes, onPrimary is safest.
                                     MaterialTheme.colorScheme.onPrimary
                                 }
+                            )
+                        }
+
+                        if (user != null) {
+                            UserIconMenu(
+                                user = user,
+                                onLogout = onLogout,
+                                onSwitchAccount = onSwitchAccount
                             )
                         }
                     },

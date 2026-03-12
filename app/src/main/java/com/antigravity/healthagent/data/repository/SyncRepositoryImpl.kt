@@ -20,36 +20,94 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun pushLocalDataToCloud(
         houses: List<House>,
-        activities: List<DayActivity>
+        activities: List<DayActivity>,
+        targetUid: String?,
+        shouldReplace: Boolean
     ): Result<Unit> {
         return try {
-            val user = auth.currentUser ?: return Result.failure(Exception("User not authenticated"))
-            val uid = user.uid
-            val userEmail = user.email ?: "Unknown Email"
+            val uid = targetUid ?: auth.currentUser?.uid ?: return Result.failure(Exception("User not authenticated"))
+            val userEmail = if (targetUid != null) "Remote Sync" else (auth.currentUser?.email ?: "Unknown Email")
 
             val userDocRef = firestore.collection("agents").document(uid)
+            
+            // Re-fetch official agent name to ensure consistency and prevent duplications
+            val agentDoc = try { 
+                userDocRef.get().await() 
+            } catch(e: Exception) { 
+                android.util.Log.e("SyncRepository", "Failed to fetch agent doc for name normalization", e)
+                null 
+            }
+            
+            var officialAgentName = agentDoc?.getString("agentName") ?: ""
+
+            // IMPROVEMENT: If name is missing in cloud, try to recover it from the data itself
+            if (officialAgentName.isBlank()) {
+                val recoveredName = houses.firstOrNull { it.agentName.isNotBlank() }?.agentName 
+                    ?: activities.firstOrNull { it.agentName.isNotBlank() }?.agentName
+                
+                if (!recoveredName.isNullOrBlank()) {
+                    officialAgentName = recoveredName
+                    android.util.Log.i("SyncRepository", "Recovering agent name '$officialAgentName' from data and updating cloud metadata")
+                    try {
+                        userDocRef.update("agentName", officialAgentName).await()
+                    } catch (e: Exception) {
+                        android.util.Log.e("SyncRepository", "Failed to update recovered agent name in cloud", e)
+                    }
+                }
+            }
+
+            if (shouldReplace) {
+                android.util.Log.i("SyncRepository", "Replacement requested. Clearing existing subcollections before push.")
+                // 1. Clear houses subcollection
+                val housesSnap = userDocRef.collection("houses").get().await()
+                housesSnap.documents.chunked(400).forEach { chunk ->
+                    val batch = firestore.batch()
+                    chunk.forEach { batch.delete(it.reference) }
+                    batch.commit().await()
+                }
+                
+                // 2. Clear activities subcollection
+                val activitiesSnap = userDocRef.collection("day_activities").get().await()
+                activitiesSnap.documents.chunked(400).forEach { chunk ->
+                    val batch = firestore.batch()
+                    chunk.forEach { batch.delete(it.reference) }
+                    batch.commit().await()
+                }
+            }
+
             val metadata = mapOf(
                 "email" to userEmail,
                 "lastSyncTime" to System.currentTimeMillis()
             )
 
-            // Combine all operations into a list to chunk them
-            val operations = mutableListOf<Pair<com.google.firebase.firestore.DocumentReference, Any>>()
-            
-            // 1. Metadata op
-            operations.add(userDocRef to metadata)
+            // 1. Metadata op (stored in a map to keep it consistent with chunking pattern)
+            val metadataOp = userDocRef to metadata
 
-            // 2. Houses
-            val housesCollection = userDocRef.collection("houses")
+            // 2. Deduplicate Houses by ID
+            val houseOps = mutableMapOf<String, House>()
             for (house in houses) {
-                operations.add(housesCollection.document(house.id.toString()) to house)
+                val normalizedHouse = house.copy(agentName = officialAgentName)
+                houseOps[normalizedHouse.id.toString()] = normalizedHouse
             }
 
-            // 3. Activities
-            val activitiesCollection = userDocRef.collection("day_activities")
+            // 3. Deduplicate Activities by Date (prevents duplication with inconsistent names)
+            val activityOps = mutableMapOf<String, DayActivity>()
             for (activity in activities) {
-                val docId = "${activity.date}_${activity.agentName}"
-                operations.add(activitiesCollection.document(docId) to activity)
+                val normalizedActivity = activity.copy(agentName = officialAgentName)
+                // Use ONLY date as docId to ensure one entry per day per agent
+                activityOps[normalizedActivity.date] = normalizedActivity
+            }
+
+            // Build the final list of operations
+            val operations = mutableListOf<Pair<com.google.firebase.firestore.DocumentReference, Any>>()
+            operations.add(metadataOp)
+            
+            for ((id, house) in houseOps) {
+                operations.add(userDocRef.collection("houses").document(id) to house)
+            }
+            
+            for ((date, activity) in activityOps) {
+                operations.add(userDocRef.collection("day_activities").document(date) to activity)
             }
 
             android.util.Log.d("SyncRepository", "Starting sync: ${operations.size} operations")
@@ -70,16 +128,16 @@ class SyncRepositoryImpl @Inject constructor(
             }
 
             Result.success(Unit)
-        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-            android.util.Log.e("SyncRepository", "Sync timeout", e)
-            Result.failure(Exception("Tempo limite excedido ao sincronizar. Verifique sua conexão."))
-        } catch (e: Exception) {
-            android.util.Log.e("SyncRepository", "Sync error: ${e.message}", e)
-            if (e.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true) {
+        } catch (e: com.google.firebase.firestore.FirebaseFirestoreException) {
+            android.util.Log.e("SyncRepository", "Firestore error: ${e.code}, ${e.message}", e)
+            if (e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                 Result.failure(Exception("Acesso negado ao sincronizar. Verifique se sua conta foi autorizada e se as regras de segurança do Firestore permitem a escrita."))
             } else {
                 Result.failure(e)
             }
+        } catch (e: Exception) {
+            android.util.Log.e("SyncRepository", "General sync error: ${e.message}", e)
+            Result.failure(e)
         }
     }
 
@@ -90,6 +148,7 @@ class SyncRepositoryImpl @Inject constructor(
 
             for (agentDoc in agentsSnapshot.documents) {
                 val email = agentDoc.getString("email") ?: "Unknown"
+                val agentName = agentDoc.getString("agentName")
                 val lastSyncTime = agentDoc.getLong("lastSyncTime") ?: 0L
                 val uid = agentDoc.id
 
@@ -103,6 +162,7 @@ class SyncRepositoryImpl @Inject constructor(
                     AgentData(
                         uid = uid,
                         email = email,
+                        agentName = agentName,
                         houses = houses,
                         activities = activities,
                         lastSyncTime = lastSyncTime
@@ -112,34 +172,26 @@ class SyncRepositoryImpl @Inject constructor(
             Result.success(allAgents)
         } catch (e: Exception) {
             if (e.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true) {
-                Result.failure(Exception("Acesso negado ao carregar dados dos agentes. Verifique se você é um administrador e se as regras do Firestore permitem a leitura desta coleção."))
+                Result.failure(Exception("Acesso negado ao carregar dados dos agentes. Verifique se você é um administrador ou supervisor e se as regras do Firestore permitem a leitura desta coleção."))
             } else {
                 Result.failure(e)
             }
         }
     }
 
-    override suspend fun pullCloudDataToLocal(): Result<Unit> {
+    override suspend fun pullCloudDataToLocal(targetUid: String?): Result<Unit> {
         return try {
-            val user = auth.currentUser ?: return Result.failure(Exception("User not authenticated"))
-            val uid = user.uid
-
+            val uid = targetUid ?: auth.currentUser?.uid ?: return Result.failure(Exception("User not authenticated"))
             val userDocRef = firestore.collection("agents").document(uid)
-            
-            // 1. Fetch Houses
             val housesSnapshot = userDocRef.collection("houses").get().await()
             val houses = housesSnapshot.toObjects(House::class.java)
-
-            // 2. Fetch Activities
             val activitiesSnapshot = userDocRef.collection("day_activities").get().await()
             val activities = activitiesSnapshot.toObjects(DayActivity::class.java)
-
-            // 3. Update Room (Replace all if it's a new device sync)
-            if (houses.isNotEmpty() || activities.isNotEmpty()) {
-                houseDao.replaceHouses(houses)
-                dayActivityDao.replaceDayActivities(activities)
-            }
-
+            
+            // Fix: Always replace local data to avoid "ghost data" from previous users
+            houseDao.replaceHouses(houses)
+            dayActivityDao.replaceDayActivities(activities)
+            
             Result.success(Unit)
         } catch (e: Exception) {
             if (e.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true) {
@@ -147,6 +199,60 @@ class SyncRepositoryImpl @Inject constructor(
             } else {
                 Result.failure(e)
             }
+        }
+    }
+
+    override suspend fun createAgent(email: String, agentName: String?): Result<Unit> {
+        return try {
+            val normalizedEmail = email.trim().lowercase()
+            // Check if agent already exists
+            val existing = firestore.collection("agents")
+                .whereEqualTo("email", normalizedEmail)
+                .get()
+                .await()
+            
+            if (!existing.isEmpty) {
+                return Result.failure(Exception("Agente já cadastrado com este e-mail"))
+            }
+
+            val docId = "pre_${normalizedEmail.hashCode()}"
+            val agentData = mapOf(
+                "email" to normalizedEmail,
+                "agentName" to agentName,
+                "lastSyncTime" to 0L,
+                "isPreRegistered" to true
+            )
+            
+            firestore.collection("agents").document(docId).set(agentData).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun deleteAgent(uid: String): Result<Unit> {
+        return try {
+            val agentRef = firestore.collection("agents").document(uid)
+            
+            // Firestore delete doesn't cascade to subcollections, we must delete them manually
+            val houses = agentRef.collection("houses").get().await()
+            val activities = agentRef.collection("day_activities").get().await()
+            
+            val operations = (houses.documents + activities.documents).map { it.reference }.toMutableList()
+            operations.add(agentRef)
+            
+            // Chunk deletions to stay within 500 limit
+            operations.chunked(400).forEach { chunk ->
+                val batch = firestore.batch()
+                for (ref in chunk) {
+                    batch.delete(ref)
+                }
+                batch.commit().await()
+            }
+            
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 }

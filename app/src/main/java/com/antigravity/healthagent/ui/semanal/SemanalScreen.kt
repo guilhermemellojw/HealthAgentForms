@@ -38,7 +38,10 @@ import androidx.compose.ui.graphics.Color
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SemanalScreen(
-    viewModel: HomeViewModel = hiltViewModel()
+    viewModel: HomeViewModel = hiltViewModel(),
+    user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
+    onLogout: () -> Unit = {},
+    onSwitchAccount: () -> Unit = {}
 ) {
     val weeklySummary by viewModel.weeklySummary.collectAsState()
     val activityOptions by viewModel.activityOptions.collectAsState()
@@ -106,7 +109,10 @@ fun SemanalScreen(
                             modifier = Modifier.size(iconSize)
                         )
                     }
-                }
+                },
+                user = user,
+                onLogout = onLogout,
+                onSwitchAccount = onSwitchAccount
             )
         },
         containerColor = Color.Transparent,

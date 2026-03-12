@@ -21,6 +21,7 @@ import com.antigravity.healthagent.data.backup.BackupData
 import com.antigravity.healthagent.utils.SemanalPdfGenerator
 import com.antigravity.healthagent.utils.BoletimPdfGenerator
 import com.antigravity.healthagent.domain.repository.SyncRepository
+import com.antigravity.healthagent.domain.repository.AgentData
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -42,7 +43,8 @@ class HomeViewModel @Inject constructor(
     private val soundManager: SoundManager,
     private val settingsManager: SettingsManager,
     private val backupScheduler: BackupScheduler,
-    private val streetRepository: StreetRepository
+    private val streetRepository: StreetRepository,
+    private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository
 ) : ViewModel() {
 
     // --- State Definitions ---
@@ -102,12 +104,16 @@ class HomeViewModel @Inject constructor(
     private val _remoteAgent = MutableStateFlow<String?>(null)
     val remoteAgent: StateFlow<String?> = _remoteAgent.asStateFlow()
 
-    fun setRemoteAgent(email: String?) {
-        _remoteAgent.value = email
-        if (email != null) {
-            _agentName.value = email
-        }
+    private val _remoteAgentUid = MutableStateFlow<String?>(null)
+    val remoteAgentUid: StateFlow<String?> = _remoteAgentUid.asStateFlow()
+
+    fun setRemoteAgent(agent: AgentData?) {
+        _remoteAgent.value = agent?.email
+        _remoteAgentUid.value = agent?.uid
     }
+
+    private val _isSupervisor = MutableStateFlow(false)
+    val isSupervisor: StateFlow<Boolean> = _isSupervisor.asStateFlow()
 
     fun setSupervisor(value: Boolean) { _isSupervisor.value = value }
 
@@ -703,6 +709,15 @@ class HomeViewModel @Inject constructor(
                 backupScheduler.scheduleBackup(freq)
             }
         }
+
+        // Keep agentName synced with AuthUser or RemoteAgent
+        viewModelScope.launch {
+            combine(authRepository.currentUserAsync, _remoteAgent) { user, remote ->
+                remote ?: user?.agentName ?: user?.email ?: ""
+            }.collect { name ->
+                _agentName.value = name
+            }
+        }
     }
 
 
@@ -761,25 +776,26 @@ class HomeViewModel @Inject constructor(
     fun syncDataToCloud() {
         if (_isSyncing.value) return
         _isSyncing.value = true
+        val targetUid = _remoteAgentUid.value
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 // 1. Pull from cloud first (Restore)
-                val pullResult = syncRepository.pullCloudDataToLocal()
+                val pullResult = syncRepository.pullCloudDataToLocal(targetUid)
                 if (pullResult.isSuccess) {
-                     android.util.Log.d("HomeViewModel", "Auto-restore successful")
+                     android.util.Log.d("HomeViewModel", "Auto-restore successful for ${targetUid ?: "current user"}")
                 }
-
+ 
                 // 2. Push local data to cloud
                 val houses = repository.getAllHousesOnce()
                 val activities = repository.getAllDayActivitiesOnce()
-                val result = syncRepository.pushLocalDataToCloud(houses, activities)
+                val result = syncRepository.pushLocalDataToCloud(houses, activities, targetUid)
                 if (result.isSuccess) {
                     _uiEvent.value = "Dados sincronizados com sucesso."
                 } else {
                     _uiEvent.value = "Falha ao sincronizar: ${result.exceptionOrNull()?.message}"
                 }
             } catch (e: Exception) {
-                _uiEvent.value = "Erro na sincronização."
+                _uiEvent.value = "Erro na sincronização: ${e.message}"
             } finally {
                 _isSyncing.value = false
             }
