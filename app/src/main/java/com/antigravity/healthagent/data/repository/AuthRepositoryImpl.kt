@@ -96,6 +96,18 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun signOut() {
+        // Final Sync: Try to push any unsynced local data to the cloud before clearing
+        try {
+            val houses = syncRepository.repository.getAllHousesOnce()
+            val activities = syncRepository.repository.getAllDayActivitiesOnce()
+            if (houses.isNotEmpty() || activities.isNotEmpty()) {
+                android.util.Log.i("AuthRepository", "Performing final sync before logout...")
+                syncRepository.pushLocalDataToCloud(houses, activities)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AuthRepository", "Final sync failed during logout. Proceeding with sign out.", e)
+        }
+        
         settingsManager.clearSessionSettings()
         syncRepository.clearLocalData()
         auth.signOut()

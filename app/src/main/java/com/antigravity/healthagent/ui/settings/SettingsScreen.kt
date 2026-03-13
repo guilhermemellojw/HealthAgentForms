@@ -447,10 +447,24 @@ fun SettingsScreen(
                             supportingContent = { Text("Enviar dados atualizados para o servidor") },
                             leadingContent = { 
                                 if (isSyncing) CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                                else Icon(Icons.Default.Sync, contentDescription = null)
+                                else Icon(Icons.Default.CloudUpload, contentDescription = null)
                             },
                             modifier = Modifier.fillMaxWidth().clickable(enabled = !isSyncing) { 
                                 viewModel.syncDataToCloud()
+                            }
+                        )
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                        ListItem(
+                            headlineContent = { Text("Baixar dados da Nuvem") },
+                            supportingContent = { Text("Recuperar seus dados guardados no servidor") },
+                            leadingContent = { 
+                                if (isSyncing) CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                else Icon(Icons.Default.CloudDownload, contentDescription = null)
+                            },
+                            modifier = Modifier.fillMaxWidth().clickable(enabled = !isSyncing) { 
+                                viewModel.pullDataFromCloud()
                             }
                         )
 
