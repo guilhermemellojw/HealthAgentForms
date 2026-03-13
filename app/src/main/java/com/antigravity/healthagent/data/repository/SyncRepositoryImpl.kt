@@ -61,7 +61,7 @@ class SyncRepositoryImpl @Inject constructor(
             
             val finalHouses = houses.filter { house -> 
                 val naturalId = "${house.data}_${house.blockNumber}_${house.streetName}_${house.number}_${house.bairro}".replace("/", "_")
-                naturalId !in deletedHouseIds 
+                naturalId !in deletedHouseIds && house.data !in deletedActivityDates
             }
             val finalActivities = activities.filter { it.date !in deletedActivityDates }
 
@@ -345,7 +345,7 @@ class SyncRepositoryImpl @Inject constructor(
                 return Result.failure(Exception("Agente já cadastrado com este e-mail"))
             }
 
-            val docId = "pre_${normalizedEmail.hashCode()}"
+            val docId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
             val agentData = mapOf(
                 "email" to normalizedEmail,
                 "agentName" to agentName,

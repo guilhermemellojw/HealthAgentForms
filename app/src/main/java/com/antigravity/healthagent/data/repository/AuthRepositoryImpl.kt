@@ -252,7 +252,7 @@ class AuthRepositoryImpl @Inject constructor(
                         
                         // Create user profile based on agent pre-registration
                         val role = if (email == "guigomelo9@gmail.com") UserRole.ADMIN else UserRole.AGENT
-                        val isAuthorized = (email == "guigomelo9@gmail.com") 
+                        val isAuthorized = true // If they were pre-registered in 'agents', they are authorized
                         
                         val newUser = mapOf(
                             "email" to email,
