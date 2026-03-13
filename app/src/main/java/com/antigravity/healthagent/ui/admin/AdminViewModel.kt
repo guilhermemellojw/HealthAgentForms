@@ -95,7 +95,7 @@ class AdminViewModel @Inject constructor(
                         email = agent.email,
                         agentName = agent.agentName,
                         role = UserRole.AGENT, 
-                        isAuthorized = false,
+                        isAuthorized = true, // Pre-registered agents are pre-approved
                         isPreRegistered = true,
                         agentData = agent
                     )

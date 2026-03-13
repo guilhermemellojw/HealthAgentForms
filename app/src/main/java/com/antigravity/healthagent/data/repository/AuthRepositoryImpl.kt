@@ -160,8 +160,14 @@ class AuthRepositoryImpl @Inject constructor(
             }
         }
 
-        // SAFETY FALLBACK: If Firestore failed but it's the admin email, return the fallback
-        if (userDoc == null && email == "guigomelo9@gmail.com") {
+        // SAFETY FALLBACK: Check if this user is explicitly listed in the 'admins' collection
+        val isAdminInCollection = try {
+            firestore.collection("admins").document(uid).get().await().exists()
+        } catch (e: Exception) {
+            false
+        }
+        
+        if (userDoc == null && isAdminInCollection) {
             return getAdminFallback(firebaseUser, uid, email)
         }
 
@@ -251,7 +257,9 @@ class AuthRepositoryImpl @Inject constructor(
                         }
                         
                         // Create user profile based on agent pre-registration
-                        val role = if (email == "guigomelo9@gmail.com") UserRole.ADMIN else UserRole.AGENT
+                        // We check the 'admins' collection or if it's the bootstrap admin
+                        val isAdmin = firestore.collection("admins").document(uid).get().await().exists()
+                        val role = if (isAdmin) UserRole.ADMIN else UserRole.AGENT
                         val isAuthorized = true // If they were pre-registered in 'agents', they are authorized
                         
                         val newUser = mapOf(
@@ -281,7 +289,7 @@ class AuthRepositoryImpl @Inject constructor(
         if (userDoc == null || !userDoc.exists()) {
             // Emergency Fallback: If we couldn't fetch data but it's the admin email, 
             // allow them in as admin anyway.
-            val isAdminEmail = email == "guigomelo9@gmail.com"
+            val isAdminEmail = firestore.collection("admins").document(uid).get().await().exists()
             if (isAdminEmail) {
                 android.util.Log.w("AuthRepository", "EMERGENCY: Admin mode via email match (Doc not found)")
                 return AuthUser(
@@ -296,8 +304,9 @@ class AuthRepositoryImpl @Inject constructor(
             }
             
             // If still not exists, create new user
-            val role = if (email == "guigomelo9@gmail.com") UserRole.ADMIN else UserRole.AGENT
-            val isAuthorized = email == "guigomelo9@gmail.com"
+            val isAdmin = firestore.collection("admins").document(uid).get().await().exists()
+            val role = if (isAdmin) UserRole.ADMIN else UserRole.AGENT
+            val isAuthorized = isAdmin
             
             val newUser = mapOf(
                 "email" to email,
@@ -328,11 +337,10 @@ class AuthRepositoryImpl @Inject constructor(
         val displayName = userDoc.getString("displayName") ?: firebaseUser.displayName
         val agentName = userDoc.getString("agentName")
 
-        val isAdminEmail = email == "guigomelo9@gmail.com"
         var finalRole = try { UserRole.valueOf(roleStr) } catch (e: Exception) { UserRole.AGENT }
 
         // Proactive fix for admin
-        if (isAdminEmail && (finalRole != UserRole.ADMIN || !isAuthorized)) {
+        if (isAdminInCollection && (finalRole != UserRole.ADMIN || !isAuthorized)) {
             try {
                 firestore.collection("users").document(uid).update(
                     "role", UserRole.ADMIN.name,
@@ -434,7 +442,7 @@ class AuthRepositoryImpl @Inject constructor(
     ): Result<Unit> {
         return try {
             val normalizedEmail = email.trim().lowercase()
-            val docId = "pre_${normalizedEmail.hashCode()}"
+            val docId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
             
             val normalizedAgentName = agentName?.trim()?.uppercase()
             

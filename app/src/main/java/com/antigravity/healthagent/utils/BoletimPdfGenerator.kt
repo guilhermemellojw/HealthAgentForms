@@ -734,8 +734,10 @@ object BoletimPdfGenerator {
         repeat(3) { drawCell(canvas, linePaint, textPaint, "", totX, cursorY, cwAmostraSingle, totalRowH); totX += cwAmostraSingle }
         drawCell(canvas, linePaint, textPaint, "", totX, cursorY, cwInsp, totalRowH); totX += cwInsp
         
-        // Imov Trat Sum
-        val totalTreated = houses.count { it.larvicida > 0 }
+        // Imov Trat Sum (Match HomeViewModel logic)
+        val totalTreated = houses.count { 
+            (it.a1 + it.a2 + it.b + it.c + it.d1 + it.d2 + it.e + it.eliminados) > 0 || it.larvicida > 0.0 
+        }
         drawCell(canvas, linePaint, boldPaint, totalTreated.toString(), totX, cursorY, cwImovTrat, totalRowH); totX += cwImovTrat
 
         // Larv 1 Gramas Sum
