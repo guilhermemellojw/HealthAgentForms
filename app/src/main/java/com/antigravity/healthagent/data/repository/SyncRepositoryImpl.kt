@@ -298,7 +298,10 @@ class SyncRepositoryImpl @Inject constructor(
                         ?: ""
 
                     deletedActivityDates.forEach { date ->
-                        houseRepository.deleteProduction(date, agentNameFromCloud) 
+                        database.withTransaction {
+                            dayActivityDao.deleteDayActivity(date, agentNameFromCloud)
+                            houseDao.deleteHousesByDateAndAgent(date, agentNameFromCloud)
+                        }
                     }
                     
                     deletedHouseIds.forEach { id ->
