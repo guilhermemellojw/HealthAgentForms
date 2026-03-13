@@ -139,6 +139,8 @@ fun HomeScreen(
         )
     }
 
+    val bairrosList by viewModel.bairrosList.collectAsState()
+    
     LaunchedEffect(uiEvent) {
         uiEvent?.let {
             snackbarHostState.showSnackbar(it)

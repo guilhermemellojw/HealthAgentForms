@@ -37,7 +37,11 @@ object SemanalPdfGenerator {
         val page = pdfDocument.startPage(pageInfo)
         val canvas = page.canvas
 
-        drawSemanalPage(context, canvas, weekDates, allHouses, activities, agentName)
+        // Hoist bitmap decoding
+        val logoVigilancia = BitmapFactory.decodeResource(context.resources, R.drawable.logo_vigilancia)
+        val logoGoverno = BitmapFactory.decodeResource(context.resources, R.drawable.governo_rj_logo)
+
+        drawSemanalPage(context, canvas, weekDates, allHouses, activities, agentName, logoVigilancia, logoGoverno)
 
         pdfDocument.finishPage(page)
 
@@ -102,7 +106,9 @@ object SemanalPdfGenerator {
         weekDates: List<String>,
         allHouses: List<House>,
         activities: Map<String, String>,
-        agentName: String
+        agentName: String,
+        logoVigilancia: android.graphics.Bitmap?,
+        logoGoverno: android.graphics.Bitmap?
     ) {
         val textPaint = Paint().apply {
             color = Color.BLACK
@@ -133,12 +139,8 @@ object SemanalPdfGenerator {
 
         // LEFT SIDE: Logo and Municipality Info
         val logoH = 55f
-        val logoBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.logo_vigilancia)
-        val actualLogo = if (logoBitmap != null) {
-            logoBitmap
-        } else {
-             BitmapFactory.decodeResource(context.resources, R.drawable.governo_rj_logo)
-        }
+        // Bitmaps are passed as arguments to avoid redundant decoding
+        val actualLogo = logoVigilancia ?: logoGoverno
         
         if (actualLogo != null) {
             val logoW = (actualLogo.width.toFloat() / actualLogo.height.toFloat() * logoH)

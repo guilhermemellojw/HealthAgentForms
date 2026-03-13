@@ -39,6 +39,7 @@ class SyncRepositoryImpl @Inject constructor(
             }
             
             var officialAgentName = agentDoc?.getString("agentName") ?: ""
+            var currentEmailInCloud = agentDoc?.getString("email")
 
             // IMPROVEMENT: If name is missing in cloud, try to recover it from the data itself
             if (officialAgentName.isBlank()) {
@@ -49,9 +50,19 @@ class SyncRepositoryImpl @Inject constructor(
                     officialAgentName = recoveredName
                     android.util.Log.i("SyncRepository", "Recovering agent name '$officialAgentName' from data and updating cloud metadata")
                     try {
-                        userDocRef.update("agentName", officialAgentName).await()
+                        // Update both 'agents' and 'users' collections to ensure consistent attribution
+                        val batch = firestore.batch()
+                        batch.update(userDocRef, "agentName", officialAgentName)
+                        
+                        // Also update the users collection if the document exists
+                        val userProfileRef = firestore.collection("users").document(uid)
+                        batch.update(userProfileRef, "agentName", officialAgentName)
+                        
+                        batch.commit().await()
                     } catch (e: Exception) {
-                        android.util.Log.e("SyncRepository", "Failed to update recovered agent name in cloud", e)
+                        android.util.Log.e("SyncRepository", "Failed to update recovered agent name in cloud collections", e)
+                        // Fallback: try individual update if batch fails (e.g. one doc doesn't exist)
+                        try { userDocRef.update("agentName", officialAgentName).await() } catch(e2: Exception) {}
                     }
                 }
             }
@@ -178,7 +189,6 @@ class SyncRepositoryImpl @Inject constructor(
             }
         }
     }
-
     override suspend fun pullCloudDataToLocal(targetUid: String?): Result<Unit> {
         return try {
             val uid = targetUid ?: auth.currentUser?.uid ?: return Result.failure(Exception("User not authenticated"))
@@ -187,10 +197,20 @@ class SyncRepositoryImpl @Inject constructor(
             val houses = housesSnapshot.toObjects(House::class.java)
             val activitiesSnapshot = userDocRef.collection("day_activities").get().await()
             val activities = activitiesSnapshot.toObjects(DayActivity::class.java)
+
+            // Strategy: If pulling for a DIFFERENT user (e.g. Admin editing someone else),
+            // we MUST clear local data to avoid mixing.
+            // If pulling for SELF, we use Upsert to protect unsynced local work.
+            val isTargetDifferentUser = targetUid != null && targetUid != auth.currentUser?.uid
             
-            // Fix: Always replace local data to avoid "ghost data" from previous users
-            houseDao.replaceHouses(houses)
-            dayActivityDao.replaceDayActivities(activities)
+            if (isTargetDifferentUser) {
+                android.util.Log.i("SyncRepository", "Pulling for different user ($targetUid). Clearing local data first.")
+                houseDao.deleteAll()
+                dayActivityDao.deleteAll()
+            }
+            
+            houseDao.upsertHouses(houses)
+            dayActivityDao.upsertDayActivities(activities)
             
             Result.success(Unit)
         } catch (e: Exception) {
@@ -307,6 +327,96 @@ class SyncRepositoryImpl @Inject constructor(
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    override suspend fun clearLocalData(): Result<Unit> {
+        return try {
+            houseDao.deleteAll()
+            dayActivityDao.deleteAll()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // --- Super Admin / Dynamic Configuration ---
+
+    override suspend fun fetchBairros(): Result<List<String>> {
+        return try {
+            val doc = firestore.collection("metadata").document("locations").get().await()
+            val bairros = doc.get("bairros") as? List<String> ?: emptyList()
+            if (bairros.isEmpty()) {
+                // Return default from AppConstants if cloud is empty
+                Result.success(com.antigravity.healthagent.utils.AppConstants.BAIRROS)
+            } else {
+                Result.success(bairros.sorted())
+            }
+        } catch (e: Exception) {
+            // Fallback
+            Result.success(com.antigravity.healthagent.utils.AppConstants.BAIRROS)
+        }
+    }
+
+    override suspend fun addBairro(name: String): Result<Unit> {
+        return try {
+            val normalizedName = name.trim()
+            if (normalizedName.isBlank()) return Result.failure(Exception("Nome do bairro não pode ser vazio"))
+            
+            val docRef = firestore.collection("metadata").document("locations")
+            val snapshot = docRef.get().await()
+            val current = (snapshot.get("bairros") as? List<String> ?: emptyList()).toMutableList()
+            
+            if (!current.contains(normalizedName)) {
+                current.add(normalizedName)
+                docRef.set(mapOf("bairros" to current.sorted())).await()
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun deleteBairro(name: String): Result<Unit> {
+        return try {
+            val docRef = firestore.collection("metadata").document("locations")
+            val snapshot = docRef.get().await()
+            val current = (snapshot.get("bairros") as? List<String> ?: emptyList()).toMutableList()
+            
+            if (current.remove(name)) {
+                docRef.set(mapOf("bairros" to current.sorted())).await()
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun fetchSystemSettings(): Result<Map<String, Any>> {
+        return try {
+            val doc = firestore.collection("metadata").document("settings").get().await()
+            Result.success(doc.data ?: emptyMap())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun updateSystemSetting(key: String, value: Any): Result<Unit> {
+        return try {
+            firestore.collection("metadata").document("settings")
+                .update(key, value)
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            // If document doesn't exist, create it
+            try {
+                firestore.collection("metadata").document("settings")
+                    .set(mapOf(key to value))
+                    .await()
+                Result.success(Unit)
+            } catch (e2: Exception) {
+                Result.failure(e2)
+            }
         }
     }
 }

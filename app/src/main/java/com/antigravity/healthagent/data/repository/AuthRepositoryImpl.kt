@@ -95,6 +95,7 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun signOut() {
+        syncRepository.clearLocalData()
         auth.signOut()
     }
 
@@ -106,6 +107,10 @@ class AuthRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             false
         }
+    }
+
+    override fun getCurrentUserUid(): String? {
+        return auth.currentUser?.uid
     }
 
     private suspend fun getFullUserData(firebaseUser: FirebaseUser): AuthUser {
@@ -158,53 +163,27 @@ class AuthRepositoryImpl @Inject constructor(
                     val oldDoc = existingUsers.documents.first()
                     android.util.Log.i("AuthRepository", "Found existing user with email $email but different UID. Merging...")
                     
-                    // Migrate data to new UID
-                    val userData = oldDoc.data?.toMutableMap() ?: mutableMapOf()
-                    userData["updatedAt"] = System.currentTimeMillis()
-                    userData["isPreRegistered"] = false
+                    // Migrated metadata
+                    val roleStr = oldDoc.getString("role") ?: "AGENT"
+                    val isAuthorized = oldDoc.getBoolean("isAuthorized") ?: false
+                    val agentName = oldDoc.getString("agentName") ?: ""
                     
-                    // Save to new UID document
-                    firestore.collection("users").document(uid).set(userData).await()
+                    val newUser = mapOf(
+                        "email" to email,
+                        "displayName" to firebaseUser.displayName,
+                        "role" to roleStr,
+                        "isAuthorized" to isAuthorized,
+                        "agentName" to agentName,
+                        "createdAt" to (oldDoc.getLong("createdAt") ?: System.currentTimeMillis()),
+                        "updatedAt" to System.currentTimeMillis(),
+                        "isPreRegistered" to false
+                    )
                     
-                    // Also check for 'agents' collection merge
-                    val existingAgents = firestore.collection("agents")
-                        .whereEqualTo("email", email)
-                        .get()
-                        .await()
+                    firestore.collection("users").document(uid).set(newUser).await()
                     
-                    if (!existingAgents.isEmpty) {
-                        val oldAgentDoc = existingAgents.documents.first()
-                        if (oldAgentDoc.id != uid) {
-                            val agentData = oldAgentDoc.data?.toMutableMap() ?: mutableMapOf()
-                            agentData["isPreRegistered"] = false
-                            
-                            val batch = firestore.batch()
-                            val newAgentRef = firestore.collection("agents").document(uid)
-                            val oldAgentRef = firestore.collection("agents").document(oldAgentDoc.id)
-                            
-                            batch.set(newAgentRef, agentData)
-                            
-                            // Migrate 'houses' subcollection
-                            val oldHouses = oldAgentRef.collection("houses").get().await()
-                            for (houseDoc in oldHouses.documents) {
-                                val newHouseRef = newAgentRef.collection("houses").document(houseDoc.id)
-                                houseDoc.data?.let { batch.set(newHouseRef, it) }
-                                batch.delete(houseDoc.reference)
-                            }
-
-                            // Migrate 'day_activities' subcollection
-                            val oldActivities = oldAgentRef.collection("day_activities").get().await()
-                            for (activityDoc in oldActivities.documents) {
-                                val newActivityRef = newAgentRef.collection("day_activities").document(activityDoc.id)
-                                activityDoc.data?.let { batch.set(newActivityRef, it) }
-                                batch.delete(activityDoc.reference)
-                            }
-                            
-                            // Delete old agent doc
-                            batch.delete(oldAgentRef)
-                            
-                            batch.commit().await()
-                        }
+                    // If user was an admin in old doc, ensure they are in admins collection
+                    if (roleStr == "ADMIN") {
+                        firestore.collection("admins").document(uid).set(mapOf("email" to email)).await()
                     }
 
                     // Optionally delete old user document if UID is different
@@ -223,8 +202,11 @@ class AuthRepositoryImpl @Inject constructor(
                     
                     if (!existingAgents.isEmpty) {
                         val oldAgentDoc = existingAgents.documents.first()
+                        android.util.Log.i("AuthRepository", "Found pre-registered agent with email $email. Merging metadata and subcollections...")
+                        
+                        val agentName = oldAgentDoc.getString("agentName") ?: ""
+
                         if (oldAgentDoc.id != uid) {
-                            android.util.Log.i("AuthRepository", "Found pre-registered agent with email $email. Merging metadata and subcollections...")
                             val agentData = oldAgentDoc.data?.toMutableMap() ?: mutableMapOf()
                             agentData["isPreRegistered"] = false
                             
@@ -253,6 +235,28 @@ class AuthRepositoryImpl @Inject constructor(
                             batch.delete(oldAgentRef)
                             batch.commit().await()
                         }
+                        
+                        // Create user profile based on agent pre-registration
+                        val role = if (email == "guigomelo9@gmail.com") UserRole.ADMIN else UserRole.AGENT
+                        val isAuthorized = (email == "guigomelo9@gmail.com") 
+                        
+                        val newUser = mapOf(
+                            "email" to email,
+                            "displayName" to firebaseUser.displayName,
+                            "role" to role.name,
+                            "isAuthorized" to isAuthorized,
+                            "agentName" to agentName.ifBlank { null },
+                            "createdAt" to System.currentTimeMillis(),
+                            "isPreRegistered" to false
+                        )
+                        
+                        firestore.collection("users").document(uid).set(newUser).await()
+                        if (role == UserRole.ADMIN) {
+                            firestore.collection("admins").document(uid).set(mapOf("email" to email)).await()
+                        }
+                        
+                        // Re-fetch
+                        userDoc = firestore.collection("users").document(uid).get().await()
                     }
                 }
             } catch (e: Exception) {

@@ -497,14 +497,6 @@ fun SettingsScreen(
                     title = "Gerenciamento de Dados",
                     icon = Icons.Outlined.Backup
                 ) {
-                    ListItem(
-                        headlineContent = { Text("Importar Produção") },
-                        supportingContent = { Text("Adicionar dados de outro dia (JSON)") },
-                        leadingContent = { Icon(Icons.Default.Add, contentDescription = null) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { importDayLauncher.launch(arrayOf("application/json")) }
-                    )
                     
                     HorizontalDivider()
                     
@@ -563,6 +555,18 @@ fun SettingsScreen(
                                     haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                                     onOpenAdmin()
                                 }
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        ListItem(
+                            headlineContent = { Text("Importar Produção") },
+                            supportingContent = { Text("Adicionar dados de outro dia (JSON)") },
+                            leadingContent = { Icon(Icons.Default.Add, contentDescription = null) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { importDayLauncher.launch(arrayOf("application/json")) }
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))

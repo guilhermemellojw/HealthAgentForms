@@ -31,6 +31,12 @@ class AdminViewModel @Inject constructor(
     private val _uiEvent = MutableSharedFlow<String>()
     val uiEvent: SharedFlow<String> = _uiEvent
 
+    private val _bairros = MutableStateFlow<List<String>>(emptyList())
+    val bairros: StateFlow<List<String>> = _bairros.asStateFlow()
+
+    private val _systemSettings = MutableStateFlow<Map<String, Any>>(emptyMap())
+    val systemSettings: StateFlow<Map<String, Any>> = _systemSettings.asStateFlow()
+
     init {
         refreshAll()
     }
@@ -41,6 +47,8 @@ class AdminViewModel @Inject constructor(
             loadAgentsData()
             loadUsers()
             loadAgentNames()
+            loadBairros()
+            loadSystemSettings()
         }
     }
 
@@ -162,6 +170,57 @@ class AdminViewModel @Inject constructor(
                 loadAgentsData()
             }
         }
+    }
+
+    // --- Super Admin Settings ---
+
+    private suspend fun loadBairros() {
+        val result = syncRepository.fetchBairros()
+        if (result.isSuccess) {
+            _bairros.value = result.getOrNull() ?: emptyList()
+        }
+    }
+
+    private suspend fun loadSystemSettings() {
+        val result = syncRepository.fetchSystemSettings()
+        if (result.isSuccess) {
+            _systemSettings.value = result.getOrNull() ?: emptyMap()
+        }
+    }
+
+    fun addBairro(name: String) {
+        viewModelScope.launch {
+            val result = syncRepository.addBairro(name)
+            if (result.isSuccess) {
+                loadBairros()
+                _uiEvent.emit("Bairro adicionado")
+            }
+        }
+    }
+
+    fun deleteBairro(name: String) {
+        viewModelScope.launch {
+            val result = syncRepository.deleteBairro(name)
+            if (result.isSuccess) {
+                loadBairros()
+                _uiEvent.emit("Bairro removido")
+            }
+        }
+    }
+
+    fun updateSetting(key: String, value: Any) {
+        viewModelScope.launch {
+            val result = syncRepository.updateSystemSetting(key, value)
+            if (result.isSuccess) {
+                loadSystemSettings()
+                _uiEvent.emit("Configuração atualizada")
+            }
+        }
+    }
+
+    fun restoreToSelf(context: Context, uri: Uri) {
+        val myUid = authRepository.getCurrentUserUid() ?: return
+        restoreAgentBackup(context, myUid, uri)
     }
 
     fun restoreAgentBackup(context: Context, uid: String, uri: Uri) {

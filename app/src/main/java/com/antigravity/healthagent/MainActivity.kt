@@ -58,6 +58,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Edit
 import com.antigravity.healthagent.domain.repository.UserRole
 import javax.inject.Inject
 
@@ -157,17 +159,14 @@ fun MainScreen(loginViewModel: LoginViewModel) {
             homeViewModel.setRemoteAgent(selectedRemoteAgent)
             if (selectedRemoteAgent != null) {
                 // When an agent is selected for edit, pull THEIR data from cloud
-                homeViewModel.syncDataToCloud() // This now pulls and then pushes
+                homeViewModel.pullDataFromCloud(selectedRemoteAgent?.uid)
             }
         }
-
-        // Auto-restore logic: Pull data once per session after authentication
+    
+        // Auto-restore logic: Pull once per session after login is now handled by LoginViewModel.
+        // We keep the effect to potentially handle other side effects of 'user' state changes if needed.
         LaunchedEffect(user) {
-            user?.let {
-                if (selectedRemoteAgent == null) {
-                    homeViewModel.syncDataToCloud()
-                }
-            }
+            // Logic moved to LoginViewModel to ensure it only happens once and at the right time.
         }
 
         // Propagate role to HomeViewModel
@@ -233,12 +232,13 @@ fun MainScreen(loginViewModel: LoginViewModel) {
             topBar = {
                 if (!isSupervisor && selectedRemoteAgent != null) {
                     Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        tonalElevation = 8.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
                             modifier = Modifier
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
                                 .fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -248,28 +248,39 @@ fun MainScreen(loginViewModel: LoginViewModel) {
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(
-                                    Icons.Default.Info, 
+                                    Icons.Default.Edit, 
                                     contentDescription = null, 
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(20.dp)
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Editando: ${selectedRemoteAgent?.email}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                Column {
+                                    Text(
+                                        text = "MODO DE EDIÇÃO",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                    Text(
+                                        text = selectedRemoteAgent?.email ?: "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
-                            TextButton(
+                            FilledTonalButton(
                                 onClick = { 
-                                    adminViewModel.selectAgentForEdit(null)
+                                    homeViewModel.finishEditSession {
+                                        adminViewModel.selectAgentForEdit(null)
+                                    }
                                 },
-                                contentPadding = PaddingValues(0.dp)
+                                contentPadding = PaddingValues(horizontal = 12.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(32.dp)
                             ) {
-                                Text("SAIR", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error)
+                                Text("FINALIZAR", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                             }
                         }
                     }

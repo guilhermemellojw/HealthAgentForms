@@ -41,8 +41,9 @@ interface HouseDao {
     suspend fun deleteHousesByDateAndAgent(date: String, agentName: String)
 
     @Transaction
-    suspend fun replaceHouses(houses: List<House>) {
-        deleteAll()
+    suspend fun upsertHouses(houses: List<House>) {
+        // We use Upsert (insertAll with REPLACE) to update cloud data locally 
+        // without deleting local records that haven't been synced yet.
         insertAll(houses)
     }
 

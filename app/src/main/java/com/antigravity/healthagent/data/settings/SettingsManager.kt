@@ -33,6 +33,7 @@ class SettingsManager @Inject constructor(
     private val WARNING_SOUND_KEY = stringPreferencesKey("warning_sound")
     private val EASY_MODE_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("easy_mode")
     private val SOLAR_MODE_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("solar_mode")
+    private val REMOTE_AGENT_UID_KEY = stringPreferencesKey("remote_agent_uid")
     
 
 
@@ -196,6 +197,22 @@ class SettingsManager @Inject constructor(
     suspend fun setAppModeSelected(selected: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[IS_APP_MODE_SELECTED_KEY] = selected
+        }
+    }
+
+    val remoteAgentUid: Flow<String?> = context.dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { preferences ->
+            preferences[REMOTE_AGENT_UID_KEY]
+        }
+
+    suspend fun setRemoteAgentUid(uid: String?) {
+        context.dataStore.edit { preferences ->
+            if (uid == null) {
+                preferences.remove(REMOTE_AGENT_UID_KEY)
+            } else {
+                preferences[REMOTE_AGENT_UID_KEY] = uid
+            }
         }
     }
 }

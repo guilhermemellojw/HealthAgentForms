@@ -30,7 +30,10 @@ object BoletimPdfGenerator {
         agentName: String
     ): File {
         val pdfDocument = PdfDocument()
-        val pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, 2).create()
+        val pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, 1).create()
+        
+        // Hoist bitmap decoding to avoid redundant work in loops
+        val logoBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.governo_rj_logo)
 
         val chunksToProcess = createChunks(houses)
         val totalFolhas = chunksToProcess.size
@@ -41,7 +44,7 @@ object BoletimPdfGenerator {
 
              // --- Page 1: Frente (List of Houses) ---
             val page1 = pdfDocument.startPage(pageInfo)
-            drawFrontPage(context, page1.canvas, chunk, date, agentName, folhaNumber, totalFolhas)
+            drawFrontPage(context, page1.canvas, chunk, date, agentName, folhaNumber, totalFolhas, logoBitmap)
             pdfDocument.finishPage(page1)
     
             // --- Page 2: Verso (Summary) ---
@@ -73,7 +76,10 @@ object BoletimPdfGenerator {
         weekDates: List<String>
     ): File {
         val pdfDocument = PdfDocument()
-        val pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, 2).create()
+        val pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, 1).create()
+        
+        // Hoist bitmap decoding to avoid redundant work in loops
+        val logoBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.governo_rj_logo)
 
         // Sort dates for daily pages (only days with data)
         val dateComparator = Comparator<String> { d1, d2 ->
@@ -96,7 +102,7 @@ object BoletimPdfGenerator {
             val totalFolhas = chunks.size
             chunks.forEachIndexed { index, chunk ->
                 val page = pdfDocument.startPage(pageInfo)
-                drawFrontPage(context, page.canvas, chunk, date, agentName, index + 1, totalFolhas)
+                drawFrontPage(context, page.canvas, chunk, date, agentName, index + 1, totalFolhas, logoBitmap)
                 pdfDocument.finishPage(page)
             }
         }
@@ -118,7 +124,10 @@ object BoletimPdfGenerator {
         // Flatten all houses for the weekly summary
         val allWeekHouses = weeklyData.values.flatten()
         // Use the FULL weekDates ensuring we print all days including those with status but no houses
-        SemanalPdfGenerator.drawSemanalPage(context, semanalPage.canvas, weekDates, allWeekHouses, activities, agentName)
+        // Hoist bitmap decoding for summary (using the same pre-decoded logos if possible, but Semanal uses logo_vigilancia)
+        val logoVigilancia = BitmapFactory.decodeResource(context.resources, com.antigravity.healthagent.R.drawable.logo_vigilancia)
+        
+        SemanalPdfGenerator.drawSemanalPage(context, semanalPage.canvas, weekDates, allWeekHouses, activities, agentName, logoVigilancia, logoBitmap)
         pdfDocument.finishPage(semanalPage)
 
 
@@ -207,7 +216,8 @@ object BoletimPdfGenerator {
         date: String,
         agentName: String,
         folhaNumber: Int,
-        totalFolhas: Int
+        totalFolhas: Int,
+        logoBitmap: android.graphics.Bitmap?
     ) {
         val textPaint = Paint().apply {
             color = Color.BLACK
@@ -233,13 +243,8 @@ object BoletimPdfGenerator {
 
         var cursorY = MARGIN
 
-        // --- Header (Top Section) ---
-        
-        val headerBlockHeight = 45f // Fixed height for the logo/title block
-        
         // 1. Logo (Left)
-        val logoResId = R.drawable.governo_rj_logo
-        val logoBitmap = BitmapFactory.decodeResource(context.resources, logoResId)
+        // Logo is pre-decoded and passed as an argument to avoid OOM
         
         if (logoBitmap != null) {
             val logoH = 40f

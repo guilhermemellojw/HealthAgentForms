@@ -13,6 +13,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.antigravity.healthagent.domain.repository.AgentData
@@ -45,6 +48,7 @@ fun AdminDashboardScreen(
     var showAddAgentDialog by remember { mutableStateOf(false) }
     var showAddNameDialog by remember { mutableStateOf(false) }
     var selectedUidForRestore by remember { mutableStateOf<String?>(null) }
+    var agentSearchQuery by remember { mutableStateOf("") }
     
     // Confirmation Dialog State
     var showConfirmDialog by remember { mutableStateOf(false) }
@@ -55,7 +59,7 @@ fun AdminDashboardScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val tabs = listOf("Dados", "Usuários", "Nomes")
+    val tabs = listOf("Dados", "Usuários", "Nomes", "Config.")
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -97,6 +101,12 @@ fun AdminDashboardScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { 
+                        selectedUidForRestore = viewModel.authRepository.getCurrentUserUid()
+                        filePickerLauncher.launch("application/json")
+                    }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Restaurar meu backup", tint = MaterialTheme.colorScheme.onPrimary)
+                    }
                     IconButton(onClick = { viewModel.refreshAll() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Atualizar", tint = MaterialTheme.colorScheme.onPrimary)
                     }
@@ -112,12 +122,15 @@ fun AdminDashboardScreen(
                         0 -> showAddAgentDialog = true
                         1 -> showAddUserDialog = true
                         2 -> showAddNameDialog = true
+                        // No FAB for tab 3
                     }
                 },
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Adicionar")
+                if (selectedTab < 3) {
+                    Icon(Icons.Default.Add, contentDescription = "Adicionar")
+                }
             }
         }
     ) { padding ->
@@ -138,33 +151,67 @@ fun AdminDashboardScreen(
 
             Box(modifier = Modifier.weight(1f)) {
                 if (selectedTab == 0) {
-                    when (val state = uiState) {
-                        is AdminUiState.Loading -> {
-                            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                        }
-                        is AdminUiState.Error -> {
-                            Text(
-                                text = "Erro: ${state.message}",
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .padding(16.dp)
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        // Search Bar
+                        OutlinedTextField(
+                            value = agentSearchQuery,
+                            onValueChange = { agentSearchQuery = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            placeholder = { Text("Pesquisar agentes por nome ou email...") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            trailingIcon = if (agentSearchQuery.isNotEmpty()) {
+                                {
+                                    IconButton(onClick = { agentSearchQuery = "" }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Limpar")
+                                    }
+                                }
+                            } else null,
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surface
                             )
-                        }
-                        is AdminUiState.Success -> {
-                            if (state.agents.isEmpty()) {
-                                Text(
-                                    text = "Nenhum dado de agente encontrado na nuvem.",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    modifier = Modifier.align(Alignment.Center)
-                                )
-                            } else {
-                                LazyColumn(
-                                    contentPadding = PaddingValues(16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    items(state.agents) { agent ->
+                        )
+
+                        when (val state = uiState) {
+                            is AdminUiState.Loading -> {
+                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                                }
+                            }
+                            is AdminUiState.Error -> {
+                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                    Text(
+                                        text = "Erro: ${state.message}",
+                                        color = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.align(Alignment.Center).padding(16.dp)
+                                    )
+                                }
+                            }
+                            is AdminUiState.Success -> {
+                                val filteredAgents = state.agents.filter {
+                                    it.email.contains(agentSearchQuery, ignoreCase = true) ||
+                                    (it.agentName?.contains(agentSearchQuery, ignoreCase = true) ?: false)
+                                }
+
+                                if (filteredAgents.isEmpty()) {
+                                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                        Text(
+                                            text = if (agentSearchQuery.isEmpty()) "Nenhum dado de agente encontrado." else "Nenhum agente corresponde à pesquisa.",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            modifier = Modifier.align(Alignment.Center)
+                                        )
+                                    }
+                                } else {
+                                    LazyColumn(
+                                        modifier = Modifier.weight(1f),
+                                        contentPadding = PaddingValues(16.dp),
+                                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                                    ) {
+                                        items(filteredAgents) { agent ->
                                         AgentCard(
                                             agent = agent,
                                             onEditAgent = {
@@ -185,6 +232,7 @@ fun AdminDashboardScreen(
                                     }
                                 }
                             }
+                        }
                         }
                     }
                 } else if (selectedTab == 1) {
@@ -210,36 +258,9 @@ fun AdminDashboardScreen(
                             )
                         }
                     }
-                } else {
-                    // Names Management Tab
-                    LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        items(agentNames) { name ->
-                            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                    IconButton(
-                                        onClick = {
-                                            confirmTitle = "Excluir Nome"
-                                            confirmMessage = "Tem certeza que deseja remover '$name' da lista de agentes?"
-                                            onConfirmAction = { viewModel.removeAgentName(name) }
-                                            showConfirmDialog = true
-                                        },
-                                        colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                                    ) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Excluir")
-                                    }
-                                }
-                            }
-                        }
-                    }
+                } else if (selectedTab == 3) {
+                    // Settings Tab
+                    SettingsTab(viewModel)
                 }
             }
         }
@@ -766,5 +787,109 @@ fun DataStat(label: String, value: String, color: androidx.compose.ui.graphics.C
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(text = value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = color)
         Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+@Composable
+fun SettingsTab(viewModel: AdminViewModel) {
+    val bairros by viewModel.bairros.collectAsState()
+    val settings by viewModel.systemSettings.collectAsState()
+    var showAddBairroDialog by remember { mutableStateOf(false) }
+    val mapsUrl = settings["maps_url"] as? String ?: AppConstants.MAPS_URL
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            Text("Gestão de Bairros", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        items(bairros) { bairro ->
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(bairro, style = MaterialTheme.typography.bodyLarge)
+                    IconButton(onClick = { viewModel.deleteBairro(bairro) }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Remover", tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+
+        item {
+            Button(
+                onClick = { showAddBairroDialog = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Adicionar Bairro")
+            }
+        }
+
+        item {
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+            Text("Configurações do Sistema", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(
+                "Estes valores afetam todos os usuários do aplicativo.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        item {
+            var tempMapsUrl by remember(mapsUrl) { mutableStateOf(mapsUrl) }
+            Column {
+                OutlinedTextField(
+                    value = tempMapsUrl,
+                    onValueChange = { tempMapsUrl = it },
+                    label = { Text("URL do Mapa (Google Maps Embed)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    supportingText = {
+                        Text("Cole aqui o link 'incorporar mapa' do Google My Maps")
+                    },
+                    trailingIcon = {
+                        if (tempMapsUrl != mapsUrl) {
+                            TextButton(onClick = { viewModel.updateSetting("maps_url", tempMapsUrl) }) {
+                                Text("SALVAR")
+                            }
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    if (showAddBairroDialog) {
+        var name by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showAddBairroDialog = false },
+            title = { Text("Novo Bairro") },
+            text = {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Nome do Bairro") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(onClick = { 
+                    viewModel.addBairro(name)
+                    showAddBairroDialog = false
+                }) {
+                    Text("Adicionar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddBairroDialog = false }) { Text("Cancelar") }
+            }
+        )
     }
 }

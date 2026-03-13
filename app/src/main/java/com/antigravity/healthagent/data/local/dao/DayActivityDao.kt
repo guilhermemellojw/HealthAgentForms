@@ -28,8 +28,9 @@ interface DayActivityDao {
     suspend fun deleteDayActivity(date: String, agentName: String)
 
     @Transaction
-    suspend fun replaceDayActivities(activities: List<DayActivity>) {
-        deleteAll()
+    suspend fun upsertDayActivities(activities: List<DayActivity>) {
+        // We use Upsert (insertAll with REPLACE) to update cloud data locally 
+        // without deleting local records that haven't been synced yet.
         insertAll(activities)
     }
 

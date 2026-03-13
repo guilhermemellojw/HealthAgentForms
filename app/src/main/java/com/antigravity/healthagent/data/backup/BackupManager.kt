@@ -19,13 +19,15 @@ data class BackupData(
 class BackupManager {
     private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
 
+    val UTF8 = java.nio.charset.StandardCharsets.UTF_8
+
     fun exportData(context: Context, uri: Uri, data: BackupData) {
         try {
             val outputStream = context.contentResolver.openOutputStream(uri) 
                 ?: throw java.io.IOException("Failed to open output stream for URI: $uri")
 
             outputStream.use { stream ->
-                OutputStreamWriter(stream).use { writer ->
+                OutputStreamWriter(stream, UTF8).use { writer ->
                     gson.toJson(data, writer)
                     writer.flush()
                 }
@@ -39,7 +41,7 @@ class BackupManager {
     fun exportToFile(file: java.io.File, data: BackupData) {
         try {
             java.io.FileOutputStream(file).use { outputStream ->
-                OutputStreamWriter(outputStream).use { writer ->
+                OutputStreamWriter(outputStream, UTF8).use { writer ->
                     gson.toJson(data, writer)
                     writer.flush()
                 }
@@ -62,7 +64,7 @@ class BackupManager {
 
             inputStream.use { stream ->
                 // Use PushbackReader to peek at the first char without consuming it
-                val reader = java.io.PushbackReader(InputStreamReader(stream), 1)
+                val reader = java.io.PushbackReader(InputStreamReader(stream, UTF8), 1)
                 
                 // Skip whitespace to find start char
                 var firstCharInt = reader.read()

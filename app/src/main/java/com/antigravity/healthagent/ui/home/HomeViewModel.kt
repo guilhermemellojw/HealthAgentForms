@@ -110,10 +110,56 @@ class HomeViewModel @Inject constructor(
     fun setRemoteAgent(agent: AgentData?) {
         _remoteAgent.value = agent?.email
         _remoteAgentUid.value = agent?.uid
+        
+        // Persist for background processes
+        viewModelScope.launch {
+            settingsManager.setRemoteAgentUid(agent?.uid)
+        }
+    }
+
+    fun finishEditSession(onComplete: () -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiEvent.value = "Finalizando e sincronizando edição..."
+            
+            try {
+                // 1. Push local data (which belongs to the remote agent) to cloud
+                val houses = repository.getAllHousesOnce()
+                val activities = repository.getAllDayActivitiesOnce()
+                val result = syncRepository.pushLocalDataToCloud(houses, activities, _remoteAgentUid.value)
+                
+                if (result.isSuccess) {
+                    // 2. Clear state and local DB
+                    setRemoteAgent(null)
+                    syncRepository.clearLocalData()
+                    _uiEvent.value = "Edição finalizada e sincronizada!"
+                    onComplete()
+                } else {
+                    _uiEvent.value = "Falha ao finalizar: ${result.exceptionOrNull()?.message}"
+                }
+            } catch (e: Exception) {
+                _uiEvent.value = "Erro ao finalizar: ${e.message}"
+            }
+        }
     }
 
     private val _agentNames = MutableStateFlow<List<String>>(emptyList())
     val agentNames: StateFlow<List<String>> = _agentNames.asStateFlow()
+
+    private val _bairrosList = MutableStateFlow<List<String>>(emptyList())
+    val bairrosList: StateFlow<List<String>> = _bairrosList.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            loadDynamicConfig()
+        }
+    }
+
+    private suspend fun loadDynamicConfig() {
+        val result = syncRepository.fetchBairros()
+        if (result.isSuccess) {
+            _bairrosList.value = result.getOrNull() ?: com.antigravity.healthagent.utils.AppConstants.BAIRROS
+        }
+    }
 
     private val _isSupervisor = MutableStateFlow(false)
     val isSupervisor: StateFlow<Boolean> = _isSupervisor.asStateFlow()
@@ -800,6 +846,25 @@ class HomeViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 _uiEvent.value = "Erro na sincronização: ${e.message}"
+            } finally {
+                _isSyncing.value = false
+            }
+        }
+    }
+
+    fun pullDataFromCloud(targetUid: String? = null) {
+        if (_isSyncing.value) return
+        _isSyncing.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val result = syncRepository.pullCloudDataToLocal(targetUid)
+                if (result.isSuccess) {
+                    _uiEvent.value = "Dados baixados com sucesso."
+                } else {
+                    _uiEvent.value = "Falha ao baixar dados: ${result.exceptionOrNull()?.message}"
+                }
+            } catch (e: Exception) {
+                _uiEvent.value = "Erro ao baixar: ${e.message}"
             } finally {
                 _isSyncing.value = false
             }
@@ -1526,8 +1591,20 @@ class HomeViewModel @Inject constructor(
                      repository.replaceAllDayActivities(sanitizedActivities)
                 }
                 
+                // 3. Push to cloud with replacement to ensure consistency
+                val pushResult = syncRepository.pushLocalDataToCloud(
+                    houses = sanitizedHouses,
+                    activities = sanitizedActivities,
+                    targetUid = _remoteAgentUid.value,
+                    shouldReplace = true
+                )
+
                 withContext(Dispatchers.Main) {
-                    _uiEvent.value = "Backup restaurado com sucesso!"
+                    if (pushResult.isSuccess) {
+                        _uiEvent.value = "Backup restaurado com sucesso (Local e Nuvem)!"
+                    } else {
+                        _uiEvent.value = "Backup restaurado localmente, mas falhou ao atualizar nuvem: ${pushResult.exceptionOrNull()?.message}"
+                    }
                     soundManager.playPop()
                 }
             } catch (e: Exception) {

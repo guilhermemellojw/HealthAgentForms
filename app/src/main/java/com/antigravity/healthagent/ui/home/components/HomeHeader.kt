@@ -51,7 +51,8 @@ fun HomeHeader(
     onSelectDate: () -> Unit,
     onMoveDateBackward: () -> Unit = {},
     onMoveDateForward: () -> Unit = {},
-    isEasyMode: Boolean = false
+    isEasyMode: Boolean = false,
+    bairrosList: List<String> = AppConstants.BAIRROS
 ) {
     var isHeaderExpanded by remember { mutableStateOf(false) }
     
@@ -156,7 +157,7 @@ fun HomeHeader(
 
                         CompactDropdown(
                             currentValue = bairro,
-                            options = AppConstants.BAIRROS.map { it },
+                            options = bairrosList,
                             onOptionSelected = { onUpdateBairro(it) },
                             label = "Bairro",
                             modifier = Modifier.weight(1.5f),

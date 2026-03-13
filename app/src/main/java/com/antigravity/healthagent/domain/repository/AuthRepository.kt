@@ -8,6 +8,7 @@ interface AuthRepository {
     suspend fun signInWithGoogle(idToken: String): Result<AuthUser>
     suspend fun signOut()
     suspend fun isUserAdmin(): Boolean
+    fun getCurrentUserUid(): String?
     
     // User Management for Admins
     suspend fun fetchAllUsers(): Result<List<AuthUser>>

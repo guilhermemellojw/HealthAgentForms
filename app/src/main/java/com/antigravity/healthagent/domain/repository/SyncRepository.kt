@@ -50,6 +50,21 @@ interface SyncRepository {
      * Deletes an agent name from the cloud registry.
      */
     suspend fun deleteAgentName(name: String): Result<Unit>
+
+    /**
+     * Clears all local Room data (Houses, DayActivities).
+     */
+    suspend fun clearLocalData(): Result<Unit>
+
+    /**
+     * Dynamic Configuration (Super Admin)
+     */
+    suspend fun fetchBairros(): Result<List<String>>
+    suspend fun addBairro(name: String): Result<Unit>
+    suspend fun deleteBairro(name: String): Result<Unit>
+    
+    suspend fun fetchSystemSettings(): Result<Map<String, Any>>
+    suspend fun updateSystemSetting(key: String, value: Any): Result<Unit>
 }
 
 data class AgentData(
