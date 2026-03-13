@@ -383,12 +383,14 @@ fun MainScreen(loginViewModel: LoginViewModel) {
                         0 -> com.antigravity.healthagent.ui.supervisor.SupervisorSummaryScreen(
                             user = user,
                             onLogout = { loginViewModel.signOut() },
-                            onSwitchAccount = { loginViewModel.signOut() }
+                            onSwitchAccount = { loginViewModel.signOut() },
+                            onOpenSettings = { showSettings = true }
                         )
                         1 -> com.antigravity.healthagent.ui.supervisor.SupervisorAgentsScreen(
                             user = user,
                             onLogout = { loginViewModel.signOut() },
-                            onSwitchAccount = { loginViewModel.signOut() }
+                            onSwitchAccount = { loginViewModel.signOut() },
+                            onOpenSettings = { showSettings = true }
                         )
                     }
                 } else {
@@ -396,7 +398,8 @@ fun MainScreen(loginViewModel: LoginViewModel) {
                         0 -> com.antigravity.healthagent.ui.home.HomeScreen(
                             user = user,
                             onLogout = { loginViewModel.signOut() },
-                            onSwitchAccount = { loginViewModel.signOut() }
+                            onSwitchAccount = { loginViewModel.signOut() },
+                            onOpenSettings = { showSettings = true }
                         )
                         1 -> com.antigravity.healthagent.ui.rg.RGScreen(
                             user = user,

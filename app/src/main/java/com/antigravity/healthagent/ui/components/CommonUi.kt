@@ -639,6 +639,7 @@ fun UserIconMenu(
     user: com.antigravity.healthagent.domain.repository.AuthUser,
     onLogout: () -> Unit,
     onSwitchAccount: () -> Unit,
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
     tint: Color = MaterialTheme.colorScheme.onPrimary
 ) {
@@ -672,6 +673,14 @@ fun UserIconMenu(
             )
             HorizontalDivider()
             DropdownMenuItem(
+                text = { Text("Configurações") },
+                onClick = { 
+                    showUserMenu = false
+                    onOpenSettings()
+                },
+                leadingIcon = { Icon(Icons.Default.Settings, null) }
+            )
+            DropdownMenuItem(
                 text = { Text("Trocar Conta") },
                 onClick = { 
                     showUserMenu = false
@@ -700,7 +709,8 @@ fun GlassTopAppBar(
     scrollBehavior: TopAppBarScrollBehavior? = null,
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
-    onSwitchAccount: () -> Unit = {}
+    onSwitchAccount: () -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     var showUserMenu by remember { mutableStateOf(false) }
     val containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
@@ -730,7 +740,8 @@ fun GlassTopAppBar(
                     UserIconMenu(
                         user = user,
                         onLogout = onLogout,
-                        onSwitchAccount = onSwitchAccount
+                        onSwitchAccount = onSwitchAccount,
+                        onOpenSettings = onOpenSettings
                     )
                 }
             },

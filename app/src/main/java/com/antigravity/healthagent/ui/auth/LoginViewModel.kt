@@ -66,6 +66,21 @@ class LoginViewModel @Inject constructor(
             authRepository.signOut()
         }
     }
+
+    private val _requestSent = MutableStateFlow(false)
+    val requestSent: StateFlow<Boolean> = _requestSent.asStateFlow()
+
+    fun requestAccess() {
+        val user = (authState.value as? AuthState.WaitingForAuthorization)?.user ?: return
+        viewModelScope.launch {
+            val result = authRepository.requestAccess(user.uid, user.email ?: "", user.displayName)
+            if (result.isSuccess) {
+                _requestSent.value = true
+            } else {
+                setError("Erro ao solicitar acesso: ${result.exceptionOrNull()?.message}")
+            }
+        }
+    }
 }
 
 sealed class AuthState {

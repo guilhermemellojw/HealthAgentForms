@@ -58,10 +58,8 @@ fun ProductionProgressBar(
     val countSize = if (isEasyMode) 16.sp else MaterialTheme.typography.labelMedium.fontSize
     val verticalPadding = if (isEasyMode) 14.dp else 9.dp
 
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.primary, // Match Top App Bar
-        tonalElevation = 2.dp
+    Box(
+        modifier = modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier

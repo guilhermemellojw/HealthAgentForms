@@ -37,7 +37,7 @@ private val situationDisplayOptions = Situation.entries.filter { it != Situation
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun HouseRowItem(
-    uiState: HouseUiState,
+    houseState: HouseUiState,
     onUpdate: (House) -> Unit,
     onDelete: (House) -> Unit,
     isReorderMode: Boolean = false,
@@ -53,12 +53,12 @@ fun HouseRowItem(
     focusRequester: androidx.compose.ui.focus.FocusRequester? = null
 ) {
     val haptic = LocalHapticFeedback.current
-    val house = uiState.house
+    val house = houseState.house
     
     // Using pre-calculated UI state from the ViewModel for better performance
-    val invalidFields = uiState.invalidFields
-    val highlightErrors = uiState.highlightErrors
-    val isTreated = uiState.isTreated
+    val invalidFields = houseState.invalidFields
+    val highlightErrors = houseState.highlightErrors
+    val isTreated = houseState.isTreated
     
     val isMissingNumbers = remember(invalidFields) { invalidFields.contains("number") }
     val isMissingType = remember(invalidFields) { invalidFields.contains("propertyType") }
@@ -195,8 +195,8 @@ fun HouseRowItem(
                 ) {
                     // Header: Location Info
                     if (!isReorderMode) {
-                        val blockDisplay = uiState.blockDisplay
-                        val formattedStreet = uiState.formattedStreet
+                        val blockDisplay = houseState.blockDisplay
+                        val formattedStreet = houseState.formattedStreet
                         Row(
                             modifier = Modifier.fillMaxWidth().height(32.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -325,7 +325,7 @@ fun HouseRowItem(
                         )
                     }
     
-                    val treatmentParts = uiState.treatmentShortSummary
+                    val treatmentParts = houseState.treatmentShortSummary
     
                     if (treatmentParts.isNotEmpty()) {
                         Row(

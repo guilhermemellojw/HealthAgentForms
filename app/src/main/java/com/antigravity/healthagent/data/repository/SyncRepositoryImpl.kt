@@ -1,5 +1,6 @@
 package com.antigravity.healthagent.data.repository
 
+import androidx.room.withTransaction
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.domain.repository.AgentData
@@ -7,6 +8,8 @@ import com.antigravity.healthagent.domain.repository.SyncRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
+import java.text.SimpleDateFormat
+import java.util.*
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -15,7 +18,8 @@ class SyncRepositoryImpl @Inject constructor(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
     private val houseDao: com.antigravity.healthagent.data.local.dao.HouseDao,
-    private val dayActivityDao: com.antigravity.healthagent.data.local.dao.DayActivityDao
+    private val dayActivityDao: com.antigravity.healthagent.data.local.dao.DayActivityDao,
+    private val database: com.antigravity.healthagent.data.local.AppDatabase
 ) : SyncRepository {
 
     override suspend fun pushLocalDataToCloud(
@@ -26,25 +30,42 @@ class SyncRepositoryImpl @Inject constructor(
     ): Result<Unit> {
         return try {
             val uid = targetUid ?: auth.currentUser?.uid ?: return Result.failure(Exception("User not authenticated"))
-            val userEmail = if (targetUid != null) "Remote Sync" else (auth.currentUser?.email ?: "Unknown Email")
-
             val userDocRef = firestore.collection("agents").document(uid)
             
-            // Re-fetch official agent name to ensure consistency and prevent duplications
-            val agentDoc = try { 
-                userDocRef.get().await() 
-            } catch(e: Exception) { 
-                android.util.Log.e("SyncRepository", "Failed to fetch agent doc for name normalization", e)
-                null 
+            // Fetch existing data to avoid overwriting email with "Remote Sync"
+            val existingDoc = try { userDocRef.get().await() } catch(e: Exception) { null }
+            val existingEmail = existingDoc?.getString("email")
+            val existingAgentName = existingDoc?.getString("agentName") ?: ""
+            
+            // IMPROVEMENT: If we have a targetUid (Admin mode), prioritize the existing email.
+            // DO NOT use "Remote Sync" as a persistent value if we can avoid it.
+            val userEmail = if (targetUid != null) {
+                if (existingEmail.isNullOrBlank()) {
+                    // Try to fetch email from 'users' collection if missing in 'agents'
+                    try { 
+                        firestore.collection("users").document(uid).get().await().getString("email") ?: "Remote Sync"
+                    } catch(e: Exception) { "Remote Sync" }
+                } else {
+                    existingEmail
+                }
+            } else {
+                auth.currentUser?.email ?: "Unknown Email"
             }
             
-            var officialAgentName = agentDoc?.getString("agentName") ?: ""
-            var currentEmailInCloud = agentDoc?.getString("email")
+            var officialAgentName = existingAgentName
+            var currentEmailInCloud = existingEmail
+
+            // FETCH TOMBSTONES
+            val deletedHouseIds = (existingDoc?.get("deleted_house_ids") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            val deletedActivityDates = (existingDoc?.get("deleted_activity_dates") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            
+            val finalHouses = houses.filter { it.id.toString() !in deletedHouseIds }
+            val finalActivities = activities.filter { it.date !in deletedActivityDates }
 
             // IMPROVEMENT: If name is missing in cloud, try to recover it from the data itself
             if (officialAgentName.isBlank()) {
-                val recoveredName = houses.firstOrNull { it.agentName.isNotBlank() }?.agentName 
-                    ?: activities.firstOrNull { it.agentName.isNotBlank() }?.agentName
+                val recoveredName = finalHouses.firstOrNull { it.agentName.isNotBlank() }?.agentName 
+                    ?: finalActivities.firstOrNull { it.agentName.isNotBlank() }?.agentName
                 
                 if (!recoveredName.isNullOrBlank()) {
                     officialAgentName = recoveredName
@@ -68,12 +89,33 @@ class SyncRepositoryImpl @Inject constructor(
             }
 
             if (shouldReplace) {
-                android.util.Log.i("SyncRepository", "Replacement requested. Clearing existing subcollections before push.")
-                // 1. Clear houses subcollection
+                // Surgical Restoration: Only wipe dates in the cloud that are present in the backup
+                // or older than the latest backup date. This protects "future workdays".
+                
+                val backupDates = (finalHouses.map { it.data } + finalActivities.map { it.date })
+                    .filter { it.isNotBlank() }
+                    .toSet()
+                
+                val latestBackupDateTs = backupDates.map { 
+                    try { SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).parse(it)?.time ?: 0L } catch(e: Exception) { 0L }
+                }.maxOrNull() ?: 0L
+
+                android.util.Log.i("SyncRepository", "Replacement requested. Surgical wipe for ${backupDates.size} dates up to $latestBackupDateTs")
+
+                // 1. Clear houses subcollection for dates in backup or older
                 val housesSnap = userDocRef.collection("houses").get().await()
                 housesSnap.documents.chunked(400).forEach { chunk ->
                     val batch = firestore.batch()
-                    chunk.forEach { batch.delete(it.reference) }
+                    chunk.forEach { doc ->
+                        val houseDate = doc.getString("data") ?: ""
+                        val houseTs = try { SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).parse(houseDate)?.time ?: 0L } catch(e: Exception) { 0L }
+                        
+                        // Delete if date matches backup or is older than the latest backup date
+                        // (latestBackupDateTs == 0 means backup had no valid dates, so we don't wipe to be safe)
+                        if (latestBackupDateTs > 0 && (backupDates.contains(houseDate) || houseTs <= latestBackupDateTs)) {
+                            batch.delete(doc.reference)
+                        }
+                    }
                     batch.commit().await()
                 }
                 
@@ -81,29 +123,50 @@ class SyncRepositoryImpl @Inject constructor(
                 val activitiesSnap = userDocRef.collection("day_activities").get().await()
                 activitiesSnap.documents.chunked(400).forEach { chunk ->
                     val batch = firestore.batch()
-                    chunk.forEach { batch.delete(it.reference) }
+                    chunk.forEach { doc ->
+                        val activityDate = doc.id
+                        val activityTs = try { SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).parse(activityDate)?.time ?: 0L } catch(e: Exception) { 0L }
+                        
+                        if (latestBackupDateTs > 0 && (backupDates.contains(activityDate) || activityTs <= latestBackupDateTs)) {
+                            batch.delete(doc.reference)
+                        }
+                    }
                     batch.commit().await()
                 }
             }
 
-            val metadata = mapOf(
-                "email" to userEmail,
+            val metadata = mutableMapOf<String, Any>(
                 "lastSyncTime" to System.currentTimeMillis()
             )
+            // Only update email if it's sync'ing for SELF or if cloud email is missing AND we have a valid value.
+            if (targetUid == null) {
+                metadata["email"] = userEmail
+            } else if (existingEmail.isNullOrBlank() && userEmail != "Remote Sync") {
+                metadata["email"] = userEmail
+            }
 
             // 1. Metadata op (stored in a map to keep it consistent with chunking pattern)
             val metadataOp = userDocRef to metadata
 
-            // 2. Deduplicate Houses by ID
+            // 2. Deduplicate Houses by ID or Natural Multi-Field Key if ID is 0 (Restore scenario)
             val houseOps = mutableMapOf<String, House>()
-            for (house in houses) {
+            finalHouses.forEach { house ->
                 val normalizedHouse = house.copy(agentName = officialAgentName)
-                houseOps[normalizedHouse.id.toString()] = normalizedHouse
+                val docId = if (normalizedHouse.id > 0) {
+                    normalizedHouse.id.toString()
+                } else {
+                    // Stable identifier for restoration houses to avoid collapsing them all into "0"
+                    // Uses house details to create a unique yet stable document ID in the cloud.
+                    // Sanitized to replace slashes in street names with underscores to avoid Firestore nesting.
+                    val rawId = "${normalizedHouse.data}_${normalizedHouse.blockNumber}_${normalizedHouse.streetName}_${normalizedHouse.number}_${normalizedHouse.bairro}"
+                    rawId.replace("/", "_")
+                }
+                houseOps[docId] = normalizedHouse
             }
 
             // 3. Deduplicate Activities by Date (prevents duplication with inconsistent names)
             val activityOps = mutableMapOf<String, DayActivity>()
-            for (activity in activities) {
+            for (activity in finalActivities) {
                 val normalizedActivity = activity.copy(agentName = officialAgentName)
                 // Use ONLY date as docId to ensure one entry per day per agent
                 activityOps[normalizedActivity.date] = normalizedActivity
@@ -158,16 +221,29 @@ class SyncRepositoryImpl @Inject constructor(
             val allAgents = mutableListOf<AgentData>()
 
             for (agentDoc in agentsSnapshot.documents) {
-                val email = agentDoc.getString("email") ?: "Unknown"
-                val agentName = agentDoc.getString("agentName")
+                var email = agentDoc.getString("email") ?: ""
+                var agentName = agentDoc.getString("agentName")
                 val lastSyncTime = agentDoc.getLong("lastSyncTime") ?: 0L
                 val uid = agentDoc.id
+
+                // If email is missing, try to fetch it from the 'users' collection to avoid "Unknown" cards
+                if (email.isBlank() || email == "Unknown") {
+                    email = try { 
+                        firestore.collection("users").document(uid).get().await().getString("email") ?: "Unknown"
+                    } catch(e: Exception) { "Unknown" }
+                }
 
                 val housesSnapshot = agentDoc.reference.collection("houses").get().await()
                 val houses = housesSnapshot.toObjects(House::class.java)
 
                 val activitiesSnapshot = agentDoc.reference.collection("day_activities").get().await()
                 val activities = activitiesSnapshot.toObjects(DayActivity::class.java)
+
+                // IMPROVEMENT: If agentName is missing in the main doc, recover it from the data
+                if (agentName.isNullOrBlank()) {
+                    agentName = houses.firstOrNull { it.agentName.isNotBlank() }?.agentName
+                        ?: activities.firstOrNull { it.agentName.isNotBlank() }?.agentName
+                }
 
                 allAgents.add(
                     AgentData(
@@ -207,6 +283,35 @@ class SyncRepositoryImpl @Inject constructor(
                 android.util.Log.i("SyncRepository", "Pulling for different user ($targetUid). Clearing local data first.")
                 houseDao.deleteAll()
                 dayActivityDao.deleteAll()
+            } else {
+                // RECONCILE TOMBSTONES: If pulling for SELF, check if any synced items were deleted in cloud
+                val agentDoc = userDocRef.get().await()
+                val deletedHouseIds = (agentDoc.get("deleted_house_ids") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                val deletedActivityDates = (agentDoc.get("deleted_activity_dates") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                
+                if (deletedHouseIds.isNotEmpty() || deletedActivityDates.isNotEmpty()) {
+                    android.util.Log.i("SyncRepository", "Reconciling tombstones on device: ${deletedHouseIds.size} houses, ${deletedActivityDates.size} activities")
+                    
+                    val agentNameFromCloud = houses.firstOrNull()?.agentName 
+                        ?: activities.firstOrNull()?.agentName 
+                        ?: auth.currentUser?.displayName 
+                        ?: ""
+
+                    deletedActivityDates.forEach { date ->
+                        houseRepository.deleteProduction(date, agentNameFromCloud) 
+                    }
+                    
+                    deletedHouseIds.forEach { id ->
+                        val house = houseDao.getHouseById(id.toLong())
+                        if (house != null) houseDao.deleteHouse(house)
+                    }
+                    
+                    // Clear tombstones from cloud after successful application to phone
+                    userDocRef.update(
+                        "deleted_house_ids", com.google.firebase.firestore.FieldValue.delete(),
+                        "deleted_activity_dates", com.google.firebase.firestore.FieldValue.delete()
+                    ).await()
+                }
             }
             
             houseDao.upsertHouses(houses)
@@ -286,7 +391,7 @@ class SyncRepositoryImpl @Inject constructor(
             val snapshot = firestore.collection("metadata").document("agent_info")
                 .get().await()
             
-            val names = snapshot.get("names") as? List<String> ?: emptyList()
+            val names = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
             Result.success(names.sorted())
         } catch (e: Exception) {
             // Fallback to AppConstants if Firestore metadata doesn't exist yet
@@ -302,7 +407,7 @@ class SyncRepositoryImpl @Inject constructor(
             val docRef = firestore.collection("metadata").document("agent_info")
             val snapshot = docRef.get().await()
             
-            val currentNames = (snapshot.get("names") as? List<String> ?: emptyList()).toMutableList()
+            val currentNames = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
             if (!currentNames.contains(normalizedName)) {
                 currentNames.add(normalizedName)
                 docRef.set(mapOf("names" to currentNames.sorted())).await()
@@ -319,7 +424,7 @@ class SyncRepositoryImpl @Inject constructor(
             val docRef = firestore.collection("metadata").document("agent_info")
             val snapshot = docRef.get().await()
             
-            val currentNames = (snapshot.get("names") as? List<String> ?: emptyList()).toMutableList()
+            val currentNames = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
             if (currentNames.remove(name)) {
                 docRef.set(mapOf("names" to currentNames.sorted())).await()
             }
@@ -332,8 +437,29 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun clearLocalData(): Result<Unit> {
         return try {
-            houseDao.deleteAll()
-            dayActivityDao.deleteAll()
+            database.withTransaction {
+                houseDao.deleteAll()
+                dayActivityDao.deleteAll()
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>): Result<Unit> {
+        return try {
+            val dates = (houses.map { it.data } + activities.map { it.date }).distinct()
+            
+            database.withTransaction {
+                if (dates.isNotEmpty()) {
+                    houseDao.deleteByAgentAndDates(agentName, dates)
+                    dayActivityDao.deleteByAgentAndDates(agentName, dates)
+                }
+                houseDao.insertAll(houses)
+                dayActivityDao.insertAll(activities)
+            }
+            
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -345,7 +471,7 @@ class SyncRepositoryImpl @Inject constructor(
     override suspend fun fetchBairros(): Result<List<String>> {
         return try {
             val doc = firestore.collection("metadata").document("locations").get().await()
-            val bairros = doc.get("bairros") as? List<String> ?: emptyList()
+            val bairros = (doc.get("bairros") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
             if (bairros.isEmpty()) {
                 // Return default from AppConstants if cloud is empty
                 Result.success(com.antigravity.healthagent.utils.AppConstants.BAIRROS)
@@ -365,7 +491,7 @@ class SyncRepositoryImpl @Inject constructor(
             
             val docRef = firestore.collection("metadata").document("locations")
             val snapshot = docRef.get().await()
-            val current = (snapshot.get("bairros") as? List<String> ?: emptyList()).toMutableList()
+            val current = (snapshot.get("bairros") as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
             
             if (!current.contains(normalizedName)) {
                 current.add(normalizedName)
@@ -381,7 +507,7 @@ class SyncRepositoryImpl @Inject constructor(
         return try {
             val docRef = firestore.collection("metadata").document("locations")
             val snapshot = docRef.get().await()
-            val current = (snapshot.get("bairros") as? List<String> ?: emptyList()).toMutableList()
+            val current = (snapshot.get("bairros") as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
             
             if (current.remove(name)) {
                 docRef.set(mapOf("bairros" to current.sorted())).await()
@@ -417,6 +543,57 @@ class SyncRepositoryImpl @Inject constructor(
             } catch (e2: Exception) {
                 Result.failure(e2)
             }
+        }
+    }
+
+    override suspend fun deleteAgentHouse(agentUid: String, houseId: String): Result<Unit> {
+        return try {
+            val agentRef = firestore.collection("agents").document(agentUid)
+            val batch = firestore.batch()
+            
+            // 1. Delete the doc
+            batch.delete(agentRef.collection("houses").document(houseId))
+            
+            // 2. Record tombstone in metadata to prevent overwrite on next agent sync
+            batch.update(agentRef, "deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayUnion(houseId))
+            
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun deleteAgentActivity(agentUid: String, activityDate: String): Result<Unit> {
+        return try {
+            val agentRef = firestore.collection("agents").document(agentUid)
+            
+            // 1. Delete the activity doc
+            firestore.collection("agents").document(agentUid)
+                .collection("day_activities").document(activityDate)
+                .delete()
+                .await()
+            
+            // 2. Surgically delete houses for this date
+            val housesSnap = agentRef.collection("houses")
+                .whereEqualTo("data", activityDate)
+                .get()
+                .await()
+            
+            if (!housesSnap.isEmpty) {
+                housesSnap.documents.chunked(500).forEach { chunk ->
+                    val batch = firestore.batch()
+                    chunk.forEach { batch.delete(it.reference) }
+                    batch.commit().await()
+                }
+            }
+                
+            // 3. Record tombstone
+            agentRef.update("deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(activityDate)).await()
+            
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 }

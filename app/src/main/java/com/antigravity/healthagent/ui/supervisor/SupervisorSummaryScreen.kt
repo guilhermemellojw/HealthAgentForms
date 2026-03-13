@@ -25,7 +25,8 @@ fun SupervisorSummaryScreen(
     viewModel: SupervisorViewModel = hiltViewModel(),
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
-    onSwitchAccount: () -> Unit = {}
+    onSwitchAccount: () -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     val summary by viewModel.aggregatedWeeklySummary.collectAsState()
     val weekRange by viewModel.weekRangeText.collectAsState()
@@ -53,7 +54,8 @@ fun SupervisorSummaryScreen(
                 },
                 user = user,
                 onLogout = onLogout,
-                onSwitchAccount = onSwitchAccount
+                onSwitchAccount = onSwitchAccount,
+                onOpenSettings = onOpenSettings
             )
         },
         containerColor = Color.Transparent

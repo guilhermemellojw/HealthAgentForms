@@ -57,6 +57,11 @@ interface SyncRepository {
     suspend fun clearLocalData(): Result<Unit>
 
     /**
+     * Surgically restores houses and activities into local database for a specific agent.
+     */
+    suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>): Result<Unit>
+
+    /**
      * Dynamic Configuration (Super Admin)
      */
     suspend fun fetchBairros(): Result<List<String>>
@@ -65,6 +70,10 @@ interface SyncRepository {
     
     suspend fun fetchSystemSettings(): Result<Map<String, Any>>
     suspend fun updateSystemSetting(key: String, value: Any): Result<Unit>
+
+    // Granular Data Management (Admin)
+    suspend fun deleteAgentHouse(agentUid: String, houseId: String): Result<Unit>
+    suspend fun deleteAgentActivity(agentUid: String, activityDate: String): Result<Unit>
 }
 
 data class AgentData(

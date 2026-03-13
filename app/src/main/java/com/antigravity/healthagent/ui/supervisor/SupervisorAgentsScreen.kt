@@ -29,7 +29,8 @@ fun SupervisorAgentsScreen(
     viewModel: SupervisorViewModel = hiltViewModel(),
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
-    onSwitchAccount: () -> Unit = {}
+    onSwitchAccount: () -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     val agents by viewModel.agents.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -56,7 +57,8 @@ fun SupervisorAgentsScreen(
                 },
                 user = user,
                 onLogout = onLogout,
-                onSwitchAccount = onSwitchAccount
+                onSwitchAccount = onSwitchAccount,
+                onOpenSettings = onOpenSettings
             )
         },
         containerColor = Color.Transparent

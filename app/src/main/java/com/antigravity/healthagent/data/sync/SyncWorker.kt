@@ -20,7 +20,8 @@ class SyncWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val houseRepository: HouseRepository,
     private val syncRepository: SyncRepository,
-    private val settingsManager: SettingsManager
+    private val settingsManager: SettingsManager,
+    private val auth: com.google.firebase.auth.FirebaseAuth
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
@@ -29,6 +30,12 @@ class SyncWorker @AssistedInject constructor(
         if (runAttemptCount > 3) {
             Log.e("SyncWorker", "Too many attempts. Giving up to save battery.")
             return Result.failure()
+        }
+
+        val currentUser = auth.currentUser
+        if (currentUser == null) {
+            Log.w("SyncWorker", "No user logged in. Skipping background sync.")
+            return Result.success()
         }
 
         return try {

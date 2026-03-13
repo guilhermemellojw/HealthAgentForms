@@ -62,10 +62,7 @@ fun BoletimScreen(
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {}
 ) {
-    val boletimList by viewModel.boletimList.collectAsState()
-    val agentName by viewModel.agentName.collectAsState()
-    val isEasyMode by viewModel.easyMode.collectAsState()
-    val isSolarMode by viewModel.solarMode.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -116,14 +113,14 @@ fun BoletimScreen(
                 Text(
                     "Transferir Produção", 
                     fontWeight = FontWeight.ExtraBold,
-                    style = if (isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge
+                    style = if (uiState.isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge
                 ) 
             },
             text = {
                 Column {
                     Text(
                         "Transferir produção do dia $transferDate para qual agente?",
-                        style = if (isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
+                        style = if (uiState.isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     CompactDropdown(
@@ -132,7 +129,7 @@ fun BoletimScreen(
                         options = com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES,
                         onOptionSelected = { selectedTransferAgent = it },
                         modifier = Modifier.fillMaxWidth(),
-                        isEasyMode = isEasyMode
+                        isEasyMode = uiState.isEasyMode
                     )
                 }
             },
@@ -146,8 +143,8 @@ fun BoletimScreen(
                             showTransferDialog = false
                             selectedTransferAgent = ""
                         },
-                        modifier = Modifier.weight(1f).height(if (isEasyMode) 52.dp else 48.dp),
-                        shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp)
+                        modifier = Modifier.weight(1f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
+                        shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp)
                     ) {
                         Text("Cancelar", fontWeight = FontWeight.Bold)
                     }
@@ -162,14 +159,14 @@ fun BoletimScreen(
                                 scope.launch { snackbarHostState.showSnackbar("Selecione um agente") }
                             }
                         },
-                        modifier = Modifier.weight(1.3f).height(if (isEasyMode) 52.dp else 48.dp),
-                        shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp)
+                        modifier = Modifier.weight(1.3f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
+                        shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp)
                     ) {
                         Text("Confirmar", fontWeight = FontWeight.Bold)
                     }
                 }
             },
-            shape = RoundedCornerShape(if (isEasyMode) 28.dp else 24.dp)
+            shape = RoundedCornerShape(if (uiState.isEasyMode) 28.dp else 24.dp)
         )
     }
 
@@ -213,13 +210,13 @@ fun BoletimScreen(
                 Text(
                     "Atenção - Dados Históricos", 
                     fontWeight = FontWeight.ExtraBold,
-                    style = if (isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge
+                    style = if (uiState.isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge
                 ) 
             },
             text = { 
                 Text(
                     "Esta produção é anterior a uma semana. Compartilhar ou transferir dados antigos pode afetar a consistência histórica e relatórios de outros agentes.\n\nDeseja realmente prosseguir?",
-                    style = if (isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
+                    style = if (uiState.isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
                 ) 
             },
             confirmButton = {
@@ -229,8 +226,8 @@ fun BoletimScreen(
                 ) {
                     OutlinedButton(
                         onClick = { showHistoryWarningDialog = false },
-                        modifier = Modifier.weight(1f).height(if (isEasyMode) 52.dp else 48.dp),
-                        shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp)
+                        modifier = Modifier.weight(1f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
+                        shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp)
                     ) {
                         Text("Cancelar", fontWeight = FontWeight.Bold)
                     }
@@ -239,15 +236,15 @@ fun BoletimScreen(
                             showHistoryWarningDialog = false
                             pendingHistoryAction()
                         },
-                        modifier = Modifier.weight(1.3f).height(if (isEasyMode) 52.dp else 48.dp),
-                        shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp),
+                        modifier = Modifier.weight(1.3f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
+                        shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                     ) {
                         Text("Confirmar", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                     }
                 }
             },
-            shape = RoundedCornerShape(if (isEasyMode) 28.dp else 24.dp)
+            shape = RoundedCornerShape(if (uiState.isEasyMode) 28.dp else 24.dp)
         )
     }
 
@@ -259,13 +256,13 @@ fun BoletimScreen(
                     "Excluir Produção", 
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.error,
-                    style = if (isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge
+                    style = if (uiState.isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge
                 ) 
             },
             text = { 
                 Text(
                     "Tem certeza que deseja excluir toda a produção do dia $deleteDate? Esta ação não pode ser desfeita.",
-                    style = if (isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
+                    style = if (uiState.isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
                 ) 
             },
             confirmButton = {
@@ -275,8 +272,8 @@ fun BoletimScreen(
                 ) {
                     OutlinedButton(
                         onClick = { showDeleteDialog = false },
-                        modifier = Modifier.weight(1f).height(if (isEasyMode) 52.dp else 48.dp),
-                        shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp)
+                        modifier = Modifier.weight(1f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
+                        shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp)
                     ) {
                         Text("Cancelar", fontWeight = FontWeight.Bold)
                     }
@@ -286,15 +283,15 @@ fun BoletimScreen(
                             showDeleteDialog = false
                             scope.launch { snackbarHostState.showSnackbar("Produção excluída.") }
                         },
-                        modifier = Modifier.weight(1.3f).height(if (isEasyMode) 52.dp else 48.dp),
-                        shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp),
+                        modifier = Modifier.weight(1.3f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
+                        shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                     ) {
                         Text("Excluir", fontWeight = FontWeight.Bold)
                     }
                 }
             },
-            shape = RoundedCornerShape(if (isEasyMode) 28.dp else 24.dp)
+            shape = RoundedCornerShape(if (uiState.isEasyMode) 28.dp else 24.dp)
         )
     }
 
@@ -306,39 +303,30 @@ fun BoletimScreen(
             GlassTopAppBar(
                 title = { 
                     Text(
-                        "Resumo de Produção", 
+                        "Produção Diária", 
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black
                     ) 
                 },
-                actions = {
-                    IconButton(
-                        onClick = onOpenSettings
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Configurações"
-                        )
-                    }
-                },
                 user = user,
                 onLogout = onLogout,
-                onSwitchAccount = onSwitchAccount
+                onSwitchAccount = onSwitchAccount,
+                onOpenSettings = onOpenSettings
             )
         }
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-            MeshGradient(modifier = Modifier.fillMaxSize())
+            com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-            itemsIndexed(boletimList, key = { _, summary -> summary.date }) { index, summary ->
+            itemsIndexed(uiState.boletimList, key = { _, summary -> summary.date }) { index, summary ->
                 PremiumCard(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { viewModel.navigateToDate(summary.date) },
-                    isSolarMode = isSolarMode
+                    isSolarMode = uiState.isSolarMode
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         // Header Row: Status and Title
@@ -471,7 +459,7 @@ fun BoletimScreen(
                                                         context,
                                                         houses,
                                                         summary.date,
-                                                        if (summary.agentName.isNotBlank()) summary.agentName else agentName
+                                                        if (summary.agentName.isNotBlank()) summary.agentName else uiState.agentName
                                                     )
                                                 }
                                                 val uri = androidx.core.content.FileProvider.getUriForFile(
@@ -509,7 +497,7 @@ fun BoletimScreen(
                                     checkHistoryAndProceed(summary.date) {
                                         scope.launch {
                                             try {
-                                                val shareName = if (summary.agentName.isNotBlank()) summary.agentName else agentName
+                                                val shareName = if (summary.agentName.isNotBlank()) summary.agentName else uiState.agentName
                                                 val houses = viewModel.getHousesForDate(summary.date)
                                                 shareToWhatsApp(context, shareName, summary.date, houses)
                                             } catch (e: Exception) {
@@ -598,7 +586,7 @@ fun BoletimScreen(
                 }
             }
 
-            if (boletimList.isEmpty()) {
+            if (uiState.boletimList.isEmpty()) {
                 item {
                     com.antigravity.healthagent.ui.components.EmptyStateView(
                         message = "Nenhum registro encontrado",

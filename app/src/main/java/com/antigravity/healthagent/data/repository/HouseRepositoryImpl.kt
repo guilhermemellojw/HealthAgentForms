@@ -83,8 +83,11 @@ class HouseRepositoryImpl @Inject constructor(
 
     override suspend fun restoreAgentData(agentName: String, houses: List<House>, activities: List<DayActivity>) {
         database.withTransaction {
-            houseDao.deleteByAgent(agentName)
-            dayActivityDao.deleteByAgent(agentName)
+            val dates = (houses.map { it.data } + activities.map { it.date }).distinct()
+            if (dates.isNotEmpty()) {
+                houseDao.deleteByAgentAndDates(agentName, dates)
+                dayActivityDao.deleteByAgentAndDates(agentName, dates)
+            }
             houseDao.insertAll(houses)
             dayActivityDao.insertAll(activities)
         }

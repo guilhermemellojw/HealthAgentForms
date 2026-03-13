@@ -4,22 +4,31 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.SyncRepository
+import com.antigravity.healthagent.domain.usecase.RestoreDataUseCase
+import com.antigravity.healthagent.domain.usecase.SyncDataUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-import android.content.Context
+import android.view.View
+import com.antigravity.healthagent.domain.repository.AuthUser
+import kotlinx.coroutines.flow.combine
 import android.net.Uri
-import com.antigravity.healthagent.data.backup.BackupManager
 
 @HiltViewModel
 class AdminViewModel @Inject constructor(
     private val syncRepository: SyncRepository,
-    private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository
+    private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository,
+    private val restoreDataUseCase: RestoreDataUseCase,
+    private val syncDataUseCase: SyncDataUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<AdminUiState>(AdminUiState.Loading)
@@ -37,6 +46,83 @@ class AdminViewModel @Inject constructor(
     private val _systemSettings = MutableStateFlow<Map<String, Any>>(emptyMap())
     val systemSettings: StateFlow<Map<String, Any>> = _systemSettings.asStateFlow()
 
+    private val _agentNames = MutableStateFlow<List<String>>(emptyList())
+    val agentNames: StateFlow<List<String>> = _agentNames.asStateFlow()
+
+    fun updateSearchQuery(query: String) { _searchQuery.value = query }
+
+    private val _accessRequests = MutableStateFlow<List<com.antigravity.healthagent.domain.repository.AccessRequest>>(emptyList())
+    val accessRequests: StateFlow<List<com.antigravity.healthagent.domain.repository.AccessRequest>> = _accessRequests.asStateFlow()
+
+    val unifiedProfiles: StateFlow<List<UnifiedProfile>> = combine(
+        users,
+        uiState,
+        agentNames,
+        _searchQuery
+    ) { usersList, agentsState, namesList, query ->
+        val agentsList = (agentsState as? AdminUiState.Success)?.agents ?: emptyList()
+        
+        // Build the unified list
+        val result = mutableListOf<UnifiedProfile>()
+        
+        // 1. Start with users who have accounts
+        usersList.forEach { user ->
+            val agentData = agentsList.find { it.uid == user.uid || it.email == user.email }
+            result.add(
+                UnifiedProfile(
+                    uid = user.uid,
+                    email = user.email,
+                    agentName = user.agentName,
+                    role = user.role,
+                    isAuthorized = user.isAuthorized,
+                    isPreRegistered = false,
+                    agentData = agentData
+                )
+            )
+        }
+        
+        // 2. Add Pre-registered "agents" who don't have a user account yet
+        agentsList.forEach { agent ->
+            if (result.none { it.uid == agent.uid || it.email == agent.email }) {
+                result.add(
+                    UnifiedProfile(
+                        uid = agent.uid,
+                        email = agent.email,
+                        agentName = agent.agentName,
+                        role = UserRole.AGENT, 
+                        isAuthorized = false,
+                        isPreRegistered = true,
+                        agentData = agent
+                    )
+                )
+            }
+        }
+
+        // 3. Add names from the Master List that haven't been linked yet
+        namesList.forEach { name ->
+            if (result.none { it.agentName == name }) {
+                result.add(
+                    UnifiedProfile(
+                        uid = null,
+                        email = null,
+                        agentName = name,
+                        role = UserRole.AGENT,
+                        isAuthorized = false,
+                        isPreRegistered = true, // Treat as pre-registered/unlinked
+                        agentData = null
+                    )
+                )
+            }
+        }
+
+        // Filter based on query
+        if (query.isBlank()) result
+        else result.filter { 
+            it.email?.contains(query, true) == true || 
+            it.agentName?.contains(query, true) == true 
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     init {
         refreshAll()
     }
@@ -49,6 +135,35 @@ class AdminViewModel @Inject constructor(
             loadAgentNames()
             loadBairros()
             loadSystemSettings()
+            loadAccessRequests()
+        }
+    }
+
+    private suspend fun loadAccessRequests() {
+        val result = authRepository.fetchAccessRequests()
+        if (result.isSuccess) {
+            _accessRequests.value = result.getOrNull() ?: emptyList()
+        }
+    }
+
+    fun approveAccess(requestId: String, agentName: String?) {
+        viewModelScope.launch {
+            val result = authRepository.respondToAccessRequest(requestId, true, agentName)
+            if (result.isSuccess) {
+                loadAccessRequests()
+                loadUsers()
+                _uiEvent.emit("Acesso aprovado")
+            }
+        }
+    }
+
+    fun rejectAccess(requestId: String) {
+        viewModelScope.launch {
+            val result = authRepository.respondToAccessRequest(requestId, false)
+            if (result.isSuccess) {
+                loadAccessRequests()
+                _uiEvent.emit("Acesso rejeitado")
+            }
         }
     }
 
@@ -208,49 +323,71 @@ class AdminViewModel @Inject constructor(
         }
     }
 
-    fun updateSetting(key: String, value: Any) {
+    fun updateSystemSetting(key: String, value: Any) {
         viewModelScope.launch {
             val result = syncRepository.updateSystemSetting(key, value)
             if (result.isSuccess) {
                 loadSystemSettings()
-                _uiEvent.emit("Configuração atualizada")
+                _uiEvent.emit("Configuração atualizada: $key = $value")
             }
         }
     }
+
+    val maxOpenHouses: StateFlow<Int> = _systemSettings.map { settings ->
+        (settings["max_open_houses"] as? Long)?.toInt() ?: 25
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 25)
 
     fun restoreToSelf(context: Context, uri: Uri) {
         val myUid = authRepository.getCurrentUserUid() ?: return
         restoreAgentBackup(context, myUid, uri)
     }
 
-    fun restoreAgentBackup(context: Context, uid: String, uri: Uri) {
+    fun restoreAgentBackup(context: Context, agentUid: String, uri: Uri) {
         viewModelScope.launch {
-            try {
-                // Parse the JSON file into BackupData
-                val backupData = BackupManager().importData(context, uri)
-                
-                // Push the parsed data directly to the given agent's cloud collection
-                val result = syncRepository.pushLocalDataToCloud(
-                    houses = backupData.houses,
-                    activities = backupData.dayActivities,
-                    targetUid = uid,
-                    shouldReplace = true
-                )
-                
-                if (result.isSuccess) {
-                    _uiEvent.emit("Backup restaurado com sucesso!")
-                    // Refresh data after successful upload
-                    loadAgentsData()
-                } else {
-                    val errorMsg = result.exceptionOrNull()?.message ?: "Erro desconhecido"
-                    _uiEvent.emit("Erro ao restaurar para nuvem: $errorMsg")
-                }
-            } catch (e: Exception) {
-                _uiEvent.emit("Falha ao ler o arquivo de backup: ${e.message}")
+            val result = restoreDataUseCase(context, agentUid, uri)
+            if (result.isSuccess) {
+                _uiEvent.emit("Backup restaurado com sucesso para o agente")
+                loadAgentsData()
+            } else {
+                _uiEvent.emit("Erro ao restaurar backup: ${result.exceptionOrNull()?.message}")
             }
         }
     }
+
+    fun deleteAgentHouse(agentUid: String, houseId: String) {
+        viewModelScope.launch {
+            val result = syncRepository.deleteAgentHouse(agentUid, houseId)
+            if (result.isSuccess) {
+                loadAgentsData()
+                _uiEvent.emit("Registro de imóvel excluído")
+            }
+        }
+    }
+
+    fun deleteAgentActivity(agentUid: String, activityDate: String) {
+        viewModelScope.launch {
+            val result = syncRepository.deleteAgentActivity(agentUid, activityDate)
+            if (result.isSuccess) {
+                loadAgentsData()
+                _uiEvent.emit("Registro de atividade excluído")
+            }
+        }
+    }
+
+    fun getCurrentUserUid(): String? {
+        return authRepository.getCurrentUserUid()
+    }
 }
+
+data class UnifiedProfile(
+    val uid: String?,
+    val email: String?,
+    val agentName: String?,
+    val role: UserRole,
+    val isAuthorized: Boolean,
+    val isPreRegistered: Boolean,
+    val agentData: AgentData? = null
+)
 
 sealed class AdminUiState {
     object Loading : AdminUiState()

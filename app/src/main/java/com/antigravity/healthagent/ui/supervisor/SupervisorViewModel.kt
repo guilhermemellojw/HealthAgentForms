@@ -35,11 +35,13 @@ class SupervisorViewModel @Inject constructor(
         }.time
         val sdf = SimpleDateFormat("dd/MM", Locale.getDefault())
         "${sdf.format(start)} - ${sdf.format(end)}"
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    }.flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     val aggregatedWeeklySummary = combine(_agents, _currentWeekStart) { agents, weekStart ->
         calculateAggregateSummary(agents, weekStart)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AggregateSummary())
+    }.flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AggregateSummary())
 
     init {
         refreshData()

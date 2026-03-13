@@ -28,6 +28,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -44,50 +45,45 @@ class HomeViewModel @Inject constructor(
     private val settingsManager: SettingsManager,
     private val backupScheduler: BackupScheduler,
     private val streetRepository: StreetRepository,
-    private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository
+    private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository,
+    private val syncDataUseCase: com.antigravity.healthagent.domain.usecase.SyncDataUseCase,
+    private val getWeeklySummaryUseCase: com.antigravity.healthagent.domain.usecase.GetWeeklySummaryUseCase,
+    private val getBoletimSummaryUseCase: com.antigravity.healthagent.domain.usecase.GetBoletimSummaryUseCase,
+    private val getRGBlocksUseCase: com.antigravity.healthagent.domain.usecase.GetRGBlocksUseCase
 ) : ViewModel() {
 
     // --- State Definitions ---
     private val dateFormatter: SimpleDateFormat get() = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
     private val displayDateFormatter: SimpleDateFormat get() = SimpleDateFormat("dd/MM", Locale.getDefault())
     
+    private val _uiState = MutableStateFlow(HomeUiState())
+    val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
     private val _data = MutableStateFlow(dateFormatter.format(Date()))
     val data: StateFlow<String> = _data.asStateFlow()
 
-    private val dateCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
-    private fun getTimestamp(date: String): Long {
-        return dateCache.getOrPut(date) {
-            try {
-                dateFormatter.parse(date)?.time ?: 0L
-            } catch (e: Exception) {
-                0L
-            }
-        }
-    }
-
-    private val _municipio = MutableStateFlow("BOM JARDIM")
-    val municipio: StateFlow<String> = _municipio.asStateFlow()
-
-    private val _bairro = MutableStateFlow("")
-    val bairro: StateFlow<String> = _bairro.asStateFlow()
-
-    private val _categoria = MutableStateFlow("BRR")
-    val categoria: StateFlow<String> = _categoria.asStateFlow()
-
-    private val _zona = MutableStateFlow("URB")
-    val zona: StateFlow<String> = _zona.asStateFlow()
-
-    private val _ciclo = MutableStateFlow("1º")
-    val ciclo: StateFlow<String> = _ciclo.asStateFlow()
-
-    private val _tipo = MutableStateFlow(2)
-    val tipo: StateFlow<Int> = _tipo.asStateFlow()
-
-    private val _atividade = MutableStateFlow(4)
-    val atividade: StateFlow<Int> = _atividade.asStateFlow()
-
     private val _agentName = MutableStateFlow("")
     val agentName: StateFlow<String> = _agentName.asStateFlow()
+    
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _selectedRgBairro = MutableStateFlow("")
+    private val _rgYear = MutableStateFlow(Calendar.getInstance().get(Calendar.YEAR).toString())
+    private val _selectedRgBlock = MutableStateFlow("")
+
+    private val _municipio = MutableStateFlow("BOM JARDIM")
+    private val _bairro = MutableStateFlow("")
+    private val _categoria = MutableStateFlow("BRR")
+    private val _zona = MutableStateFlow("URB")
+    private val _ciclo = MutableStateFlow("1º")
+    private val _tipo = MutableStateFlow(2)
+    private val _atividade = MutableStateFlow(4)
+    fun setSupervisor(isSupervisor: Boolean) {
+        _isSupervisor.value = isSupervisor
+    }
+
+    private val _isSupervisor = MutableStateFlow(false)
 
     private val _currentBlock = MutableStateFlow("")
     val currentBlock: StateFlow<String> = _currentBlock.asStateFlow()
@@ -98,83 +94,22 @@ class HomeViewModel @Inject constructor(
     private val _currentStreet = MutableStateFlow("")
     val currentStreet: StateFlow<String> = _currentStreet.asStateFlow()
 
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
-
-    private val _remoteAgent = MutableStateFlow<String?>(null)
-    val remoteAgent: StateFlow<String?> = _remoteAgent.asStateFlow()
-
-    private val _remoteAgentUid = MutableStateFlow<String?>(null)
-    val remoteAgentUid: StateFlow<String?> = _remoteAgentUid.asStateFlow()
-
-    fun setRemoteAgent(agent: AgentData?) {
-        _remoteAgent.value = agent?.email
-        _remoteAgentUid.value = agent?.uid
-        
-        // Persist for background processes
-        viewModelScope.launch {
-            settingsManager.setRemoteAgentUid(agent?.uid)
-        }
-    }
-
-    fun finishEditSession(onComplete: () -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
-            _uiEvent.value = "Finalizando e sincronizando edição..."
-            
-            try {
-                // 1. Push local data (which belongs to the remote agent) to cloud
-                val houses = repository.getAllHousesOnce()
-                val activities = repository.getAllDayActivitiesOnce()
-                val result = syncRepository.pushLocalDataToCloud(houses, activities, _remoteAgentUid.value)
-                
-                if (result.isSuccess) {
-                    // 2. Clear state and local DB
-                    setRemoteAgent(null)
-                    syncRepository.clearLocalData()
-                    _uiEvent.value = "Edição finalizada e sincronizada!"
-                    onComplete()
-                } else {
-                    _uiEvent.value = "Falha ao finalizar: ${result.exceptionOrNull()?.message}"
-                }
-            } catch (e: Exception) {
-                _uiEvent.value = "Erro ao finalizar: ${e.message}"
-            }
-        }
-    }
-
     private val _agentNames = MutableStateFlow<List<String>>(emptyList())
     val agentNames: StateFlow<List<String>> = _agentNames.asStateFlow()
 
     private val _bairrosList = MutableStateFlow<List<String>>(emptyList())
     val bairrosList: StateFlow<List<String>> = _bairrosList.asStateFlow()
 
-    init {
-        viewModelScope.launch {
-            loadDynamicConfig()
-        }
-    }
+    private val _currentWeekStart = MutableStateFlow(Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+    })
 
-    private suspend fun loadDynamicConfig() {
-        val result = syncRepository.fetchBairros()
-        if (result.isSuccess) {
-            _bairrosList.value = result.getOrNull() ?: com.antigravity.healthagent.utils.AppConstants.BAIRROS
-        }
-    }
+    private val _remoteAgent = MutableStateFlow<String?>(null)
+    val remoteAgent: StateFlow<String?> = _remoteAgent.asStateFlow()
 
-    private val _isSupervisor = MutableStateFlow(false)
-    val isSupervisor: StateFlow<Boolean> = _isSupervisor.asStateFlow()
-
-    fun setSupervisor(value: Boolean) { _isSupervisor.value = value }
-
-    // Global unfiltered list for initialization
-    private val allHousesFlow = repository.getAllHouses()
-
-    val houses: StateFlow<List<House>> = combine(allHousesFlow, _agentName) { list, agent ->
-        list.filter { it.agentName.trim().equals(agent.trim(), ignoreCase = true) }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-
-
+    private val _remoteAgentUid = MutableStateFlow<String?>(null)
+    val remoteAgentUid: StateFlow<String?> = _remoteAgentUid.asStateFlow()
 
     private val _uiEvent = MutableStateFlow<String?>(null)
     val uiEvent: StateFlow<String?> = _uiEvent.asStateFlow()
@@ -187,9 +122,6 @@ class HomeViewModel @Inject constructor(
 
     private val _validationErrorHouseIds = MutableStateFlow<Set<Int>>(emptySet())
     val validationErrorHouseIds: StateFlow<Set<Int>> = _validationErrorHouseIds.asStateFlow()
-
-    // Redundant houseInvalidFields removed to improve performance. 
-    // Validation is now handled locally within HouseRowItem.
 
     private val _showClosingAudit = MutableStateFlow<AuditSummary?>(null)
     val showClosingAudit: StateFlow<AuditSummary?> = _showClosingAudit.asStateFlow()
@@ -212,6 +144,19 @@ class HomeViewModel @Inject constructor(
     private val _moveConfirmationData = MutableStateFlow<Pair<House, String>?>(null)
     val moveConfirmationData: StateFlow<Pair<House, String>?> = _moveConfirmationData.asStateFlow()
 
+    // --- State Injections ---
+    val easyMode: StateFlow<Boolean> = settingsManager.easyMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val solarMode: StateFlow<Boolean> = settingsManager.solarMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val maxOpenHouses: StateFlow<Int> = settingsManager.maxOpenHouses
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 25)
+    val backupFrequency: StateFlow<com.antigravity.healthagent.data.backup.BackupFrequency> = settingsManager.backupFrequency
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.antigravity.healthagent.data.backup.BackupFrequency.DAILY)
+    val isAppModeSelected: StateFlow<Boolean?> = settingsManager.isAppModeSelected
+        .map { it as Boolean? }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     val themeMode: StateFlow<String?> = settingsManager.themeMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
     
@@ -230,19 +175,257 @@ class HomeViewModel @Inject constructor(
     val warningSound: StateFlow<String> = settingsManager.warningSound
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "SYSTEM_NOTIFICATION_2")
 
-    val easyMode: StateFlow<Boolean> = settingsManager.easyMode
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    private val dateCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private fun getTimestamp(date: String): Long {
+        return dateCache.getOrPut(date) {
+            try {
+                dateFormatter.parse(date)?.time ?: 0L
+            } catch (e: Exception) {
+                0L
+            }
+        }
+    }
 
-    val backupFrequency: StateFlow<com.antigravity.healthagent.data.backup.BackupFrequency> = settingsManager.backupFrequency
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.antigravity.healthagent.data.backup.BackupFrequency.DAILY)
+    fun setRemoteAgent(agent: AgentData?) {
+        _remoteAgent.value = agent?.email
+        _remoteAgentUid.value = agent?.uid
+        
+        // Persist for background processes
+        viewModelScope.launch {
+            settingsManager.setRemoteAgentUid(agent?.uid)
+        }
+    }
 
-    val solarMode: StateFlow<Boolean> = settingsManager.solarMode
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    fun finishEditSession(onComplete: () -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiEvent.value = "Finalizando e sincronizando edição..."
+            
+            try {
+                // 1. Push local data (which belongs to the remote agent) to cloud
+                val houses = repository.getAllHousesOnce()
+                val activities = repository.getAllDayActivitiesOnce()
+                val result = syncDataUseCase.pushData(houses, activities, _remoteAgentUid.value)
+                
+                if (result.isSuccess) {
+                    // 2. Clear state and local DB
+                    setRemoteAgent(null)
+                    syncRepository.clearLocalData()
+                    _uiEvent.value = "Edição finalizada e sincronizada!"
+                    onComplete()
+                } else {
+                    _uiEvent.value = "Falha ao finalizar: ${result.exceptionOrNull()?.message}"
+                }
+            } catch (e: Exception) {
+                _uiEvent.value = "Erro ao finalizar: ${e.message}"
+            }
+        }
+    }
+
+    // Global unfiltered list for initialization
+    private val allHousesFlow = repository.getAllHouses()
+
+    val houses: StateFlow<List<House>> = combine(allHousesFlow, _agentName) { list, agent ->
+        list.filter { it.agentName.trim().equals(agent.trim(), ignoreCase = true) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // --- Semanal State ---
+    val currentWeekDates: StateFlow<List<String>> = _currentWeekStart.map { start ->
+        val dates = mutableListOf<String>()
+        val cal = start.clone() as Calendar
+        // Work week: Monday to Friday
+        for (i in 0..4) { 
+            dates.add(dateFormatter.format(cal.time))
+            cal.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        dates
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val weekRangeText: StateFlow<String> = _currentWeekStart.map { start ->
+        val cal = start.clone() as Calendar
+        // PDF/User logic: Sunday to Saturday
+        // We are already at Monday. Go back 1 to Sunday.
+        cal.add(Calendar.DAY_OF_YEAR, -1)
+        val sunday = cal.time
+        cal.add(Calendar.DAY_OF_YEAR, 6)
+        val saturday = cal.time
+        
+        "${displayDateFormatter.format(sunday)} a ${displayDateFormatter.format(saturday)}"
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    
+    val weeklySummary: StateFlow<List<DaySummary>> = combine(currentWeekDates, _agentName) { dates, agent -> Pair(dates, agent) }
+        .flatMapLatest { (dates: List<String>, agent: String) ->
+        val activitiesFlow = repository.getDayActivities(dates, agent)
+        combine(houses, activitiesFlow) { all: List<House>, activities: List<DayActivity> ->
+            dates.map { date ->
+                val dayHouses = all.filter { it.data == date }
+                val activity = activities.find { it.date == date }
+                val openHousesCount = dayHouses.count { it.situation == Situation.NONE }
+                DaySummary(date, openHousesCount, activity?.status ?: "")
+            }
+        }
+    }
+    .flowOn(Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val boletimList: StateFlow<List<BoletimSummary>> = combine(houses, _agentName) { h, name -> Pair(h, name) }
+        .flatMapLatest { (h: List<House>, name: String) ->
+            val dates = h.map { it.data }.distinct()
+            repository.getDayActivities(dates, name).map { activities ->
+                getBoletimSummaryUseCase(h, activities)
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activityOptions: StateFlow<List<String>> = settingsManager.customActivities.map { custom -> 
+        (listOf("NORMAL") + custom.toList()).sorted()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("NORMAL"))
+
+    val customActivities: StateFlow<Set<String>> = settingsManager.customActivities
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    val availableYears: StateFlow<List<String>> = houses.map { all ->
+        all.mapNotNull { 
+            try { 
+                val d = dateFormatter.parse(it.data)
+                if(d != null) {
+                    val c = Calendar.getInstance().apply { time = d }
+                    c.get(Calendar.YEAR).toString()
+                } else null 
+            } catch (e: Exception) { null }
+        }.distinct().sortedDescending()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(Calendar.getInstance().get(Calendar.YEAR).toString()))
+
+    val rgBlocks: StateFlow<List<BlockSegment>> = combine(houses, _selectedRgBairro, _rgYear) { h, b, y ->
+        getRGBlocksUseCase(h, b, y)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val selectedRgBlock: StateFlow<String> = _selectedRgBlock.asStateFlow()
+
+    val rgFilteredList: StateFlow<List<House>> = combine(rgBlocks, selectedRgBlock) { blocks, selectedId ->
+        blocks.find { it.id == selectedId }?.houses ?: emptyList()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    init {
+        viewModelScope.launch {
+            loadDynamicConfig()
+        }
+
+        // UI state reducer
+        combine(
+            houses,
+            _data,
+            _agentName,
+            _searchQuery,
+            _isSupervisor,
+            _municipio,
+            _bairro,
+            _categoria,
+            _zona,
+            _ciclo,
+            _tipo,
+            _atividade,
+            _selectedRgBairro,
+            _rgYear,
+            _currentWeekStart,
+            allHousesFlow, // Full houses for global summaries
+            _currentBlock,
+            _currentBlockSequence,
+            _currentStreet,
+            isAppModeSelected,
+            rgFilteredList,
+            selectedRgBlock,
+            availableYears,
+            activityOptions,
+            weekRangeText,
+            customActivities,
+            easyMode,
+            solarMode,
+            maxOpenHouses,
+            rgBlocks,
+            weeklySummary,
+            boletimList
+        ) { args ->
+            val h = args[0] as List<House>
+            val d = args[1] as String
+            val name = args[2] as String
+            val q = args[3] as String
+            val supervisor = args[4] as Boolean
+            val rgB = args[12] as String
+            val rgY = args[13] as String
+            val weekStart = args[14] as Calendar
+            val allH = args[15] as List<House>
+            
+            val dayHouses = h.filter { it.data == d }
+            val totals = calculateDashboardTotals(dayHouses)
+            
+            // Weekly dates
+            val weekDates = mutableListOf<String>()
+            val cal = weekStart.clone() as Calendar
+            for (i in 0..4) { 
+                weekDates.add(dateFormatter.format(cal.time))
+                cal.add(Calendar.DAY_OF_YEAR, 1)
+            }
+            _uiState.update { current ->
+                current.copy(
+                    houses = dayHouses.filter { it.streetName.contains(q, true) || it.number.contains(q, true) }.map { it.toUiState() },
+                    dashboardTotals = totals,
+                    data = d,
+                    agentName = name,
+                    searchQuery = q,
+                    isSupervisor = supervisor,
+                    municipality = args[5] as String,
+                    neighborhood = args[6] as String,
+                    category = args[7] as String,
+                    zone = args[8] as String,
+                    cycle = args[9] as String,
+                    type = args[10] as Int,
+                    activity = args[11] as Int,
+                    rgBlocks = args[29] as List<BlockSegment>,
+                    weeklySummary = args[30] as List<DaySummary>,
+                    boletimList = args[31] as List<BoletimSummary>,
+                    currentBlock = args[16] as String,
+                    currentBlockSequence = args[17] as String,
+                    currentStreet = args[18] as String,
+                    isAppModeSelected = args[19] as Boolean?,
+                    selectedRgBairro = rgB,
+                    selectedRgBlock = args[21] as String,
+                    rgFilteredList = args[20] as List<House>,
+                    rgYear = rgY,
+                    availableYears = args[22] as List<String>,
+                    activityOptions = args[23] as List<String>,
+                    weekRangeText = args[24] as String,
+                    customActivities = args[25] as Set<String>,
+                    isEasyMode = args[26] as Boolean,
+                    isSolarMode = args[27] as Boolean,
+                    maxOpenHouses = args[28] as Int
+                )
+            }
+        }.launchIn(viewModelScope)
+    }
+
+    private suspend fun loadDynamicConfig() {
+        // 1. Sync Bairros
+        val bairrosResult = syncRepository.fetchBairros()
+        if (bairrosResult.isSuccess) {
+            _bairrosList.value = bairrosResult.getOrNull() ?: com.antigravity.healthagent.utils.AppConstants.BAIRROS
+        }
+
+        // 2. Sync Global System Settings (e.g. max_open_houses)
+        val settingsResult = syncRepository.fetchSystemSettings()
+        if (settingsResult.isSuccess) {
+            val settings = settingsResult.getOrNull() ?: emptyMap()
+            (settings["max_open_houses"] as? Long)?.let { cloudMax ->
+                settingsManager.setMaxOpenHouses(cloudMax.toInt())
+            }
+        }
+    }
 
 
-    val isAppModeSelected: StateFlow<Boolean?> = settingsManager.isAppModeSelected
-        .map { it as Boolean? }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null) // Default null to wait for data
+
+
+
+
+
+
 
 
     // --- Computed State ---
@@ -306,10 +489,11 @@ class HomeViewModel @Inject constructor(
             d1 = dayHouses.sumOf { it.d1 }, d2 = dayHouses.sumOf { it.d2 },
             e = dayHouses.sumOf { it.e }, eliminados = dayHouses.sumOf { it.eliminados },
             larvicida = dayHouses.sumOf { it.larvicida },
-            comFoco = dayHouses.count { it.comFoco },
+            totalFocos = dayHouses.count { it.comFoco },
             totalRegisteredHouses = dayHouses.size
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardTotals())
+    }.flowOn(Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardTotals())
 
     val daysWithErrors: StateFlow<List<DayErrorSummary>> = houses.map { all ->
         try {
@@ -325,28 +509,30 @@ class HomeViewModel @Inject constructor(
         } catch (e: Exception) {
             emptyList()
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.flowOn(Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val streetSuggestions: StateFlow<List<String>> = _bairro.flatMapLatest { currentB ->
         streetRepository.getStreetSuggestions(currentB)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val maxOpenHouses: StateFlow<Int> = settingsManager.maxOpenHouses
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 25)
+
+
+    fun calculateRGBlocks(houses: List<House>, bairro: String, year: String): List<BlockSegment> {
+        return getRGBlocksUseCase(houses, bairro, year)
+    }
 
     // --- RG State ---
-    private val _rgYear = MutableStateFlow(Calendar.getInstance().get(Calendar.YEAR).toString())
     val rgYear: StateFlow<String> = _rgYear.asStateFlow()
 
     // Semester filter removed as per user request
     // private val _rgSemester = MutableStateFlow(if (Calendar.getInstance().get(Calendar.MONTH) < 6) 1 else 2)
     // val rgSemester: StateFlow<Int> = _rgSemester.asStateFlow()
 
-    private val _selectedRgBairro = MutableStateFlow("")
     val selectedRgBairro: StateFlow<String> = _selectedRgBairro.asStateFlow()
 
-    private val _selectedRgBlock = MutableStateFlow("")
-    val selectedRgBlock: StateFlow<String> = _selectedRgBlock.asStateFlow()
+
+
 
     // Helper to filter houses by Year (Semester removed)
     private fun filterByYear(houses: List<House>, year: String): List<House> {
@@ -360,301 +546,31 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    val availableYears: StateFlow<List<String>> = houses.map { all ->
-        all.mapNotNull { 
-            try { 
-                val d = dateFormatter.parse(it.data)
-                if(d != null) {
-                    val c = Calendar.getInstance().apply { time = d }
-                    c.get(Calendar.YEAR).toString()
-                } else null 
-            } catch (e: Exception) { null }
-        }.distinct().sortedDescending()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(Calendar.getInstance().get(Calendar.YEAR).toString()))
+
 
     val rgBairros: StateFlow<List<String>> = combine(houses, _rgYear) { all, year ->
         filterByYear(all, year)
             .map { it.bairro.trim().formatStreetName() }
             .distinct()
             .sorted()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    // Define a class to represent a Block Segment
-    data class BlockSegment(
-        val blockNumber: String,
-        val blockSequence: String,
-        val startDate: String,
-        val endDate: String,
-        val isConcluded: Boolean,
-        val conclusionDate: String?,
-        val houses: List<House>
-    ) {
-        val label: String
-            get() {
-                val base = if (blockSequence.isNotBlank()) "$blockNumber / $blockSequence" else blockNumber
-                return if (isConcluded) "$base (Concluído $conclusionDate)" else "$base (Em Aberto)"
-            }
-        
-        val id: String
-             get() = "${blockNumber}_${blockSequence}_${if(isConcluded) "C" else "O"}_${startDate}"
-    }
-
-    // Helper to generate key for dropdown
-    private fun getBlockSegmentKey(segment: BlockSegment): String {
-        // We use a unique string representation that can be parsed back or just matched
-        // Format: "Block/Seq|StartDate|EndDate" (Using pipes to avoid visible confusion, but label is what matters for UI usually if we map it, 
-        // but here rgBlocks is List<String> so the string IS the UI. We need a readable string that is also unique.)
-        // Strategy: The string will be the Display String. 
-        // "01 / A (Concluído 10/01)"
-        // "01 / A (Aberto)"
-        // If there are multiple concluded segments for same block (rare in one semester but possible), date distinguishes them.
-        return segment.label
-    }
-
-    // Updated to return BlockSegment objects instead of Strings
-    val rgBlocks: StateFlow<List<BlockSegment>> = combine(houses, _selectedRgBairro, _rgYear) { all, bairro, year ->
-        if (bairro.isBlank()) emptyList()
-        else {
-            // New Requirement: RG Segments can span years. Reference year is the Conclusion Year (or last year if Open).
-            // 1. Get ALL houses for this bairro, regardless of year
-            val bairroHouses = all.filter { it.bairro.equals(bairro, ignoreCase = true) }
-            
-            val segments = mutableListOf<BlockSegment>()
-            
-            // 2. Sort global list for this Bairro by Date -> ListOrder
-            val sortedHouses = bairroHouses.sortedWith(compareBy({ getTimestamp(it.data) }, { it.listOrder }))
-            
-            // 3. Group by Block+Seq
-            val groupedByBlock = sortedHouses.groupBy { Pair(it.blockNumber, it.blockSequence) }
-            
-            groupedByBlock.keys.sortedWith(compareBy({ it.first.padStart(10, '0') }, { it.second })).forEach { key ->
-                val (bNum, bSeq) = key
-                val blockHouses = groupedByBlock[key] ?: return@forEach 
-                
-                var currentSegmentHouses = mutableListOf<House>()
-                
-                // Group blockHouses by Date
-                val housesByDate = blockHouses.groupBy { it.data }
-                val sortedDates = housesByDate.keys.sortedBy { getTimestamp(it) }
-                
-                sortedDates.forEachIndexed { index, date ->
-                    val dayHouses = housesByDate[date]?.sortedBy { it.listOrder } ?: emptyList()
-                    currentSegmentHouses.addAll(dayHouses)
-                    
-                    val lastHouseOfDay = dayHouses.last()
-                    
-                    // Criterion A: Manual Flag
-                    val manualConcluded = dayHouses.any { it.quarteiraoConcluido }
-                    
-                    // Criterion B: Auto-Conclusion (Transition to DIFFERENT block/bairro on same day)
-                    // (Strictly: it means we stopped working on this block and did something else afterwards)
-                    val allWorkThatDay = all.filter { it.data == date }.sortedBy { it.listOrder }
-                    val indexOfLast = allWorkThatDay.indexOfFirst { it.id == lastHouseOfDay.id }
-                    val autoConcluded = indexOfLast != -1 && indexOfLast < allWorkThatDay.size - 1
-                    
-                    if (manualConcluded || autoConcluded) {
-                         // Close segment
-                         val seg = BlockSegment(
-                             blockNumber = bNum,
-                             blockSequence = bSeq,
-                             startDate = currentSegmentHouses.first().data,
-                             endDate = currentSegmentHouses.last().data,
-                             isConcluded = true,
-                             conclusionDate = lastHouseOfDay.data,
-                             houses = currentSegmentHouses.toList()
-                         )
-                         segments.add(seg)
-                         currentSegmentHouses = mutableListOf()
-                    }
-                }
-                
-                // If anything remains, it's an Open Segment
-                if (currentSegmentHouses.isNotEmpty()) {
-                     val seg = BlockSegment(
-                         blockNumber = bNum,
-                         blockSequence = bSeq,
-                         startDate = currentSegmentHouses.first().data,
-                         endDate = currentSegmentHouses.last().data,
-                         isConcluded = false,
-                         conclusionDate = null,
-                         houses = currentSegmentHouses.toList()
-                     )
-                     segments.add(seg)
-                }
-            }
-            
-            // 4. Filter segments by the selected Year
-            // Rule: "Join entire RG into the year where it finishes"
-            // If Concluded: Check Year of Conclusion Date
-            // If Open: Check Year of End Date (Most recent activity)
-            segments.filter { segment ->
-                val refDate = segment.conclusionDate ?: segment.endDate
-                try {
-                    val d = dateFormatter.parse(refDate)
-                    if (d != null) {
-                        val c = Calendar.getInstance().apply { time = d }
-                        c.get(Calendar.YEAR).toString() == year
-                    } else false
-                } catch (e: Exception) { false }
-            }.sortedWith(compareBy({ it.blockNumber.padStart(10, '0') }, { it.blockSequence }, { getTimestamp(it.startDate) }))
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    // Filtered list now just finds the matching segment in rgBlocks
-    val rgFilteredList: StateFlow<List<House>> = combine(rgBlocks, _selectedRgBlock) { blocks, selectedId ->
-        if (selectedId.isBlank()) emptyList()
-        else {
-            blocks.find { it.id == selectedId }?.houses ?: emptyList()
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    // --- Semanal State ---
-    private val _currentWeekStart = MutableStateFlow(Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-    })
-
-    val currentWeekDates: StateFlow<List<String>> = _currentWeekStart.map { start ->
-        val dates = mutableListOf<String>()
-        val cal = start.clone() as Calendar
-        // Work week: Monday to Friday
-        for (i in 0..4) { 
-            dates.add(dateFormatter.format(cal.time))
-            cal.add(Calendar.DAY_OF_YEAR, 1)
-        }
-        dates
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val weekRangeText: StateFlow<String> = _currentWeekStart.map { start ->
-        val cal = start.clone() as Calendar
-        // PDF/User logic: Sunday to Saturday
-        // We are already at Monday. Go back 1 to Sunday.
-        cal.add(Calendar.DAY_OF_YEAR, -1)
-        val sunday = cal.time
-        cal.add(Calendar.DAY_OF_YEAR, 6)
-        val saturday = cal.time
-        
-        "${displayDateFormatter.format(sunday)} a ${displayDateFormatter.format(saturday)}"
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
-    
-    val weeklySummary: StateFlow<List<DaySummary>> = combine(currentWeekDates, _agentName) { dates, agent -> Pair(dates, agent) }
-        .flatMapLatest { (dates, agent) ->
-        val activitiesFlow = repository.getDayActivities(dates, agent)
-        combine(houses, activitiesFlow) { all, activities ->
-            dates.map { date ->
-                val dayHouses = all.filter { it.data == date }
-                val activity = activities.find { it.date == date }
-                val openHousesCount = dayHouses.count { it.situation == Situation.NONE }
-                DaySummary(date, openHousesCount, activity?.status ?: "")
-            }
-        }
-    }
-    .flowOn(Dispatchers.Default)
+    }.flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val activityOptions: StateFlow<List<String>> = settingsManager.customActivities.map { custom ->
-        val allOptions = (listOf("FERIADO", "FOLGA DE ANIVERSÁRIO", "SERVIÇO INTERNO", "TEMPO CHUVOSO") + custom.toList()).distinct().sorted()
-        listOf("NORMAL") + allOptions
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("NORMAL"))
 
-    val customActivities: StateFlow<Set<String>> = settingsManager.customActivities
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
-    // --- Boletim State ---
-    val boletimList: StateFlow<List<BoletimSummary>> = combine(houses, _agentName) { h, a -> Pair(h, a) }
-        .flatMapLatest { (allHouses, agentName) ->
-        val dates = allHouses.map { it.data }.distinct()
-        repository.getDayActivities(dates, agentName).map { activities ->
-            allHouses.groupBy { it.data }.map { (date, dayHouses) ->
-                val activity = activities.find { it.date == date }
-                
-                // Group by block AND bairro (Fix: Distinguish blocks with same number in different bairros)
-                val dayHousesSorted = dayHouses.sortedBy { it.listOrder }
-                
-                // Key: Triple(Bairro, BlockNumber, BlockSequence)
-                // We use formatted names to avoid case sensitivity issues
-                val blockMap = dayHousesSorted.groupBy { 
-                    Triple(it.bairro.trim().uppercase(), it.blockNumber, it.blockSequence) 
-                }
-                
-                val completedBlocks = mutableListOf<Triple<String, String, String>>()
-                
-                blockMap.forEach { (blockKey, blockHouses) ->
-                    val (bairroKey, bNum, bSeq) = blockKey
-                    
-                    // a) Manual flag check
-                    val hasManual = blockHouses.any { it.quarteiraoConcluido }
-                    
-                    if (hasManual) {
-                        completedBlocks.add(blockKey)
-                    } else {
-                        // b) Auto-concluded: last house of block has a successor in day's production
-                        val lastInBlock = blockHouses.last()
-                        val lastInBlockId = lastInBlock.id
-                        val indexOfLast = dayHousesSorted.indexOfFirst { it.id == lastInBlockId }
-                        
-                        // Check if there is a next house in the sorted list
-                        if (indexOfLast != -1 && indexOfLast < dayHousesSorted.size - 1) {
-                            // If the next house has a different Bairro/Block/Seq (which it must, by definition of grouping),
-                            // then this block segment is effectively "left behind" -> Concluded
-                             completedBlocks.add(blockKey)
-                        }
-                    }
-                }
-                
-                val bairrosWithLocalidadeConcluida = dayHouses
-                    .filter { it.localidadeConcluida }
-                    .map { it.bairro }
-                    .toSet()
-                
-                val blockSummaries = blockMap.map { (blockKey, blockHouses) ->
-                    val (bairroKey, bNum, bSeq) = blockKey
-                    val firstBH = blockHouses.first()
-                    
-                    BlockSummary(
-                        number = bNum,
-                        sequence = bSeq,
-                        bairro = firstBH.bairro,
-                        isCompleted = completedBlocks.contains(blockKey),
-                        isLocalidadeConcluded = bairrosWithLocalidadeConcluida.contains(firstBH.bairro),
-                        totalHouses = blockHouses.count { it.situation == Situation.NONE },
-                        totalVisits = blockHouses.size,
-                        focos = blockHouses.count { it.comFoco }
-                    )
-                }.sortedWith(compareBy({ it.isCompleted }, { it.bairro }, { it.number }))
 
-                BoletimSummary(
-                    date = date,
-                    agentName = dayHouses.firstOrNull()?.agentName ?: "",
-                    totals = DashboardTotals(
-                        totalHouses = dayHouses.count { it.situation == Situation.NONE },
-                        a1 = dayHouses.sumOf { it.a1 }, a2 = dayHouses.sumOf { it.a2 },
-                        b = dayHouses.sumOf { it.b }, c = dayHouses.sumOf { it.c },
-                        d1 = dayHouses.sumOf { it.d1 }, d2 = dayHouses.sumOf { it.d2 },
-                        e = dayHouses.sumOf { it.e }, eliminados = dayHouses.sumOf { it.eliminados },
-                        larvicida = dayHouses.sumOf { it.larvicida },
-                        comFoco = dayHouses.count { it.comFoco },
-                        totalRegisteredHouses = dayHouses.size
-                    ),
-                    blocks = blockSummaries
-                )
-            }.sortedByDescending { getTimestamp(it.date) }
-        }
-    }
-    .flowOn(Dispatchers.Default)
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+
+
+
 
     // --- Actions ---
     fun validateCurrentDay(showDialog: Boolean): Boolean {
         val result = houseValidationUseCase.validateCurrentDay(_data.value, houses.value, strict = true)
-        if (!result.isValid) {
-            _validationErrorHouseIds.value = result.errorHouseIds
-            if (showDialog) {
-                _integrityDialogMessage.value = result.dialogMessage
-                soundManager.playWarning()
-            }
-        } else {
-            _validationErrorHouseIds.value = emptySet()
+        _uiState.update { it.copy(validationErrorHouseIds = result.errorHouseIds) }
+        if (!result.isValid && showDialog) {
+            _uiEvent.value = result.dialogMessage
+            soundManager.playWarning()
         }
         return result.isValid
     }
@@ -759,9 +675,9 @@ class HomeViewModel @Inject constructor(
             }
         }
 
-        // Initialize Auto-Backup on Startup
+        // Initialize Auto-Backup and observe frequency changes
         viewModelScope.launch {
-            backupFrequency.first().let { freq ->
+            backupFrequency.collect { freq ->
                 backupScheduler.scheduleBackup(freq)
             }
         }
@@ -1793,5 +1709,32 @@ class HomeViewModel @Inject constructor(
             // Fallback: manual sync trigger if background fails or context is missing
             syncDataToCloud()
         }
+    }
+
+    private fun calculateDashboardTotals(dayHouses: List<House>): DashboardTotals {
+        return DashboardTotals(
+            totalHouses = dayHouses.count { it.situation == Situation.NONE },
+            a1 = dayHouses.sumOf { it.a1 }, a2 = dayHouses.sumOf { it.a2 },
+            b = dayHouses.sumOf { it.b }, c = dayHouses.sumOf { it.c },
+            d1 = dayHouses.sumOf { it.d1 }, d2 = dayHouses.sumOf { it.d2 },
+            e = dayHouses.sumOf { it.e }, eliminados = dayHouses.sumOf { it.eliminados },
+            larvicida = dayHouses.sumOf { it.larvicida },
+            totalFocos = dayHouses.count { it.comFoco },
+            totalRegisteredHouses = dayHouses.size
+        )
+    }
+
+    private fun House.toUiState(): HouseUiState {
+        val validationResult = houseValidationUseCase.isHouseValid(this, strict = true)
+        val streetDisplay = if (streetName.isBlank()) "Sem Logradouro" else streetName
+        return HouseUiState(
+            house = this,
+            invalidFields = emptySet(), // Simplified for now
+            highlightErrors = !validationResult,
+            isTreated = situation != Situation.NONE,
+            blockDisplay = if (blockSequence.isNotBlank()) "$blockNumber / $blockSequence" else blockNumber,
+            formattedStreet = "$streetDisplay, $number",
+            treatmentShortSummary = if (situation == Situation.NONE) "Pendente" else situation.name
+        )
     }
 }

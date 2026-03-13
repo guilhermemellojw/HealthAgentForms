@@ -286,6 +286,7 @@ object BoletimPdfGenerator {
         // Simple text is fine for now as per previous iterations.
 
         // Advance cursor PAST the entire header block
+        val headerBlockHeight = 40f
         cursorY += headerBlockHeight + 5f 
 
         // Metadata Header Rows (Municipio, Data, etc.)

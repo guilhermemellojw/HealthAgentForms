@@ -23,7 +23,8 @@ import com.antigravity.healthagent.domain.repository.SyncRepository
 class AuthRepositoryImpl @Inject constructor(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
-    private val syncRepository: SyncRepository
+    private val syncRepository: SyncRepository,
+    private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager
 ) : AuthRepository {
 
     init {
@@ -95,6 +96,7 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun signOut() {
+        settingsManager.clearSessionSettings()
         syncRepository.clearLocalData()
         auth.signOut()
     }
@@ -397,6 +399,13 @@ class AuthRepositoryImpl @Inject constructor(
     override suspend fun updateUserProfile(uid: String, updates: Map<String, Any?>): Result<Unit> {
         return try {
             firestore.collection("users").document(uid).update(updates).await()
+            
+            // Auto-sync agentName to metadata if updated
+            val newAgentName = updates["agentName"] as? String
+            if (newAgentName != null && newAgentName.isNotBlank()) {
+                syncRepository.addAgentName(newAgentName)
+            }
+            
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -411,7 +420,6 @@ class AuthRepositoryImpl @Inject constructor(
     ): Result<Unit> {
         return try {
             val normalizedEmail = email.trim().lowercase()
-            // We use a custom ID (email-based) for pre-registered users who don't have a UID yet
             val docId = "pre_${normalizedEmail.hashCode()}"
             
             val userData = mutableMapOf(
@@ -424,6 +432,12 @@ class AuthRepositoryImpl @Inject constructor(
             )
             
             firestore.collection("users").document(docId).set(userData).await()
+            
+            // Auto-sync agentName to metadata if provided
+            if (agentName != null && agentName.isNotBlank()) {
+                syncRepository.addAgentName(agentName)
+            }
+            
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -438,6 +452,62 @@ class AuthRepositoryImpl @Inject constructor(
             val batch = firestore.batch()
             batch.delete(firestore.collection("users").document(uid))
             batch.delete(firestore.collection("admins").document(uid))
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun requestAccess(uid: String, email: String, displayName: String?): Result<Unit> {
+        return try {
+            val request = mapOf(
+                "id" to uid,
+                "uid" to uid,
+                "email" to email,
+                "displayName" to displayName,
+                "timestamp" to System.currentTimeMillis(),
+                "status" to "PENDING"
+            )
+            firestore.collection("access_requests").document(uid).set(request).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun fetchAccessRequests(): Result<List<com.antigravity.healthagent.domain.repository.AccessRequest>> {
+        return try {
+            val snapshot = firestore.collection("access_requests")
+                .whereEqualTo("status", "PENDING")
+                .get()
+                .await()
+            val requests = snapshot.toObjects(com.antigravity.healthagent.domain.repository.AccessRequest::class.java)
+            Result.success(requests)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun respondToAccessRequest(requestId: String, approved: Boolean, agentName: String?): Result<Unit> {
+        return try {
+            val status = if (approved) "APPROVED" else "REJECTED"
+            val requestDoc = firestore.collection("access_requests").document(requestId).get().await()
+            val uid = requestDoc.getString("uid") ?: requestId
+            
+            val batch = firestore.batch()
+            batch.update(firestore.collection("access_requests").document(requestId), "status", status)
+            
+            if (approved) {
+                val userRef = firestore.collection("users").document(uid)
+                val updates = mutableMapOf<String, Any>("isAuthorized" to true)
+                if (agentName != null) {
+                    updates["agentName"] = agentName
+                    syncRepository.addAgentName(agentName)
+                }
+                batch.update(userRef, updates)
+            }
+            
             batch.commit().await()
             Result.success(Unit)
         } catch (e: Exception) {

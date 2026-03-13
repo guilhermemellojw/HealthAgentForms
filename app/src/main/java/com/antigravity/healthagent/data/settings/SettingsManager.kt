@@ -215,4 +215,12 @@ class SettingsManager @Inject constructor(
             }
         }
     }
+
+    suspend fun clearSessionSettings() {
+        context.dataStore.edit { preferences ->
+            preferences.remove(REMOTE_AGENT_UID_KEY)
+            // Reset other temporary session state if any
+            preferences[IS_APP_MODE_SELECTED_KEY] = false 
+        }
+    }
 }

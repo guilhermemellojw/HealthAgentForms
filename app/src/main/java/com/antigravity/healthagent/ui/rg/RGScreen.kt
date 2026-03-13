@@ -39,20 +39,14 @@ fun RGScreen(
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {}
 ) {
-    val rgBairros by viewModel.rgBairros.collectAsState()
-    val rgBlocks by viewModel.rgBlocks.collectAsState()
-    val selectedRgBairro by viewModel.selectedRgBairro.collectAsState()
-    val selectedRgBlock by viewModel.selectedRgBlock.collectAsState()
-    val rgFilteredList by viewModel.rgFilteredList.collectAsState()
-    val isEasyMode by viewModel.easyMode.collectAsState()
-    val isSolarMode by viewModel.solarMode.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
     
     // State for showing loading or error
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     // Back Handler Logic (optional, but good for UX)
-    BackHandler(enabled = selectedRgBlock.isNotBlank()) {
+    BackHandler(enabled = uiState.selectedRgBlock.isNotBlank()) {
         viewModel.selectRgBlock("")
     }
 
@@ -63,13 +57,13 @@ fun RGScreen(
             com.antigravity.healthagent.ui.components.GlassTopAppBar(
                 title = { 
                     Text(
-                        if (selectedRgBlock.isNotBlank()) "Detalhes do Quarteirão" else "Registro Geral", 
+                        if (uiState.selectedRgBlock.isNotBlank()) "Detalhes do Quarteirão" else "Registro Geral", 
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black
                     ) 
                 },
                 navigationIcon = {
-                    if (selectedRgBlock.isNotBlank()) {
+                    if (uiState.selectedRgBlock.isNotBlank()) {
                         IconButton(onClick = { viewModel.selectRgBlock("") }) {
                             Icon(
                                 imageVector = androidx.compose.material.icons.Icons.Default.ArrowBack,
@@ -84,13 +78,13 @@ fun RGScreen(
             )
         },
         floatingActionButton = {
-            if (selectedRgBlock.isNotBlank() && rgFilteredList.isNotEmpty()) {
+            if (uiState.selectedRgBlock.isNotBlank() && uiState.rgFilteredList.isNotEmpty()) {
                 FloatingActionButton(
                     onClick = {
                         scope.launch {
                              try {
                                  // Find the selected block label for the PDF name
-                                 val block = rgBlocks.find { it.id == selectedRgBlock }
+                                 val block = uiState.rgBlocks.find { it.id == uiState.selectedRgBlock }
                                  val blockLabel = if (block != null) {
                                      "${block.blockNumber}${if (block.blockSequence.isNotBlank()) " / ${block.blockSequence}" else ""}"
                                  } else {
@@ -100,10 +94,10 @@ fun RGScreen(
                                  val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                      com.antigravity.healthagent.utils.RGPdfGenerator.generatePdf(
                                          context, 
-                                         rgFilteredList, 
-                                         selectedRgBairro, 
+                                         uiState.rgFilteredList, 
+                                         uiState.selectedRgBairro, 
                                          blockLabel, // Pass the formatted label
-                                         municipio = viewModel.municipio.value
+                                         municipio = uiState.municipality
                                      )
                                  }
                                  sharePdf(context, file)
@@ -128,12 +122,12 @@ fun RGScreen(
                     .fillMaxSize()
             ) {
             // Filters Header (Only visible in Selection Mode)
-            if (selectedRgBlock.isBlank()) {
+            if (uiState.selectedRgBlock.isBlank()) {
                 com.antigravity.healthagent.ui.components.PremiumCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    isSolarMode = isSolarMode
+                    isSolarMode = uiState.isSolarMode
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -150,8 +144,8 @@ fun RGScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            val availableYears by viewModel.availableYears.collectAsState()
-                            val selectedYear by viewModel.rgYear.collectAsState()
+                            val availableYears = uiState.availableYears
+                            val selectedYear = uiState.rgYear
                             
                             Box(modifier = Modifier.weight(1f)) {
                                 com.antigravity.healthagent.ui.components.CompactDropdown(
@@ -167,8 +161,8 @@ fun RGScreen(
                             Box(modifier = Modifier.weight(2f)) {
                                 com.antigravity.healthagent.ui.components.CompactDropdown(
                                     label = "Bairro",
-                                    currentValue = selectedRgBairro,
-                                    options = rgBairros,
+                                    currentValue = uiState.selectedRgBairro,
+                                    options = uiState.bairrosList,
                                     onOptionSelected = { viewModel.selectRgBairro(it) },
                                     modifier = Modifier.fillMaxWidth()
                                 )
@@ -180,10 +174,10 @@ fun RGScreen(
 
             // Body Content
             Box(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-                if (selectedRgBlock.isBlank()) {
+                if (uiState.selectedRgBlock.isBlank()) {
                     // SELECTION MODE: Grid of Cards
-                    if (selectedRgBairro.isNotBlank()) {
-                        if (rgBlocks.isEmpty()) {
+                    if (uiState.selectedRgBairro.isNotBlank()) {
+                        if (uiState.rgBlocks.isEmpty()) {
                              Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
                                 Text(
                                     "Nenhum quarteirão encontrado.",
@@ -198,7 +192,7 @@ fun RGScreen(
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                itemsIndexed(rgBlocks, key = { _, segment -> segment.id }) { index, segment ->
+                                itemsIndexed(uiState.rgBlocks, key = { _, segment -> segment.id }) { index, segment ->
                                     Box(
                                         modifier = Modifier.let { 
                                             if (index == 0) it else it 
@@ -206,8 +200,8 @@ fun RGScreen(
                                     ) {
                                         com.antigravity.healthagent.ui.components.RGBlockCard(
                                             segment = segment,
-                                            isEasyMode = isEasyMode,
-                                            isSolarMode = isSolarMode,
+                                            isEasyMode = uiState.isEasyMode,
+                                            isSolarMode = uiState.isSolarMode,
                                             onClick = { viewModel.selectRgBlock(segment.id) }
                                         )
                                     }
@@ -229,7 +223,7 @@ fun RGScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 100.dp)
                     ) {
-                        if (rgFilteredList.isEmpty()) {
+                        if (uiState.rgFilteredList.isEmpty()) {
                              item {
                                 Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
                                     Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
@@ -249,10 +243,10 @@ fun RGScreen(
                                 }
                             }
                         } else {
-                            items(rgFilteredList, key = { it.id }) { house ->
+                            items(uiState.rgFilteredList, key = { it.id }) { house ->
                                 RGHouseRow(
                                     house = house,
-                                    isEasyMode = isEasyMode
+                                    isEasyMode = uiState.isEasyMode
                                 )
                             }
                         }

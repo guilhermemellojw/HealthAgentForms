@@ -35,8 +35,12 @@ data class DashboardTotals(
     val e: Int = 0,
     val eliminados: Int = 0,
     val larvicida: Double = 0.0,
-    val comFoco: Int = 0,
-    val totalRegisteredHouses: Int = 0
+    val totalFocos: Int = 0,
+    val totalRegisteredHouses: Int = 0,
+    val recused: Int = 0,
+    val absent: Int = 0,
+    val closed: Int = 0,
+    val vacant: Int = 0
 )
 
 data class DaySummary(
@@ -49,7 +53,8 @@ data class BoletimSummary(
     val date: String,
     val agentName: String,
     val totals: DashboardTotals,
-    val blocks: List<BlockSummary>
+    val blocks: List<BlockSummary>,
+    val status: String = ""
 )
 
 data class BlockSummary(
@@ -72,3 +77,22 @@ data class HouseUiState(
     val formattedStreet: String,
     val treatmentShortSummary: String
 )
+
+data class BlockSegment(
+    val blockNumber: String,
+    val blockSequence: String,
+    val startDate: String,
+    val endDate: String,
+    val isConcluded: Boolean,
+    val conclusionDate: String?,
+    val houses: List<com.antigravity.healthagent.data.local.model.House>
+) {
+    val label: String
+        get() {
+            val base = if (blockSequence.isNotBlank()) "$blockNumber / $blockSequence" else blockNumber
+            return if (isConcluded) "$base (Concluído $conclusionDate)" else "$base (Em Aberto)"
+        }
+    
+    val id: String
+         get() = "${blockNumber}_${blockSequence}_${if(isConcluded) "C" else "O"}_${startDate}"
+}

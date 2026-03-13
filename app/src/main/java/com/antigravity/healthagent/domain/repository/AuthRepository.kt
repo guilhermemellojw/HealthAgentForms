@@ -17,6 +17,11 @@ interface AuthRepository {
     suspend fun updateUserProfile(uid: String, updates: Map<String, Any?>): Result<Unit>
     suspend fun createUserProfile(email: String, role: UserRole, agentName: String?, isAuthorized: Boolean): Result<Unit>
     suspend fun deleteUser(uid: String): Result<Unit>
+    
+    // Authorization Requests
+    suspend fun requestAccess(uid: String, email: String, displayName: String?): Result<Unit>
+    suspend fun fetchAccessRequests(): Result<List<AccessRequest>>
+    suspend fun respondToAccessRequest(requestId: String, approved: Boolean, agentName: String? = null): Result<Unit>
 }
 
 enum class UserRole {
@@ -37,3 +42,12 @@ data class AuthUser(
     val isAdmin: Boolean get() = role == UserRole.ADMIN
     val isSupervisor: Boolean get() = role == UserRole.SUPERVISOR
 }
+
+data class AccessRequest(
+    val id: String = "",
+    val uid: String = "",
+    val email: String = "",
+    val displayName: String? = null,
+    val timestamp: Long = System.currentTimeMillis(),
+    val status: String = "PENDING"
+)

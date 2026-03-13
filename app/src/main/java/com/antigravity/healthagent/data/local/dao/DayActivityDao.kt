@@ -34,11 +34,20 @@ interface DayActivityDao {
         insertAll(activities)
     }
 
+    @Transaction
+    suspend fun replaceDayActivities(activities: List<DayActivity>) {
+        deleteAll()
+        insertAll(activities)
+    }
+
     @Query("DELETE FROM day_activities")
     suspend fun deleteAll()
 
     @Query("DELETE FROM day_activities WHERE agentName = :agentName")
     suspend fun deleteByAgent(agentName: String)
+
+    @Query("DELETE FROM day_activities WHERE agentName = :agentName AND date IN (:dates)")
+    suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>)
 
     @Query("SELECT COUNT(*) FROM day_activities WHERE isClosed = 0 AND agentName = :agentName")
     suspend fun countOpenDays(agentName: String): Int

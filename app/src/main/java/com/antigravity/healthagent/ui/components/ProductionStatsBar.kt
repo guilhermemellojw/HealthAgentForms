@@ -19,10 +19,8 @@ fun ProductionStatsBar(
     modifier: Modifier = Modifier,
     isEasyMode: Boolean = false
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.primary,
-        tonalElevation = 2.dp
+    Box(
+        modifier = modifier.fillMaxWidth()
     ) {
         val verticalPadding = if (isEasyMode) 10.dp else 6.dp
         Row(

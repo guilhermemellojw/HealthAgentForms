@@ -16,11 +16,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.antigravity.healthagent.ui.home.HomeViewModel
+import com.antigravity.healthagent.ui.home.BlockSegment
 
 @Composable
 fun RGBlockCard(
-    segment: HomeViewModel.BlockSegment,
+    segment: BlockSegment,
     onClick: () -> Unit,
     isEasyMode: Boolean = false,
     isSolarMode: Boolean = false,

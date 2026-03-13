@@ -47,9 +47,18 @@ interface HouseDao {
         insertAll(houses)
     }
 
+    @Transaction
+    suspend fun replaceHouses(houses: List<House>) {
+        deleteAll()
+        insertAll(houses)
+    }
+
     @Query("DELETE FROM houses")
     suspend fun deleteAll()
 
     @Query("DELETE FROM houses WHERE agentName = :agentName")
     suspend fun deleteByAgent(agentName: String)
+
+    @Query("DELETE FROM houses WHERE agentName = :agentName AND data IN (:dates)")
+    suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>)
 }

@@ -43,10 +43,7 @@ fun SemanalScreen(
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {}
 ) {
-    val weeklySummary by viewModel.weeklySummary.collectAsState()
-    val activityOptions by viewModel.activityOptions.collectAsState()
-    val isEasyMode by viewModel.easyMode.collectAsState()
-    val isSolarMode by viewModel.solarMode.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
     var showAddActivityDialog by remember { mutableStateOf(false) }
     var newActivityName by remember { mutableStateOf("") }
 
@@ -65,8 +62,8 @@ fun SemanalScreen(
                     ) 
                 },
                 actions = {
-                    val iconButtonSize = if (isEasyMode) 56.dp else 48.dp
-                    val iconSize = if (isEasyMode) 32.dp else 24.dp
+                    val iconButtonSize = if (uiState.isEasyMode) 56.dp else 48.dp
+                    val iconSize = if (uiState.isEasyMode) 32.dp else 24.dp
 
                     IconButton(
                         onClick = { showAddActivityDialog = true },
@@ -150,8 +147,8 @@ fun SemanalScreen(
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
             com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
-            val currentWeekDates by viewModel.currentWeekDates.collectAsState()
-            val weekRangeText by viewModel.weekRangeText.collectAsState()
+            // Unused val currentWeekDates by viewModel.currentWeekDates.collectAsState()
+            val weekRangeText = uiState.weekRangeText
 
             Column(
                 modifier = Modifier
@@ -163,7 +160,7 @@ fun SemanalScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 8.dp),
-                    isSolarMode = isSolarMode
+                    isSolarMode = uiState.isSolarMode
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -172,12 +169,12 @@ fun SemanalScreen(
                 ) {
                     FilledIconButton(
                         onClick = { viewModel.previousWeek() },
-                        modifier = Modifier.size(if (isEasyMode) 56.dp else 44.dp)
+                        modifier = Modifier.size(if (uiState.isEasyMode) 56.dp else 44.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Semana Anterior",
-                            modifier = Modifier.size(if (isEasyMode) 32.dp else 24.dp)
+                            modifier = Modifier.size(if (uiState.isEasyMode) 32.dp else 24.dp)
                         )
                     }
                     
@@ -187,68 +184,68 @@ fun SemanalScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Black,
-                            fontSize = if (isEasyMode) 12.sp else 10.sp
+                            fontSize = if (uiState.isEasyMode) 12.sp else 10.sp
                         )
                         Text(
                             text = weekRangeText,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = if (isEasyMode) 18.sp else 16.sp
+                            fontSize = if (uiState.isEasyMode) 18.sp else 16.sp
                         )
                     }
                     
                     FilledIconButton(
                         onClick = { viewModel.nextWeek() },
-                        modifier = Modifier.size(if (isEasyMode) 56.dp else 44.dp)
+                        modifier = Modifier.size(if (uiState.isEasyMode) 56.dp else 44.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ArrowForward,
                             contentDescription = "Próxima Semana",
-                            modifier = Modifier.size(if (isEasyMode) 32.dp else 24.dp)
+                            modifier = Modifier.size(if (uiState.isEasyMode) 32.dp else 24.dp)
                         )
                     }
                 }
             }
 
             // Agent Selection
-            val agentName by viewModel.agentName.collectAsState()
+            val agentName = uiState.agentName
             PremiumCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp),
-                isSolarMode = isSolarMode
+                isSolarMode = uiState.isSolarMode
             ) {
                 CompactDropdown(
                     label = "Agente Responsável",
                     currentValue = agentName,
-                    options = AppConstants.AGENT_NAMES,
+                    options = uiState.agentNames.ifEmpty { AppConstants.AGENT_NAMES },
                     onOptionSelected = { viewModel.updateAgentName(it) },
                     modifier = Modifier.fillMaxWidth(),
-                    isEasyMode = isEasyMode
+                    isEasyMode = uiState.isEasyMode
                 )
             }
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 80.dp, start = 12.dp, end = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(if (isEasyMode) 16.dp else 12.dp)
+                verticalArrangement = Arrangement.spacedBy(if (uiState.isEasyMode) 16.dp else 12.dp)
             ) {
-                itemsIndexed(weeklySummary, key = { _, day -> day.date }) { index, day ->
+                itemsIndexed(uiState.weeklySummary, key = { _, day -> day.date }) { index, day ->
                     WeeklyDayRow(
                         day = day,
-                        options = activityOptions,
+                        options = uiState.activityOptions,
                         onStatusChange = { viewModel.updateDayStatus(day.date, it) },
                         onClick = { viewModel.navigateToDate(day.date) },
-                        isEasyMode = isEasyMode,
-                        isSolarMode = isSolarMode,
+                        isEasyMode = uiState.isEasyMode,
+                        isSolarMode = uiState.isSolarMode,
                         modifier = Modifier
                     )
                 }
             }
 
             if (showAddActivityDialog) {
-                val customActivities by viewModel.customActivities.collectAsState()
+                val customActivities = uiState.customActivities
                 
                 AlertDialog(
                     onDismissRequest = { showAddActivityDialog = false },

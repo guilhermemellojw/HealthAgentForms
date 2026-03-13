@@ -7,16 +7,20 @@ import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonSyntaxException
 import com.google.gson.reflect.TypeToken
+import com.google.gson.annotations.SerializedName
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import javax.inject.Inject
 
 data class BackupData(
+    @SerializedName("houses")
     val houses: List<House>,
+    @SerializedName("dayActivities", alternate = ["day_activities"])
     val dayActivities: List<DayActivity> = emptyList()
 )
 
-class BackupManager {
+class BackupManager @Inject constructor() {
     private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
 
     val UTF8 = java.nio.charset.StandardCharsets.UTF_8

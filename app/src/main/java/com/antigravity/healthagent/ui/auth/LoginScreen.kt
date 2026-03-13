@@ -115,6 +115,33 @@ fun LoginScreen(
                             style = MaterialTheme.typography.bodyLarge,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
+                        val requestSent by viewModel.requestSent.collectAsState()
+                        
+                        if (requestSent) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Solicitação enviada com sucesso! Aguarde a aprovação de um administrador.",
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
+                        } else {
+                            Button(
+                                onClick = { viewModel.requestAccess() },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Solicitar Acesso")
+                            }
+                        }
+                        
                         Spacer(modifier = Modifier.height(8.dp))
                         TextButton(onClick = { viewModel.signOut() }) {
                             Text("Sair e tentar outra conta")
