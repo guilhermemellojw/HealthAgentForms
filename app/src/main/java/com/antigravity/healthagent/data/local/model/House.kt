@@ -37,12 +37,11 @@ data class House(
     val localidadeConcluida: Boolean = false,
     val blockSequence: String = "",
     val quarteiraoConcluido: Boolean = false,
-    val listOrder: Long = 0, // For manual reordering
-    
+    val listOrder: Long = 0 // For manual reordering
+) {
     @com.google.firebase.firestore.DocumentId
     @androidx.room.Ignore
-    val cloudId: String? = null
-) {
+    var cloudId: String? = null
     // Helper to generate a consistent natural key for deduplication
     fun generateNaturalKey(): String {
         return "${data}_${blockNumber}_${streetName}_${number}_${bairro}".replace("/", "_")
