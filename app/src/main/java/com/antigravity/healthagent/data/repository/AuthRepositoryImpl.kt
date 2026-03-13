@@ -398,14 +398,16 @@ class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun updateUserProfile(uid: String, updates: Map<String, Any?>): Result<Unit> {
         return try {
-            firestore.collection("users").document(uid).update(updates).await()
+            val finalUpdates = updates.toMutableMap()
             
-            // Auto-sync agentName to metadata if updated
-            val newAgentName = updates["agentName"] as? String
+            // Auto-sync and normalize agentName if updated
+            val newAgentName = (updates["agentName"] as? String)?.trim()?.uppercase()
             if (newAgentName != null && newAgentName.isNotBlank()) {
+                finalUpdates["agentName"] = newAgentName
                 syncRepository.addAgentName(newAgentName)
             }
             
+            firestore.collection("users").document(uid).update(finalUpdates).await()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -422,11 +424,13 @@ class AuthRepositoryImpl @Inject constructor(
             val normalizedEmail = email.trim().lowercase()
             val docId = "pre_${normalizedEmail.hashCode()}"
             
+            val normalizedAgentName = agentName?.trim()?.uppercase()
+            
             val userData = mutableMapOf(
                 "email" to normalizedEmail,
                 "role" to role.name,
                 "isAuthorized" to isAuthorized,
-                "agentName" to agentName,
+                "agentName" to normalizedAgentName,
                 "createdAt" to System.currentTimeMillis(),
                 "isPreRegistered" to true
             )

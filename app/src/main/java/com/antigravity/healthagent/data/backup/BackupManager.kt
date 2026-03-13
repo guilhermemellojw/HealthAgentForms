@@ -125,7 +125,7 @@ class BackupManager @Inject constructor() {
     private fun sanitizeHouses(houses: List<House>): List<House> {
         return houses.map { house ->
             house.copy(
-                agentName = house.agentName?.trim() ?: "",
+                agentName = house.agentName?.trim()?.uppercase() ?: "",
                 municipio = house.municipio?.trim() ?: "BOM JARDIM",
                 bairro = house.bairro?.trim() ?: "",
                 blockNumber = house.blockNumber?.trim() ?: "",
@@ -138,7 +138,7 @@ class BackupManager @Inject constructor() {
     private fun sanitizeActivities(activities: List<DayActivity>): List<DayActivity> {
         return activities.map { activity ->
             activity.copy(
-                agentName = activity.agentName?.trim() ?: "",
+                agentName = activity.agentName?.trim()?.uppercase() ?: "",
                 date = activity.date?.trim() ?: "",
                 status = activity.status?.trim() ?: "NORMAL"
             )

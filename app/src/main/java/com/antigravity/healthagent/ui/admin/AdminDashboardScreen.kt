@@ -27,9 +27,15 @@ import java.util.Locale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
+import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.MeshGradient
-import com.antigravity.healthagent.ui.components.PremiumCard
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import android.content.Context
 
 // --- Helper Components ---
 
@@ -186,6 +192,7 @@ fun AgentStatSubItem(label: String, value: String, color: Color = MaterialTheme.
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun UnifiedProfileCard(
     profile: UnifiedProfile,
@@ -308,7 +315,7 @@ fun UnifiedProfileCard(
             AnimatedVisibility(visible = expanded) {
                 Column {
                     Spacer(modifier = Modifier.height(16.dp))
-                    HorizontalDivider(alpha = 0.1f)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Account Settings
@@ -435,6 +442,7 @@ fun UnifiedProfileCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AddProfileDialog(
     agentNamesList: List<String>,
@@ -538,7 +546,7 @@ fun AddProfileDialog(
 
 // --- Main Screen ---
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AdminDashboardScreen(
     viewModel: AdminViewModel,
@@ -643,7 +651,7 @@ fun AdminDashboardScreen(
                                                 onAuthorize = { viewModel.authorizeUser(profile.uid ?: "", it) },
                                                 onRoleChange = { viewModel.changeUserRole(profile.uid ?: "", it) },
                                                 onUpdateName = { viewModel.updateUserProfile(profile.uid ?: "", mapOf("agentName" to it)) },
-                                                onDelete = { confirmTitle = "Excluir Perfil"; confirmMessage = "Deseja excluir este perfil?"; onConfirmAction = { profile.uid?.let { viewModel.deleteUser(it) } ?: profile.agentData?.let { viewModel.deleteAgent(it.uid) } }; showConfirmDialog = true },
+                                                onDelete = { confirmTitle = "Excluir Perfil"; confirmMessage = "Deseja excluir este perfil?"; onConfirmAction = { profile.uid?.let { u -> viewModel.deleteUser(u) } ?: profile.agentData?.uid?.let { uid -> viewModel.deleteAgent(uid) } }; showConfirmDialog = true },
                                                 onRestore = { selectedUidForRestore = profile.uid ?: profile.agentData?.uid; filePickerLauncher.launch("application/json") },
                                                 onEditAgent = { viewModel.selectAgentForEdit(profile.agentData); onNavigateBack() },
                                                 onDeleteHouse = { uid, id -> confirmTitle = "Excluir Imóvel"; confirmMessage = "Deseja excluir este registro de imóvel da nuvem?"; onConfirmAction = { viewModel.deleteAgentHouse(uid, id) }; showConfirmDialog = true },
@@ -700,13 +708,11 @@ fun AdminDashboardScreen(
                                                     onClick = { },
                                                     label = { Text(name) },
                                                     trailingIcon = { 
-                                                        Icon(
-                                                            Icons.Default.Close, 
-                                                            null, 
-                                                            modifier = Modifier.size(14.dp).clickable { 
-                                                                confirmTitle = "Excluir Nome"; confirmMessage = "Excluir '$name' da lista mestra?"; onConfirmAction = { viewModel.removeAgentName(name) }; showConfirmDialog = true 
-                                                            }
-                                                        ) 
+                                                        IconButton(onClick = { 
+                                                            confirmTitle = "Excluir Nome"; confirmMessage = "Excluir '$name' da lista mestra?"; onConfirmAction = { viewModel.removeAgentName(name) }; showConfirmDialog = true 
+                                                        }, modifier = Modifier.size(14.dp)) {
+                                                            Icon(Icons.Default.Close, null)
+                                                        }
                                                     }
                                                 )
                                             }
@@ -889,14 +895,14 @@ fun GranularDataSection(
                         items(houses) { house ->
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(4.dp)) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("${house.logradouro}, ${house.numero}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    Text("${house.streetName}, ${house.number}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                     Text("${house.data} • ${house.bairro}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                                IconButton(onClick = { onDeleteHouse(agentUid, house.remoteId ?: house.id.toString()) }) {
+                                IconButton(onClick = { onDeleteHouse(agentUid, house.cloudId ?: house.generateNaturalKey()) }) {
                                     Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
                                 }
                             }
-                            HorizontalDivider(alpha = 0.1f)
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                         }
                     }
                 }
@@ -928,14 +934,15 @@ fun GranularDataSection(
                         items(activities) { activity ->
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(4.dp)) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Data: ${activity.data}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                    Text("${activity.totalPendentes} casas pendentes", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Data: ${activity.date}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    // Placeholder for pendentes info as it's not in the model anymore
+                                    Text("Status: ${activity.status}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                                IconButton(onClick = { onDeleteActivity(agentUid, activity.data) }) {
+                                IconButton(onClick = { onDeleteActivity(agentUid, activity.date) }) {
                                     Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
                                 }
                             }
-                            HorizontalDivider(alpha = 0.1f)
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                         }
                     }
                 }

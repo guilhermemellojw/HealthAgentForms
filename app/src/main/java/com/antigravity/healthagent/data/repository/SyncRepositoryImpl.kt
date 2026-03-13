@@ -52,14 +52,17 @@ class SyncRepositoryImpl @Inject constructor(
                 auth.currentUser?.email ?: "Unknown Email"
             }
             
-            var officialAgentName = existingAgentName
+            var officialAgentName = existingAgentName.uppercase()
             var currentEmailInCloud = existingEmail
 
             // FETCH TOMBSTONES
             val deletedHouseIds = (existingDoc?.get("deleted_house_ids") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
             val deletedActivityDates = (existingDoc?.get("deleted_activity_dates") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
             
-            val finalHouses = houses.filter { it.id.toString() !in deletedHouseIds }
+            val finalHouses = houses.filter { house -> 
+                val naturalId = "${house.data}_${house.blockNumber}_${house.streetName}_${house.number}_${house.bairro}".replace("/", "_")
+                naturalId !in deletedHouseIds 
+            }
             val finalActivities = activities.filter { it.date !in deletedActivityDates }
 
             // IMPROVEMENT: If name is missing in cloud, try to recover it from the data itself
@@ -148,19 +151,15 @@ class SyncRepositoryImpl @Inject constructor(
             // 1. Metadata op (stored in a map to keep it consistent with chunking pattern)
             val metadataOp = userDocRef to metadata
 
-            // 2. Deduplicate Houses by ID or Natural Multi-Field Key if ID is 0 (Restore scenario)
+            // 2. Deduplicate Houses by Natural Multi-Field Key (Critical for restoration consistency)
             val houseOps = mutableMapOf<String, House>()
             finalHouses.forEach { house ->
                 val normalizedHouse = house.copy(agentName = officialAgentName)
-                val docId = if (normalizedHouse.id > 0) {
-                    normalizedHouse.id.toString()
-                } else {
-                    // Stable identifier for restoration houses to avoid collapsing them all into "0"
-                    // Uses house details to create a unique yet stable document ID in the cloud.
-                    // Sanitized to replace slashes in street names with underscores to avoid Firestore nesting.
-                    val rawId = "${normalizedHouse.data}_${normalizedHouse.blockNumber}_${normalizedHouse.streetName}_${normalizedHouse.number}_${normalizedHouse.bairro}"
-                    rawId.replace("/", "_")
-                }
+                // Use a stable identifier to avoid duplicates between local DB (numeric IDs)
+                // and restored backups (ID 0). Sanitized to avoid Firestore path issues.
+                val naturalId = "${normalizedHouse.data}_${normalizedHouse.blockNumber}_${normalizedHouse.streetName}_${normalizedHouse.number}_${normalizedHouse.bairro}"
+                val docId = naturalId.replace("/", "_")
+                
                 houseOps[docId] = normalizedHouse
             }
 
@@ -304,9 +303,12 @@ class SyncRepositoryImpl @Inject constructor(
                         }
                     }
                     
-                    deletedHouseIds.forEach { id ->
-                        val house = houseDao.getHouseById(id.toLong())
-                        if (house != null) houseDao.deleteHouse(house)
+                    val allLocalHouses = houseDao.getAllHouses().kotlinx.coroutines.flow.first()
+                    allLocalHouses.forEach { house ->
+                        val naturalId = "${house.data}_${house.blockNumber}_${house.streetName}_${house.number}_${house.bairro}".replace("/", "_")
+                        if (naturalId in deletedHouseIds) {
+                            houseDao.deleteHouse(house)
+                        }
                     }
                     
                     // Clear tombstones from cloud after successful application to phone

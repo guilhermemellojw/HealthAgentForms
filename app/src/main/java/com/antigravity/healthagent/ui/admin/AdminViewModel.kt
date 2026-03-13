@@ -20,8 +20,10 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import android.view.View
 import com.antigravity.healthagent.domain.repository.AuthUser
+import com.antigravity.healthagent.domain.repository.UserRole
 import kotlinx.coroutines.flow.combine
 import android.net.Uri
+import android.content.Context
 
 @HiltViewModel
 class AdminViewModel @Inject constructor(
@@ -48,6 +50,9 @@ class AdminViewModel @Inject constructor(
 
     private val _agentNames = MutableStateFlow<List<String>>(emptyList())
     val agentNames: StateFlow<List<String>> = _agentNames.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     fun updateSearchQuery(query: String) { _searchQuery.value = query }
 
@@ -100,7 +105,8 @@ class AdminViewModel @Inject constructor(
 
         // 3. Add names from the Master List that haven't been linked yet
         namesList.forEach { name ->
-            if (result.none { it.agentName == name }) {
+            val normalizedName = name.trim().uppercase()
+            if (result.none { it.agentName?.trim()?.uppercase() == normalizedName }) {
                 result.add(
                     UnifiedProfile(
                         uid = null,
@@ -183,8 +189,6 @@ class AdminViewModel @Inject constructor(
         }
     }
 
-    private val _agentNames = MutableStateFlow<List<String>>(emptyList())
-    val agentNames: StateFlow<List<String>> = _agentNames.asStateFlow()
 
     private suspend fun loadAgentNames() {
         val result = syncRepository.fetchAgentNames()
