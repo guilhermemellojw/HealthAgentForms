@@ -126,11 +126,20 @@ class BackupManager @Inject constructor() {
         return houses.map { house ->
             house.copy(
                 agentName = house.agentName?.trim()?.uppercase() ?: "",
-                municipio = house.municipio?.trim() ?: "BOM JARDIM",
-                bairro = house.bairro?.trim() ?: "",
+                municipio = house.municipio?.trim()?.uppercase() ?: "BOM JARDIM",
+                bairro = house.bairro?.trim()?.uppercase() ?: "",
                 blockNumber = house.blockNumber?.trim() ?: "",
+                blockSequence = house.blockSequence?.trim() ?: "",
                 streetName = house.streetName?.trim() ?: "",
-                data = house.data?.trim() ?: ""
+                number = house.number?.trim() ?: "",
+                sequence = house.sequence ?: 0,
+                complement = house.complement ?: 0,
+                data = house.data?.replace("/", "-")?.trim() ?: "",
+                listOrder = house.listOrder,
+                ciclo = house.ciclo?.trim() ?: "1º",
+                categoria = house.categoria?.trim() ?: "BRR",
+                zona = house.zona?.trim() ?: "URB",
+                tipo = house.tipo
             )
         }
     }
@@ -139,8 +148,9 @@ class BackupManager @Inject constructor() {
         return activities.map { activity ->
             activity.copy(
                 agentName = activity.agentName?.trim()?.uppercase() ?: "",
-                date = activity.date?.trim() ?: "",
-                status = activity.status?.trim() ?: "NORMAL"
+                date = activity.date?.replace("/", "-")?.trim() ?: "",
+                status = activity.status?.trim()?.uppercase() ?: "NORMAL",
+                isClosed = activity.isClosed
             )
         }
     }

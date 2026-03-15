@@ -86,7 +86,7 @@ fun BoletimScreen(
         DatePickerDialog(
             context,
             { _, year, month, dayOfMonth ->
-                val newDate = String.format("%02d-%02d-%04d", dayOfMonth, month + 1, year)
+                val newDate = String.format(java.util.Locale("pt", "BR"), "%02d-%02d-%04d", dayOfMonth, month + 1, year)
                 if (newDate != moveSourceDate) {
                     viewModel.moveHousesToDate(moveSourceDate, newDate)
                     scope.launch { snackbarHostState.showSnackbar("Produção transferida para $newDate") }
@@ -178,7 +178,7 @@ fun BoletimScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var deleteDate by remember { mutableStateOf("") }
     
-    val dateSdf = remember { java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.getDefault()) }
+    val dateSdf = remember { java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US) }
     
     fun isDateOld(dateStr: String): Boolean {
         return try {

@@ -12,6 +12,7 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.channels.awaitClose
 import com.google.firebase.firestore.Source
 import javax.inject.Inject
@@ -24,7 +25,9 @@ class AuthRepositoryImpl @Inject constructor(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
     private val syncRepository: SyncRepository,
-    private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager
+    private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager,
+    private val houseDao: com.antigravity.healthagent.data.local.dao.HouseDao,
+    private val activityDao: com.antigravity.healthagent.data.local.dao.DayActivityDao
 ) : AuthRepository {
 
     init {
@@ -97,20 +100,28 @@ class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun signOut() {
         // Final Sync: Try to push any unsynced local data to the cloud before clearing
-        try {
-            val houses = syncRepository.repository.getAllHousesOnce()
-            val activities = syncRepository.repository.getAllDayActivitiesOnce()
-            if (houses.isNotEmpty() || activities.isNotEmpty()) {
-                android.util.Log.i("AuthRepository", "Performing final sync before logout...")
-                syncRepository.pushLocalDataToCloud(houses, activities)
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            try {
+                val houses = houseDao.getAllHouses().first()
+                val activities = activityDao.getAllDayActivities()
+                if (houses.isNotEmpty() || activities.isNotEmpty()) {
+                    android.util.Log.i("AuthRepository", "Performing final sync before logout (${houses.size} houses)...")
+                    val result = syncRepository.pushLocalDataToCloud(houses, activities)
+                    if (result.isSuccess) {
+                        android.util.Log.i("AuthRepository", "Final sync successful.")
+                    } else {
+                        android.util.Log.e("AuthRepository", "Final sync failed: ${result.exceptionOrNull()?.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("AuthRepository", "Error during final sync preparation: ${e.message}", e)
             }
-        } catch (e: Exception) {
-            android.util.Log.e("AuthRepository", "Final sync failed during logout. Proceeding with sign out.", e)
+            
+            android.util.Log.i("AuthRepository", "Clearing local data and signing out...")
+            settingsManager.clearSessionSettings()
+            syncRepository.clearLocalData()
+            auth.signOut()
         }
-        
-        settingsManager.clearSessionSettings()
-        syncRepository.clearLocalData()
-        auth.signOut()
     }
 
     override suspend fun isUserAdmin(): Boolean {
@@ -361,7 +372,7 @@ class AuthRepositoryImpl @Inject constructor(
             photoUrl = firebaseUser.photoUrl?.toString(),
             role = finalRole,
             isAuthorized = isAuthorized,
-            agentName = agentName
+            agentName = agentName?.trim()?.uppercase()
         )
     }
 

@@ -33,7 +33,7 @@ class DayManagementUseCase @Inject constructor(
 
     fun canSafelyUnlock(currentDate: String): Boolean {
         try {
-            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
             val dateObj = sdf.parse(currentDate)
             
             if (dateObj != null) {
@@ -51,7 +51,7 @@ class DayManagementUseCase @Inject constructor(
 
     suspend fun getNextBusinessDay(date: String, agentName: String): String {
         return try {
-            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
             val cal = Calendar.getInstance()
             val dateObj = sdf.parse(date) ?: return ""
             cal.time = dateObj

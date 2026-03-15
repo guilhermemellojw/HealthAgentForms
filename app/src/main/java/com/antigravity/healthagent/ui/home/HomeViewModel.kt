@@ -53,8 +53,8 @@ class HomeViewModel @Inject constructor(
 ) : ViewModel() {
 
     // --- State Definitions ---
-    private val dateFormatter: SimpleDateFormat get() = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
-    private val displayDateFormatter: SimpleDateFormat get() = SimpleDateFormat("dd/MM", Locale.getDefault())
+    private val dateFormatter: SimpleDateFormat get() = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+    private val displayDateFormatter: SimpleDateFormat get() = SimpleDateFormat("dd/MM", Locale.US)
     
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
@@ -580,6 +580,7 @@ class HomeViewModel @Inject constructor(
             try {
                 houseManagementUseCase.migrateStreetNamesToFormat()
                 houseManagementUseCase.migrateBairrosToTitleCase()
+                houseManagementUseCase.migrateDateFormats()
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error migrating data", e)
             }
@@ -1173,97 +1174,103 @@ class HomeViewModel @Inject constructor(
     fun updateDayStatus(date: String, status: String) {
         viewModelScope.launch {
             try {
-                val currentAgent = _agentName.value
-                val oldActivities = repository.getAllDayActivitiesOnce()
-                    .filter { it.agentName == currentAgent }
-                    .associateBy { it.date }
-                val oldStatus = oldActivities[date]?.status ?: "NORMAL"
-                
-                // Only trigger ripple if "Working Day" status changes
-                val wasWorking = oldStatus == "NORMAL" || oldStatus.isBlank()
-                val isWorking = status == "NORMAL" || status.isBlank()
-                
-                // Update the status first
-                val existing = repository.getDayActivity(date, currentAgent)
-                if (existing != null) {
-                    repository.updateDayActivity(existing.copy(status = status))
-                } else {
-                    repository.updateDayActivity(DayActivity(date = date, status = status, agentName = currentAgent))
-                }
+                repository.runInTransaction {
+                    val currentAgent = _agentName.value
+                    val oldActivities = repository.getAllDayActivitiesOnce()
+                        .filter { it.agentName == currentAgent }
+                        .associateBy { it.date }
+                    val oldStatus = oldActivities[date]?.status ?: "NORMAL"
+                    
+                    // Only trigger ripple if "Working Day" status changes
+                    val wasWorking = oldStatus == "NORMAL" || oldStatus.isBlank()
+                    val isWorking = status == "NORMAL" || status.isBlank()
+                    
+                    // Update the status first
+                    val existing = repository.getDayActivity(date, currentAgent)
+                    if (existing != null) {
+                        repository.updateDayActivity(existing.copy(status = status))
+                    } else {
+                        repository.updateDayActivity(DayActivity(date = date, status = status, agentName = currentAgent))
+                    }
 
-                if (wasWorking != isWorking) {
-                    // Ripple Effect: Shift production dates
-                    val updatedStatusMap = oldActivities.toMutableMap()
-                    updatedStatusMap[date] = DayActivity(date, status)
-                    
-                    val allHouses = repository.getAllHousesOnce().filter { it.agentName == currentAgent }
-                    val targetDateObj = try { dateFormatter.parse(date) } catch (e: Exception) { null } ?: return@launch
-                    
-                    // Analyze production at or after the changed date
-                    val housesToShift = allHouses.filter { 
-                        val houseDate = try { dateFormatter.parse(it.data) } catch (e: Exception) { null }
-                        houseDate != null && !houseDate.before(targetDateObj)
-                    }
-                    
-                    if (housesToShift.isEmpty()) return@launch
-                    
-                    val productionDates = housesToShift.map { it.data }.distinct()
-                    val productionDatesSet = productionDates.toSet()
-                    val dateToOffset = mutableMapOf<String, Int>()
-                    
-                    // 1. Calculate offsets using old configuration
-                    productionDates.forEach { pDate ->
-                        var offset = 0
-                        val cal = Calendar.getInstance()
-                        cal.time = targetDateObj
-                        val pDateObj = try { dateFormatter.parse(pDate) } catch (e: Exception) { null } ?: return@forEach
+                    if (wasWorking != isWorking) {
+                        // Ripple Effect: Shift production dates
+                        val updatedStatusMap = oldActivities.toMutableMap()
+                        updatedStatusMap[date] = DayActivity(date, status)
                         
-                        while (cal.time.before(pDateObj)) {
-                            val currentDateStr = dateFormatter.format(cal.time)
-                            if (isWorkingDay(cal, oldActivities) || productionDatesSet.contains(currentDateStr)) {
-                                offset++
-                            }
-                            cal.add(Calendar.DAY_OF_YEAR, 1)
+                        val allHouses = repository.getAllHousesOnce().filter { it.agentName == currentAgent }
+                        val targetDateObj = try { dateFormatter.parse(date) } catch (e: Exception) { null } ?: return@runInTransaction
+                        
+                        // Analyze production at or after the changed date
+                        val housesToShift = allHouses.filter { 
+                            val houseDate = try { dateFormatter.parse(it.data) } catch (e: Exception) { null }
+                            houseDate != null && !houseDate.before(targetDateObj)
                         }
-                        dateToOffset[pDate] = offset
-                    }
-                    
-                    // 2. Map offsets to new target dates using updated configuration
-                    val sortedOffsets = dateToOffset.values.distinct().sorted()
-                    val offsetToNewDate = mutableMapOf<Int, String>()
-                    
-                    var currentWorkingOffset = 0
-                    val cal = Calendar.getInstance()
-                    cal.time = targetDateObj
-                    
-                    var daysChecked = 0
-                    while (currentWorkingOffset <= (sortedOffsets.lastOrNull() ?: 0) && daysChecked < 365) {
-                        if (isWorkingDay(cal, updatedStatusMap)) {
-                            if (sortedOffsets.contains(currentWorkingOffset)) {
-                                offsetToNewDate[currentWorkingOffset] = dateFormatter.format(cal.time)
+                        
+                        if (housesToShift.isNotEmpty()) {
+                            val productionDates = housesToShift.map { it.data }.distinct()
+                            val productionDatesSet = productionDates.toSet()
+                            val dateToOffset = mutableMapOf<String, Int>()
+                            
+                            // 1. Calculate offsets using old configuration
+                            productionDates.forEach { pDate ->
+                                var offset = 0
+                                val cal = Calendar.getInstance()
+                                cal.time = targetDateObj
+                                val pDateObj = try { dateFormatter.parse(pDate) } catch (e: Exception) { null } ?: return@forEach
+                                
+                                while (cal.time.before(pDateObj)) {
+                                    val currentDateStr = dateFormatter.format(cal.time)
+                                    if (isWorkingDay(cal, oldActivities) || productionDatesSet.contains(currentDateStr)) {
+                                        offset++
+                                    }
+                                    cal.add(Calendar.DAY_OF_YEAR, 1)
+                                }
+                                dateToOffset[pDate] = offset
                             }
-                            currentWorkingOffset++
+                            
+                            // 2. Map offsets to new target dates using updated configuration
+                            val sortedOffsets = dateToOffset.values.distinct().sorted()
+                            val offsetToNewDate = mutableMapOf<Int, String>()
+                            
+                            var currentWorkingOffset = 0
+                            val cal = Calendar.getInstance()
+                            cal.time = targetDateObj
+                            
+                            var daysChecked = 0
+                            while (currentWorkingOffset <= (sortedOffsets.lastOrNull() ?: 0) && daysChecked < 365) {
+                                if (isWorkingDay(cal, updatedStatusMap)) {
+                                    if (sortedOffsets.contains(currentWorkingOffset)) {
+                                        offsetToNewDate[currentWorkingOffset] = dateFormatter.format(cal.time)
+                                    }
+                                    currentWorkingOffset++
+                                }
+                                cal.add(Calendar.DAY_OF_YEAR, 1)
+                                daysChecked++
+                            }
+                            
+                            // 3. Batch update records
+                            val updatedHouses = housesToShift.mapNotNull { house ->
+                                val offset = dateToOffset[house.data]
+                                val newDate = offsetToNewDate[offset]
+                                if (newDate != null && newDate != house.data) {
+                                    house.copy(data = newDate)
+                                } else null
+                            }
+                            
+                            if (updatedHouses.isNotEmpty()) {
+                                repository.updateHouses(updatedHouses)
+                            }
                         }
-                        cal.add(Calendar.DAY_OF_YEAR, 1)
-                        daysChecked++
-                    }
-                    
-                    // 3. Batch update records
-                    val updatedHouses = housesToShift.mapNotNull { house ->
-                        val offset = dateToOffset[house.data]
-                        val newDate = offsetToNewDate[offset]
-                        if (newDate != null && newDate != house.data) {
-                            house.copy(data = newDate)
-                        } else null
-                    }
-                    
-                    if (updatedHouses.isNotEmpty()) {
-                        repository.updateHouses(updatedHouses)
                     }
                 }
+                
+                // Sound feedback (Outside transaction)
+                soundManager.playSuccess()
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error updating day status", e)
                 _uiEvent.value = "Erro ao atualizar status do dia: ${e.message}"
+                soundManager.playWarning()
             }
         }
     }
@@ -1275,6 +1282,7 @@ class HomeViewModel @Inject constructor(
     }
     suspend fun exportSemanalPdf(context: Context): File {
         return withContext(Dispatchers.IO) {
+            clearOldPdfs(context, "Semanal_")
             val summary = weeklySummary.value
             val weekDates = summary.map { it.date }
             val allHouses = houses.value
@@ -1285,6 +1293,8 @@ class HomeViewModel @Inject constructor(
 
     suspend fun exportWeeklyBatchPdf(context: Context): File {
         return withContext(Dispatchers.IO) {
+            clearOldPdfs(context, "Produção_")
+            clearOldPdfs(context, "Boletim_")
             val dates = currentWeekDates.value
             val allHouses = houses.value
             
@@ -1333,7 +1343,8 @@ class HomeViewModel @Inject constructor(
 
                 // Save to Cache Dir
                 val backupDir = File(context.cacheDir, "exports")
-                if (!backupDir.exists()) backupDir.mkdirs()
+                if (backupDir.exists()) backupDir.deleteRecursively()
+                backupDir.mkdirs()
 
                 val file = File(backupDir, fileName)
                 BackupManager().exportToFile(file, backupData)
@@ -1436,7 +1447,8 @@ class HomeViewModel @Inject constructor(
                 // Save to Cache Dir (so we can share it via FileProvider)
                 // Using cacheDir/backups to keep it clean
                 val backupDir = File(context.cacheDir, "backups")
-                if (!backupDir.exists()) backupDir.mkdirs()
+                if (backupDir.exists()) backupDir.deleteRecursively()
+                backupDir.mkdirs()
                 
                 val file = File(backupDir, fileName)
                 BackupManager().exportToFile(file, backupData)
@@ -1488,12 +1500,12 @@ class HomeViewModel @Inject constructor(
                     }
                 }
 
-                // If backup has no agent names (legacy), use targetAgent (which might still be blank but at least we tried)
+                // Ensure all restored data belongs to the target agent unconditionally
                 val sanitizedHouses = backupData.houses.map { 
-                    it.copy(id = 0, agentName = it.agentName.ifBlank { targetAgent }) 
+                    it.copy(id = 0, agentName = targetAgent) 
                 }
                 val sanitizedActivities = backupData.dayActivities.map { 
-                    it.copy(agentName = it.agentName.ifBlank { targetAgent }) 
+                    it.copy(agentName = targetAgent) 
                 }
 
                 // If it's a full restore, we might want to restore ALL agents data 
@@ -1566,17 +1578,15 @@ class HomeViewModel @Inject constructor(
                 }
 
                 val currentHouses = houses.value
-                val existingHouseKeys = currentHouses.map { 
-                    "${it.streetName}|${it.number}|${it.blockNumber}|${it.data}|${it.agentName}" 
-                }.toSet()
+                val existingHouseKeys = currentHouses.map { it.generateNaturalKey() }.toSet()
 
                 var importedCount = 0
                 var skippedCount = 0
 
-                // Assign imported houses to the target agent to prevent mixing
+                // Assign imported houses to the target agent to prevent mixing unconditionally
                 backupData.houses.forEach { house ->
-                    val sanitizedHouse = house.copy(id = 0, agentName = house.agentName.ifBlank { targetAgent })
-                    val key = "${sanitizedHouse.streetName}|${sanitizedHouse.number}|${sanitizedHouse.blockNumber}|${sanitizedHouse.data}|${sanitizedHouse.agentName}"
+                    val sanitizedHouse = house.copy(id = 0, agentName = targetAgent)
+                    val key = sanitizedHouse.generateNaturalKey()
                     
                     if (!existingHouseKeys.contains(key)) {
                         repository.insertHouse(sanitizedHouse)
@@ -1586,9 +1596,9 @@ class HomeViewModel @Inject constructor(
                     }
                 }
 
-                // Also assign activities
+                // Also assign activities unconditionally
                 backupData.dayActivities.forEach { 
-                    repository.updateDayActivity(it.copy(agentName = it.agentName.ifBlank { targetAgent })) 
+                    repository.updateDayActivity(it.copy(agentName = targetAgent)) 
                 }
 
                 withContext(Dispatchers.Main) {
@@ -1722,6 +1732,18 @@ class HomeViewModel @Inject constructor(
             totalFocos = dayHouses.count { it.comFoco },
             totalRegisteredHouses = dayHouses.size
         )
+    }
+
+    private fun clearOldPdfs(context: Context, prefix: String) {
+        try {
+            context.cacheDir.listFiles()?.forEach { 
+                if (it.isFile && it.name.startsWith(prefix, ignoreCase = true) && it.name.endsWith(".pdf", ignoreCase = true)) {
+                    it.delete()
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("HomeViewModel", "Error clearing old PDFs with prefix $prefix", e)
+        }
     }
 
     private fun House.toUiState(): HouseUiState {

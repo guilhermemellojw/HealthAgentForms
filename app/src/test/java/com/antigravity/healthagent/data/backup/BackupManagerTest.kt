@@ -51,6 +51,19 @@ class BackupManagerTest {
         assertTrue(backupData.dayActivities.isEmpty()) // Should default to empty list if missing
     }
 
+    @Test
+    fun testNaturalKeyUniqueness() {
+        val house1 = House(id = 1, blockNumber = "1", streetName = "Rua A", data = "10-01-2024", listOrder = 0, agentName = "AGENT")
+        val house2 = House(id = 2, blockNumber = "1", streetName = "Rua A", data = "10-01-2024", listOrder = 1, agentName = "AGENT")
+        
+        val key1 = house1.generateNaturalKey()
+        val key2 = house2.generateNaturalKey()
+        
+        assertTrue("Keys should be different for different listOrder values", key1 != key2)
+        assertTrue("Key should contain listOrder", key1.contains("_0"))
+        assertTrue("Key should contain listOrder", key2.contains("_1"))
+    }
+
     // Helper to mimic BackupManager logic
     private fun parseLegacy(json: String): List<House> {
         val typeList = object : TypeToken<List<House>>() {}.type
@@ -69,12 +82,14 @@ class BackupManagerTest {
     private fun sanitizeHouses(houses: List<House>): List<House> {
         return houses.map { house ->
             house.copy(
-                agentName = (house.agentName as? String)?.trim() ?: "",
-                municipio = (house.municipio as? String)?.trim() ?: "BOM JARDIM",
-                bairro = (house.bairro as? String)?.trim() ?: "",
-                blockNumber = (house.blockNumber as? String)?.trim() ?: "",
-                streetName = (house.streetName as? String)?.trim() ?: "",
-                data = (house.data as? String)?.trim() ?: ""
+                agentName = house.agentName.trim().uppercase(),
+                municipio = house.municipio.trim(),
+                bairro = house.bairro.trim().uppercase(),
+                blockNumber = house.blockNumber.trim(),
+                blockSequence = house.blockSequence.trim(),
+                streetName = house.streetName.trim(),
+                number = house.number.trim(),
+                data = house.data.trim()
             )
         }
     }
@@ -82,9 +97,9 @@ class BackupManagerTest {
     private fun sanitizeActivities(activities: List<DayActivity>): List<DayActivity> {
         return activities.map { activity ->
             activity.copy(
-                agentName = (activity.agentName as? String)?.trim() ?: "",
-                date = (activity.date as? String)?.trim() ?: "",
-                status = (activity.status as? String)?.trim() ?: "NORMAL"
+                agentName = activity.agentName.trim().uppercase(),
+                date = activity.date.trim(),
+                status = activity.status.trim()
             )
         }
     }

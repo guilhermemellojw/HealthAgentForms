@@ -105,6 +105,7 @@ class HouseManagementUseCase @Inject constructor(
             zona = house.zona.trim().uppercase(),
             ciclo = house.ciclo.trim().uppercase(),
             situation = situation,
+            data = house.data.replace("/", "-").trim(),
             a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e, eliminados = elims, larvicida = larv
         )
     }
@@ -266,6 +267,34 @@ class HouseManagementUseCase @Inject constructor(
         if (toUpdate.isNotEmpty()) {
             val updated = toUpdate.map { it.copy(bairro = it.bairro.formatStreetName()) }
             repository.updateHouses(updated)
+        }
+    }
+
+    suspend fun migrateDateFormats() {
+        val allHouses = repository.getAllHousesOnce()
+        val housesToUpdate = allHouses.filter { it.data.contains("/") }
+        
+        if (housesToUpdate.isNotEmpty()) {
+            android.util.Log.i("HouseManagement", "Migrating ${housesToUpdate.size} legacy date formats (/) to standard (-)")
+            val updatedHouses = housesToUpdate.map { it.copy(data = it.data.replace("/", "-")) }
+            repository.updateHouses(updatedHouses)
+        }
+        
+        val allActivities = repository.getAllDayActivitiesOnce()
+        val activitiesToUpdate = allActivities.filter { it.date.contains("/") }
+        
+        if (activitiesToUpdate.isNotEmpty()) {
+             android.util.Log.i("HouseManagement", "Migrating ${activitiesToUpdate.size} legacy activity dates (/) to standard (-)")
+             activitiesToUpdate.forEach { activity ->
+                 val newDate = activity.date.replace("/", "-")
+                 // Since date is part of primary key, we might need a special transaction or delete/insert
+                 // Repository doesn't have a direct 'updatePrimaryKey' but SyncRepositoryImpl does some similar stuff.
+                 // In Room, for primary key changes, usually we delete and re-insert.
+                 repository.runInTransaction {
+                     repository.deleteProduction(activity.date, activity.agentName)
+                     repository.updateDayActivity(activity.copy(date = newDate))
+                 }
+             }
         }
     }
 }

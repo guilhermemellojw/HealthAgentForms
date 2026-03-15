@@ -44,6 +44,11 @@ data class House(
     var cloudId: String? = null
     // Helper to generate a consistent natural key for deduplication
     fun generateNaturalKey(): String {
-        return "${data}_${blockNumber}_${streetName}_${number}_${bairro}".replace("/", "_")
+        val normalizedDate = data.replace("/", "-")
+        val normalizedStreet = streetName.trim().replace(Regex("\\s+"), " ")
+        val normalizedBairro = bairro.trim().replace(Regex("\\s+"), " ")
+        val normalizedAgent = agentName.trim().replace(Regex("\\s+"), " ")
+        
+        return "${normalizedAgent}_${normalizedDate}_${blockNumber.trim()}_${blockSequence.trim()}_${normalizedStreet}_${number.trim()}_${sequence ?: 0}_${complement ?: 0}_${normalizedBairro}".uppercase()
     }
 }

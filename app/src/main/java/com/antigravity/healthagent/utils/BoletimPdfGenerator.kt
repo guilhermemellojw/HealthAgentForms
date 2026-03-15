@@ -38,19 +38,23 @@ object BoletimPdfGenerator {
         val chunksToProcess = createChunks(houses)
         val totalFolhas = chunksToProcess.size
         
-        chunksToProcess.forEachIndexed { index, chunk ->
-            val folhaNumber = index + 1
-            val stats = calculateBlockStats(houses, chunk)
+        try {
+            chunksToProcess.forEachIndexed { index, chunk ->
+                val folhaNumber = index + 1
+                val stats = calculateBlockStats(houses, chunk)
 
-             // --- Page 1: Frente (List of Houses) ---
-            val page1 = pdfDocument.startPage(pageInfo)
-            drawFrontPage(context, page1.canvas, chunk, date, agentName, folhaNumber, totalFolhas, logoBitmap)
-            pdfDocument.finishPage(page1)
-    
-            // --- Page 2: Verso (Summary) ---
-            val page2 = pdfDocument.startPage(pageInfo)
-            drawBackPage(page2.canvas, chunk, date, stats.quarteiraoConcluido, stats.localidadeConcluida, stats.workedBlocks, stats.completedBlocks)
-            pdfDocument.finishPage(page2)
+                 // --- Page 1: Frente (List of Houses) ---
+                val page1 = pdfDocument.startPage(pageInfo)
+                drawFrontPage(context, page1.canvas, chunk, date, agentName, folhaNumber, totalFolhas, logoBitmap)
+                pdfDocument.finishPage(page1)
+        
+                // --- Page 2: Verso (Summary) ---
+                val page2 = pdfDocument.startPage(pageInfo)
+                drawBackPage(page2.canvas, chunk, date, stats.quarteiraoConcluido, stats.localidadeConcluida, stats.workedBlocks, stats.completedBlocks)
+                pdfDocument.finishPage(page2)
+            }
+        } finally {
+            logoBitmap?.recycle()
         }
 
         val sanitizedAgent = agentName.trim().replace(" ", "_").replace("/", "-")
@@ -96,39 +100,47 @@ object BoletimPdfGenerator {
             createChunks(weeklyData[date] ?: emptyList())
         }
 
-        // --- Pass 1: All Front Pages ---
-        sortedDates.forEach { date ->
-            val chunks = dailyChunks[date] ?: emptyList()
-            val totalFolhas = chunks.size
-            chunks.forEachIndexed { index, chunk ->
-                val page = pdfDocument.startPage(pageInfo)
-                drawFrontPage(context, page.canvas, chunk, date, agentName, index + 1, totalFolhas, logoBitmap)
-                pdfDocument.finishPage(page)
+        try {
+            // --- Pass 1: All Front Pages ---
+            sortedDates.forEach { date ->
+                val chunks = dailyChunks[date] ?: emptyList()
+                val totalFolhas = chunks.size
+                chunks.forEachIndexed { index, chunk ->
+                    val page = pdfDocument.startPage(pageInfo)
+                    drawFrontPage(context, page.canvas, chunk, date, agentName, index + 1, totalFolhas, logoBitmap)
+                    pdfDocument.finishPage(page)
+                }
             }
-        }
 
-        // --- Pass 2: All Back Pages ---
-        sortedDates.forEach { date ->
-            val houses = weeklyData[date] ?: emptyList()
-            val chunks = dailyChunks[date] ?: emptyList()
-            chunks.forEachIndexed { index, chunk ->
-                val stats = calculateBlockStats(houses, chunk)
-                val page = pdfDocument.startPage(pageInfo)
-                drawBackPage(page.canvas, chunk, date, stats.quarteiraoConcluido, stats.localidadeConcluida, stats.workedBlocks, stats.completedBlocks)
-                pdfDocument.finishPage(page)
+            // --- Pass 2: All Back Pages ---
+            sortedDates.forEach { date ->
+                val houses = weeklyData[date] ?: emptyList()
+                val chunks = dailyChunks[date] ?: emptyList()
+                chunks.forEachIndexed { index, chunk ->
+                    val stats = calculateBlockStats(houses, chunk)
+                    val page = pdfDocument.startPage(pageInfo)
+                    drawBackPage(page.canvas, chunk, date, stats.quarteiraoConcluido, stats.localidadeConcluida, stats.workedBlocks, stats.completedBlocks)
+                    pdfDocument.finishPage(page)
+                }
             }
-        }
 
-        // --- Final Page: Resumo Semanal ---
-        val semanalPage = pdfDocument.startPage(pageInfo)
-        // Flatten all houses for the weekly summary
-        val allWeekHouses = weeklyData.values.flatten()
-        // Use the FULL weekDates ensuring we print all days including those with status but no houses
-        // Hoist bitmap decoding for summary (using the same pre-decoded logos if possible, but Semanal uses logo_vigilancia)
-        val logoVigilancia = BitmapFactory.decodeResource(context.resources, com.antigravity.healthagent.R.drawable.logo_vigilancia)
-        
-        SemanalPdfGenerator.drawSemanalPage(context, semanalPage.canvas, weekDates, allWeekHouses, activities, agentName, logoVigilancia, logoBitmap)
-        pdfDocument.finishPage(semanalPage)
+            // --- Final Page: Resumo Semanal ---
+            val semanalPage = pdfDocument.startPage(pageInfo)
+            // Flatten all houses for the weekly summary
+            val allWeekHouses = weeklyData.values.flatten()
+            // Use the FULL weekDates ensuring we print all days including those with status but no houses
+            // Hoist bitmap decoding for summary (using the same pre-decoded logos if possible, but Semanal uses logo_vigilancia)
+            val logoVigilancia = try { BitmapFactory.decodeResource(context.resources, com.antigravity.healthagent.R.drawable.logo_vigilancia) } catch(e: Exception) { null }
+            
+            try {
+                SemanalPdfGenerator.drawSemanalPage(context, semanalPage.canvas, weekDates, allWeekHouses, activities, agentName, logoVigilancia, logoBitmap)
+            } finally {
+                logoVigilancia?.recycle()
+            }
+            pdfDocument.finishPage(semanalPage)
+        } finally {
+            logoBitmap?.recycle()
+        }
 
 
 
@@ -1495,7 +1507,7 @@ object BoletimPdfGenerator {
     
     private fun calculateCicloFromDate(dateStr: String): String {
         return try {
-            val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.getDefault())
+            val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US)
             val dateObj = sdf.parse(dateStr)
             if (dateObj != null) {
                 val cal = java.util.Calendar.getInstance()

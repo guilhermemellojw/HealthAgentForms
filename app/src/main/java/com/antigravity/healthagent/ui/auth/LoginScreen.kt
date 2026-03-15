@@ -179,6 +179,12 @@ fun LoginScreen(
                                         val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
                                         viewModel.signInWithGoogle(googleIdTokenCredential.idToken)
                                     }
+                                } catch (e: androidx.credentials.exceptions.GetCredentialCancellationException) {
+                                    Log.i("LoginScreen", "User cancelled sign in")
+                                    // Ignore cancellation quietly
+                                } catch (e: androidx.credentials.exceptions.NoCredentialException) {
+                                    Log.w("LoginScreen", "No credentials available")
+                                    viewModel.setError("Nenhuma conta Google encontrada.")
                                 } catch (e: Exception) {
                                     Log.e("LoginScreen", "Error during sign in", e)
                                     viewModel.setError("Erro no login: ${e.message}")

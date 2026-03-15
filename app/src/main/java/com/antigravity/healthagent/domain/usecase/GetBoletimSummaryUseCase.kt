@@ -74,7 +74,7 @@ class GetBoletimSummaryUseCase @Inject constructor() {
             )
         }.sortedWith(compareByDescending { 
             try {
-                java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.getDefault()).parse(it.date)?.time ?: 0L
+                java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US).parse(it.date)?.time ?: 0L
             } catch (e: Exception) {
                 0L
             }

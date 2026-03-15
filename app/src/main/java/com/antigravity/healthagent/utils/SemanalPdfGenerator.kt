@@ -38,14 +38,19 @@ object SemanalPdfGenerator {
         val canvas = page.canvas
 
         // Hoist bitmap decoding
-        val logoVigilancia = BitmapFactory.decodeResource(context.resources, R.drawable.logo_vigilancia)
-        val logoGoverno = BitmapFactory.decodeResource(context.resources, R.drawable.governo_rj_logo)
+        val logoVigilancia = try { BitmapFactory.decodeResource(context.resources, R.drawable.logo_vigilancia) } catch (e: Exception) { null }
+        val logoGoverno = try { BitmapFactory.decodeResource(context.resources, R.drawable.governo_rj_logo) } catch (e: Exception) { null }
 
-        drawSemanalPage(context, canvas, weekDates, allHouses, activities, agentName, logoVigilancia, logoGoverno)
+        try {
+            drawSemanalPage(context, canvas, weekDates, allHouses, activities, agentName, logoVigilancia, logoGoverno)
+        } finally {
+            logoVigilancia?.recycle()
+            logoGoverno?.recycle()
+        }
 
         pdfDocument.finishPage(page)
 
-        val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.getDefault())
+        val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US)
         val firstDateStr = weekDates.firstOrNull()
         
         var fileNameStr = "Semanal_export"
@@ -72,8 +77,8 @@ object SemanalPdfGenerator {
                     val monthNames = arrayOf("Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro")
                     val monthName = monthNames[startMonthIndex]
                 
-                    val startDayStr = String.format("%02d", startDay)
-                    val endDayStr = String.format("%02d", endDay)
+                    val startDayStr = String.format(java.util.Locale("pt", "BR"), "%02d", startDay)
+                    val endDayStr = String.format(java.util.Locale("pt", "BR"), "%02d", endDay)
                     val sanitizedAgent = agentName.trim().replace(" ", "_").replace("/", "-")
                 
                     fileNameStr = "Semanal_${startDayStr}_a_${endDayStr}_${monthName}_$sanitizedAgent"
@@ -236,7 +241,7 @@ object SemanalPdfGenerator {
         val wSeg = availSD / 4f
         
         // Calculate Sunday (Start) and Saturday (End) based on the first date (Monday)
-        val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.getDefault())
+        val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US)
         val firstDateStr = weekDates.firstOrNull()
         
         var weekStartDay = ""
@@ -256,13 +261,13 @@ object SemanalPdfGenerator {
                 val daysFromSunday = dayOfWeek - java.util.Calendar.SUNDAY
                 cal.add(java.util.Calendar.DAY_OF_YEAR, -daysFromSunday)
                 
-                weekStartDay = String.format("%02d", cal.get(java.util.Calendar.DAY_OF_MONTH))
-                weekStartMonth = String.format("%02d", cal.get(java.util.Calendar.MONTH) + 1)
+                weekStartDay = String.format(java.util.Locale("pt", "BR"), "%02d", cal.get(java.util.Calendar.DAY_OF_MONTH))
+                weekStartMonth = String.format(java.util.Locale("pt", "BR"), "%02d", cal.get(java.util.Calendar.MONTH) + 1)
                 
                 // Set to Saturday (End of week) - add 6 days to Sunday
                 cal.add(java.util.Calendar.DAY_OF_YEAR, 6)
-                weekEndDay = String.format("%02d", cal.get(java.util.Calendar.DAY_OF_MONTH))
-                weekEndMonth = String.format(java.util.Locale.getDefault(), "%02d", cal.get(java.util.Calendar.MONTH) + 1)
+                weekEndDay = String.format(java.util.Locale("pt", "BR"), "%02d", cal.get(java.util.Calendar.DAY_OF_MONTH))
+                weekEndMonth = String.format(java.util.Locale.US, "%02d", cal.get(java.util.Calendar.MONTH) + 1)
                 } // End of if (parsedDate != null)
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -471,7 +476,7 @@ object SemanalPdfGenerator {
                 
                 // Helper to draw dash if zero
                 fun dsh(v: Int): String = if (v == 0) dash else v.toString()
-                fun dshD(v: Double): String = if (v == 0.0) dash else String.format("%.0f", v)
+                fun dshD(v: Double): String = if (v == 0.0) dash else String.format(java.util.Locale("pt", "BR"), "%.0f", v)
 
                 drawCell(canvas, linePaint, textPaint, dsh(res), tx, cursorY, colRes, rowH); tx += colRes
                 drawCell(canvas, linePaint, textPaint, dsh(com), tx, cursorY, colCom, rowH); tx += colCom
@@ -577,7 +582,7 @@ object SemanalPdfGenerator {
         tx += colData
         
         fun dshT(v: Int): String = if (v == 0) dash else v.toString()
-        fun dshTD(v: Double): String = if (v == 0.0) dash else String.format("%.0f", v)
+        fun dshTD(v: Double): String = if (v == 0.0) dash else String.format(java.util.Locale("pt", "BR"), "%.0f", v)
 
         drawRectBox(canvas, tx, cursorY, colRes, rowH, dshT(totRes), boldPaint, headerBgPaint); tx += colRes
         drawRectBox(canvas, tx, cursorY, colCom, rowH, dshT(totCom), boldPaint, headerBgPaint); tx += colCom

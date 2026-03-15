@@ -7,7 +7,7 @@ import java.util.*
 import javax.inject.Inject
 
 class GetRGBlocksUseCase @Inject constructor() {
-    private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+    private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
 
     private fun getTimestamp(date: String): Long {
         return try {

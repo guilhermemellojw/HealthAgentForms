@@ -36,7 +36,7 @@ fun GoalReachedOverlay(onDismiss: () -> Unit) {
         }
     }
     
-    var time by remember { mutableStateOf(0L) }
+    var time by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
     
     LaunchedEffect(Unit) {
         val startTime = System.nanoTime()

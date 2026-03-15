@@ -56,6 +56,7 @@ class HouseManagementUseCaseTest {
         override suspend fun deleteHousesByDateAndAgent(date: String, agentName: String) {}
         override suspend fun deleteAll() {}
         override suspend fun deleteByAgent(agentName: String) {}
+        override suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>) {}
     }
 
     private val dummyCustomStreetDao = object : CustomStreetDao {

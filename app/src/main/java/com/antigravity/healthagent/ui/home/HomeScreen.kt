@@ -254,8 +254,8 @@ fun HomeScreen(
     // Drag State (Overlay Strategy)
     val uiHouses = remember { mutableStateListOf<HouseUiState>() }
     var draggingHouse by remember { mutableStateOf<HouseUiState?>(null) }
-    var ghostY by remember { mutableStateOf(0f) }
-    var initialTouchY by remember { mutableStateOf(0f) }
+    var ghostY by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var initialTouchY by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
 
     // Focus Management for new houses
     val focusRequesters = remember { mutableMapOf<Int, androidx.compose.ui.focus.FocusRequester>() }
@@ -309,7 +309,7 @@ fun HomeScreen(
     val datePickerDialog = DatePickerDialog(
         context,
         { _, year, month, dayOfMonth ->
-            val formattedDate = String.format("%02d-%02d-%04d", dayOfMonth, month + 1, year)
+            val formattedDate = String.format(java.util.Locale("pt", "BR"), "%02d-%02d-%04d", dayOfMonth, month + 1, year)
             viewModel.updateHeader(uiState.municipality, uiState.neighborhood, "BRR", uiState.zone, uiState.type, formattedDate, uiState.cycle, uiState.activity)
         },
         calendar.get(Calendar.YEAR),
@@ -321,7 +321,7 @@ fun HomeScreen(
     val moveDatePickerDialog = DatePickerDialog(
         context,
         { _, year, month, dayOfMonth ->
-            val formattedDate = String.format("%02d/%02d/%04d", dayOfMonth, month + 1, year)
+            val formattedDate = String.format(java.util.Locale("pt", "BR"), "%02d/%02d/%04d", dayOfMonth, month + 1, year)
             houseToMove?.let { 
                 viewModel.moveHouseToDate(it, formattedDate)
                 houseToMove = null 

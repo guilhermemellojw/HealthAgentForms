@@ -23,15 +23,15 @@ fun TreatmentDialog(
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     // Local state for the form
-    var a1 by remember { mutableStateOf(house.a1) }
-    var a2 by remember { mutableStateOf(house.a2) }
-    var b by remember { mutableStateOf(house.b) }
-    var c by remember { mutableStateOf(house.c) }
-    var d1 by remember { mutableStateOf(house.d1) }
-    var d2 by remember { mutableStateOf(house.d2) }
-    var e by remember { mutableStateOf(house.e) }
-    var eliminados by remember { mutableStateOf(house.eliminados) }
-    var larvicida by remember { mutableStateOf(house.larvicida) }
+    var a1 by remember { androidx.compose.runtime.mutableIntStateOf(house.a1) }
+    var a2 by remember { androidx.compose.runtime.mutableIntStateOf(house.a2) }
+    var b by remember { androidx.compose.runtime.mutableIntStateOf(house.b) }
+    var c by remember { androidx.compose.runtime.mutableIntStateOf(house.c) }
+    var d1 by remember { androidx.compose.runtime.mutableIntStateOf(house.d1) }
+    var d2 by remember { androidx.compose.runtime.mutableIntStateOf(house.d2) }
+    var e by remember { androidx.compose.runtime.mutableIntStateOf(house.e) }
+    var eliminados by remember { androidx.compose.runtime.mutableIntStateOf(house.eliminados) }
+    var larvicida by remember { androidx.compose.runtime.mutableDoubleStateOf(house.larvicida) }
     var comFoco by remember { mutableStateOf(house.comFoco) }
 
     AlertDialog(
@@ -112,7 +112,7 @@ fun TreatmentDialog(
                                     Text("-", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary, fontSize = if (isEasyMode) 24.sp else 22.sp)
                                 }
                                 Text(
-                                    String.format("%.1f", larvicida), 
+                                    String.format(java.util.Locale("pt", "BR"), "%.1f", larvicida), 
                                     color = MaterialTheme.colorScheme.onSurface,
                                     style = TextStyle(
                                         fontSize = if (isEasyMode) 20.sp else 18.sp,

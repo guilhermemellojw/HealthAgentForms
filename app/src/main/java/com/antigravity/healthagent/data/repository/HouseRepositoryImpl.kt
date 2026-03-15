@@ -68,6 +68,10 @@ class HouseRepositoryImpl @Inject constructor(
     override suspend fun updateDayActivity(dayActivity: DayActivity) {
         dayActivityDao.insertDayActivity(dayActivity)
     }
+    
+    override suspend fun <T> runInTransaction(block: suspend () -> T): T {
+        return database.withTransaction { block() }
+    }
 
     override suspend fun getDayActivity(date: String, agentName: String): DayActivity? {
         return dayActivityDao.getDayActivity(date, agentName)
@@ -83,13 +87,39 @@ class HouseRepositoryImpl @Inject constructor(
 
     override suspend fun restoreAgentData(agentName: String, houses: List<House>, activities: List<DayActivity>) {
         database.withTransaction {
-            val dates = (houses.map { it.data } + activities.map { it.date }).distinct()
-            if (dates.isNotEmpty()) {
-                houseDao.deleteByAgentAndDates(agentName, dates)
-                dayActivityDao.deleteByAgentAndDates(agentName, dates)
+            // Deduplicate Houses locally to prevent auto-generated ID duplicates
+            val localHouses = houseDao.getAllHouses().first()
+            val localHouseGroups = localHouses.groupBy { it.generateNaturalKey() }
+            
+            val normalizedActivities = activities.map { 
+                it.copy(
+                    agentName = agentName.uppercase(),
+                    date = it.date.replace("/", "-")
+                ) 
             }
-            houseDao.insertAll(houses)
-            dayActivityDao.insertAll(activities)
+            val housesToUpsert = mutableListOf<House>()
+
+            houses.forEach { restoredHouse ->
+                val key = restoredHouse.generateNaturalKey()
+                val existingId = localHouseGroups[key]?.firstOrNull()?.id ?: 0
+                
+                housesToUpsert.add(restoredHouse.copy(
+                    id = existingId,
+                    agentName = agentName.uppercase(),
+                    data = restoredHouse.data.replace("/", "-")
+                ))
+            }
+
+            houseDao.upsertHouses(housesToUpsert)
+            dayActivityDao.upsertDayActivities(normalizedActivities)
+            
+            // Cleanup ghosts
+            for ((key, matches) in localHouseGroups) {
+                if (matches.size > 1) {
+                    val keptId = housesToUpsert.find { it.generateNaturalKey() == key }?.id
+                    matches.forEach { if (it.id != keptId && it.id != 0) houseDao.deleteHouse(it) }
+                }
+            }
         }
     }
 

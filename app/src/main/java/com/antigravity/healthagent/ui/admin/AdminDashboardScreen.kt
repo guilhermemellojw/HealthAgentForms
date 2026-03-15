@@ -93,96 +93,7 @@ fun AdminSettingsTab(viewModel: AdminViewModel) {
     }
 }
 
-@Composable
-fun AgentCard(
-    agent: AgentData, 
-    onEditAgent: (AgentData) -> Unit, 
-    onDeleteAgent: (String) -> Unit, 
-    onRestoreRequest: (String) -> Unit,
-    onDeleteHouse: (String, String) -> Unit,
-    onDeleteActivity: (String, String) -> Unit
-) {
-    val lastSync = remember(agent.lastSyncTime) {
-        if (agent.lastSyncTime > 0) {
-            SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(agent.lastSyncTime))
-        } else "Nunca"
-    }
-
-    PremiumCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Header: Name and Last Sync
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    Surface(shape = androidx.compose.foundation.shape.CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Default.Person, null, modifier = Modifier.padding(8.dp), tint = MaterialTheme.colorScheme.primary)
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(text = agent.agentName ?: agent.email.substringBefore("@"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                        Text(text = "Última Sincronização: $lastSync", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                Icon(Icons.Default.ExpandMore, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-
-            // Resumo Geral Section
-            Text(text = "Resumo Geral", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                AgentStatSubItem(label = "Imóveis Visitados", value = agent.houses.size.toString())
-                AgentStatSubItem(label = "Com Foco", value = agent.houses.count { it.comFoco }.toString(), color = if (agent.houses.any { it.comFoco }) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
-                AgentStatSubItem(label = "Dias Trabalhados", value = agent.activities.size.toString())
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Action Buttons
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Button(
-                    onClick = { onEditAgent(agent) },
-                    modifier = Modifier.weight(1f).height(48.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                ) {
-                    Icon(Icons.Default.Edit, null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("EDITAR", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black)
-                }
-
-                Button(
-                    onClick = { onRestoreRequest(agent.uid) },
-                    modifier = Modifier.weight(1.5f).height(48.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                ) {
-                    Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("RESTAURAR JSON", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black)
-                }
-
-                IconButton(
-                    onClick = { onDeleteAgent(agent.uid) },
-                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f))
-                ) {
-                    Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
-                }
-            }
-
-            // Granular Control
-            Spacer(modifier = Modifier.height(16.dp))
-            GranularDataSection(
-                agentUid = agent.uid,
-                houses = agent.houses,
-                activities = agent.activities,
-                onDeleteHouse = onDeleteHouse,
-                onDeleteActivity = onDeleteActivity
-            )
-        }
-    }
-}
+// Redundant AgentCard removed in favor of UnifiedProfileCard
 
 @Composable
 fun AgentStatSubItem(label: String, value: String, color: Color = MaterialTheme.colorScheme.onSurface) {
@@ -303,7 +214,7 @@ fun UnifiedProfileCard(
                     // Cloud Status
                     if (profile.agentData != null) {
                         val lastSync = if (profile.agentData.lastSyncTime > 0) {
-                            SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(profile.agentData.lastSyncTime))
+                            SimpleDateFormat("dd/MM HH:mm", Locale.US).format(Date(profile.agentData.lastSyncTime))
                         } else "Nunca"
                         Text("Sinc: $lastSync", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else if (profile.isPreRegistered && profile.uid == null) {
@@ -389,14 +300,29 @@ fun UnifiedProfileCard(
                             AgentStatSubItem(label = "Dias", value = data.activities.size.toString())
                         }
                         
+                        // Granular Control
                         Spacer(modifier = Modifier.height(16.dp))
-                        
+                        GranularDataSection(
+                            agentUid = data.uid,
+                            houses = data.houses,
+                            activities = data.activities,
+                            onDeleteHouse = onDeleteHouse,
+                            onDeleteActivity = onDeleteActivity
+                        )
+                    }
+
+                    // RESTORE / EDIT BUTTONS (Available for all authorized users)
+                    if (profile.isAuthorized || profile.isPreRegistered) {
+                        Spacer(modifier = Modifier.height(16.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = onEditAgent,
                                 modifier = Modifier.weight(1f).height(40.dp),
                                 shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
                             ) {
                                 Icon(Icons.Default.Edit, null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
@@ -412,16 +338,6 @@ fun UnifiedProfileCard(
                                 Text("RESTAURAR", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                             }
                         }
-
-                        // Granular Control
-                        Spacer(modifier = Modifier.height(16.dp))
-                        GranularDataSection(
-                            agentUid = data.uid,
-                            houses = data.houses,
-                            activities = data.activities,
-                            onDeleteHouse = onDeleteHouse,
-                            onDeleteActivity = onDeleteActivity
-                        )
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -449,7 +365,7 @@ fun AddProfileDialog(
     onDismiss: () -> Unit,
     onConfirm: (String?, String?, UserRole, Boolean) -> Unit
 ) {
-    var mode by remember { mutableStateOf(0) } // 0: Novo Usuário, 1: Apenas Nome, 2: Vincular
+    var mode by remember { androidx.compose.runtime.mutableIntStateOf(0) } // 0: Novo Usuário, 1: Apenas Nome, 2: Vincular
     var email by remember { mutableStateOf("") }
     var agentName by remember { mutableStateOf<String?>(null) }
     var customName by remember { mutableStateOf("") }
@@ -574,7 +490,7 @@ fun AdminDashboardScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val tabs = listOf("Produção", "Pessoas", "Config.")
+    val tabs = listOf("Gestão", "Config.")
 
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
@@ -602,10 +518,9 @@ fun AdminDashboardScreen(
         ) },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = { 
-            if (selectedTab < 2) { 
+            if (selectedTab == 0) { 
                 FloatingActionButton(onClick = { 
-                    if (selectedTab == 1) showAddProfileDialog = true
-                    else if (selectedTab == 0) showAddProfileDialog = true // Also use unified here
+                    showAddProfileDialog = true
                 }) { Icon(Icons.Default.Add, null) } 
             } 
         }
@@ -618,61 +533,33 @@ fun AdminDashboardScreen(
                 }
                 Box(modifier = Modifier.weight(1f)) {
                     if (selectedTab == 0) {
-                        // Produção (Sync Data Focus)
-                        Column(modifier = Modifier.fillMaxSize()) {
-                            OutlinedTextField(
-                                value = searchQuery,
-                                onValueChange = { viewModel.updateSearchQuery(it) },
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                placeholder = { Text("Pesquisar agente...") },
-                                leadingIcon = { Icon(Icons.Default.FilterList, null) }
-                            )
-                            val agentsOnly = unifiedProfiles.filter { it.agentData != null || it.role == UserRole.AGENT }
-                            if (agentsOnly.isEmpty()) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text("Nenhum dado de agente encontrado.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            } else {
-                                LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                    items(agentsOnly) { profile ->
-                                        if (profile.agentData != null) {
-                                            AgentCard(
-                                                agent = profile.agentData,
-                                                onEditAgent = { viewModel.selectAgentForEdit(profile.agentData); onNavigateBack() },
-                                                onDeleteAgent = { uid -> confirmTitle = "Excluir Sincronização"; confirmMessage = "Isso apagará permanentemente os dados da nuvem para este agente. Continuar?"; onConfirmAction = { viewModel.deleteAgent(uid) }; showConfirmDialog = true },
-                                                onRestoreRequest = { selectedUidForRestore = it; filePickerLauncher.launch("application/json") },
-                                                onDeleteHouse = { uid, id -> confirmTitle = "Excluir Imóvel"; confirmMessage = "Deseja excluir este registro de imóvel da nuvem?"; onConfirmAction = { viewModel.deleteAgentHouse(uid, id) }; showConfirmDialog = true },
-                                                onDeleteActivity = { uid, date -> confirmTitle = "Excluir Atividade"; confirmMessage = "Deseja excluir este registro de atividade ($date) da nuvem?"; onConfirmAction = { viewModel.deleteAgentActivity(uid, date) }; showConfirmDialog = true }
-                                            )
-                                        } else {
-                                            UnifiedProfileCard(
-                                                profile = profile,
-                                                agentNamesList = agentNames,
-                                                onAuthorize = { viewModel.authorizeUser(profile.uid ?: "", it) },
-                                                onRoleChange = { viewModel.changeUserRole(profile.uid ?: "", it) },
-                                                onUpdateName = { viewModel.updateUserProfile(profile.uid ?: "", mapOf("agentName" to it)) },
-                                                onDelete = { confirmTitle = "Excluir Perfil"; confirmMessage = "Deseja excluir este perfil?"; onConfirmAction = { profile.uid?.let { u -> viewModel.deleteUser(u) } ?: profile.agentData?.uid?.let { uid -> viewModel.deleteAgent(uid) } }; showConfirmDialog = true },
-                                                onRestore = { selectedUidForRestore = profile.uid ?: profile.agentData?.uid; filePickerLauncher.launch("application/json") },
-                                                onEditAgent = { viewModel.selectAgentForEdit(profile.agentData); onNavigateBack() },
-                                                onDeleteHouse = { uid, id -> confirmTitle = "Excluir Imóvel"; confirmMessage = "Deseja excluir este registro de imóvel da nuvem?"; onConfirmAction = { viewModel.deleteAgentHouse(uid, id) }; showConfirmDialog = true },
-                                                onDeleteActivity = { uid, date -> confirmTitle = "Excluir Atividade"; confirmMessage = "Deseja excluir este registro de atividade ($date) da nuvem?"; onConfirmAction = { viewModel.deleteAgentActivity(uid, date) }; showConfirmDialog = true }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else if (selectedTab == 1) {
-                        // Pessoas (Unified Profiles)
+                        // Gestão Tab (Combined Profiles, Requests, and Master List)
                         Column(modifier = Modifier.fillMaxSize()) {
                             var showMasterList by remember { mutableStateOf(false) }
                             
+                            // 1. Access Requests (if any)
+                            val accessRequests by viewModel.accessRequests.collectAsState()
+                            if (accessRequests.isNotEmpty()) {
+                                Text("Solicitações de Acesso", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
+                                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    items(accessRequests) { request ->
+                                        AccessRequestCard(
+                                            request = request,
+                                            onApprove = { showApprovalDialog = true; pendingRequest = request },
+                                            onReject = { viewModel.rejectAccess(request.id) }
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+
+                            // 2. Search and Master List Toggle
                             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 OutlinedTextField(
                                     value = searchQuery,
                                     onValueChange = { viewModel.updateSearchQuery(it) },
                                     modifier = Modifier.weight(1f),
-                                    placeholder = { Text("Pesquisar...") },
+                                    placeholder = { Text("Pesquisar agente ou email...") },
                                     leadingIcon = { Icon(Icons.Default.Search, null) },
                                     shape = RoundedCornerShape(12.dp)
                                 )
@@ -682,20 +569,7 @@ fun AdminDashboardScreen(
                                 }
                             }
                             
-                            val accessRequests by viewModel.accessRequests.collectAsState()
-                            if (accessRequests.isNotEmpty()) {
-                                Text("Solicitações de Acesso", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
-                                LazyRow(contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    items(accessRequests) { request ->
-                                        AccessRequestCard(
-                                            request = request,
-                                            onApprove = { showApprovalDialog = true; pendingRequest = request },
-                                            onReject = { viewModel.rejectAccess(request.id) }
-                                        )
-                                    }
-                                }
-                            }
-                            
+                            // 3. Master List Section
                             AnimatedVisibility(visible = showMasterList) {
                                 PremiumCard(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                                     Column(modifier = Modifier.padding(12.dp)) {
@@ -717,7 +591,7 @@ fun AdminDashboardScreen(
                                                 )
                                             }
                                             AssistChip(
-                                                onClick = { showAddProfileDialog = true }, // AddDialog now supports "Add Name"
+                                                onClick = { showAddProfileDialog = true },
                                                 label = { Text("Adicionar Nome") },
                                                 leadingIcon = { Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)) }
                                             )
@@ -726,33 +600,40 @@ fun AdminDashboardScreen(
                                 }
                             }
 
-                            LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                items(unifiedProfiles) { profile ->
-                                    UnifiedProfileCard(
-                                        profile = profile,
-                                        agentNamesList = agentNames,
-                                        onAuthorize = { viewModel.authorizeUser(profile.uid ?: "", it) },
-                                        onRoleChange = { viewModel.changeUserRole(profile.uid ?: "", it) },
-                                        onUpdateName = { name ->
-                                            profile.uid?.let { viewModel.updateUserProfile(it, mapOf("agentName" to name)) }
-                                        },
-                                        onDelete = {
-                                            confirmTitle = "Excluir"; confirmMessage = "Confirmar exclusão de ${profile.email ?: profile.agentName}?"; 
-                                            onConfirmAction = { 
-                                                if (profile.uid != null) viewModel.deleteUser(profile.uid)
-                                                else profile.agentData?.uid?.let { viewModel.deleteAgent(it) }
-                                            }; 
-                                            showConfirmDialog = true 
-                                        },
-                                        onRestore = { selectedUidForRestore = profile.uid ?: profile.agentData?.uid; filePickerLauncher.launch("application/json") },
-                                        onEditAgent = { viewModel.selectAgentForEdit(profile.agentData); onNavigateBack() },
-                                        onDeleteHouse = { uid, id -> confirmTitle = "Excluir Imóvel"; confirmMessage = "Deseja excluir este registro de imóvel da nuvem?"; onConfirmAction = { viewModel.deleteAgentHouse(uid, id) }; showConfirmDialog = true },
-                                        onDeleteActivity = { uid, date -> confirmTitle = "Excluir Atividade"; confirmMessage = "Deseja excluir este registro de atividade ($date) da nuvem?"; onConfirmAction = { viewModel.deleteAgentActivity(uid, date) }; showConfirmDialog = true }
-                                    )
+                            // 4. Unified Profiles List
+                            if (unifiedProfiles.isEmpty()) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("Nenhum usuário encontrado.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            } else {
+                                LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    items(unifiedProfiles) { profile ->
+                                        UnifiedProfileCard(
+                                            profile = profile,
+                                            agentNamesList = agentNames,
+                                            onAuthorize = { viewModel.authorizeUser(profile.uid ?: "", it) },
+                                            onRoleChange = { viewModel.changeUserRole(profile.uid ?: "", it) },
+                                            onUpdateName = { name ->
+                                                profile.uid?.let { viewModel.updateUserProfile(it, mapOf("agentName" to name)) }
+                                            },
+                                            onDelete = {
+                                                confirmTitle = "Excluir"; confirmMessage = "Confirmar exclusão de ${profile.email ?: profile.agentName}?"; 
+                                                onConfirmAction = { 
+                                                    if (profile.uid != null) viewModel.deleteUser(profile.uid)
+                                                    else profile.agentData?.uid?.let { viewModel.deleteAgent(it) }
+                                                }; 
+                                                showConfirmDialog = true 
+                                            },
+                                            onRestore = { selectedUidForRestore = profile.uid ?: profile.agentData?.uid; filePickerLauncher.launch("application/json") },
+                                            onEditAgent = { viewModel.selectAgentForEdit(profile.agentData); onNavigateBack() },
+                                            onDeleteHouse = { uid, id -> confirmTitle = "Excluir Imóvel"; confirmMessage = "Deseja excluir este registro de imóvel da nuvem?"; onConfirmAction = { viewModel.deleteAgentHouse(uid, id) }; showConfirmDialog = true },
+                                            onDeleteActivity = { uid, date -> confirmTitle = "Excluir Atividade"; confirmMessage = "Deseja excluir este registro de atividade ($date) da nuvem?"; onConfirmAction = { viewModel.deleteAgentActivity(uid, date) }; showConfirmDialog = true }
+                                        )
+                                    }
                                 }
                             }
                         }
-                    } else if (selectedTab == 2) {
+                    } else if (selectedTab == 1) {
                         AdminSettingsTab(viewModel)
                     }
                 }

@@ -83,7 +83,7 @@ fun ClosingAuditDialog(
                     if (audit.eliminados > 0) AuditItem("Eliminados", "${audit.eliminados}", isEasyMode)
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    AuditItem("Total Larvicida", String.format("%.2fg", audit.totalLarvicide))
+                    AuditItem("Total Larvicida", String.format(java.util.Locale("pt", "BR"), "%.2fg", audit.totalLarvicide))
                 }
 
 

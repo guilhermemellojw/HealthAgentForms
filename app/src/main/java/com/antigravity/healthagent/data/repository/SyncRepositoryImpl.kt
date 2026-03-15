@@ -8,6 +8,7 @@ import com.antigravity.healthagent.domain.repository.SyncRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.flow.first
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -60,7 +61,7 @@ class SyncRepositoryImpl @Inject constructor(
             val deletedActivityDates = (existingDoc?.get("deleted_activity_dates") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
             
             val finalHouses = houses.filter { house -> 
-                val naturalId = "${house.data}_${house.blockNumber}_${house.streetName}_${house.number}_${house.bairro}".replace("/", "_")
+                val naturalId = house.generateNaturalKey()
                 naturalId !in deletedHouseIds && house.data !in deletedActivityDates
             }
             val finalActivities = activities.filter { it.date !in deletedActivityDates }
@@ -100,7 +101,7 @@ class SyncRepositoryImpl @Inject constructor(
                     .toSet()
                 
                 val latestBackupDateTs = backupDates.map { 
-                    try { SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).parse(it)?.time ?: 0L } catch(e: Exception) { 0L }
+                    try { SimpleDateFormat("dd-MM-yyyy", Locale.US).parse(it)?.time ?: 0L } catch(e: Exception) { 0L }
                 }.maxOrNull() ?: 0L
 
                 android.util.Log.i("SyncRepository", "Replacement requested. Surgical wipe for ${backupDates.size} dates up to $latestBackupDateTs")
@@ -111,7 +112,7 @@ class SyncRepositoryImpl @Inject constructor(
                     val batch = firestore.batch()
                     chunk.forEach { doc ->
                         val houseDate = doc.getString("data") ?: ""
-                        val houseTs = try { SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).parse(houseDate)?.time ?: 0L } catch(e: Exception) { 0L }
+                        val houseTs = try { SimpleDateFormat("dd-MM-yyyy", Locale.US).parse(houseDate)?.time ?: 0L } catch(e: Exception) { 0L }
                         
                         // Delete if date matches backup or is older than the latest backup date
                         // (latestBackupDateTs == 0 means backup had no valid dates, so we don't wipe to be safe)
@@ -128,7 +129,7 @@ class SyncRepositoryImpl @Inject constructor(
                     val batch = firestore.batch()
                     chunk.forEach { doc ->
                         val activityDate = doc.id
-                        val activityTs = try { SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).parse(activityDate)?.time ?: 0L } catch(e: Exception) { 0L }
+                        val activityTs = try { SimpleDateFormat("dd-MM-yyyy", Locale.US).parse(activityDate)?.time ?: 0L } catch(e: Exception) { 0L }
                         
                         if (latestBackupDateTs > 0 && (backupDates.contains(activityDate) || activityTs <= latestBackupDateTs)) {
                             batch.delete(doc.reference)
@@ -154,11 +155,11 @@ class SyncRepositoryImpl @Inject constructor(
             // 2. Deduplicate Houses by Natural Multi-Field Key (Critical for restoration consistency)
             val houseOps = mutableMapOf<String, House>()
             finalHouses.forEach { house ->
-                val normalizedHouse = house.copy(agentName = officialAgentName)
+                val normalizedHouse = house.copy(agentName = officialAgentName.uppercase())
                 // Use a stable identifier to avoid duplicates between local DB (numeric IDs)
                 // and restored backups (ID 0). Sanitized to avoid Firestore path issues.
-                val naturalId = "${normalizedHouse.data}_${normalizedHouse.blockNumber}_${normalizedHouse.streetName}_${normalizedHouse.number}_${normalizedHouse.bairro}"
-                val docId = naturalId.replace("/", "_")
+                val naturalId = normalizedHouse.generateNaturalKey()
+                val docId = naturalId
                 
                 houseOps[docId] = normalizedHouse
             }
@@ -166,7 +167,7 @@ class SyncRepositoryImpl @Inject constructor(
             // 3. Deduplicate Activities by Date (prevents duplication with inconsistent names)
             val activityOps = mutableMapOf<String, DayActivity>()
             for (activity in finalActivities) {
-                val normalizedActivity = activity.copy(agentName = officialAgentName)
+                val normalizedActivity = activity.copy(agentName = officialAgentName.uppercase())
                 // Use ONLY date as docId to ensure one entry per day per agent
                 activityOps[normalizedActivity.date] = normalizedActivity
             }
@@ -278,49 +279,101 @@ class SyncRepositoryImpl @Inject constructor(
             // If pulling for SELF, we use Upsert to protect unsynced local work.
             val isTargetDifferentUser = targetUid != null && targetUid != auth.currentUser?.uid
             
-            if (isTargetDifferentUser) {
-                android.util.Log.i("SyncRepository", "Pulling for different user ($targetUid). Clearing local data first.")
-                houseDao.deleteAll()
-                dayActivityDao.deleteAll()
-            } else {
-                // RECONCILE TOMBSTONES: If pulling for SELF, check if any synced items were deleted in cloud
-                val agentDoc = userDocRef.get().await()
-                val deletedHouseIds = (agentDoc.get("deleted_house_ids") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
-                val deletedActivityDates = (agentDoc.get("deleted_activity_dates") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
-                
-                if (deletedHouseIds.isNotEmpty() || deletedActivityDates.isNotEmpty()) {
-                    android.util.Log.i("SyncRepository", "Reconciling tombstones on device: ${deletedHouseIds.size} houses, ${deletedActivityDates.size} activities")
+            database.withTransaction {
+                if (isTargetDifferentUser) {
+                    android.util.Log.i("SyncRepository", "Pulling for different user ($targetUid). Clearing local data first.")
+                    houseDao.deleteAll()
+                    dayActivityDao.deleteAll()
+                } else {
+                    // RECONCILE TOMBSTONES: If pulling for SELF, check if any synced items were deleted in cloud
+                    val agentDoc = userDocRef.get().await()
+                    val deletedHouseIds = (agentDoc.get("deleted_house_ids") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                    val deletedActivityDates = (agentDoc.get("deleted_activity_dates") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
                     
-                    val agentNameFromCloud = houses.firstOrNull()?.agentName 
-                        ?: activities.firstOrNull()?.agentName 
-                        ?: auth.currentUser?.displayName 
-                        ?: ""
+                    if (deletedHouseIds.isNotEmpty() || deletedActivityDates.isNotEmpty()) {
+                        android.util.Log.i("SyncRepository", "Reconciling tombstones on device: ${deletedHouseIds.size} houses, ${deletedActivityDates.size} activities")
+                        
+                        val agentNameFromCloud = houses.firstOrNull()?.agentName?.uppercase()
+                            ?: activities.firstOrNull()?.agentName?.uppercase()
+                            ?: auth.currentUser?.displayName?.uppercase()
+                            ?: ""
 
-                    deletedActivityDates.forEach { date ->
-                        database.withTransaction {
+                        deletedActivityDates.forEach { date ->
                             dayActivityDao.deleteDayActivity(date, agentNameFromCloud)
                             houseDao.deleteHousesByDateAndAgent(date, agentNameFromCloud)
                         }
+                        
+                        val allLocalHouses = houseDao.getAllHouses().first()
+                        for (house in allLocalHouses) {
+                            val naturalId = house.generateNaturalKey()
+                            if (naturalId in deletedHouseIds) {
+                                houseDao.deleteHouse(house)
+                            }
+                        }
+                        
+                        // Clear tombstones from cloud after successful application to phone
+                        userDocRef.update(
+                            "deleted_house_ids", com.google.firebase.firestore.FieldValue.delete(),
+                            "deleted_activity_dates", com.google.firebase.firestore.FieldValue.delete()
+                        ).await()
                     }
+                }
+                
+                // Deduplicate Houses locally to prevent auto-generated ID duplicates
+                val localHouses = houseDao.getAllHouses().first()
+                val localHouseGroups = localHouses.groupBy { it.generateNaturalKey() }
+                
+                val idsToKeep = mutableSetOf<Int>()
+                val housesToUpsert = mutableListOf<House>()
+
+                houses.forEach { cloudHouse ->
+                    val key = cloudHouse.generateNaturalKey()
+                    val matches = localHouseGroups[key] ?: emptyList()
                     
-                    val allLocalHouses = houseDao.getAllHouses().kotlinx.coroutines.flow.first()
-                    allLocalHouses.forEach { house ->
-                        val naturalId = "${house.data}_${house.blockNumber}_${house.streetName}_${house.number}_${house.bairro}".replace("/", "_")
-                        if (naturalId in deletedHouseIds) {
-                            houseDao.deleteHouse(house)
+                    val existingId = if (matches.isNotEmpty()) {
+                        val chosen = matches.first()
+                        idsToKeep.add(chosen.id)
+                        chosen.id
+                    } else 0
+                    
+                    housesToUpsert.add(cloudHouse.copy(
+                        id = existingId,
+                        agentName = cloudHouse.agentName.uppercase()
+                    ))
+                    
+                    // Identify potential "ghost" duplicates to delete
+                    if (matches.size > 1) {
+                        val ghosts = matches.drop(1)
+                        android.util.Log.w("SyncRepository", "Found ${matches.size} local matches for key $key. Marking ${ghosts.size} as ghosts.")
+                        // We will delete these after upsert to be safe
+                    }
+                }
+
+                val normalizedActivities = activities.map { activity ->
+                    activity.copy(
+                        date = activity.date.replace("/", "-"),
+                        agentName = activity.agentName.uppercase()
+                    )
+                }
+
+                houseDao.upsertHouses(housesToUpsert)
+                dayActivityDao.upsertDayActivities(normalizedActivities)
+
+                // Cleanup ghost duplicates: houses in local DB with same key but different IDs than the ones we kept
+                if (!isTargetDifferentUser) {
+                    for ((key, matches) in localHouseGroups) {
+                        if (matches.size > 1) {
+                            val keptIdForThisKey = housesToUpsert.find { it.generateNaturalKey() == key }?.id
+                            matches.forEach { match ->
+                                if (match.id != keptIdForThisKey && match.id != 0) {
+                                    android.util.Log.i("SyncRepository", "Deleting ghost duplicate: ID ${match.id} for key $key")
+                                    houseDao.deleteHouse(match)
+                                }
+                            }
                         }
                     }
-                    
-                    // Clear tombstones from cloud after successful application to phone
-                    userDocRef.update(
-                        "deleted_house_ids", com.google.firebase.firestore.FieldValue.delete(),
-                        "deleted_activity_dates", com.google.firebase.firestore.FieldValue.delete()
-                    ).await()
                 }
             }
-            
-            houseDao.upsertHouses(houses)
-            dayActivityDao.upsertDayActivities(activities)
             
             Result.success(Unit)
         } catch (e: Exception) {
@@ -406,7 +459,7 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun addAgentName(name: String): Result<Unit> {
         return try {
-            val normalizedName = name.trim()
+            val normalizedName = name.trim().uppercase()
             if (normalizedName.isBlank()) return Result.failure(Exception("Nome não pode ser vazio"))
 
             val docRef = firestore.collection("metadata").document("agent_info")
@@ -454,15 +507,40 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>): Result<Unit> {
         return try {
-            val dates = (houses.map { it.data } + activities.map { it.date }).distinct()
-            
             database.withTransaction {
-                if (dates.isNotEmpty()) {
-                    houseDao.deleteByAgentAndDates(agentName, dates)
-                    dayActivityDao.deleteByAgentAndDates(agentName, dates)
+                // Deduplicate Houses locally to prevent auto-generated ID duplicates
+                val localHouses = houseDao.getAllHouses().first()
+                val localHouseGroups = localHouses.groupBy { it.generateNaturalKey() }
+                
+                val normalizedActivities = activities.map { 
+                    it.copy(
+                        agentName = agentName.uppercase(),
+                        date = it.date.replace("/", "-")
+                    ) 
                 }
-                houseDao.insertAll(houses)
-                dayActivityDao.insertAll(activities)
+                val housesToUpsert = mutableListOf<House>()
+
+                houses.forEach { restoredHouse ->
+                    val key = restoredHouse.generateNaturalKey()
+                    val existingId = localHouseGroups[key]?.firstOrNull()?.id ?: 0
+                    
+                    housesToUpsert.add(restoredHouse.copy(
+                        id = existingId,
+                        agentName = agentName.uppercase(),
+                        data = restoredHouse.data.replace("/", "-")
+                    ))
+                }
+
+                houseDao.upsertHouses(housesToUpsert)
+                dayActivityDao.upsertDayActivities(normalizedActivities)
+                
+                // Cleanup ghosts
+                for ((key, matches) in localHouseGroups) {
+                    if (matches.size > 1) {
+                        val keptId = housesToUpsert.find { it.generateNaturalKey() == key }?.id
+                        matches.forEach { if (it.id != keptId && it.id != 0) houseDao.deleteHouse(it) }
+                    }
+                }
             }
             
             Result.success(Unit)

@@ -32,7 +32,7 @@ class BackupWorker @AssistedInject constructor(
             val backupData = BackupData(houses, activities)
 
             // Create filename with timestamp
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
             val filename = "backup_auto_$timestamp.json"
 
             // Get Documents/HealthAgentBackups directory

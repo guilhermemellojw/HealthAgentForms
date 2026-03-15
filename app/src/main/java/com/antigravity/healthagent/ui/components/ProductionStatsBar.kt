@@ -45,7 +45,7 @@ fun ProductionStatsBar(
             VerticalDivider(modifier = Modifier.height(28.dp).padding(horizontal = 4.dp), thickness = 1.dp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f))
             
             StatItem(label = "ELIMINADOS", value = totals.eliminados.toString(), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
-            StatItem(label = "LARVICIDA", value = String.format("%.1fg", totals.larvicida), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
+            StatItem(label = "LARVICIDA", value = String.format(java.util.Locale("pt", "BR"), "%.1fg", totals.larvicida), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
         }
     }
 }

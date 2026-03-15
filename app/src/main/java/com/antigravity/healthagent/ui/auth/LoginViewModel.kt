@@ -33,8 +33,13 @@ class LoginViewModel @Inject constructor(
                     _authState.value = AuthState.Authenticated(user)
                     
                     // Trigger sync in the background
-                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        syncRepository.pullCloudDataToLocal()
+                    @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        try {
+                            syncRepository.pullCloudDataToLocal()
+                        } catch (e: Exception) {
+                            android.util.Log.e("LoginViewModel", "Background sync failed", e)
+                        }
                     }
                 }
             }

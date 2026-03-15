@@ -18,29 +18,35 @@ class RestoreDataUseCase @Inject constructor(
             // 1. Get the agent name for this UID
             val usersResult = authRepository.fetchAllUsers()
             val user = usersResult.getOrNull()?.find { it.uid == targetUid }
-            val agentName = user?.agentName ?: "Restorado"
+            val agentName = user?.agentName?.uppercase() ?: "RESTORADO"
 
             // 2. Import the data using BackupManager
             val backupData = backupManager.importData(context, fileUri)
             
-            // 3. Perform restoration via syncRepository
-            val result = syncRepository.restoreLocalData(
-                agentName = agentName,
-                houses = backupData.houses,
-                activities = backupData.dayActivities
-            )
-            
-            if (result.isSuccess) {
-                // 4. Automatically push to cloud after restoration to ensure consistency
-                syncRepository.pushLocalDataToCloud(
-                    houses = backupData.houses,
-                    activities = backupData.dayActivities,
-                    targetUid = targetUid,
-                    shouldReplace = true
+            // Normalize the imported data so it aligns with the target user securely.
+            // Critical: Reset the id to 0 so Room treats them as new entries instead of overriding existing rows.
+            val normalizedHouses = backupData.houses.map { it.copy(id = 0, agentName = agentName) }
+            val normalizedActivities = backupData.dayActivities.map { it.copy(agentName = agentName) }
+
+            // 3. Perform restoration locally ONLY if targetUid is the current user.
+            // If an Admin is restoring data for someone else, we only push to the cloud.
+            val currentUserUid = authRepository.getCurrentUserUid()
+            if (targetUid == currentUserUid) {
+                val result = syncRepository.restoreLocalData(
+                    agentName = agentName,
+                    houses = normalizedHouses,
+                    activities = normalizedActivities
                 )
-            } else {
-                result
+                if (result.isFailure) return@withContext result
             }
+
+            // 4. Push to cloud for the specified targetUid
+            syncRepository.pushLocalDataToCloud(
+                houses = normalizedHouses,
+                activities = normalizedActivities,
+                targetUid = targetUid,
+                shouldReplace = true
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }
