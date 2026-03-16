@@ -154,7 +154,9 @@ class SyncRepositoryImpl @Inject constructor(
 
             // 2. Deduplicate Houses by Natural Multi-Field Key (Critical for restoration consistency)
             val houseOps = mutableMapOf<String, House>()
-            finalHouses.forEach { house ->
+            val normalizedHouses = com.antigravity.healthagent.utils.HouseNormalizationUtils.normalizeHouses(finalHouses)
+            
+            normalizedHouses.forEach { house ->
                 val normalizedHouse = house.copy(agentName = officialAgentName.uppercase())
                 // Use a stable identifier to avoid duplicates between local DB (numeric IDs)
                 // and restored backups (ID 0). Sanitized to avoid Firestore path issues.
@@ -326,7 +328,9 @@ class SyncRepositoryImpl @Inject constructor(
                 val idsToKeep = mutableSetOf<Int>()
                 val housesToUpsert = mutableListOf<House>()
 
-                houses.forEach { cloudHouse ->
+                val normalizedCloudHouses = com.antigravity.healthagent.utils.HouseNormalizationUtils.normalizeHouses(houses)
+
+                normalizedCloudHouses.forEach { cloudHouse ->
                     val key = cloudHouse.generateNaturalKey()
                     val matches = localHouseGroups[key] ?: emptyList()
                     
@@ -519,8 +523,9 @@ class SyncRepositoryImpl @Inject constructor(
                     ) 
                 }
                 val housesToUpsert = mutableListOf<House>()
+                val normalizedHouses = com.antigravity.healthagent.utils.HouseNormalizationUtils.normalizeHouses(houses)
 
-                houses.forEach { restoredHouse ->
+                normalizedHouses.forEach { restoredHouse ->
                     val key = restoredHouse.generateNaturalKey()
                     val existingId = localHouseGroups[key]?.firstOrNull()?.id ?: 0
                     

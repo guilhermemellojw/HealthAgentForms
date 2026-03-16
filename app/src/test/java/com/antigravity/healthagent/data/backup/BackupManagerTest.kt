@@ -6,6 +6,7 @@ import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.reflect.TypeToken
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.InputStreamReader
@@ -53,15 +54,15 @@ class BackupManagerTest {
 
     @Test
     fun testNaturalKeyUniqueness() {
-        val house1 = House(id = 1, blockNumber = "1", streetName = "Rua A", data = "10-01-2024", listOrder = 0, agentName = "AGENT")
-        val house2 = House(id = 2, blockNumber = "1", streetName = "Rua A", data = "10-01-2024", listOrder = 1, agentName = "AGENT")
+        val house1 = House(id = 1, blockNumber = "1", streetName = "Rua A", data = "10-01-2024", visitSegment = 0, agentName = "AGENT")
+        val house2 = House(id = 2, blockNumber = "1", streetName = "Rua A", data = "10-01-2024", visitSegment = 1, agentName = "AGENT")
         
         val key1 = house1.generateNaturalKey()
         val key2 = house2.generateNaturalKey()
         
-        assertTrue("Keys should be different for different listOrder values", key1 != key2)
-        assertTrue("Key should contain listOrder", key1.contains("_0"))
-        assertTrue("Key should contain listOrder", key2.contains("_1"))
+        assertNotEquals("Keys should be different for different visitSegment values", key1, key2)
+        assertTrue("Key should contain segment 0", key1.contains("_0"))
+        assertTrue("Key should contain segment 1", key2.contains("_1"))
     }
 
     // Helper to mimic BackupManager logic

@@ -10,7 +10,7 @@ import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.CustomStreet
 
-@Database(entities = [House::class, DayActivity::class, CustomStreet::class], version = 14, exportSchema = false)
+@Database(entities = [House::class, DayActivity::class, CustomStreet::class], version = 15, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun houseDao(): HouseDao
@@ -50,6 +50,15 @@ abstract class AppDatabase : RoomDatabase() {
                         PRIMARY KEY(`name`)
                     )
                 """)
+            }
+        }
+        val MIGRATION_14_15 = object : androidx.room.migration.Migration(14, 15) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // We use a fixed timestamp for existing records to ensure stability, 
+                // but since these are unique in the local DB already, they won't collide with each other.
+                // Using 0L or a fixed old timestamp is safer for historical records.
+                database.execSQL("ALTER TABLE houses ADD COLUMN createdAt INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE houses ADD COLUMN visitSegment INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

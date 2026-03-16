@@ -40,6 +40,7 @@ class HouseManagementUseCaseTest {
         override suspend fun countOpenDays(agentName: String): Int = 0
         override suspend fun closeAllDays(agentName: String) {}
         override suspend fun clearAllData() {}
+        override suspend fun <T> runInTransaction(block: suspend () -> T): T = block()
     }
 
     private val dummyHouseDao = object : HouseDao {

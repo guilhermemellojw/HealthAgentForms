@@ -98,8 +98,9 @@ class HouseRepositoryImpl @Inject constructor(
                 ) 
             }
             val housesToUpsert = mutableListOf<House>()
+            val normalizedHouses = com.antigravity.healthagent.utils.HouseNormalizationUtils.normalizeHouses(houses)
 
-            houses.forEach { restoredHouse ->
+            normalizedHouses.forEach { restoredHouse ->
                 val key = restoredHouse.generateNaturalKey()
                 val existingId = localHouseGroups[key]?.firstOrNull()?.id ?: 0
                 

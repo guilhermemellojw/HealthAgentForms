@@ -37,7 +37,9 @@ data class House(
     val localidadeConcluida: Boolean = false,
     val blockSequence: String = "",
     val quarteiraoConcluido: Boolean = false,
-    val listOrder: Long = 0 // For manual reordering
+    val listOrder: Long = 0, // For manual reordering
+    val visitSegment: Int = 0, // To distinguish return trips to the same street
+    val createdAt: Long = System.currentTimeMillis()
 ) {
     @com.google.firebase.firestore.DocumentId
     @androidx.room.Ignore
@@ -49,6 +51,6 @@ data class House(
         val normalizedBairro = bairro.trim().replace(Regex("\\s+"), " ")
         val normalizedAgent = agentName.trim().replace(Regex("\\s+"), " ")
         
-        return "${normalizedAgent}_${normalizedDate}_${blockNumber.trim()}_${blockSequence.trim()}_${normalizedStreet}_${number.trim()}_${sequence ?: 0}_${complement ?: 0}_${normalizedBairro}".uppercase()
+        return "${normalizedAgent}_${normalizedDate}_${blockNumber.trim()}_${blockSequence.trim()}_${normalizedStreet}_${number.trim()}_${sequence ?: 0}_${complement ?: 0}_${normalizedBairro}_${visitSegment}".uppercase()
     }
 }

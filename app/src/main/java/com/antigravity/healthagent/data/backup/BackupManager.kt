@@ -123,7 +123,7 @@ class BackupManager @Inject constructor() {
     }
 
     private fun sanitizeHouses(houses: List<House>): List<House> {
-        return houses.map { house ->
+        val mappedHouses = houses.map { house ->
             house.copy(
                 agentName = house.agentName?.trim()?.uppercase() ?: "",
                 municipio = house.municipio?.trim()?.uppercase() ?: "BOM JARDIM",
@@ -136,12 +136,16 @@ class BackupManager @Inject constructor() {
                 complement = house.complement ?: 0,
                 data = house.data?.replace("/", "-")?.trim() ?: "",
                 listOrder = house.listOrder,
+                // Legacy Support: If createdAt is missing or 0, use listOrder as a stable differentiator 
+                // for this specific backup file. This preserves collisions that were separate in the JSON.
+                createdAt = if (house.createdAt == 0L) house.listOrder else house.createdAt,
                 ciclo = house.ciclo?.trim() ?: "1º",
                 categoria = house.categoria?.trim() ?: "BRR",
                 zona = house.zona?.trim() ?: "URB",
                 tipo = house.tipo
             )
         }
+        return com.antigravity.healthagent.utils.HouseNormalizationUtils.normalizeHouses(mappedHouses)
     }
 
     private fun sanitizeActivities(activities: List<DayActivity>): List<DayActivity> {
