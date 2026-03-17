@@ -313,6 +313,27 @@ class HomeViewModel @Inject constructor(
         blocks.find { it.id == selectedId }?.houses ?: emptyList()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // Helper to filter houses by Year (Semester removed)
+    private fun filterByYear(houses: List<House>, year: String): List<House> {
+        return houses.filter { house ->
+            val date = try { dateFormatter.parse(house.data) } catch (e: Exception) { null }
+            if (date != null) {
+                val cal = Calendar.getInstance().apply { time = date }
+                val hYear = cal.get(Calendar.YEAR).toString()
+                hYear == year
+            } else false
+        }
+    }
+
+    val rgBairros: StateFlow<List<String>> = combine(allHousesFlow, _rgYear, _agentName) { all, year, agent ->
+        filterByYear(all, year)
+            .filter { it.agentName.equals(agent, ignoreCase = true) }
+            .map { it.bairro.trim().formatStreetName() }
+            .distinct()
+            .sorted()
+    }.flowOn(Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     init {
         viewModelScope.launch {
             loadDynamicConfig()
@@ -550,27 +571,6 @@ class HomeViewModel @Inject constructor(
 
 
     // Helper to filter houses by Year (Semester removed)
-    private fun filterByYear(houses: List<House>, year: String): List<House> {
-        return houses.filter { house ->
-            val date = try { dateFormatter.parse(house.data) } catch (e: Exception) { null }
-            if (date != null) {
-                val cal = Calendar.getInstance().apply { time = date }
-                val hYear = cal.get(Calendar.YEAR).toString()
-                hYear == year
-            } else false
-        }
-    }
-
-
-
-    val rgBairros: StateFlow<List<String>> = combine(allHousesFlow, _rgYear, _agentName) { all, year, agent ->
-        filterByYear(all, year)
-            .filter { it.agentName.equals(agent, ignoreCase = true) }
-            .map { it.bairro.trim().formatStreetName() }
-            .distinct()
-            .sorted()
-    }.flowOn(Dispatchers.Default)
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
 
 
