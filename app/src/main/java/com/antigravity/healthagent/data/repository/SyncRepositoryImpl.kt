@@ -748,4 +748,29 @@ class SyncRepositoryImpl @Inject constructor(
             Result.failure(e)
         }
     }
+
+    override suspend fun recordBulkDeletions(houseKeys: List<String>, activityDates: List<String>): Result<Unit> {
+        return try {
+            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("User not authenticated"))
+            val docRef = firestore.collection("agents").document(uid)
+
+            // Firestore limits arrayUnion/update to some extent, but mainly chunking for safety 
+            // and to avoid payload size limits if lists are massive.
+            if (houseKeys.isNotEmpty()) {
+                houseKeys.chunked(400).forEach { chunk ->
+                    docRef.update("deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayUnion(*chunk.toTypedArray())).await()
+                }
+            }
+
+            if (activityDates.isNotEmpty()) {
+                activityDates.chunked(400).forEach { chunk ->
+                    docRef.update("deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(*chunk.toTypedArray())).await()
+                }
+            }
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }

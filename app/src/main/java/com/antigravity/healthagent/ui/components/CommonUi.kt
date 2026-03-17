@@ -731,7 +731,7 @@ fun GlassTopAppBar(
             )
         )
         
-        CenterAlignedTopAppBar(
+        TopAppBar(
             title = title,
             navigationIcon = navigationIcon,
             actions = {
@@ -746,7 +746,7 @@ fun GlassTopAppBar(
                 }
             },
             scrollBehavior = scrollBehavior,
-            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+            colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = Color.Transparent,
                 titleContentColor = MaterialTheme.colorScheme.onPrimary,
                 navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,

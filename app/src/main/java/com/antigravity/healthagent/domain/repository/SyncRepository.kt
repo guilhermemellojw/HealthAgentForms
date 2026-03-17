@@ -78,6 +78,7 @@ interface SyncRepository {
     // Local-to-Cloud Deletion Synchronization (Tombstones)
     suspend fun recordHouseDeletion(house: House): Result<Unit>
     suspend fun recordActivityDeletion(date: String, agentName: String): Result<Unit>
+    suspend fun recordBulkDeletions(houseKeys: List<String>, activityDates: List<String>): Result<Unit>
 }
 
 data class AgentData(

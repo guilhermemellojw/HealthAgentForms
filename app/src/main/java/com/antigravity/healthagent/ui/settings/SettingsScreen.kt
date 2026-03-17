@@ -64,6 +64,11 @@ fun SettingsScreen(
     // State for Restore Dialog
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var showEraseConfirm by remember { mutableStateOf(false) }
+    var showCleanupPicker by remember { mutableStateOf(false) }
+    var showCleanupConfirm by remember { mutableStateOf(false) }
+    var selectedCleanupDate by remember { mutableStateOf("") }
+    
+    val datePickerState = rememberDatePickerState()
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val context = LocalContext.current
 
@@ -120,6 +125,50 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showRestoreConfirm = false }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    if (showCleanupPicker) {
+        DatePickerDialog(
+            onDismissRequest = { showCleanupPicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    val selection = datePickerState.selectedDateMillis
+                    if (selection != null) {
+                        val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US)
+                        selectedCleanupDate = sdf.format(java.util.Date(selection))
+                        showCleanupPicker = false
+                        showCleanupConfirm = true
+                    }
+                }) { Text("Confirmar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCleanupPicker = false }) { Text("Cancelar") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    if (showCleanupConfirm) {
+        AlertDialog(
+            onDismissRequest = { showCleanupConfirm = false },
+            title = { Text("Confirmar Limpeza") },
+            text = { Text("Isso removerápermanentemente todos os dados ANTERIORES a $selectedCleanupDate localmente e na nuvem. Deseja continuar?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showCleanupConfirm = false
+                        viewModel.cleanupHistoricalData(selectedCleanupDate)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Sim, Limpar Histórico")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCleanupConfirm = false }) { Text("Cancelar") }
             }
         )
     }
@@ -210,9 +259,10 @@ fun SettingsScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // --- SEÇÃO 1: PERSONALIZAÇÃO ---
                 item {
                     SettingsSection(
-                        title = "Aparência",
+                        title = "Personalização",
                         icon = Icons.Outlined.Palette
                     ) {
                         val currentMode by viewModel.themeMode.collectAsState(initial = "SYSTEM")
@@ -289,12 +339,82 @@ fun SettingsScreen(
                         }
 
                         HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+                        
+                        // Efeitos Sonoros moved inside Personalização
+                        val popSound by viewModel.popSound.collectAsState()
+                        val successSound by viewModel.successSound.collectAsState()
+                        val celebrationSound by viewModel.celebrationSound.collectAsState()
+                        val warningSound by viewModel.warningSound.collectAsState()
+                        
+                        var expandedCategory by remember { mutableStateOf<String?>(null) }
+                        
+                        SoundSelectionGroup(
+                            title = "Sons do Aplicativo",
+                            description = "Clique, Sucesso, Celebração e Alerta",
+                            popSound = popSound,
+                            successSound = successSound,
+                            celebrationSound = celebrationSound,
+                            warningSound = warningSound,
+                            expandedCategory = expandedCategory,
+                            onExpandToggle = { cat -> expandedCategory = if (expandedCategory == cat) null else cat },
+                            onSoundSelect = { cat, uri -> 
+                                when(cat) {
+                                    "POP" -> viewModel.updatePopSound(uri)
+                                    "SUCCESS" -> viewModel.updateSuccessSound(uri)
+                                    "CELEBRATION" -> viewModel.updateCelebrationSound(uri)
+                                    "WARNING" -> viewModel.updateWarningSound(uri)
+                                }
+                            },
+                            onSystemPickerClick = { cat, uri -> launchSystemPicker(cat, uri) },
+                            onCustomFileClick = { cat -> 
+                                when(cat) {
+                                    com.antigravity.healthagent.utils.SoundCategory.POP -> importPopSoundLauncher.launch(arrayOf("audio/*"))
+                                    com.antigravity.healthagent.utils.SoundCategory.SUCCESS -> importSuccessSoundLauncher.launch(arrayOf("audio/*"))
+                                    com.antigravity.healthagent.utils.SoundCategory.CELEBRATION -> importCelebrationSoundLauncher.launch(arrayOf("audio/*"))
+                                    com.antigravity.healthagent.utils.SoundCategory.WARNING -> importWarningSoundLauncher.launch(arrayOf("audio/*"))
+                                }
+                            },
+                            onTestSound = { uri -> viewModel.playPreview(uri) },
+                            context = context,
+                            viewModel = viewModel
+                        )
+                    }
+                }
+
+                // --- SEÇÃO 2: PREFERÊNCIAS DE TRABALHO ---
+                item {
+                    SettingsSection(
+                        title = "Preferências de Trabalho",
+                        icon = Icons.Outlined.Assignment // Assignment fits and has an outlined version
+                    ) {
+                        val maxHouses by viewModel.maxOpenHouses.collectAsState()
+                        
+                        // Meta Diária is read-only for regular users
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Flag, null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text("Meta Diária", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                                    Text("$maxHouses Imóveis", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
 
                         val isEasyMode by viewModel.easyMode.collectAsState()
                         
                         ListItem(
                             headlineContent = { Text("Modo Fácil") },
-                            supportingContent = { Text("Interface simplificada com visualização otimizada") },
+                            supportingContent = { Text("Interface simplificada com botões maiores") },
                             leadingContent = { Icon(Icons.Outlined.AccessibilityNew, contentDescription = null) },
                             trailingContent = {
                                 Switch(
@@ -310,7 +430,7 @@ fun SettingsScreen(
                         
                         ListItem(
                             headlineContent = { Text("Modo Solar") },
-                            supportingContent = { Text("Alto contraste para visibilidade sob luz solar direta") },
+                            supportingContent = { Text("Alto contraste para visibilidade no sol") },
                             leadingContent = { Icon(Icons.Outlined.WbSunny, contentDescription = null) },
                             trailingContent = {
                                 Switch(
@@ -324,184 +444,84 @@ fun SettingsScreen(
                     }
                 }
 
+                // --- SEÇÃO 3: DADOS E BACKUP LOCAL ---
                 item {
                     SettingsSection(
-                        title = "Efeitos Sonoros",
-                        icon = Icons.Default.NotificationsActive
-                    ) {
-                        val popSound by viewModel.popSound.collectAsState()
-                        val successSound by viewModel.successSound.collectAsState()
-                        val celebrationSound by viewModel.celebrationSound.collectAsState()
-                        val warningSound by viewModel.warningSound.collectAsState()
-                        
-                        var expandedCategory by remember { mutableStateOf<String?>(null) }
-                        
-                        SoundSelectionGroup(
-                            title = "Som de Clique",
-                            description = "Ao adicionar imóveis",
-                            currentSoundUri = popSound,
-                            isExpanded = expandedCategory == "POP",
-                            onExpandToggle = { expandedCategory = if (expandedCategory == "POP") null else "POP" },
-                            onSoundSelect = { viewModel.updatePopSound(it) },
-                            onSystemPickerClick = { launchSystemPicker(com.antigravity.healthagent.utils.SoundCategory.POP, popSound) },
-                            onCustomFileClick = { importPopSoundLauncher.launch(arrayOf("audio/*")) },
-                            onTestSound = { viewModel.playPreview(popSound) },
-                            context = context,
-                            viewModel = viewModel
-                        )
-                        
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                        
-                        SoundSelectionGroup(
-                            title = "Som de Sucesso",
-                            description = "Ao fechar o dia",
-                            currentSoundUri = successSound,
-                            isExpanded = expandedCategory == "SUCCESS",
-                            onExpandToggle = { expandedCategory = if (expandedCategory == "SUCCESS") null else "SUCCESS" },
-                            onSoundSelect = { viewModel.updateSuccessSound(it) },
-                            onSystemPickerClick = { launchSystemPicker(com.antigravity.healthagent.utils.SoundCategory.SUCCESS, successSound) },
-                            onCustomFileClick = { importSuccessSoundLauncher.launch(arrayOf("audio/*")) },
-                            onTestSound = { viewModel.playPreview(successSound) },
-                            context = context,
-                            viewModel = viewModel
-                        )
-                        
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                        
-                        SoundSelectionGroup(
-                            title = "Som de Celebração",
-                            description = "Ao atingir a meta diária",
-                            currentSoundUri = celebrationSound,
-                            isExpanded = expandedCategory == "CELEBRATION",
-                            onExpandToggle = { expandedCategory = if (expandedCategory == "CELEBRATION") null else "CELEBRATION" },
-                            onSoundSelect = { viewModel.updateCelebrationSound(it) },
-                            onSystemPickerClick = { launchSystemPicker(com.antigravity.healthagent.utils.SoundCategory.CELEBRATION, celebrationSound) },
-                            onCustomFileClick = { importCelebrationSoundLauncher.launch(arrayOf("audio/*")) },
-                            onTestSound = { viewModel.playPreview(celebrationSound) },
-                            context = context,
-                            viewModel = viewModel
-                        )
-                        
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                        
-                        SoundSelectionGroup(
-                            title = "Som de Alerta",
-                            description = "Ao detectar erros",
-                            currentSoundUri = warningSound,
-                            isExpanded = expandedCategory == "WARNING",
-                            onExpandToggle = { expandedCategory = if (expandedCategory == "WARNING") null else "WARNING" },
-                            onSoundSelect = { viewModel.updateWarningSound(it) },
-                            onSystemPickerClick = { launchSystemPicker(com.antigravity.healthagent.utils.SoundCategory.WARNING, warningSound) },
-                            onCustomFileClick = { importWarningSoundLauncher.launch(arrayOf("audio/*")) },
-                            onTestSound = { viewModel.playPreview(warningSound) },
-                            context = context,
-                            viewModel = viewModel
-                        )
-                    }
-                }
-
-                item {
-                    SettingsSection(
-                        title = "Limites de Produção",
-                        icon = Icons.Outlined.Schedule
-                    ) {
-                        val maxHouses by viewModel.maxOpenHouses.collectAsState()
-                        
-                        Text(
-                            text = "Limite de Casas Abertas: $maxHouses",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        
-                        Slider(
-                            value = maxHouses.toFloat(),
-                            onValueChange = { viewModel.updateMaxOpenHouses(it.toInt()) },
-                            valueRange = 25f..35f,
-                            steps = 9,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-
-                item {
-                    SettingsSection(
-                        title = "Gerenciamento de Dados",
-                        icon = Icons.Outlined.Backup
+                        title = "Dados e Backup Local",
+                        icon = Icons.Outlined.Storage
                     ) {
                         ListItem(
-                            headlineContent = { Text("Backup Manual") },
-                            supportingContent = { Text("Salvar uma cópia de segurança agora") },
-                            leadingContent = { Icon(Icons.Default.Share, contentDescription = null) },
+                            headlineContent = { Text("Exportar Backup") },
+                            supportingContent = { Text("Gerar arquivo JSON para segurança") },
+                            leadingContent = { Icon(Icons.Default.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                             modifier = Modifier.fillMaxWidth().clickable { 
                                 viewModel.backupDataAndShare(context) 
                             }
                         )
                         
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                        
-                        val isSyncing by viewModel.isSyncing.collectAsState()
-                        
-                        ListItem(
-                            headlineContent = { Text("Sincronizar com a Nuvem") },
-                            supportingContent = { Text("Enviar dados atualizados para o servidor") },
-                            leadingContent = { 
-                                if (isSyncing) CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                                else Icon(Icons.Default.CloudUpload, contentDescription = null)
-                            },
-                            modifier = Modifier.fillMaxWidth().clickable(enabled = !isSyncing) { 
-                                viewModel.syncDataToCloud()
-                            }
-                        )
-
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-                        ListItem(
-                            headlineContent = { Text("Baixar dados da Nuvem") },
-                            supportingContent = { Text("Recuperar seus dados guardados no servidor") },
-                            leadingContent = { 
-                                if (isSyncing) CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                                else Icon(Icons.Default.CloudDownload, contentDescription = null)
-                            },
-                            modifier = Modifier.fillMaxWidth().clickable(enabled = !isSyncing) { 
-                                viewModel.pullDataFromCloud()
-                            }
-                        )
-
                         if (isAdmin) {
                             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                            
                             ListItem(
-                                headlineContent = { Text("Painel de Gestão (Admin)") },
-                                leadingContent = { Icon(Icons.Default.Security, null, tint = MaterialTheme.colorScheme.primary) },
-                                modifier = Modifier.fillMaxWidth().clickable { onOpenAdmin() }
+                                headlineContent = { Text("Restaurar Backup") },
+                                supportingContent = { Text("Importar dados de um arquivo JSON") },
+                                leadingContent = { Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                modifier = Modifier.fillMaxWidth().clickable { 
+                                    showRestoreConfirm = true
+                                }
                             )
                         }
                     }
                 }
 
-                if (isAdmin) {
+                // --- SEÇÃO 4: ADMINISTRAÇÃO ---
+                if (canAccessAdmin) {
                     item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f)),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(16.dp)
+                        SettingsSection(
+                            title = "Administração",
+                            icon = Icons.Outlined.AdminPanelSettings
                         ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text("Zona de Perigo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                ListItem(
-                                    headlineContent = { Text("Restaurar Backup", color = MaterialTheme.colorScheme.error) },
-                                    leadingContent = { Icon(Icons.Default.Restore, null, tint = MaterialTheme.colorScheme.error) },
-                                    modifier = Modifier.clickable { showRestoreConfirm = true },
-                                    colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                                )
-                                ListItem(
-                                    headlineContent = { Text("Apagar Tudo", color = MaterialTheme.colorScheme.error) },
-                                    leadingContent = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                                    modifier = Modifier.clickable { showEraseConfirm = true },
-                                    colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                                )
+                            ListItem(
+                                headlineContent = { Text("Painel de Gestão") },
+                                supportingContent = { Text("Controle de usuários e sincronização") },
+                                leadingContent = { Icon(Icons.Default.Security, null, tint = MaterialTheme.colorScheme.primary) },
+                                modifier = Modifier.fillMaxWidth().clickable { onOpenAdmin() }
+                            )
+
+                            if (isAdmin) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
+                                ) {
+                                    Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                                        Text(
+                                            "ZONA DE PERIGO", 
+                                            style = MaterialTheme.typography.labelSmall, 
+                                            fontWeight = FontWeight.Black, 
+                                            color = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.padding(16.dp)
+                                        )
+                                        
+                                        ListItem(
+                                            headlineContent = { Text("Limpar Histórico Antigo", color = MaterialTheme.colorScheme.error) },
+                                            supportingContent = { Text("Remover dados anteriores a uma data", color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)) },
+                                            leadingContent = { Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.error) },
+                                            modifier = Modifier.clickable { showCleanupPicker = true },
+                                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                                        )
+                                        ListItem(
+                                            headlineContent = { Text("Apagar Tudo", color = MaterialTheme.colorScheme.error) },
+                                            supportingContent = { Text("Resetar banco de dados local", color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)) },
+                                            leadingContent = { Icon(Icons.Default.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
+                                            modifier = Modifier.clickable { showEraseConfirm = true },
+                                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -544,56 +564,105 @@ fun SettingsSection(
 fun SoundSelectionGroup(
     title: String,
     description: String,
-    currentSoundUri: String,
-    isExpanded: Boolean,
-    onExpandToggle: () -> Unit,
-    onSoundSelect: (String) -> Unit,
-    onSystemPickerClick: () -> Unit,
-    onCustomFileClick: () -> Unit,
-    onTestSound: () -> Unit,
+    popSound: String,
+    successSound: String,
+    celebrationSound: String,
+    warningSound: String,
+    expandedCategory: String?,
+    onExpandToggle: (String) -> Unit,
+    onSoundSelect: (String, String) -> Unit,
+    onSystemPickerClick: (com.antigravity.healthagent.utils.SoundCategory, String) -> Unit,
+    onCustomFileClick: (com.antigravity.healthagent.utils.SoundCategory) -> Unit,
+    onTestSound: (String) -> Unit,
     context: android.content.Context,
     viewModel: HomeViewModel
 ) {
     PremiumCard(modifier = Modifier.fillMaxWidth().animateContentSize()) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onExpandToggle).padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.NotificationsActive, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(12.dp))
+                Column {
                     Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(text = description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Icon(imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
             }
-            if (isExpanded) {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    val currentTitle = remember(currentSoundUri) { viewModel.getSoundTitle(currentSoundUri, context) }
-                    Text(text = "Selecionado: $currentTitle", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    
-                    Row(modifier = Modifier.fillMaxWidth().clickable { onSoundSelect("SILENT") }, verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = currentSoundUri == "SILENT", onClick = { onSoundSelect("SILENT") })
-                        Text("Silencioso", modifier = Modifier.padding(start = 8.dp))
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            val sounds = listOf(
+                Triple("POP", "Som de Clique (Adicionar Imóvel)", popSound),
+                Triple("SUCCESS", "Som de Sucesso (Fechar Dia)", successSound),
+                Triple("CELEBRATION", "Som de Celebração (Meta)", celebrationSound),
+                Triple("WARNING", "Som de Alerta (Erros)", warningSound)
+            )
+            
+            sounds.forEachIndexed { index, (id, label, currentUri) ->
+                val isExpanded = expandedCategory == id
+                val currentTitle = remember(currentUri) { viewModel.getSoundTitle(currentUri, context) }
+                
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onExpandToggle(id) }
+                        .padding(vertical = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                            Text(currentTitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Icon(
+                            imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
-                    Row(modifier = Modifier.fillMaxWidth().clickable { onSystemPickerClick() }, verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = currentSoundUri.startsWith("content://"), onClick = { onSystemPickerClick() })
-                        Text("Som do Sistema", modifier = Modifier.padding(start = 8.dp))
-                    }
-                    Row(modifier = Modifier.fillMaxWidth().clickable { onCustomFileClick() }, verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = currentSoundUri.startsWith("file://"), onClick = { onCustomFileClick() })
-                        Text("Personalizado", modifier = Modifier.padding(start = 8.dp))
-                    }
                     
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    if (currentSoundUri != "SILENT") {
-                        TextButton(onClick = onTestSound, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Default.PlayArrow, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Testar Som")
+                    if (isExpanded) {
+                        Column(modifier = Modifier.padding(top = 8.dp).animateContentSize()) {
+                            Row(modifier = Modifier.fillMaxWidth().clickable { onSoundSelect(id, "SILENT") }, verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = currentUri == "SILENT", onClick = { onSoundSelect(id, "SILENT") })
+                                Text("Silencioso", style = MaterialTheme.typography.bodyMedium)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth().clickable { 
+                                onSystemPickerClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id), currentUri) 
+                            }, verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = currentUri.startsWith("content://"), onClick = { 
+                                    onSystemPickerClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id), currentUri) 
+                                })
+                                Text("Som do Sistema", style = MaterialTheme.typography.bodyMedium)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth().clickable { 
+                                onCustomFileClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id)) 
+                            }, verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = currentUri.startsWith("file://"), onClick = { 
+                                    onCustomFileClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id)) 
+                                })
+                                Text("Personalizado", style = MaterialTheme.typography.bodyMedium)
+                            }
+                            
+                            if (currentUri != "SILENT") {
+                                TextButton(
+                                    onClick = { onTestSound(currentUri) },
+                                    modifier = Modifier.align(Alignment.End)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Testar")
+                                }
+                            }
                         }
                     }
+                }
+                
+                if (index < sounds.size - 1) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 }
             }
         }

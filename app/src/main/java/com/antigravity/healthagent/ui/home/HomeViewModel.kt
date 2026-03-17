@@ -49,7 +49,8 @@ class HomeViewModel @Inject constructor(
     private val syncDataUseCase: com.antigravity.healthagent.domain.usecase.SyncDataUseCase,
     private val getWeeklySummaryUseCase: com.antigravity.healthagent.domain.usecase.GetWeeklySummaryUseCase,
     private val getBoletimSummaryUseCase: com.antigravity.healthagent.domain.usecase.GetBoletimSummaryUseCase,
-    private val getRGBlocksUseCase: com.antigravity.healthagent.domain.usecase.GetRGBlocksUseCase
+    private val getRGBlocksUseCase: com.antigravity.healthagent.domain.usecase.GetRGBlocksUseCase,
+    private val cleanupHistoricalDataUseCase: com.antigravity.healthagent.domain.usecase.CleanupHistoricalDataUseCase
 ) : ViewModel() {
 
     // --- State Definitions ---
@@ -290,7 +291,7 @@ class HomeViewModel @Inject constructor(
     val customActivities: StateFlow<Set<String>> = settingsManager.customActivities
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
-    val availableYears: StateFlow<List<String>> = houses.map { all ->
+    val availableYears: StateFlow<List<String>> = allHousesFlow.map { all ->
         all.mapNotNull { 
             try { 
                 val d = dateFormatter.parse(it.data)
@@ -302,7 +303,7 @@ class HomeViewModel @Inject constructor(
         }.distinct().sortedDescending()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(Calendar.getInstance().get(Calendar.YEAR).toString()))
 
-    val rgBlocks: StateFlow<List<BlockSegment>> = combine(houses, _selectedRgBairro, _rgYear) { h, b, y ->
+    val rgBlocks: StateFlow<List<BlockSegment>> = combine(allHousesFlow, _selectedRgBairro, _rgYear) { h, b, y ->
         getRGBlocksUseCase(h, b, y)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -350,7 +351,10 @@ class HomeViewModel @Inject constructor(
             maxOpenHouses,
             rgBlocks,
             weeklySummary,
-            boletimList
+            boletimList,
+            agentNames,
+            bairrosList,
+            rgBairros
         ) { args ->
             val h = args[0] as List<House>
             val d = args[1] as String
@@ -390,6 +394,8 @@ class HomeViewModel @Inject constructor(
                     rgBlocks = args[29] as List<BlockSegment>,
                     weeklySummary = args[30] as List<DaySummary>,
                     boletimList = args[31] as List<BoletimSummary>,
+                    agentNames = args[32] as List<String>,
+                    bairrosList = args[33] as List<String>,
                     currentBlock = args[16] as String,
                     currentBlockSequence = args[17] as String,
                     currentStreet = args[18] as String,
@@ -404,7 +410,8 @@ class HomeViewModel @Inject constructor(
                     customActivities = args[25] as Set<String>,
                     isEasyMode = args[26] as Boolean,
                     isSolarMode = args[27] as Boolean,
-                    maxOpenHouses = args[28] as Int
+                    maxOpenHouses = args[28] as Int,
+                    rgBairros = args[34] as List<String>
                 )
             }
         }.launchIn(viewModelScope)
@@ -556,8 +563,9 @@ class HomeViewModel @Inject constructor(
 
 
 
-    val rgBairros: StateFlow<List<String>> = combine(houses, _rgYear) { all, year ->
+    val rgBairros: StateFlow<List<String>> = combine(allHousesFlow, _rgYear, _agentName) { all, year, agent ->
         filterByYear(all, year)
+            .filter { it.agentName.equals(agent, ignoreCase = true) }
             .map { it.bairro.trim().formatStreetName() }
             .distinct()
             .sorted()
@@ -765,11 +773,18 @@ class HomeViewModel @Inject constructor(
                 // 1. Push local data to cloud
                 val houses = repository.getAllHousesOnce()
                 val activities = repository.getAllDayActivitiesOnce()
-                val result = syncRepository.pushLocalDataToCloud(houses, activities, targetUid)
-                if (result.isSuccess) {
-                    _uiEvent.value = "Dados sincronizados com sucesso."
+                val pushResult = syncRepository.pushLocalDataToCloud(houses, activities, targetUid)
+                
+                if (pushResult.isSuccess) {
+                    // 2. Pull cloud data to local
+                    val pullResult = syncRepository.pullCloudDataToLocal(targetUid)
+                    if (pullResult.isSuccess) {
+                        _uiEvent.value = "Sincronização completa com sucesso."
+                    } else {
+                        _uiEvent.value = "Dados enviados, mas houve erro ao baixar: ${pullResult.exceptionOrNull()?.message}"
+                    }
                 } else {
-                    _uiEvent.value = "Falha ao sincronizar: ${result.exceptionOrNull()?.message}"
+                    _uiEvent.value = "Falha ao enviar dados: ${pushResult.exceptionOrNull()?.message}"
                 }
             } catch (e: Exception) {
                 _uiEvent.value = "Erro na sincronização: ${e.message}"
@@ -1572,6 +1587,34 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    fun cleanupHistoricalData(beforeDate: String) {
+        if (_isSyncing.value) return
+        _isSyncing.value = true
+        _uiEvent.value = "Iniciando limpeza de histórico..."
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val result = cleanupHistoricalDataUseCase(beforeDate, _agentName.value)
+                withContext(Dispatchers.Main) {
+                    if (result.isSuccess) {
+                        _uiEvent.value = "Histórico anterior a $beforeDate removido com sucesso."
+                        soundManager.playSuccess()
+                    } else {
+                        _uiEvent.value = "Erro na limpeza: ${result.exceptionOrNull()?.message}"
+                        soundManager.playWarning()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    _uiEvent.value = "Erro inesperado: ${e.message}"
+                    soundManager.playWarning()
+                }
+            } finally {
+                _isSyncing.value = false
+            }
+        }
+    }
+
     fun importDayData(context: Context, uri: android.net.Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -1766,7 +1809,7 @@ class HomeViewModel @Inject constructor(
             isTreated = situation != Situation.NONE,
             blockDisplay = if (blockSequence.isNotBlank()) "$blockNumber / $blockSequence" else blockNumber,
             formattedStreet = "$streetDisplay, $number",
-            treatmentShortSummary = if (situation == Situation.NONE) "Pendente" else situation.name
+            treatmentShortSummary = if (situation == Situation.NONE) "" else situation.name
         )
     }
 }

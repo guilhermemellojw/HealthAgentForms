@@ -398,7 +398,7 @@ fun HomeScreen(
         AlertDialog(
             onDismissRequest = { viewModel.dismissMoveConfirmation() },
             title = { Text("Confirmar Movimentação") },
-            text = { Text("O dia selecionado já atingiu o limite de produção. Deseja mover o imóvel mesmo assim?") },
+            text = { Text("O dia selecionado já atingiu a Meta Diária. Deseja mover o imóvel mesmo assim?") },
             confirmButton = {
                 TextButton(
                     onClick = { viewModel.confirmMoveHouse() },
@@ -694,7 +694,6 @@ fun HomeScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
         ) {
             MeshGradient(modifier = Modifier.fillMaxSize())
             Column(modifier = Modifier.fillMaxSize()) {

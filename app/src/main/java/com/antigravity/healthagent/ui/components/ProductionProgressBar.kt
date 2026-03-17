@@ -56,7 +56,7 @@ fun ProductionProgressBar(
     val barHeight = if (isEasyMode) 10.dp else 6.dp
     val labelSize = if (isEasyMode) 12.sp else 10.sp
     val countSize = if (isEasyMode) 16.sp else MaterialTheme.typography.labelMedium.fontSize
-    val verticalPadding = if (isEasyMode) 14.dp else 9.dp
+    val verticalPadding = if (isEasyMode) 8.dp else 4.dp
 
     Box(
         modifier = modifier.fillMaxWidth()

@@ -27,7 +27,8 @@ class GetRGBlocksUseCase @Inject constructor() {
         val bairroHouses = allHouses.filter { it.bairro.equals(selectedBairro, ignoreCase = true) }
         val segments = mutableListOf<BlockSegment>()
         
-        val sortedHouses = bairroHouses.sortedWith(compareBy({ getTimestamp(it.data) }, { it.listOrder }))
+        // Use createdAt for global chronological sorting across multiple agents (perfect for offline pairs)
+        val sortedHouses = bairroHouses.sortedWith(compareBy({ getTimestamp(it.data) }, { it.createdAt }))
         val groupedByBlock = sortedHouses.groupBy { Pair(it.blockNumber, it.blockSequence) }
         
         groupedByBlock.keys.sortedWith(compareBy({ it.first.padStart(10, '0') }, { it.second })).forEach { key ->
@@ -39,14 +40,29 @@ class GetRGBlocksUseCase @Inject constructor() {
             val sortedDates = housesByDate.keys.sortedBy { getTimestamp(it) }
             
             sortedDates.forEach { date ->
-                val dayHouses = housesByDate[date]?.sortedBy { it.listOrder } ?: emptyList()
+                val dayHousesForBlock = housesByDate[date] ?: emptyList()
+                
+                // 1. Group by agent and find their earliest work in this specific block/day
+                val agentFirstTouch = dayHousesForBlock.groupBy { it.agentName }
+                    .mapValues { (_, houses) -> houses.minOf { it.createdAt } }
+                
+                // 2. Sort agents by who started THIS block first
+                val sortedAgents = agentFirstTouch.toList().sortedBy { it.second }.map { it.first }
+                
+                // 3. Complete all of the first agent's houses before moving to the next
+                val dayHouses = dayHousesForBlock.sortedWith(compareBy(
+                    { sortedAgents.indexOf(it.agentName) },
+                    { it.createdAt }
+                ))
+                
                 currentSegmentHouses.addAll(dayHouses)
                 
                 val lastHouseOfDay = dayHouses.last()
                 val manualConcluded = dayHouses.any { it.quarteiraoConcluido }
                 
-                // Auto-Conclusion logic: did the agent work on something else AFTER this block on the same day?
-                val allWorkThatDay = allHouses.filter { it.data == date }.sortedBy { it.listOrder }
+                // Auto-Conclusion logic: did the agent(s) work on something else AFTER this block on the same day?
+                // We sort all global work that day by absolute creation time to detect block transitions
+                val allWorkThatDay = allHouses.filter { it.data == date }.sortedBy { it.createdAt }
                 val indexOfLast = allWorkThatDay.indexOfFirst { it.id == lastHouseOfDay.id }
                 val autoConcluded = indexOfLast != -1 && indexOfLast < allWorkThatDay.size - 1
                 

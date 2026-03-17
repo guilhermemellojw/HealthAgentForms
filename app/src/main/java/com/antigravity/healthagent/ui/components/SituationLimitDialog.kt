@@ -19,14 +19,14 @@ fun SituationLimitDialog(
         onDismissRequest = onDismiss,
         title = { 
             Text(
-                "Resumo Diário Atingido", 
+                "Meta Diária Atingida", 
                 fontWeight = FontWeight.ExtraBold,
                 style = if (isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge
             ) 
         },
         text = { 
             Text(
-                "Você está prestes a exceder o limite de imóveis abertos para hoje.\n\nDeseja continuar?",
+                "Você está prestes a exceder a Meta Diária de imóveis abertos para hoje.\n\nDeseja continuar?",
                 style = if (isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
             ) 
         },

@@ -40,6 +40,7 @@ data class HomeUiState(
     val activityOptions: List<String> = listOf("NORMAL"),
     val weekRangeText: String = "",
     val customActivities: Set<String> = emptySet(),
+    val rgBairros: List<String> = emptyList(),
     val isEasyMode: Boolean = false,
     val isSolarMode: Boolean = false,
     val maxOpenHouses: Int = 25

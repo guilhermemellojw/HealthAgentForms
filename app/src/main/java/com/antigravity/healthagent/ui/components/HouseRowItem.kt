@@ -173,7 +173,7 @@ fun HouseRowItem(
                 when {
                     highlightErrors -> colors.error
                     isTreated -> colors.tertiaryContainer
-                    else -> colors.primary.copy(alpha = 0.3f) 
+                    else -> Color.Transparent // No bar for untreated/non-error houses
                 }
             }
 
@@ -181,10 +181,12 @@ fun HouseRowItem(
                 modifier = Modifier
                     .fillMaxWidth()
                     .drawBehind {
-                        drawRect(
-                            color = indicatorColor,
-                            size = this.size.copy(width = 6.dp.toPx())
-                        )
+                        if (indicatorColor != Color.Transparent) { // Only draw if not transparent
+                            drawRect(
+                                color = indicatorColor,
+                                size = this.size.copy(width = 6.dp.toPx())
+                            )
+                        }
                     }
                     .padding(start = 18.dp, end = 12.dp, bottom = 12.dp, top = 6.dp),
                 verticalAlignment = Alignment.Top

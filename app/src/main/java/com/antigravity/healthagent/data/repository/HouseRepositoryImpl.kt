@@ -135,6 +135,13 @@ class HouseRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>) {
+        database.withTransaction {
+            dayActivityDao.deleteByAgentAndDates(agentName, dates)
+            houseDao.deleteByAgentAndDates(agentName, dates)
+        }
+    }
+
     override suspend fun countOpenDays(agentName: String): Int {
         return dayActivityDao.countOpenDays(agentName)
     }

@@ -9,6 +9,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -115,12 +117,21 @@ fun RGScreen(
             }
         }
     ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-            com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-            ) {
+        val isSyncing by viewModel.isSyncing.collectAsState()
+        val pullToRefreshState = rememberPullToRefreshState()
+
+        PullToRefreshBox(
+            isRefreshing = isSyncing,
+            onRefresh = { viewModel.syncDataToCloud() },
+            state = pullToRefreshState,
+            modifier = Modifier.padding(paddingValues).fillMaxSize()
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                ) {
             // Filters Header (Only visible in Selection Mode)
             if (uiState.selectedRgBlock.isBlank()) {
                 com.antigravity.healthagent.ui.components.PremiumCard(
@@ -162,7 +173,7 @@ fun RGScreen(
                                 com.antigravity.healthagent.ui.components.CompactDropdown(
                                     label = "Bairro",
                                     currentValue = uiState.selectedRgBairro,
-                                    options = uiState.bairrosList,
+                                    options = uiState.rgBairros,
                                     onOptionSelected = { viewModel.selectRgBairro(it) },
                                     modifier = Modifier.fillMaxWidth()
                                 )
@@ -252,6 +263,7 @@ fun RGScreen(
                         }
                     }
                 }
+            }
             }
         }
     }

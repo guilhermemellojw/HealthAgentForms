@@ -70,7 +70,7 @@ fun AdminSettingsTab(viewModel: AdminViewModel) {
         val maxHouses by viewModel.maxOpenHouses.collectAsState()
         PremiumCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("Limite de Casas Abertas (Global): $maxHouses", style = MaterialTheme.typography.bodyMedium)
+                Text("Meta Diária (Global): $maxHouses", style = MaterialTheme.typography.bodyMedium)
                 Slider(
                     value = maxHouses.toFloat(),
                     onValueChange = { viewModel.updateSystemSetting("max_open_houses", it.toLong()) },

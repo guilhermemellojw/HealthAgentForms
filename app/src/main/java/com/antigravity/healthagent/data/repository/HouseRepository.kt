@@ -27,6 +27,7 @@ interface HouseRepository {
     suspend fun replaceAllDayActivities(activities: List<DayActivity>)
     suspend fun restoreAgentData(agentName: String, houses: List<House>, activities: List<DayActivity>)
     suspend fun deleteProduction(date: String, agentName: String) // Deletes houses, might need check
+    suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>)
     suspend fun countOpenDays(agentName: String): Int
     suspend fun closeAllDays(agentName: String)
     suspend fun clearAllData()
