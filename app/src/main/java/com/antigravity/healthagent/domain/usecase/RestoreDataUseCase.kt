@@ -18,15 +18,27 @@ class RestoreDataUseCase @Inject constructor(
             // 1. Get the agent name for this UID
             val usersResult = authRepository.fetchAllUsers()
             val user = usersResult.getOrNull()?.find { it.uid == targetUid }
-            val agentName = user?.agentName?.uppercase() ?: "RESTORADO"
+            val agentName = user?.agentName?.trim()?.uppercase() ?: "RESTORADO"
 
             // 2. Import the data using BackupManager
             val backupData = backupManager.importData(context, fileUri)
             
             // Normalize the imported data so it aligns with the target user securely.
             // Critical: Reset the id to 0 so Room treats them as new entries instead of overriding existing rows.
-            val normalizedHouses = backupData.houses.map { it.copy(id = 0, agentName = agentName) }
-            val normalizedActivities = backupData.dayActivities.map { it.copy(agentName = agentName) }
+            // Preference: Keep the original agentName if it is already set (important for legacy data/multi-agent).
+            val normalizedHouses = backupData.houses.map { 
+                it.copy(
+                    id = 0, 
+                    agentName = it.agentName.ifBlank { agentName },
+                    data = it.data.replace("/", "-")
+                ) 
+            }
+            val normalizedActivities = backupData.dayActivities.map { 
+                it.copy(
+                    agentName = it.agentName.ifBlank { agentName },
+                    date = it.date.replace("/", "-")
+                ) 
+            }
 
             // 3. Perform restoration locally ONLY if targetUid is the current user.
             // If an Admin is restoring data for someone else, we only push to the cloud.

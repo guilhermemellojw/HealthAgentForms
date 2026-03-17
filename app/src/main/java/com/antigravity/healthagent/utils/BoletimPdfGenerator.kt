@@ -88,8 +88,8 @@ object BoletimPdfGenerator {
         // Sort dates for daily pages (only days with data)
         val dateComparator = Comparator<String> { d1, d2 ->
             try {
-                val p1 = d1.split("-").reversed().joinToString("")
-                val p2 = d2.split("-").reversed().joinToString("")
+                val p1 = d1.replace("/", "-").split("-").reversed().joinToString("")
+                val p2 = d2.replace("/", "-").split("-").reversed().joinToString("")
                 p1.compareTo(p2)
             } catch (_: Exception) { 0 }
         }

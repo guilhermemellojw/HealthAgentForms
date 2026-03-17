@@ -54,7 +54,6 @@ class SyncRepositoryImpl @Inject constructor(
             }
             
             var officialAgentName = existingAgentName.uppercase()
-            var currentEmailInCloud = existingEmail
 
             // FETCH TOMBSTONES
             val deletedHouseIds = (existingDoc?.get("deleted_house_ids") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
@@ -62,9 +61,25 @@ class SyncRepositoryImpl @Inject constructor(
             
             val finalHouses = houses.filter { house -> 
                 val naturalId = house.generateNaturalKey()
+                // DEBT: If shouldReplace is true, we ignore tombstones because we are performing a full restoration.
+                if (shouldReplace) return@filter true
+                
                 naturalId !in deletedHouseIds && house.data !in deletedActivityDates
             }
-            val finalActivities = activities.filter { it.date !in deletedActivityDates }
+            val finalActivities = activities.filter { activity ->
+                if (shouldReplace) return@filter true
+                
+                // Tombstones for activities can be just "date" or "date|agentName"
+                val isTombstoned = deletedActivityDates.any { tombstone ->
+                    if (tombstone.contains("|")) {
+                        val parts = tombstone.split("|")
+                        parts[0] == activity.date && parts[1].equals(officialAgentName, ignoreCase = true)
+                    } else {
+                        tombstone == activity.date
+                    }
+                }
+                !isTombstoned
+            }
 
             // IMPROVEMENT: If name is missing in cloud, try to recover it from the data itself
             if (officialAgentName.isBlank()) {
@@ -72,7 +87,7 @@ class SyncRepositoryImpl @Inject constructor(
                     ?: finalActivities.firstOrNull { it.agentName.isNotBlank() }?.agentName
                 
                 if (!recoveredName.isNullOrBlank()) {
-                    officialAgentName = recoveredName
+                    officialAgentName = recoveredName.uppercase()
                     android.util.Log.i("SyncRepository", "Recovering agent name '$officialAgentName' from data and updating cloud metadata")
                     try {
                         // Update both 'agents' and 'users' collections to ensure consistent attribution
@@ -106,32 +121,29 @@ class SyncRepositoryImpl @Inject constructor(
 
                 android.util.Log.i("SyncRepository", "Replacement requested. Surgical wipe for ${backupDates.size} dates up to $latestBackupDateTs")
 
-                // 1. Clear houses subcollection for dates in backup or older
+                // 1. Clear houses subcollection for dates in backup
                 val housesSnap = userDocRef.collection("houses").get().await()
                 housesSnap.documents.chunked(400).forEach { chunk ->
                     val batch = firestore.batch()
                     chunk.forEach { doc ->
-                        val houseDate = doc.getString("data") ?: ""
-                        val houseTs = try { SimpleDateFormat("dd-MM-yyyy", Locale.US).parse(houseDate)?.time ?: 0L } catch(e: Exception) { 0L }
+                        val houseDate = (doc.getString("data") ?: "").replace("/", "-")
                         
-                        // Delete if date matches backup or is older than the latest backup date
-                        // (latestBackupDateTs == 0 means backup had no valid dates, so we don't wipe to be safe)
-                        if (latestBackupDateTs > 0 && (backupDates.contains(houseDate) || houseTs <= latestBackupDateTs)) {
+                        // ONLY delete if date matches a date present in the backup.
+                        // We DO NOT wipe based on age anymore, to protect historical data not in the backup.
+                        if (backupDates.contains(houseDate)) {
                             batch.delete(doc.reference)
                         }
                     }
                     batch.commit().await()
                 }
                 
-                // 2. Clear activities subcollection
+                // 2. Clear activities subcollection for dates in backup
                 val activitiesSnap = userDocRef.collection("day_activities").get().await()
                 activitiesSnap.documents.chunked(400).forEach { chunk ->
                     val batch = firestore.batch()
                     chunk.forEach { doc ->
-                        val activityDate = doc.id
-                        val activityTs = try { SimpleDateFormat("dd-MM-yyyy", Locale.US).parse(activityDate)?.time ?: 0L } catch(e: Exception) { 0L }
-                        
-                        if (latestBackupDateTs > 0 && (backupDates.contains(activityDate) || activityTs <= latestBackupDateTs)) {
+                        val activityDate = doc.id.replace("/", "-")
+                        if (backupDates.contains(activityDate)) {
                             batch.delete(doc.reference)
                         }
                     }
@@ -142,6 +154,13 @@ class SyncRepositoryImpl @Inject constructor(
             val metadata = mutableMapOf<String, Any>(
                 "lastSyncTime" to System.currentTimeMillis()
             )
+
+            // If we are replacing everything, also clear the tombstones in the cloud 
+            // so they don't block future restorations or syncs of the same data.
+            if (shouldReplace) {
+                metadata["deleted_house_ids"] = com.google.firebase.firestore.FieldValue.delete()
+                metadata["deleted_activity_dates"] = com.google.firebase.firestore.FieldValue.delete()
+            }
             // Only update email if it's sync'ing for SELF or if cloud email is missing AND we have a valid value.
             if (targetUid == null) {
                 metadata["email"] = userEmail
@@ -192,7 +211,18 @@ class SyncRepositoryImpl @Inject constructor(
             operations.chunked(400).forEachIndexed { index, chunk ->
                 val batch = firestore.batch()
                 for ((docRef, data) in chunk) {
-                    batch.set(docRef, data)
+                    if (docRef == userDocRef) {
+                        // Use update if document exists to avoid FieldValue.delete() errors with set(merge)
+                        // documented in cloud logs. fallback to set(merge) only if first sync.
+                        if (existingDoc?.exists() == true) {
+                            @Suppress("UNCHECKED_CAST")
+                            batch.update(docRef, data as Map<String, Any>)
+                        } else {
+                            batch.set(docRef, data, com.google.firebase.firestore.SetOptions.merge())
+                        }
+                    } else {
+                        batch.set(docRef, data)
+                    }
                 }
                 
                 android.util.Log.d("SyncRepository", "Committing batch ${index + 1}/${(operations.size + 399) / 400}")
@@ -224,7 +254,7 @@ class SyncRepositoryImpl @Inject constructor(
 
             for (agentDoc in agentsSnapshot.documents) {
                 var email = agentDoc.getString("email") ?: ""
-                var agentName = agentDoc.getString("agentName")
+                var agentName = agentDoc.getString("agentName")?.uppercase()
                 val lastSyncTime = agentDoc.getLong("lastSyncTime") ?: 0L
                 val uid = agentDoc.id
 
@@ -243,8 +273,8 @@ class SyncRepositoryImpl @Inject constructor(
 
                 // IMPROVEMENT: If agentName is missing in the main doc, recover it from the data
                 if (agentName.isNullOrBlank()) {
-                    agentName = houses.firstOrNull { it.agentName.isNotBlank() }?.agentName
-                        ?: activities.firstOrNull { it.agentName.isNotBlank() }?.agentName
+                    agentName = houses.firstOrNull { it.agentName.isNotBlank() }?.agentName?.uppercase()
+                        ?: activities.firstOrNull { it.agentName.isNotBlank() }?.agentName?.uppercase()
                 }
 
                 allAgents.add(
@@ -300,9 +330,13 @@ class SyncRepositoryImpl @Inject constructor(
                             ?: auth.currentUser?.displayName?.uppercase()
                             ?: ""
 
-                        deletedActivityDates.forEach { date ->
-                            dayActivityDao.deleteDayActivity(date, agentNameFromCloud)
-                            houseDao.deleteHousesByDateAndAgent(date, agentNameFromCloud)
+                        deletedActivityDates.forEach { tombstone ->
+                            val parts = tombstone.split("|")
+                            val date = parts[0]
+                            val agent = if (parts.size > 1) parts[1].uppercase() else agentNameFromCloud.uppercase()
+                            
+                            dayActivityDao.deleteDayActivity(date, agent)
+                            houseDao.deleteHousesByDateAndAgent(date, agent)
                         }
                         
                         val allLocalHouses = houseDao.getAllHouses().first()
@@ -517,8 +551,9 @@ class SyncRepositoryImpl @Inject constructor(
                 val localHouseGroups = localHouses.groupBy { it.generateNaturalKey() }
                 
                 val normalizedActivities = activities.map { 
+                    val finalAgentName = if (it.agentName.isNotBlank()) it.agentName else agentName
                     it.copy(
-                        agentName = agentName.uppercase(),
+                        agentName = finalAgentName.uppercase(),
                         date = it.date.replace("/", "-")
                     ) 
                 }
@@ -528,10 +563,11 @@ class SyncRepositoryImpl @Inject constructor(
                 normalizedHouses.forEach { restoredHouse ->
                     val key = restoredHouse.generateNaturalKey()
                     val existingId = localHouseGroups[key]?.firstOrNull()?.id ?: 0
+                    val finalAgentName = if (restoredHouse.agentName.isNotBlank()) restoredHouse.agentName else agentName
                     
                     housesToUpsert.add(restoredHouse.copy(
                         id = existingId,
-                        agentName = agentName.uppercase(),
+                        agentName = finalAgentName.uppercase(),
                         data = restoredHouse.data.replace("/", "-")
                     ))
                 }
@@ -679,6 +715,34 @@ class SyncRepositoryImpl @Inject constructor(
             // 3. Record tombstone
             agentRef.update("deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(activityDate)).await()
             
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun recordHouseDeletion(house: House): Result<Unit> {
+        return try {
+            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("User not authenticated"))
+            val naturalId = house.generateNaturalKey()
+            firestore.collection("agents").document(uid)
+                .update("deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayUnion(naturalId))
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun recordActivityDeletion(date: String, agentName: String): Result<Unit> {
+        return try {
+            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("User not authenticated"))
+            // Note: We use the date as the key for activity tombstones. 
+            // If multiple agents exist in the same account (legacy), this wipes the date for all local entries.
+            val tombstone = "$date|$agentName"
+            firestore.collection("agents").document(uid)
+                .update("deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(tombstone))
+                .await()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

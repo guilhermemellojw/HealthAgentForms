@@ -5,6 +5,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -145,7 +147,16 @@ fun SemanalScreen(
             )
         }
     ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+        val isSyncing by viewModel.isSyncing.collectAsState()
+        val pullToRefreshState = rememberPullToRefreshState()
+
+        PullToRefreshBox(
+            isRefreshing = isSyncing,
+            onRefresh = { viewModel.syncDataToCloud() },
+            state = pullToRefreshState,
+            modifier = Modifier.padding(paddingValues).fillMaxSize()
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
             com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
             // Unused val currentWeekDates by viewModel.currentWeekDates.collectAsState()
             val weekRangeText = uiState.weekRangeText
@@ -339,9 +350,10 @@ fun SemanalScreen(
                         }
                     }
                 )
-            }
         }
     }
+}
+}
 }
 }
 

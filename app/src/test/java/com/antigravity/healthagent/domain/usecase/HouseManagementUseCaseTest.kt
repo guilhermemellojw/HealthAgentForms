@@ -20,6 +20,7 @@ class HouseManagementUseCaseTest {
     // Dummy HouseRepository since predictNextHouseValues doesn't use it
     private val dummyRepository = object : HouseRepository {
         override fun getAllHouses(): Flow<List<House>> = flowOf(emptyList())
+        override fun getDistinctAgentNames(): Flow<List<String>> = flowOf(emptyList())
         override fun getAllHousesOrderedByBlock(): Flow<List<House>> = flowOf(emptyList())
         override fun getDayActivities(dates: List<String>, agentName: String): Flow<List<DayActivity>> = flowOf(emptyList())
         override fun getDayActivityFlow(date: String, agentName: String): Flow<DayActivity?> = flowOf(null)
@@ -46,6 +47,7 @@ class HouseManagementUseCaseTest {
     private val dummyHouseDao = object : HouseDao {
         override fun getAllHouses(): Flow<List<House>> = flowOf(emptyList())
         override fun getAllHousesOrderedByBlock(): Flow<List<House>> = flowOf(emptyList())
+        override fun getDistinctAgentNames(): Flow<List<String>> = flowOf(emptyList())
         override suspend fun getDistinctDates(agentName: String): List<String> = emptyList()
         override suspend fun getHouseById(id: Long): House? = null
         override suspend fun insertHouse(house: House) {}
@@ -66,10 +68,32 @@ class HouseManagementUseCaseTest {
         override suspend fun deleteCustomStreet(street: CustomStreet) {}
     }
 
+    private val dummySyncRepository = object : com.antigravity.healthagent.domain.repository.SyncRepository {
+        override suspend fun pushLocalDataToCloud(houses: List<House>, activities: List<DayActivity>, targetUid: String?, shouldReplace: Boolean): Result<Unit> = Result.success(Unit)
+        override suspend fun fetchAllAgentsData(): Result<List<com.antigravity.healthagent.domain.repository.AgentData>> = Result.success(emptyList())
+        override suspend fun pullCloudDataToLocal(targetUid: String?): Result<Unit> = Result.success(Unit)
+        override suspend fun createAgent(email: String, agentName: String?): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteAgent(uid: String): Result<Unit> = Result.success(Unit)
+        override suspend fun fetchAgentNames(): Result<List<String>> = Result.success(emptyList())
+        override suspend fun addAgentName(name: String): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteAgentName(name: String): Result<Unit> = Result.success(Unit)
+        override suspend fun clearLocalData(): Result<Unit> = Result.success(Unit)
+        override suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>): Result<Unit> = Result.success(Unit)
+        override suspend fun fetchBairros(): Result<List<String>> = Result.success(emptyList())
+        override suspend fun addBairro(name: String): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteBairro(name: String): Result<Unit> = Result.success(Unit)
+        override suspend fun fetchSystemSettings(): Result<Map<String, Any>> = Result.success(emptyMap())
+        override suspend fun updateSystemSetting(key: String, value: Any): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteAgentHouse(agentUid: String, houseId: String): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteAgentActivity(agentUid: String, activityDate: String): Result<Unit> = Result.success(Unit)
+        override suspend fun recordHouseDeletion(house: House): Result<Unit> = Result.success(Unit)
+        override suspend fun recordActivityDeletion(date: String, agentName: String): Result<Unit> = Result.success(Unit)
+    }
+
     // Real StreetRepository with dummy DAOs
     private val streetRepository = StreetRepository(dummyHouseDao, dummyCustomStreetDao)
 
-    private val useCase = HouseManagementUseCase(dummyRepository, streetRepository)
+    private val useCase = HouseManagementUseCase(dummyRepository, streetRepository, dummySyncRepository)
     private val date = "2026-01-26"
 
     @Test

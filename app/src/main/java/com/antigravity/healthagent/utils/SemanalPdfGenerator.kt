@@ -57,7 +57,9 @@ object SemanalPdfGenerator {
         
         if (firstDateStr != null) {
             try {
-                val parsedDate = sdf.parse(firstDateStr)
+                // Ensure date format is consistent for parsing
+                val transformedDate = firstDateStr.replace("/", "-")
+                val parsedDate = sdf.parse(transformedDate)
                 if (parsedDate != null) {
                     val cal = java.util.Calendar.getInstance()
                     cal.time = parsedDate

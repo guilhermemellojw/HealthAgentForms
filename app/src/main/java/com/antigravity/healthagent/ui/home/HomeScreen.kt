@@ -11,6 +11,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.geometry.Offset
@@ -651,6 +653,15 @@ fun HomeScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
+        val isSyncing by viewModel.isSyncing.collectAsState()
+        val pullToRefreshState = rememberPullToRefreshState()
+
+        PullToRefreshBox(
+            isRefreshing = isSyncing,
+            onRefresh = { viewModel.syncDataToCloud() },
+            state = pullToRefreshState,
+            modifier = Modifier.padding(paddingValues).fillMaxSize()
+        ) {
         
         fun checkForOverScroll(viewportY: Float) {
             val distFromTop = viewportY
@@ -925,5 +936,6 @@ fun HomeScreen(
             }
         }
     }
+}
 }
 

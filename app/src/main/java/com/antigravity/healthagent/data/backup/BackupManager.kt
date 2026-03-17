@@ -130,7 +130,7 @@ class BackupManager @Inject constructor() {
                 bairro = house.bairro?.trim()?.uppercase() ?: "",
                 blockNumber = house.blockNumber?.trim() ?: "",
                 blockSequence = house.blockSequence?.trim() ?: "",
-                streetName = house.streetName?.trim() ?: "",
+                streetName = house.streetName?.trim()?.uppercase() ?: "",
                 number = house.number?.trim() ?: "",
                 sequence = house.sequence ?: 0,
                 complement = house.complement ?: 0,

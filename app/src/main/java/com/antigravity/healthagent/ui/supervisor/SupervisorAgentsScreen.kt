@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,7 +65,15 @@ fun SupervisorAgentsScreen(
         },
         containerColor = Color.Transparent
     ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+        val pullToRefreshState = rememberPullToRefreshState()
+
+        PullToRefreshBox(
+            isRefreshing = isLoading,
+            onRefresh = { viewModel.refreshData() },
+            state = pullToRefreshState,
+            modifier = Modifier.padding(paddingValues).fillMaxSize()
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
             MeshGradient(modifier = Modifier.fillMaxSize())
             
             Column(modifier = Modifier.fillMaxSize()) {
@@ -121,6 +131,7 @@ fun SupervisorAgentsScreen(
             }
         }
     }
+}
 }
 
 @Composable

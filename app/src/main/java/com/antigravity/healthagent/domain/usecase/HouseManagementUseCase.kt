@@ -10,7 +10,8 @@ import javax.inject.Inject
 
 class HouseManagementUseCase @Inject constructor(
     private val repository: HouseRepository,
-    private val streetRepository: StreetRepository
+    private val streetRepository: StreetRepository,
+    private val syncRepository: com.antigravity.healthagent.domain.repository.SyncRepository
 ) {
 
     suspend fun insertHouse(house: House) {
@@ -31,10 +32,12 @@ class HouseManagementUseCase @Inject constructor(
 
     suspend fun deleteHouse(house: House) {
         repository.deleteHouse(house)
+        syncRepository.recordHouseDeletion(house)
     }
 
     suspend fun deleteProduction(date: String, agentName: String) {
         repository.deleteProduction(date, agentName)
+        syncRepository.recordActivityDeletion(date, agentName)
     }
 
     suspend fun updateHouseWithContext(

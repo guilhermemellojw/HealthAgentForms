@@ -95,7 +95,6 @@ class HomeViewModel @Inject constructor(
     val currentStreet: StateFlow<String> = _currentStreet.asStateFlow()
 
     private val _agentNames = MutableStateFlow<List<String>>(emptyList())
-    val agentNames: StateFlow<List<String>> = _agentNames.asStateFlow()
 
     private val _bairrosList = MutableStateFlow<List<String>>(emptyList())
     val bairrosList: StateFlow<List<String>> = _bairrosList.asStateFlow()
@@ -223,6 +222,15 @@ class HomeViewModel @Inject constructor(
 
     // Global unfiltered list for initialization
     private val allHousesFlow = repository.getAllHouses()
+
+    // List of agent names for selection
+    val agentNames: StateFlow<List<String>> = combine(_agentNames, repository.getDistinctAgentNames()) { remote, local ->
+        (remote + local)
+            .map { it.trim().uppercase() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val houses: StateFlow<List<House>> = combine(allHousesFlow, _agentName) { list, agent ->
         list.filter { it.agentName.trim().equals(agent.trim(), ignoreCase = true) }
@@ -688,7 +696,9 @@ class HomeViewModel @Inject constructor(
             combine(authRepository.currentUserAsync, _remoteAgent) { user, remote ->
                 remote ?: user?.agentName ?: user?.email ?: ""
             }.collect { name ->
-                _agentName.value = name
+                if (_agentName.value.isBlank()) {
+                    _agentName.value = name
+                }
             }
         }
     }
@@ -1126,7 +1136,7 @@ class HomeViewModel @Inject constructor(
 
     private fun calculateCicloForDate(dateStr: String): String {
         return try {
-            val dateObj = dateFormatter.parse(dateStr)
+            val dateObj = dateFormatter.parse(dateStr.replace("/", "-"))
             if (dateObj != null) {
                 val cal = Calendar.getInstance()
                 cal.time = dateObj
@@ -1439,7 +1449,7 @@ class HomeViewModel @Inject constructor(
                 val backupData = BackupData(h, a)
                 
                 // Generate Filename
-                val sdf = java.text.SimpleDateFormat("dd-MM-yyyy_HH-mm", java.util.Locale.getDefault())
+                val sdf = java.text.SimpleDateFormat("dd-MM-yyyy_HH-mm", java.util.Locale.US)
                 val now = sdf.format(java.util.Date())
                 val safeAgentName = _agentName.value.trim().replace(" ", "_").ifBlank { "Agente" }
                 val fileName = "Backup_${safeAgentName}_$now.json"

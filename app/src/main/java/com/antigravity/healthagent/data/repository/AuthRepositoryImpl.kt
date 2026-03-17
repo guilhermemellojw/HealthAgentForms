@@ -400,7 +400,7 @@ class AuthRepositoryImpl @Inject constructor(
                     photoUrl = null,
                     role = try { UserRole.valueOf(doc.getString("role") ?: "AGENT") } catch (e: Exception) { UserRole.AGENT },
                     isAuthorized = doc.getBoolean("isAuthorized") ?: false,
-                    agentName = doc.getString("agentName")
+                    agentName = doc.getString("agentName")?.uppercase()
                 )
             }
             Result.success(users)

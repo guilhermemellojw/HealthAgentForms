@@ -18,6 +18,10 @@ class HouseRepositoryImpl @Inject constructor(
         return houseDao.getAllHouses()
     }
 
+    override fun getDistinctAgentNames(): Flow<List<String>> {
+        return houseDao.getDistinctAgentNames()
+    }
+
     override fun getAllHousesOrderedByBlock(): Flow<List<House>> {
         return houseDao.getAllHousesOrderedByBlock()
     }

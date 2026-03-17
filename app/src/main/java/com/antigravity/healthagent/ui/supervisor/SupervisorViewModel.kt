@@ -33,7 +33,7 @@ class SupervisorViewModel @Inject constructor(
             time = start
             add(Calendar.DAY_OF_YEAR, 6)
         }.time
-        val sdf = SimpleDateFormat("dd/MM", Locale.getDefault())
+        val sdf = SimpleDateFormat("dd/MM", Locale.US)
         "${sdf.format(start)} - ${sdf.format(end)}"
     }.flowOn(kotlinx.coroutines.Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
@@ -101,7 +101,7 @@ class SupervisorViewModel @Inject constructor(
         val weekDates = (0..6).map { i ->
             cal.time = weekStart
             cal.add(Calendar.DAY_OF_YEAR, i)
-            SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).format(cal.time)
+            SimpleDateFormat("dd-MM-yyyy", Locale.US).format(cal.time)
         }
 
         var totalHouses = 0

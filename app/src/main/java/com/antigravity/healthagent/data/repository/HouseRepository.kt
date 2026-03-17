@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.Flow
 
 interface HouseRepository {
     fun getAllHouses(): Flow<List<House>>
+    fun getDistinctAgentNames(): Flow<List<String>>
     fun getAllHousesOrderedByBlock(): Flow<List<House>>
     suspend fun getHouseById(id: Long): House?
     suspend fun getAllHousesOnce(): List<House> // Snapshot for backup

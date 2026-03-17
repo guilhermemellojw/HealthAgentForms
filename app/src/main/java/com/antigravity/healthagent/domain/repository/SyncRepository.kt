@@ -74,6 +74,10 @@ interface SyncRepository {
     // Granular Data Management (Admin)
     suspend fun deleteAgentHouse(agentUid: String, houseId: String): Result<Unit>
     suspend fun deleteAgentActivity(agentUid: String, activityDate: String): Result<Unit>
+
+    // Local-to-Cloud Deletion Synchronization (Tombstones)
+    suspend fun recordHouseDeletion(house: House): Result<Unit>
+    suspend fun recordActivityDeletion(date: String, agentName: String): Result<Unit>
 }
 
 data class AgentData(
