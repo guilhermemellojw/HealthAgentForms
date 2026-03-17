@@ -96,11 +96,19 @@ class HouseManagementUseCase @Inject constructor(
             a1 = 0; a2 = 0; b = 0; c = 0; d1 = 0; d2 = 0; e = 0; elims = 0; larv = 0.0
         }
 
+        val normalizedNumber = house.number.trim().uppercase().let { 
+            if (it == "0") "" else it 
+        }
+        val normalizedSequence = if (house.sequence == 0) null else house.sequence
+        val normalizedComplement = if (house.complement == 0) null else house.complement
+
         return house.copy(
             blockNumber = house.blockNumber.trim().uppercase(),
             blockSequence = house.blockSequence.trim().uppercase(),
             streetName = house.streetName.trim().formatStreetName(),
-            number = house.number.trim().uppercase(),
+            number = normalizedNumber,
+            sequence = normalizedSequence,
+            complement = normalizedComplement,
             municipio = house.municipio.trim().uppercase(),
             bairro = house.bairro.trim().formatStreetName(),
             agentName = house.agentName.trim().uppercase(),
