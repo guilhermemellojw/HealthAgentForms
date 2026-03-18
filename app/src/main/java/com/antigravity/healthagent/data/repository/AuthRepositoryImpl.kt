@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.channels.awaitClose
 import com.google.firebase.firestore.Source
 import javax.inject.Inject
@@ -143,12 +144,13 @@ class AuthRepositoryImpl @Inject constructor(
         val uid = firebaseUser.uid
         val email = (firebaseUser.email ?: "").trim().lowercase()
         
-        // Check if we actually have internet by reloading the user
+        // Check if we actually have internet by reloading the user with a timeout
         val isOnline = try {
-            firebaseUser.reload().await()
-            true
+            withTimeoutOrNull(5000) {
+                firebaseUser.reload().await()
+            } != null
         } catch (e: Exception) {
-            android.util.Log.e("AuthRepository", "Firebase Auth reload failed (Offline?): ${e.message}")
+            android.util.Log.e("AuthRepository", "Firebase Auth reload failed or timed out: ${e.message}")
             false
         }
         
@@ -157,10 +159,12 @@ class AuthRepositoryImpl @Inject constructor(
         
         // Retries for Firestore
         if (isOnline) {
-            for (i in 1..3) {
+            for (i in 1..2) {
                 try {
                     // Use default get() which is smarter about connectivity than Source.SERVER
-                    userDoc = firestore.collection("users").document(uid).get().await()
+                    userDoc = withTimeoutOrNull(5000) {
+                        firestore.collection("users").document(uid).get().await()
+                    }
                     if (userDoc != null && userDoc.exists()) break
                     kotlinx.coroutines.delay(500)
                 } catch (e: Exception) {
@@ -368,10 +372,13 @@ class AuthRepositoryImpl @Inject constructor(
             )
         }
         
-        val roleStr = userDoc.getString("role") ?: "AGENT"
-        var isAuthorized = userDoc.getBoolean("isAuthorized") ?: false
-        val displayName = userDoc.getString("displayName") ?: firebaseUser.displayName
-        val agentName = userDoc.getString("agentName")
+        val roleStr = userDoc?.getString("role") ?: "AGENT"
+        var isAuthorized = userDoc?.getBoolean("isAuthorized") ?: false
+        val displayName = userDoc?.getString("displayName") ?: firebaseUser.displayName
+        val agentName = userDoc?.getString("agentName")
+        
+        // At this point we are sure userDoc is not null because of the early returns above,
+        // but Kotlin needs the safe calls or !! for nullable vars.
 
         var finalRole = try { UserRole.valueOf(roleStr) } catch (e: Exception) { UserRole.AGENT }
 
