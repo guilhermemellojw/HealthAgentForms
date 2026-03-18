@@ -12,6 +12,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.catch
+import com.antigravity.healthagent.domain.repository.AuthUser
+import com.antigravity.healthagent.domain.repository.UserRole
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -35,6 +37,14 @@ class SettingsManager @Inject constructor(
     private val SOLAR_MODE_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("solar_mode")
     private val REMOTE_AGENT_UID_KEY = stringPreferencesKey("remote_agent_uid")
     private val LAST_SYNC_TIMESTAMP_KEY = androidx.datastore.preferences.core.longPreferencesKey("last_sync_timestamp")
+    
+    // User Profile Cache for Offline Support
+    private val CACHED_USER_UID_KEY = stringPreferencesKey("cached_user_uid")
+    private val CACHED_USER_EMAIL_KEY = stringPreferencesKey("cached_user_email")
+    private val CACHED_USER_DISPLAY_NAME_KEY = stringPreferencesKey("cached_user_display_name")
+    private val CACHED_USER_ROLE_KEY = stringPreferencesKey("cached_user_role")
+    private val CACHED_USER_IS_AUTHORIZED_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("cached_user_is_authorized")
+    private val CACHED_USER_AGENT_NAME_KEY = stringPreferencesKey("cached_user_agent_name")
     
 
 
@@ -229,10 +239,47 @@ class SettingsManager @Inject constructor(
         }
     }
 
+    val cachedUser: Flow<AuthUser?> = context.dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { preferences ->
+            val uid = preferences[CACHED_USER_UID_KEY] ?: return@map null
+            AuthUser(
+                uid = uid,
+                email = preferences[CACHED_USER_EMAIL_KEY],
+                displayName = preferences[CACHED_USER_DISPLAY_NAME_KEY],
+                photoUrl = null, // Photo not cached for now
+                role = try { 
+                    UserRole.valueOf(preferences[CACHED_USER_ROLE_KEY] ?: "AGENT") 
+                } catch(e: Exception) { UserRole.AGENT },
+                isAuthorized = preferences[CACHED_USER_IS_AUTHORIZED_KEY] ?: false,
+                agentName = preferences[CACHED_USER_AGENT_NAME_KEY]
+            )
+        }
+
+    suspend fun saveUserProfile(user: AuthUser) {
+        context.dataStore.edit { preferences ->
+            preferences[CACHED_USER_UID_KEY] = user.uid
+            preferences[CACHED_USER_EMAIL_KEY] = user.email ?: ""
+            preferences[CACHED_USER_DISPLAY_NAME_KEY] = user.displayName ?: ""
+            preferences[CACHED_USER_ROLE_KEY] = user.role.name
+            preferences[CACHED_USER_IS_AUTHORIZED_KEY] = user.isAuthorized
+            preferences[CACHED_USER_AGENT_NAME_KEY] = user.agentName ?: ""
+        }
+    }
+
     suspend fun clearSessionSettings() {
         context.dataStore.edit { preferences ->
             preferences.remove(REMOTE_AGENT_UID_KEY)
             preferences.remove(LAST_SYNC_TIMESTAMP_KEY)
+            
+            // Clear cached user on logout to ensure safety
+            preferences.remove(CACHED_USER_UID_KEY)
+            preferences.remove(CACHED_USER_EMAIL_KEY)
+            preferences.remove(CACHED_USER_DISPLAY_NAME_KEY)
+            preferences.remove(CACHED_USER_ROLE_KEY)
+            preferences.remove(CACHED_USER_IS_AUTHORIZED_KEY)
+            preferences.remove(CACHED_USER_AGENT_NAME_KEY)
+
             // Reset other temporary session state if any
             preferences[IS_APP_MODE_SELECTED_KEY] = false 
         }

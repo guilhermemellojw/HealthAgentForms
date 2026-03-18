@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.awaitClose
 import com.google.firebase.firestore.Source
 import javax.inject.Inject
@@ -143,30 +144,31 @@ class AuthRepositoryImpl @Inject constructor(
         val email = (firebaseUser.email ?: "").trim().lowercase()
         
         // Check if we actually have internet by reloading the user
-        try {
+        val isOnline = try {
             firebaseUser.reload().await()
+            true
         } catch (e: Exception) {
-            android.util.Log.e("AuthRepository", "Firebase Auth reload failed", e)
-            // If we can't even reload the user, we definitely have network issues
-            throw Exception("Não foi possível verificar sua conta. Verifique sua internet.")
+            android.util.Log.e("AuthRepository", "Firebase Auth reload failed (Offline?): ${e.message}")
+            false
         }
         
         var userDoc: com.google.firebase.firestore.DocumentSnapshot? = null
         var lastException: Exception? = null
         
-        // Retry logic for connectivity issues
-        for (i in 1..3) {
-            try {
-                // Use default get() which is smarter about connectivity than Source.SERVER
-                userDoc = firestore.collection("users").document(uid).get().await()
-                if (userDoc != null) break
-            } catch (e: Exception) {
-                lastException = e
-                if (e.message?.contains("permission", ignoreCase = true) == true && 
-                    e.message?.contains("denied", ignoreCase = true) == true) {
-                    // If it's permission denied, no point in retrying
-                    android.util.Log.e("AuthRepository", "Firestore fetch permission denied")
-                    break
+        // Retries for Firestore
+        if (isOnline) {
+            for (i in 1..3) {
+                try {
+                    // Use default get() which is smarter about connectivity than Source.SERVER
+                    userDoc = firestore.collection("users").document(uid).get().await()
+                    if (userDoc != null && userDoc.exists()) break
+                    kotlinx.coroutines.delay(500)
+                } catch (e: Exception) {
+                    lastException = e
+                    if (e.message?.contains("permission", ignoreCase = true) == true && 
+                        e.message?.contains("denied", ignoreCase = true) == true) {
+                        break
+                    }
                 }
             }
         }
@@ -298,9 +300,23 @@ class AuthRepositoryImpl @Inject constructor(
         }
 
         if (userDoc == null || !userDoc.exists()) {
+            // OFFLINE FALLBACK: If we are offline or fetch failed, try local cache
+            try {
+                val cached = settingsManager.cachedUser.first()
+                if (cached != null && cached.uid == uid) {
+                    android.util.Log.i("AuthRepository", "Using CACHED user profile for $email")
+                    return cached
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("AuthRepository", "Error reading cached user", e)
+            }
+
             // Emergency Fallback: If we couldn't fetch data but it's the admin email, 
             // allow them in as admin anyway.
-            val isAdminEmail = firestore.collection("admins").document(uid).get().await().exists()
+            val isAdminEmail = if (isOnline) {
+                try { firestore.collection("admins").document(uid).get().await().exists() } catch(e: Exception) { false }
+            } else false
+
             if (isAdminEmail) {
                 android.util.Log.w("AuthRepository", "EMERGENCY: Admin mode via email match (Doc not found)")
                 return AuthUser(
@@ -314,22 +330,28 @@ class AuthRepositoryImpl @Inject constructor(
                 )
             }
             
-            // If still not exists, create new user
-            val isAdmin = firestore.collection("admins").document(uid).get().await().exists()
-            val role = if (isAdmin) UserRole.ADMIN else UserRole.AGENT
-            val isAuthorized = isAdmin
-            
-            val newUser = mapOf(
-                "email" to email,
-                "displayName" to firebaseUser.displayName,
-                "role" to role.name,
-                "isAuthorized" to isAuthorized,
-                "createdAt" to System.currentTimeMillis()
-            )
-            
-            firestore.collection("users").document(uid).set(newUser).await()
-            if (role == UserRole.ADMIN) {
-                firestore.collection("admins").document(uid).set(mapOf("email" to email)).await()
+            // If still not exists and online, create new user
+            if (isOnline) {
+                val isAdmin = try { firestore.collection("admins").document(uid).get().await().exists() } catch(e: Exception) { false }
+                val role = if (isAdmin) UserRole.ADMIN else UserRole.AGENT
+                val isAuthorized = isAdmin
+                
+                val newUser = mapOf(
+                    "email" to email,
+                    "displayName" to firebaseUser.displayName,
+                    "role" to role.name,
+                    "isAuthorized" to isAuthorized,
+                    "createdAt" to System.currentTimeMillis()
+                )
+                
+                try {
+                    firestore.collection("users").document(uid).set(newUser).await()
+                    if (role == UserRole.ADMIN) {
+                        firestore.collection("admins").document(uid).set(mapOf("email" to email)).await()
+                    }
+                } catch(e: Exception) {
+                    android.util.Log.e("AuthRepository", "Failed to create new user profile offline", e)
+                }
             }
             
             return AuthUser(
@@ -365,7 +387,7 @@ class AuthRepositoryImpl @Inject constructor(
             }
         }
         
-        return AuthUser(
+        val user = AuthUser(
             uid = uid,
             email = email,
             displayName = displayName,
@@ -374,6 +396,11 @@ class AuthRepositoryImpl @Inject constructor(
             isAuthorized = isAuthorized,
             agentName = agentName?.trim()?.uppercase()
         )
+
+        // Cache the successful profile
+        settingsManager.saveUserProfile(user)
+        
+        return user
     }
 
     private suspend fun getAdminFallback(firebaseUser: FirebaseUser, uid: String, email: String): AuthUser {

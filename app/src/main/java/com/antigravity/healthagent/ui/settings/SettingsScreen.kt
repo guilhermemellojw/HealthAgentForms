@@ -14,6 +14,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.data.backup.BackupFrequency
@@ -278,31 +281,25 @@ fun SettingsScreen(
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
                         
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        SingleChoiceSegmentedButtonRow(
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            listOf("SYSTEM" to "Sistema", "LIGHT" to "Claro", "DARK" to "Escuro").forEach { (mode, label) ->
-                                FilterChip(
-                                    selected = currentMode == mode,
+                            val options = listOf("SYSTEM" to "Sistema", "LIGHT" to "Claro", "DARK" to "Escuro")
+                            options.forEachIndexed { index, (mode, label) ->
+                                SegmentedButton(
+                                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
                                     onClick = { viewModel.updateThemeMode(mode) },
-                                    label = { Text(label) },
-                                    leadingIcon = if (currentMode == mode) {
-                                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                                    } else null,
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        containerColor = Color.Transparent,
-                                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        selectedLabelColor = MaterialTheme.colorScheme.primary
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        enabled = true,
-                                        selected = currentMode == mode,
-                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                                        selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                                    ),
-                                    modifier = Modifier.weight(1f)
+                                    selected = currentMode == mode,
+                                    label = { 
+                                        Text(
+                                            text = label,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        ) 
+                                    },
+                                    icon = {
+                                        SegmentedButtonDefaults.Icon(active = currentMode == mode)
+                                    }
                                 )
                             }
                         }
@@ -318,19 +315,17 @@ fun SettingsScreen(
                             modifier = Modifier.padding(bottom = 12.dp)
                         )
                         
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                         ) {
-                            val colors = AppColors
-                            colors.forEach { (name, color) ->
+                            items(AppColors.toList()) { (name, color) ->
                                 val isSelected = currentColor == name
                                 Box(
                                     modifier = Modifier
-                                        .size(48.dp)
+                                        .size(if (isSelected) 54.dp else 48.dp)
                                         .clip(CircleShape)
                                         .background(color)
                                         .clickable { 
@@ -338,8 +333,9 @@ fun SettingsScreen(
                                             viewModel.updateThemeColor(name) 
                                         }
                                         .then(
-                                            if (isSelected) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier
-                                        ),
+                                            if (isSelected) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier
+                                        )
+                                        .animateContentSize(),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (isSelected) {
@@ -347,7 +343,7 @@ fun SettingsScreen(
                                             imageVector = Icons.Default.Check,
                                             contentDescription = null,
                                             tint = Color.White,
-                                            modifier = Modifier.size(24.dp)
+                                            modifier = Modifier.size(28.dp)
                                         )
                                     }
                                 }
@@ -510,29 +506,35 @@ fun SettingsScreen(
                                 
                                 Surface(
                                     modifier = Modifier.fillMaxWidth(),
-                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.05f),
-                                    shape = RoundedCornerShape(12.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f))
+                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
                                 ) {
                                     Column(modifier = Modifier.padding(bottom = 8.dp)) {
-                                        Text(
-                                            "ZONA DE PERIGO", 
-                                            style = MaterialTheme.typography.labelSmall, 
-                                            fontWeight = FontWeight.Black, 
-                                            color = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.padding(16.dp)
-                                        )
+                                        Row(
+                                            modifier = Modifier.padding(16.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                "ZONA DE PERIGO", 
+                                                style = MaterialTheme.typography.labelMedium, 
+                                                fontWeight = FontWeight.Black, 
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                        }
                                         
                                         ListItem(
-                                            headlineContent = { Text("Limpar Histórico Antigo", color = MaterialTheme.colorScheme.error) },
-                                            supportingContent = { Text("Remover dados anteriores a uma data", color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)) },
+                                            headlineContent = { Text("Limpar Histórico Antigo", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
+                                            supportingContent = { Text("Remover dados anteriores a uma data", color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)) },
                                             leadingContent = { Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.error) },
                                             modifier = Modifier.clickable { showCleanupPicker = true },
                                             colors = ListItemDefaults.colors(containerColor = Color.Transparent)
                                         )
                                         ListItem(
-                                            headlineContent = { Text("Apagar Tudo", color = MaterialTheme.colorScheme.error) },
-                                            supportingContent = { Text("Resetar banco de dados local", color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)) },
+                                            headlineContent = { Text("Apagar Tudo", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
+                                            supportingContent = { Text("Resetar banco de dados local", color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)) },
                                             leadingContent = { Icon(Icons.Default.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
                                             modifier = Modifier.clickable { showEraseConfirm = true },
                                             colors = ListItemDefaults.colors(containerColor = Color.Transparent)
@@ -594,94 +596,93 @@ fun SoundSelectionGroup(
     context: android.content.Context,
     viewModel: HomeViewModel
 ) {
-    PremiumCard(modifier = Modifier.fillMaxWidth().animateContentSize()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.NotificationsActive, null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text(text = description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(bottom = 16.dp)
+    ) {
+        Icon(Icons.Default.NotificationsActive, null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(text = description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    
+    Spacer(modifier = Modifier.height(16.dp))
+    
+    val sounds = listOf(
+        Triple("POP", "Som de Clique (Adicionar Imóvel)", popSound),
+        Triple("SUCCESS", "Som de Sucesso (Fechar Dia)", successSound),
+        Triple("CELEBRATION", "Som de Celebração (Meta)", celebrationSound),
+        Triple("WARNING", "Som de Alerta (Erros)", warningSound)
+    )
+    
+    sounds.forEachIndexed { index, (id, label, currentUri) ->
+        val isExpanded = expandedCategory == id
+        val currentTitle = remember(currentUri) { viewModel.getSoundTitle(currentUri, context) }
+        
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { onExpandToggle(id) }
+                .padding(vertical = 8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Text(currentTitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                 }
+                Icon(
+                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            val sounds = listOf(
-                Triple("POP", "Som de Clique (Adicionar Imóvel)", popSound),
-                Triple("SUCCESS", "Som de Sucesso (Fechar Dia)", successSound),
-                Triple("CELEBRATION", "Som de Celebração (Meta)", celebrationSound),
-                Triple("WARNING", "Som de Alerta (Erros)", warningSound)
-            )
-            
-            sounds.forEachIndexed { index, (id, label, currentUri) ->
-                val isExpanded = expandedCategory == id
-                val currentTitle = remember(currentUri) { viewModel.getSoundTitle(currentUri, context) }
-                
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onExpandToggle(id) }
-                        .padding(vertical = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                            Text(currentTitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                        }
-                        Icon(
-                            imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
+            if (isExpanded) {
+                Column(modifier = Modifier.padding(top = 8.dp).animateContentSize()) {
+                    Row(modifier = Modifier.fillMaxWidth().clickable { onSoundSelect(id, "SILENT") }, verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = currentUri == "SILENT", onClick = { onSoundSelect(id, "SILENT") })
+                        Text("Silencioso", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth().clickable { 
+                        onSystemPickerClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id), currentUri) 
+                    }, verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = currentUri.startsWith("content://"), onClick = { 
+                            onSystemPickerClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id), currentUri) 
+                        })
+                        Text("Som do Sistema", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth().clickable { 
+                        onCustomFileClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id)) 
+                    }, verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = currentUri.startsWith("file://"), onClick = { 
+                            onCustomFileClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id)) 
+                        })
+                        Text("Personalizado", style = MaterialTheme.typography.bodyMedium)
                     }
                     
-                    if (isExpanded) {
-                        Column(modifier = Modifier.padding(top = 8.dp).animateContentSize()) {
-                            Row(modifier = Modifier.fillMaxWidth().clickable { onSoundSelect(id, "SILENT") }, verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = currentUri == "SILENT", onClick = { onSoundSelect(id, "SILENT") })
-                                Text("Silencioso", style = MaterialTheme.typography.bodyMedium)
-                            }
-                            Row(modifier = Modifier.fillMaxWidth().clickable { 
-                                onSystemPickerClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id), currentUri) 
-                            }, verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = currentUri.startsWith("content://"), onClick = { 
-                                    onSystemPickerClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id), currentUri) 
-                                })
-                                Text("Som do Sistema", style = MaterialTheme.typography.bodyMedium)
-                            }
-                            Row(modifier = Modifier.fillMaxWidth().clickable { 
-                                onCustomFileClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id)) 
-                            }, verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = currentUri.startsWith("file://"), onClick = { 
-                                    onCustomFileClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id)) 
-                                })
-                                Text("Personalizado", style = MaterialTheme.typography.bodyMedium)
-                            }
-                            
-                            if (currentUri != "SILENT") {
-                                TextButton(
-                                    onClick = { onTestSound(currentUri) },
-                                    modifier = Modifier.align(Alignment.End)
-                                ) {
-                                    Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Testar")
-                                }
-                            }
+                    if (currentUri != "SILENT") {
+                        TextButton(
+                            onClick = { onTestSound(currentUri) },
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Testar")
                         }
                     }
                 }
-                
-                if (index < sounds.size - 1) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                }
             }
+        }
+        
+        if (index < sounds.size - 1) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         }
     }
 }
