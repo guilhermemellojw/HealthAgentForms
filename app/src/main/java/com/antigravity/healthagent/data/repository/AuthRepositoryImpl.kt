@@ -331,10 +331,13 @@ class AuthRepositoryImpl @Inject constructor(
             }
             
             // If still not exists and online, create new user
+            var role = UserRole.AGENT
+            var isAuthorized = false
+
             if (isOnline) {
                 val isAdmin = try { firestore.collection("admins").document(uid).get().await().exists() } catch(e: Exception) { false }
-                val role = if (isAdmin) UserRole.ADMIN else UserRole.AGENT
-                val isAuthorized = isAdmin
+                role = if (isAdmin) UserRole.ADMIN else UserRole.AGENT
+                isAuthorized = isAdmin
                 
                 val newUser = mapOf(
                     "email" to email,
