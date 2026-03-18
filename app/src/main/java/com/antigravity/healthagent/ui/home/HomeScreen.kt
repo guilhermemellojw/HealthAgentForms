@@ -662,6 +662,7 @@ fun HomeScreen(
             state = pullToRefreshState,
             modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
+            // Indentation and content will be below
         
         fun checkForOverScroll(viewportY: Float) {
             val distFromTop = viewportY
@@ -934,7 +935,8 @@ fun HomeScreen(
                 }
             }
         }
+        }
     }
 }
-}
+
 

@@ -6,14 +6,14 @@ import androidx.room.*
 
 @Dao
 interface DayActivityDao {
-    @Query("SELECT * FROM day_activities WHERE date = :date AND UPPER(agentName) = UPPER(:agentName)")
-    suspend fun getDayActivity(date: String, agentName: String): DayActivity?
+    @Query("SELECT * FROM day_activities WHERE date = :date AND (UPPER(agentName) = UPPER(:agentName) OR (agentUid != '' AND agentUid = :agentUid))")
+    suspend fun getDayActivity(date: String, agentName: String, agentUid: String? = ""): DayActivity?
 
-    @Query("SELECT * FROM day_activities WHERE date IN (:dates) AND UPPER(agentName) = UPPER(:agentName)")
-    fun getDayActivities(dates: List<String>, agentName: String): Flow<List<DayActivity>>
+    @Query("SELECT * FROM day_activities WHERE date IN (:dates) AND (UPPER(agentName) = UPPER(:agentName) OR (agentUid != '' AND agentUid = :agentUid))")
+    fun getDayActivities(dates: List<String>, agentName: String, agentUid: String? = ""): Flow<List<DayActivity>>
 
-    @Query("SELECT * FROM day_activities WHERE date = :date AND UPPER(agentName) = UPPER(:agentName)")
-    fun getDayActivityFlow(date: String, agentName: String): Flow<DayActivity?>
+    @Query("SELECT * FROM day_activities WHERE date = :date AND (UPPER(agentName) = UPPER(:agentName) OR (agentUid != '' AND agentUid = :agentUid))")
+    fun getDayActivityFlow(date: String, agentName: String, agentUid: String? = ""): Flow<DayActivity?>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDayActivity(dayActivity: DayActivity)
@@ -23,6 +23,12 @@ interface DayActivityDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(activities: List<DayActivity>)
+
+    @Query("SELECT * FROM day_activities WHERE isSynced = 0")
+    suspend fun getUnsyncedActivities(): List<DayActivity>
+
+    @Query("UPDATE day_activities SET isSynced = 1 WHERE date IN (:dates) AND UPPER(agentName) = UPPER(:agentName)")
+    suspend fun markAsSynced(dates: List<String>, agentName: String)
 
     @Query("DELETE FROM day_activities WHERE date = :date AND UPPER(agentName) = UPPER(:agentName)")
     suspend fun deleteDayActivity(date: String, agentName: String)
@@ -52,6 +58,9 @@ interface DayActivityDao {
     @Query("SELECT COUNT(*) FROM day_activities WHERE isClosed = 0 AND UPPER(agentName) = UPPER(:agentName)")
     suspend fun countOpenDays(agentName: String): Int
 
-    @Query("UPDATE day_activities SET isClosed = 1 WHERE UPPER(agentName) = UPPER(:agentName)")
-    suspend fun closeAllActivities(agentName: String)
+    @Query("UPDATE day_activities SET isClosed = 1, isSynced = 0, lastUpdated = :now WHERE UPPER(agentName) = UPPER(:agentName)")
+    suspend fun closeAllActivities(agentName: String, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE day_activities SET agentName = :newName WHERE agentName = :oldName")
+    suspend fun updateAgentNameForAll(oldName: String, newName: String)
 }

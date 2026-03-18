@@ -1,8 +1,12 @@
 package com.antigravity.healthagent.ui.supervisor
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -32,6 +36,10 @@ fun SupervisorSummaryScreen(
     val weekRange by viewModel.weekRangeText.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    
+    var selectedStatLabel by remember { mutableStateOf<String?>(null) }
+    var selectedStatDetails by remember { mutableStateOf<List<StatDetail>>(emptyList()) }
+    var showStatDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -147,13 +155,23 @@ fun SupervisorSummaryScreen(
                                     label = "TRABALHADOS",
                                     value = summary.totalHouses.toString(),
                                     icon = Icons.Default.Home,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        selectedStatLabel = "TRABALHADOS"
+                                        selectedStatDetails = summary.housesDetails
+                                        showStatDialog = true
+                                    }
                                 )
                                 StatItem(
                                     label = "TRATADOS",
                                     value = summary.totalTratados.toString(),
                                     icon = Icons.Default.WaterDrop,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        selectedStatLabel = "TRATADOS"
+                                        selectedStatDetails = summary.tratadosDetails
+                                        showStatDialog = true
+                                    }
                                 )
                             }
                             
@@ -166,13 +184,23 @@ fun SupervisorSummaryScreen(
                                     value = summary.totalFoci.toString(),
                                     icon = Icons.Default.Warning,
                                     color = if (summary.totalFoci > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        selectedStatLabel = "COM FOCO"
+                                        selectedStatDetails = summary.fociDetails
+                                        showStatDialog = true
+                                    }
                                 )
                                 StatItem(
                                     label = "FECHADOS",
                                     value = summary.totalFechados.toString(),
                                     icon = Icons.Default.DoorFront,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        selectedStatLabel = "FECHADOS"
+                                        selectedStatDetails = summary.fechadosDetails
+                                        showStatDialog = true
+                                    }
                                 )
                             }
 
@@ -184,13 +212,23 @@ fun SupervisorSummaryScreen(
                                     label = "ABANDONADOS",
                                     value = summary.totalAbandonados.toString(),
                                     icon = Icons.Default.House,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        selectedStatLabel = "ABANDONADOS"
+                                        selectedStatDetails = summary.abandonadosDetails
+                                        showStatDialog = true
+                                    }
                                 )
                                 StatItem(
                                     label = "RECUSADOS",
                                     value = summary.totalRecusados.toString(),
                                     icon = Icons.Default.Block,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        selectedStatLabel = "RECUSADOS"
+                                        selectedStatDetails = summary.recusadosDetails
+                                        showStatDialog = true
+                                    }
                                 )
                             }
                         }
@@ -221,6 +259,14 @@ fun SupervisorSummaryScreen(
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
             }
+
+            if (showStatDialog && selectedStatLabel != null) {
+                StatDetailsDialog(
+                    onDismissRequest = { showStatDialog = false },
+                    label = selectedStatLabel!!,
+                    details = selectedStatDetails
+                )
+            }
         }
     }
 }
@@ -231,10 +277,14 @@ fun StatItem(
     value: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     color: Color = MaterialTheme.colorScheme.primary,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     Column(
-        modifier = modifier,
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
@@ -257,5 +307,119 @@ fun StatItem(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun StatDetailsDialog(
+    onDismissRequest: () -> Unit,
+    label: String,
+    details: List<StatDetail>
+) {
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        modifier = Modifier.fillMaxWidth(0.9f)
+    ) {
+        PremiumCard(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(0.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "DETALHAMENTO",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Black
+                        )
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                    IconButton(onClick = onDismissRequest) {
+                        Icon(Icons.Default.Close, contentDescription = "Fechar")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                if (details.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Nenhum dado registrado",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        details.forEach { detail ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = detail.agentName,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = detail.agentEmail,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
+                                
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.padding(start = 12.dp)
+                                ) {
+                                    Text(
+                                        text = detail.count.toString(),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
     }
 }

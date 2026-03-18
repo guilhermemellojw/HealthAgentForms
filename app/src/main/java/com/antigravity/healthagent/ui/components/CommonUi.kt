@@ -40,6 +40,9 @@ import kotlinx.coroutines.delay
 import android.os.Build
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.shadow
+import coil.compose.AsyncImage
 
 @Composable
 fun CompactInputBox(
@@ -646,12 +649,16 @@ fun UserIconMenu(
     var showUserMenu by remember { mutableStateOf(false) }
     
     Box(modifier = modifier) {
-        IconButton(onClick = { showUserMenu = true }) {
-            Icon(
-                imageVector = Icons.Default.Person,
-                contentDescription = "Perfil",
-                tint = tint,
-                modifier = Modifier.size(28.dp)
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .clickable { showUserMenu = true },
+            contentAlignment = Alignment.Center
+        ) {
+            UserAvatar(
+                user = user,
+                size = 34.dp
             )
         }
         DropdownMenu(
@@ -688,14 +695,62 @@ fun UserIconMenu(
                 },
                 leadingIcon = { Icon(Icons.Default.SwapHoriz, null) }
             )
-            DropdownMenuItem(
-                text = { Text("Sair", color = MaterialTheme.colorScheme.error) },
-                onClick = { 
-                    showUserMenu = false
-                    onLogout()
-                },
-                leadingIcon = { Icon(Icons.Default.ExitToApp, null, tint = MaterialTheme.colorScheme.error) }
+        }
+    }
+}
+
+@Composable
+fun UserAvatar(
+    user: com.antigravity.healthagent.domain.repository.AuthUser,
+    size: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier
+) {
+    val avatarColors = listOf(
+        Color(0xFF4285F4), // Google Blue
+        Color(0xFFEA4335), // Google Red
+        Color(0xFFFBBC04), // Google Yellow
+        Color(0xFF34A853), // Google Green
+        Color(0xFF673AB7), // Deep Purple
+        Color(0xFFF44336), // Red
+        Color(0xFF2196F3), // Blue
+        Color(0xFF4CAF50)  // Green
+    )
+    
+    val backgroundColor = remember(user.uid) {
+        avatarColors[user.uid.hashCode().let { if (it < 0) -it else it } % avatarColors.size]
+    }
+
+    Surface(
+        modifier = modifier
+            .size(size)
+            .shadow(elevation = 2.dp, shape = CircleShape)
+            .border(1.dp, Color.White.copy(alpha = 0.4f), CircleShape),
+        shape = CircleShape,
+        color = backgroundColor
+    ) {
+        if (!user.photoUrl.isNullOrEmpty()) {
+            AsyncImage(
+                model = user.photoUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop
             )
+        } else {
+            val initial = remember(user.displayName, user.email) {
+                (user.displayName ?: user.email ?: "?").take(1).uppercase()
+            }
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Text(
+                    text = initial,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = (size.value * 0.5).sp,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
         }
     }
 }
@@ -748,6 +803,7 @@ fun GlassTopAppBar(
             scrollBehavior = scrollBehavior,
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = Color.Transparent,
+                scrolledContainerColor = Color.Transparent,
                 titleContentColor = MaterialTheme.colorScheme.onPrimary,
                 navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
                 actionIconContentColor = MaterialTheme.colorScheme.onPrimary

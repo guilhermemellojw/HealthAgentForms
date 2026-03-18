@@ -57,6 +57,11 @@ interface SyncRepository {
     suspend fun clearLocalData(): Result<Unit>
 
     /**
+     * Performs a one-time cleanup of corrupted data (e.g., '0' in number/sequence/complement).
+     */
+    suspend fun performDataCleanup(): Result<Unit>
+
+    /**
      * Surgically restores houses and activities into local database for a specific agent.
      */
     suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>): Result<Unit>
@@ -78,7 +83,12 @@ interface SyncRepository {
     // Local-to-Cloud Deletion Synchronization (Tombstones)
     suspend fun recordHouseDeletion(house: House): Result<Unit>
     suspend fun recordActivityDeletion(date: String, agentName: String): Result<Unit>
-    suspend fun recordBulkDeletions(houseKeys: List<String>, activityDates: List<String>): Result<Unit>
+    suspend fun recordBulkDeletions(houseKeys: List<String>, activityDates: List<String>, targetUid: String? = null): Result<Unit>
+
+    /**
+     * NUCLEAR OPTION: Deletes ALL data for ALL agents in the cloud.
+     */
+    suspend fun deleteAllCloudData(): Result<Unit>
 }
 
 data class AgentData(

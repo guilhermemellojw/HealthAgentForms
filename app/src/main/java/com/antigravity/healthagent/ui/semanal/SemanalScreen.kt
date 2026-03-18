@@ -5,8 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,6 +19,13 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.DoorFront
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import android.content.Intent
 import android.widget.Toast
@@ -27,6 +33,7 @@ import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.ui.home.HomeViewModel
 import com.antigravity.healthagent.ui.components.CompactDropdown
+import com.antigravity.healthagent.ui.components.SyncStatusOverlay
 import com.antigravity.healthagent.ui.home.DaySummary
 import com.antigravity.healthagent.utils.AppConstants
 import kotlinx.coroutines.launch
@@ -157,204 +164,214 @@ fun SemanalScreen(
             modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-            com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
-            // Unused val currentWeekDates by viewModel.currentWeekDates.collectAsState()
-            val weekRangeText = uiState.weekRangeText
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-            // Week Selector Row
-                PremiumCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    isSolarMode = uiState.isSolarMode
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    FilledIconButton(
-                        onClick = { viewModel.previousWeek() },
-                        modifier = Modifier.size(if (uiState.isEasyMode) 56.dp else 44.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Semana Anterior",
-                            modifier = Modifier.size(if (uiState.isEasyMode) 32.dp else 24.dp)
-                        )
-                    }
-                    
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "PERÍODO DA SEMANA",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Black,
-                            fontSize = if (uiState.isEasyMode) 12.sp else 10.sp
-                        )
-                        Text(
-                            text = weekRangeText,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = if (uiState.isEasyMode) 18.sp else 16.sp
-                        )
-                    }
-                    
-                    FilledIconButton(
-                        onClick = { viewModel.nextWeek() },
-                        modifier = Modifier.size(if (uiState.isEasyMode) 56.dp else 44.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowForward,
-                            contentDescription = "Próxima Semana",
-                            modifier = Modifier.size(if (uiState.isEasyMode) 32.dp else 24.dp)
-                        )
-                    }
-                }
-            }
-
-            // Agent Selection
-            val agentName = uiState.agentName
-            PremiumCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                isSolarMode = uiState.isSolarMode
-            ) {
-                CompactDropdown(
-                    label = "Agente Responsável",
-                    currentValue = agentName,
-                    options = uiState.agentNames.ifEmpty { AppConstants.AGENT_NAMES },
-                    onOptionSelected = { viewModel.updateAgentName(it) },
-                    modifier = Modifier.fillMaxWidth(),
-                    isEasyMode = uiState.isEasyMode
-                )
-            }
-
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 80.dp, start = 12.dp, end = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(if (uiState.isEasyMode) 16.dp else 12.dp)
-            ) {
-                itemsIndexed(uiState.weeklySummary, key = { _, day -> day.date }) { index, day ->
-                    WeeklyDayRow(
-                        day = day,
-                        options = uiState.activityOptions,
-                        onStatusChange = { viewModel.updateDayStatus(day.date, it) },
-                        onClick = { viewModel.navigateToDate(day.date) },
-                        isEasyMode = uiState.isEasyMode,
-                        isSolarMode = uiState.isSolarMode,
-                        modifier = Modifier
-                    )
-                }
-            }
-
-            if (showAddActivityDialog) {
-                val customActivities = uiState.customActivities
+                com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
                 
-                AlertDialog(
-                    onDismissRequest = { showAddActivityDialog = false },
-                    title = { Text("Gerenciar Status") },
-                    text = {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.fillMaxWidth()
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Week Selector Row
+                    PremiumCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        isSolarMode = uiState.isSolarMode
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // List of existing custom activities
-                            if (customActivities.isNotEmpty()) {
+                            FilledIconButton(
+                                onClick = { viewModel.previousWeek() },
+                                modifier = Modifier.size(if (uiState.isEasyMode) 56.dp else 44.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowBack,
+                                    contentDescription = "Semana Anterior",
+                                    modifier = Modifier.size(if (uiState.isEasyMode) 32.dp else 24.dp)
+                                )
+                            }
+                            
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    "Status Personalizados:",
+                                    text = "PERÍODO DA SEMANA",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = if (uiState.isEasyMode) 12.sp else 10.sp
+                                )
+                                Text(
+                                    text = uiState.weekRangeText,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = if (uiState.isEasyMode) 18.sp else 16.sp
+                                )
+                            }
+                            
+                            FilledIconButton(
+                                onClick = { viewModel.nextWeek() },
+                                modifier = Modifier.size(if (uiState.isEasyMode) 56.dp else 44.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowForward,
+                                    contentDescription = "Próxima Semana",
+                                    modifier = Modifier.size(if (uiState.isEasyMode) 32.dp else 24.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Weekly Summary Card
+                    PremiumCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp),
+                        isSolarMode = uiState.isSolarMode
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "ESTATÍSTICAS DA SEMANA",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = if (uiState.isEasyMode) 11.sp else 9.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                CompactStatItem("TRABALHADOS", uiState.weeklySummaryTotals.totalHouses.toString(), Icons.Default.Home, isEasyMode = uiState.isEasyMode)
+                                CompactStatItem("TRATADOS", uiState.weeklySummaryTotals.totalTratados.toString(), Icons.Default.WaterDrop, isEasyMode = uiState.isEasyMode)
+                                CompactStatItem("COM FOCO", uiState.weeklySummaryTotals.totalFoci.toString(), Icons.Default.Warning, color = if (uiState.weeklySummaryTotals.totalFoci > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, isEasyMode = uiState.isEasyMode)
+                                CompactStatItem("FECHADOS", uiState.weeklySummaryTotals.totalFechados.toString(), Icons.Default.DoorFront, isEasyMode = uiState.isEasyMode)
+                                CompactStatItem("RECUSADOS", uiState.weeklySummaryTotals.totalRecusados.toString(), Icons.Default.Block, isEasyMode = uiState.isEasyMode)
+                            }
+                        }
+                    }
+
+
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 80.dp, start = 12.dp, end = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(if (uiState.isEasyMode) 16.dp else 12.dp)
+                    ) {
+                        itemsIndexed(uiState.weeklySummary, key = { _, day -> day.date }) { _, day ->
+                            WeeklyDayRow(
+                                day = day,
+                                options = uiState.activityOptions,
+                                onStatusChange = { viewModel.updateDayStatus(day.date, it) },
+                                onClick = { viewModel.navigateToDate(day.date) },
+                                isEasyMode = uiState.isEasyMode,
+                                isSolarMode = uiState.isSolarMode,
+                                modifier = Modifier
+                            )
+                        }
+                    }
+                }
+
+                if (showAddActivityDialog) {
+                    val customActivities = uiState.customActivities
+                    
+                    AlertDialog(
+                        onDismissRequest = { showAddActivityDialog = false },
+                        title = { Text("Gerenciar Status") },
+                        text = {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                if (customActivities.isNotEmpty()) {
+                                    Text(
+                                        "Status Personalizados:",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 200.dp)
+                                    ) {
+                                        items(customActivities.toList()) { activity ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 4.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = activity,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                IconButton(
+                                                    onClick = { viewModel.removeActivity(activity) },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Delete,
+                                                        contentDescription = "Remover",
+                                                        tint = MaterialTheme.colorScheme.error
+                                                    )
+                                                }
+                                            }
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                        }
+                                    }
+                                } else {
+                                    Text(
+                                        "Nenhum status personalizado.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                
+                                Spacer(modifier = Modifier.height(8.dp))
+                                
+                                Text(
+                                    "Adicionar Novo:",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
-                                LazyColumn(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 200.dp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    items(customActivities.toList()) { activity ->
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 4.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = activity,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            IconButton(
-                                                onClick = { viewModel.removeActivity(activity) },
-                                                modifier = Modifier.size(32.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Delete,
-                                                    contentDescription = "Remover",
-                                                    tint = MaterialTheme.colorScheme.error
-                                                )
-                                            }
-                                        }
-                                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                    OutlinedTextField(
+                                        value = newActivityName,
+                                        onValueChange = { newActivityName = it },
+                                        label = { Text("Nome do Status") },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    FilledIconButton(
+                                        onClick = {
+                                            viewModel.addNewActivity(newActivityName.uppercase())
+                                            newActivityName = ""
+                                        },
+                                        enabled = newActivityName.isNotBlank()
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = "Adicionar")
                                     }
                                 }
-                            } else {
-                                Text(
-                                    "Nenhum status personalizado.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
                             }
-                            
-                            Spacer(modifier = Modifier.height(8.dp))
-                            
-                            // Input for new activity
-                            Text(
-                                "Adicionar Novo:",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = newActivityName,
-                                    onValueChange = { newActivityName = it },
-                                    label = { Text("Nome do Status") },
-                                    singleLine = true,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                FilledIconButton(
-                                    onClick = {
-                                        viewModel.addNewActivity(newActivityName.uppercase())
-                                        newActivityName = ""
-                                    },
-                                    enabled = newActivityName.isNotBlank()
-                                ) {
-                                    Icon(Icons.Default.Add, contentDescription = "Adicionar")
-                                }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showAddActivityDialog = false }) {
+                                Text("FECHAR")
                             }
                         }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { showAddActivityDialog = false }) {
-                            Text("FECHAR")
-                        }
-                    }
-                )
+                    )
+                }
+            }
         }
     }
-}
-}
-}
 }
 
 @Composable
@@ -446,5 +463,39 @@ fun WeeklyDayRow(
                 isEasyMode = isEasyMode
             )
         }
+    }
+}
+
+@Composable
+fun CompactStatItem(
+    label: String,
+    value: String,
+    icon: ImageVector,
+    color: Color = MaterialTheme.colorScheme.primary,
+    isEasyMode: Boolean = false
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(vertical = 2.dp, horizontal = 4.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = color.copy(alpha = 0.7f),
+            modifier = Modifier.size(if (isEasyMode) 24.dp else 20.dp)
+        )
+        Text(
+            text = value,
+            style = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Black,
+            color = color
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 9.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
     }
 }

@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.antigravity.healthagent.data.local.AppDatabase
 import com.antigravity.healthagent.data.local.dao.HouseDao
 import com.antigravity.healthagent.data.local.dao.DayActivityDao
+import com.antigravity.healthagent.data.local.dao.TombstoneDao
 import com.antigravity.healthagent.data.local.dao.CustomStreetDao
 import dagger.Module
 import dagger.Provides
@@ -28,7 +29,9 @@ object DatabaseModule {
         .addMigrations(
             AppDatabase.MIGRATION_12_13, 
             AppDatabase.MIGRATION_13_14,
-            AppDatabase.MIGRATION_14_15
+            AppDatabase.MIGRATION_14_15,
+            AppDatabase.MIGRATION_15_16,
+            AppDatabase.MIGRATION_16_17
         )
         .build()
     }
@@ -46,5 +49,10 @@ object DatabaseModule {
     @Provides
     fun provideCustomStreetDao(database: AppDatabase): CustomStreetDao {
         return database.customStreetDao()
+    }
+
+    @Provides
+    fun provideTombstoneDao(database: AppDatabase): TombstoneDao {
+        return database.tombstoneDao()
     }
 }

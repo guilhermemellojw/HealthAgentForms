@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 import javax.inject.Inject
 
 @HiltViewModel
@@ -26,6 +28,7 @@ class QuarteiroesViewModel @Inject constructor(
 
     private val PREFS_NAME = "quarteiroes_prefs"
     private val KEY_KML_URI = "kml_uri"
+    private val KEY_KML_LOCAL_PATH = "kml_local_path"
     private val KEY_MAP_TYPE = "map_type"
 
     init {
@@ -34,10 +37,38 @@ class QuarteiroesViewModel @Inject constructor(
     }
 
     fun setKmlUri(uri: android.net.Uri) {
+        // 1. Store URI and take persistable permission
         saveKmlUri(uri)
         _kmlUri.value = uri
-        loadKmlData(uri)
+        
+        // 2. Copy to internal storage for permanent access
+        val localPath = copyKmlToInternal(uri)
+        if (localPath != null) {
+            saveKmlLocalPath(localPath)
+            loadKmlData(android.net.Uri.fromFile(File(localPath)))
+        } else {
+             // Fallback to direct URI if copy fails
+            loadKmlData(uri)
+        }
     }
+
+    private fun copyKmlToInternal(uri: android.net.Uri): String? {
+        return try {
+            val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+            val internalFile = File(context.filesDir, "selected_map_layers.kml")
+            
+            FileOutputStream(internalFile).use { outputStream ->
+                inputStream.copyTo(outputStream)
+            }
+            internalFile.absolutePath
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    private val _kmlBounds = MutableStateFlow<com.google.android.gms.maps.model.LatLngBounds?>(null)
+    val kmlBounds: StateFlow<com.google.android.gms.maps.model.LatLngBounds?> = _kmlBounds.asStateFlow()
 
     private fun loadKmlData(uri: android.net.Uri) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -47,6 +78,32 @@ class QuarteiroesViewModel @Inject constructor(
                     result.fold(
                         onSuccess = { folders ->
                             _kmlFolders.value = folders
+                            
+                            // Calculate total bounds and placemark count for diagnostics
+                            val builder = com.google.android.gms.maps.model.LatLngBounds.builder()
+                            var totalPlacemarks = 0
+                            var hasPoints = false
+                            
+                            folders.forEach { folder ->
+                                folder.getBounds()?.let { 
+                                    builder.include(it.northeast)
+                                    builder.include(it.southwest)
+                                    hasPoints = true
+                                }
+                                
+                                fun countPlacemarks(f: KmlFolder): Int {
+                                    return f.placemarks.size + f.children.sumOf { countPlacemarks(it) }
+                                }
+                                totalPlacemarks += countPlacemarks(folder)
+                            }
+                            
+                            if (hasPoints) {
+                                _kmlBounds.value = builder.build()
+                            }
+                            
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                android.widget.Toast.makeText(context, "KML carregado: $totalPlacemarks elementos encontrados", android.widget.Toast.LENGTH_LONG).show()
+                            }
                         },
                         onFailure = { e ->
                             e.printStackTrace()
@@ -58,7 +115,15 @@ class QuarteiroesViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                if (e is SecurityException || e.message?.contains("Permission Denial", ignoreCase = true) == true) {
+                    // If we failed with Permission Denial on an EXTERNAL URI, but we have a local path, try that
+                    if (uri.scheme != "file") {
+                         android.util.Log.e("QuarteiroesViewModel", "Permission denied on external URI, but internal copy should be used.")
+                    } else {
+                         clearKmlUri()
+                    }
+                }
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                     android.widget.Toast.makeText(context, "Erro ao abrir arquivo: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
@@ -80,14 +145,11 @@ class QuarteiroesViewModel @Inject constructor(
         val newFolders = folders.map { folder ->
             if (folder.id == targetId) {
                 foundInThisList = true
-                // Action 1: Toggle Target & Recursively set children to same state
                 setFolderAndChildrenVisibility(folder, targetIsVisible)
             } else {
-                // Check children
                 val (newChildren, foundInChild) = updateFolderVisibilityRecursive(folder.children, targetId, targetIsVisible)
                 if (foundInChild) {
                     foundInThisList = true
-                    // Action 2: If we are enabling a child, we must enable the parent (this folder)
                     val shouldBeVisible = if (targetIsVisible) true else folder.isVisible
                     folder.copy(isVisible = shouldBeVisible, children = newChildren)
                 } else {
@@ -114,13 +176,24 @@ class QuarteiroesViewModel @Inject constructor(
         val sharedPrefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
         sharedPrefs.edit().putString(KEY_KML_URI, uri.toString()).apply()
         
-        // Take persistable permission
         try {
             val takeFlags: Int = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
             context.contentResolver.takePersistableUriPermission(uri, takeFlags)
         } catch (e: SecurityException) {
             e.printStackTrace()
         }
+    }
+
+    private fun saveKmlLocalPath(path: String) {
+        val sharedPrefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        sharedPrefs.edit().putString(KEY_KML_LOCAL_PATH, path).apply()
+    }
+
+    private fun clearKmlUri() {
+        val sharedPrefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        sharedPrefs.edit().remove(KEY_KML_URI).remove(KEY_KML_LOCAL_PATH).apply()
+        _kmlUri.value = null
+        _kmlFolders.value = emptyList()
     }
 
     private fun saveMapType(type: com.google.maps.android.compose.MapType) {
@@ -130,12 +203,33 @@ class QuarteiroesViewModel @Inject constructor(
 
     private fun loadSavedKml() {
         val sharedPrefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        
+        // 1. Try Local Path first (Permanent fix)
+        val localPath = sharedPrefs.getString(KEY_KML_LOCAL_PATH, null)
+        if (localPath != null) {
+            val file = File(localPath)
+            if (file.exists()) {
+                android.util.Log.i("QuarteiroesViewModel", "Loading KML from internal storage: $localPath")
+                loadKmlData(android.net.Uri.fromFile(file))
+                return
+            }
+        }
+
+        // 2. Fallback to external URI (Legacy/Transition)
         val uriString = sharedPrefs.getString(KEY_KML_URI, null)
         uriString?.let {
             try {
                 val uri = android.net.Uri.parse(it)
                 _kmlUri.value = uri
-                loadKmlData(uri)
+                
+                // Try to copy to internal now if it wasn't there
+                val newLocal = copyKmlToInternal(uri)
+                if (newLocal != null) {
+                    saveKmlLocalPath(newLocal)
+                    loadKmlData(android.net.Uri.fromFile(File(newLocal)))
+                } else {
+                    loadKmlData(uri)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }

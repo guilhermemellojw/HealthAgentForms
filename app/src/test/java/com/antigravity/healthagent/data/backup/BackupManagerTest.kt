@@ -42,14 +42,17 @@ class BackupManagerTest {
         val json = """
             {
                 "houses": [
-                    {"blockNumber": "1", "streetName": "Rua A", "data": "10-01-2024"}
+                    {"blockNumber": "1", "streetName": "Rua A", "data": "10-01-2024", "number": "0", "sequence": 0, "complement": 0}
                 ]
             }
         """.trimIndent()
         
         val backupData = parseNew(json)
-        assertEquals(1, backupData.houses.size)
-        assertTrue(backupData.dayActivities.isEmpty()) // Should default to empty list if missing
+        val house = backupData.houses[0]
+        assertEquals("", house.number) // "0" should be sanitized to ""
+        assertEquals(null, house.sequence) // 0 should be null
+        assertEquals(null, house.complement) // 0 should be null
+        assertTrue(backupData.dayActivities.isEmpty())
     }
 
     @Test
@@ -89,7 +92,9 @@ class BackupManagerTest {
                 blockNumber = house.blockNumber.trim(),
                 blockSequence = house.blockSequence.trim(),
                 streetName = house.streetName.trim(),
-                number = house.number.trim(),
+                number = if (house.number.trim() == "0") "" else house.number.trim(),
+                sequence = if (house.sequence == 0) null else house.sequence,
+                complement = if (house.complement == 0) null else house.complement,
                 data = house.data.trim()
             )
         }

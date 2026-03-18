@@ -29,14 +29,21 @@ class RestoreDataUseCase @Inject constructor(
             val normalizedHouses = backupData.houses.map { 
                 it.copy(
                     id = 0, 
-                    agentName = it.agentName.ifBlank { agentName },
-                    data = it.data.replace("/", "-")
+                    agentName = it.agentName.ifBlank { agentName }.trim().uppercase(),
+                    number = if (it.number.trim() == "0") "" else it.number.trim().uppercase(),
+                    sequence = if (it.sequence == 0) null else it.sequence,
+                    complement = if (it.complement == 0) null else it.complement,
+                    data = it.data.replace("/", "-"),
+                    isSynced = false,
+                    lastUpdated = System.currentTimeMillis()
                 ) 
             }
             val normalizedActivities = backupData.dayActivities.map { 
                 it.copy(
                     agentName = it.agentName.ifBlank { agentName },
-                    date = it.date.replace("/", "-")
+                    date = it.date.replace("/", "-"),
+                    isSynced = false,
+                    lastUpdated = System.currentTimeMillis()
                 ) 
             }
 

@@ -112,6 +112,14 @@ fun QuarteiroesScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("QuarteiroesScreen", "Failed to take persistable permission", e)
+            }
             viewModel.setKmlUri(it)
         }
     }
@@ -123,6 +131,18 @@ fun QuarteiroesScreen(
     val bomJardim = LatLng(-22.151944, -42.418889)
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(bomJardim, 15f)
+    }
+
+    val kmlBounds by viewModel.kmlBounds.collectAsState()
+    
+    // Auto-zoom to KML bounds when they change
+    LaunchedEffect(kmlBounds) {
+        kmlBounds?.let { bounds ->
+            cameraPositionState.animate(
+                update = CameraUpdateFactory.newLatLngBounds(bounds, 100),
+                durationMs = 1000
+            )
+        }
     }
 
     val uiSettings = remember {

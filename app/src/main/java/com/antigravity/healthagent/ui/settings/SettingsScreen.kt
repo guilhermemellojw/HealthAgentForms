@@ -61,6 +61,10 @@ fun SettingsScreen(
         }
     }
 
+    LaunchedEffect(Unit) {
+        viewModel.refreshConfig()
+    }
+
     // State for Restore Dialog
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var showEraseConfirm by remember { mutableStateOf(false) }
@@ -154,8 +158,8 @@ fun SettingsScreen(
     if (showCleanupConfirm) {
         AlertDialog(
             onDismissRequest = { showCleanupConfirm = false },
-            title = { Text("Confirmar Limpeza") },
-            text = { Text("Isso removerápermanentemente todos os dados ANTERIORES a $selectedCleanupDate localmente e na nuvem. Deseja continuar?") },
+            title = { Text("Confirmar Limpeza GLOBAL") },
+            text = { Text("ATENÇÃO: Isso removerá permanentemente os dados de TODOS OS AGENTES anteriores a $selectedCleanupDate, tanto localmente quanto na nuvem. Esta ação afetará todo o sistema. Deseja continuar?") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -176,8 +180,8 @@ fun SettingsScreen(
     if (showEraseConfirm) {
         AlertDialog(
            onDismissRequest = { showEraseConfirm = false },
-           title = { Text("Apagar Tudo?") },
-           text = { Text("Isso removerá TODOS os imóveis e dados de produção permanentemente. Essa ação não pode ser desfeita.") },
+           title = { Text("Apagar TUDO (Global)?") },
+           text = { Text("NUCLEAR: Isso removerá permanentemente TODOS os imóveis e dados de produção de TODOS OS AGENTES na nuvem e localmente. O sistema será resetado. Essa ação NÃO pode ser desfeita.") },
            confirmButton = {
                Button(
                    onClick = {
@@ -286,6 +290,18 @@ fun SettingsScreen(
                                     leadingIcon = if (currentMode == mode) {
                                         { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
                                     } else null,
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = Color.Transparent,
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        selectedLabelColor = MaterialTheme.colorScheme.primary
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = currentMode == mode,
+                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                        selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                    ),
                                     modifier = Modifier.weight(1f)
                                 )
                             }
@@ -392,8 +408,9 @@ fun SettingsScreen(
                         // Meta Diária is read-only for regular users
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                            shape = RoundedCornerShape(12.dp)
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                         ) {
                             Row(
                                 modifier = Modifier.padding(12.dp),
@@ -493,9 +510,9 @@ fun SettingsScreen(
                                 
                                 Surface(
                                     modifier = Modifier.fillMaxWidth(),
-                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f),
+                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.05f),
                                     shape = RoundedCornerShape(12.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f))
                                 ) {
                                     Column(modifier = Modifier.padding(bottom = 8.dp)) {
                                         Text(

@@ -24,6 +24,16 @@ data class DayErrorSummary(
     val errorCount: Int
 )
 
+data class WeeklySummaryTotals(
+    val totalHouses: Int = 0,
+    val totalTratados: Int = 0,
+    val totalFoci: Int = 0,
+    val totalFechados: Int = 0,
+    val totalRecusados: Int = 0,
+    val totalAbsent: Int = 0,
+    val totalVacant: Int = 0
+)
+
 data class DashboardTotals(
     val totalHouses: Int = 0,
     val a1: Int = 0,

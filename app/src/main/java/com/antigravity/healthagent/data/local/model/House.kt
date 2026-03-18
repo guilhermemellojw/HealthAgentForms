@@ -39,7 +39,11 @@ data class House(
     val quarteiraoConcluido: Boolean = false,
     val listOrder: Long = 0, // For manual reordering
     val visitSegment: Int = 0, // To distinguish return trips to the same street
-    val createdAt: Long = System.currentTimeMillis()
+    @get:com.google.firebase.firestore.Exclude
+    val createdAt: Long = System.currentTimeMillis(),
+    val isSynced: Boolean = false,
+    @get:com.google.firebase.firestore.Exclude
+    val lastUpdated: Long = System.currentTimeMillis()
 ) {
     @com.google.firebase.firestore.DocumentId
     @androidx.room.Ignore
@@ -52,5 +56,37 @@ data class House(
         val normalizedAgent = agentName.trim().replace(Regex("\\s+"), " ")
         
         return "${normalizedAgent}_${normalizedDate}_${blockNumber.trim()}_${blockSequence.trim()}_${normalizedStreet}_${number.trim()}_${sequence ?: 0}_${complement ?: 0}_${normalizedBairro}_${visitSegment}".uppercase()
+    }
+
+    fun toFirestoreMap(): Map<String, Any?> {
+        return mapOf(
+            "blockNumber" to blockNumber,
+            "streetName" to streetName,
+            "number" to number,
+            "sequence" to sequence,
+            "complement" to complement,
+            "propertyType" to propertyType.name,
+            "situation" to situation.name,
+            "municipio" to municipio,
+            "bairro" to bairro,
+            "categoria" to categoria,
+            "zona" to zona,
+            "tipo" to tipo,
+            "data" to data.replace("/", "-"),
+            "ciclo" to ciclo,
+            "atividade" to atividade,
+            "agentName" to agentName.uppercase(),
+            "a1" to a1, "a2" to a2, "b" to b, "c" to c, "d1" to d1, "d2" to d2, "e" to e,
+            "eliminados" to eliminados,
+            "larvicida" to larvicida,
+            "comFoco" to comFoco,
+            "localidadeConcluida" to localidadeConcluida,
+            "blockSequence" to blockSequence,
+            "quarteiraoConcluido" to quarteiraoConcluido,
+            "listOrder" to listOrder,
+            "visitSegment" to visitSegment,
+            "createdAt" to createdAt,
+            "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+        )
     }
 }

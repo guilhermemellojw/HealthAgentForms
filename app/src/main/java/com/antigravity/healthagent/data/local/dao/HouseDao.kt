@@ -15,6 +15,12 @@ interface HouseDao {
     @Query("SELECT DISTINCT agentName FROM houses")
     fun getDistinctAgentNames(): Flow<List<String>>
 
+    @Query("SELECT * FROM houses WHERE isSynced = 0")
+    suspend fun getUnsyncedHouses(): List<House>
+
+    @Query("UPDATE houses SET isSynced = 1 WHERE id IN (:ids)")
+    suspend fun markAsSynced(ids: List<Int>)
+
     @Query("SELECT DISTINCT data FROM houses WHERE UPPER(agentName) = UPPER(:agentName)")
     suspend fun getDistinctDates(agentName: String): List<String>
 
@@ -36,8 +42,8 @@ interface HouseDao {
     @Delete
     suspend fun deleteHouse(house: House)
 
-    @Query("UPDATE houses SET data = :newDate WHERE data = :oldDate AND UPPER(agentName) = UPPER(:agentName)")
-    suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String)
+    @Query("UPDATE houses SET data = :newDate, isSynced = 0, lastUpdated = :now WHERE data = :oldDate AND UPPER(agentName) = UPPER(:agentName)")
+    suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, now: Long = System.currentTimeMillis())
 
 
     @Query("DELETE FROM houses WHERE data = :date AND UPPER(agentName) = UPPER(:agentName)")
@@ -64,4 +70,16 @@ interface HouseDao {
 
     @Query("DELETE FROM houses WHERE UPPER(agentName) = UPPER(:agentName) AND data IN (:dates)")
     suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>)
+
+    @Query("""
+        UPDATE houses 
+        SET number = CASE WHEN number = '0' THEN '' ELSE number END,
+            sequence = CASE WHEN sequence = 0 THEN NULL ELSE sequence END,
+            complement = CASE WHEN complement = 0 THEN NULL ELSE complement END
+        WHERE number = '0' OR sequence = 0 OR complement = 0
+    """)
+    suspend fun cleanupZeroValues()
+
+    @Query("UPDATE houses SET agentName = :newName WHERE agentName = :oldName")
+    suspend fun updateAgentNameForAll(oldName: String, newName: String)
 }

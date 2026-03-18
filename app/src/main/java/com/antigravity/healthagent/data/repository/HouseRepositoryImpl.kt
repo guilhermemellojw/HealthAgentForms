@@ -38,15 +38,15 @@ class HouseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun insertHouse(house: House) {
-        houseDao.insertHouse(house)
+        houseDao.insertHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
     }
 
     override suspend fun updateHouse(house: House) {
-        houseDao.updateHouse(house)
+        houseDao.updateHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
     }
 
     override suspend fun updateHouses(houses: List<House>) {
-        houseDao.updateAll(houses)
+        houseDao.updateAll(houses.map { it.copy(isSynced = false, lastUpdated = System.currentTimeMillis()) })
     }
 
     override suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String) {
@@ -61,24 +61,24 @@ class HouseRepositoryImpl @Inject constructor(
         houseDao.replaceHouses(houses)
     }
 
-    override fun getDayActivities(dates: List<String>, agentName: String): Flow<List<DayActivity>> {
-        return dayActivityDao.getDayActivities(dates, agentName)
+    override fun getDayActivities(dates: List<String>, agentName: String, agentUid: String?): Flow<List<DayActivity>> {
+        return dayActivityDao.getDayActivities(dates, agentName, agentUid ?: "")
     }
 
-    override fun getDayActivityFlow(date: String, agentName: String): Flow<DayActivity?> {
-        return dayActivityDao.getDayActivityFlow(date, agentName)
+    override fun getDayActivityFlow(date: String, agentName: String, agentUid: String?): Flow<DayActivity?> {
+        return dayActivityDao.getDayActivityFlow(date, agentName, agentUid ?: "")
     }
 
     override suspend fun updateDayActivity(dayActivity: DayActivity) {
-        dayActivityDao.insertDayActivity(dayActivity)
+        dayActivityDao.insertDayActivity(dayActivity.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
     }
     
     override suspend fun <T> runInTransaction(block: suspend () -> T): T {
         return database.withTransaction { block() }
     }
 
-    override suspend fun getDayActivity(date: String, agentName: String): DayActivity? {
-        return dayActivityDao.getDayActivity(date, agentName)
+    override suspend fun getDayActivity(date: String, agentName: String, agentUid: String?): DayActivity? {
+        return dayActivityDao.getDayActivity(date, agentName, agentUid ?: "")
     }
 
     override suspend fun getAllDayActivitiesOnce(): List<DayActivity> {
@@ -157,9 +157,9 @@ class HouseRepositoryImpl @Inject constructor(
             dates.forEach { date ->
                 val activity = dayActivityDao.getDayActivity(date, agentName)
                 if (activity == null) {
-                    dayActivityDao.insertDayActivity(DayActivity(date, "NORMAL", true, agentName))
+                    dayActivityDao.insertDayActivity(DayActivity(date, "NORMAL", true, agentName, isSynced = false, lastUpdated = System.currentTimeMillis()))
                 } else if (!activity.isClosed) {
-                    dayActivityDao.insertDayActivity(activity.copy(isClosed = true))
+                    dayActivityDao.insertDayActivity(activity.copy(isClosed = true, isSynced = false, lastUpdated = System.currentTimeMillis()))
                 }
             }
         }

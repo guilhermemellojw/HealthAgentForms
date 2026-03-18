@@ -9,13 +9,15 @@ import com.antigravity.healthagent.data.local.dao.CustomStreetDao
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.CustomStreet
+import com.antigravity.healthagent.data.local.model.Tombstone
 
-@Database(entities = [House::class, DayActivity::class, CustomStreet::class], version = 15, exportSchema = false)
+@Database(entities = [House::class, DayActivity::class, CustomStreet::class, Tombstone::class], version = 17, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun houseDao(): HouseDao
     abstract fun dayActivityDao(): DayActivityDao
     abstract fun customStreetDao(): CustomStreetDao
+    abstract fun tombstoneDao(): com.antigravity.healthagent.data.local.dao.TombstoneDao
 
     companion object {
         val MIGRATION_12_13 = object : androidx.room.migration.Migration(12, 13) {
@@ -59,6 +61,32 @@ abstract class AppDatabase : RoomDatabase() {
                 // Using 0L or a fixed old timestamp is safer for historical records.
                 database.execSQL("ALTER TABLE houses ADD COLUMN createdAt INTEGER NOT NULL DEFAULT 0")
                 database.execSQL("ALTER TABLE houses ADD COLUMN visitSegment INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+        val MIGRATION_15_16 = object : androidx.room.migration.Migration(15, 16) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // 1. Add sync fields to houses
+                database.execSQL("ALTER TABLE houses ADD COLUMN isSynced INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE houses ADD COLUMN lastUpdated INTEGER NOT NULL DEFAULT 0")
+                
+                // 2. Add sync fields to day_activities
+                database.execSQL("ALTER TABLE day_activities ADD COLUMN isSynced INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE day_activities ADD COLUMN lastUpdated INTEGER NOT NULL DEFAULT 0")
+                
+                // 3. Create tombstones table
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `tombstones` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, 
+                        `type` TEXT NOT NULL, 
+                        `naturalKey` TEXT NOT NULL, 
+                        `deletedAt` INTEGER NOT NULL
+                    )
+                """)
+            }
+        }
+        val MIGRATION_16_17 = object : androidx.room.migration.Migration(16, 17) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE day_activities ADD COLUMN agentUid TEXT NOT NULL DEFAULT ''")
             }
         }
     }

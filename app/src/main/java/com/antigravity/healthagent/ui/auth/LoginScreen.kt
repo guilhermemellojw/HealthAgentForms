@@ -116,6 +116,7 @@ fun LoginScreen(
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                         val requestSent by viewModel.requestSent.collectAsState()
+                        var requestedName by remember { mutableStateOf("") }
                         
                         if (requestSent) {
                             Surface(
@@ -133,8 +134,17 @@ fun LoginScreen(
                                 )
                             }
                         } else {
+                            OutlinedTextField(
+                                value = requestedName,
+                                onValueChange = { requestedName = it },
+                                label = { Text("Seu Nome/Agente (Opcional)") },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                singleLine = true
+                            )
+                            
                             Button(
-                                onClick = { viewModel.requestAccess() },
+                                onClick = { viewModel.requestAccess(requestedName.ifBlank { null }) },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp)
                             ) {

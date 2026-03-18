@@ -17,7 +17,25 @@ data class KmlFolder(
     val isVisible: Boolean,
     val children: List<KmlFolder>,
     val placemarks: List<KmlPlacemark>
-)
+) {
+    fun getBounds(): com.google.android.gms.maps.model.LatLngBounds? {
+        val builder = com.google.android.gms.maps.model.LatLngBounds.builder()
+        var hasPoints = false
+        
+        fun processFolder(f: KmlFolder) {
+            f.placemarks.forEach { p ->
+                p.geometry.extractCoordinates().forEach { 
+                    builder.include(it)
+                    hasPoints = true
+                }
+            }
+            f.children.forEach { processFolder(it) }
+        }
+        
+        processFolder(this)
+        return if (hasPoints) builder.build() else null
+    }
+}
 
 data class KmlPlacemark(
     val name: String,
@@ -28,10 +46,23 @@ data class KmlPlacemark(
 )
 
 sealed class KmlGeometry {
-    data class Point(val coordinate: LatLng) : KmlGeometry()
-    data class LineString(val coordinates: List<LatLng>) : KmlGeometry()
-    data class Polygon(val outerBoundary: List<LatLng>, val innerBoundaries: List<List<LatLng>> = emptyList()) : KmlGeometry()
-    data class MultiGeometry(val geometries: List<KmlGeometry>) : KmlGeometry()
+    abstract fun extractCoordinates(): List<LatLng>
+    
+    data class Point(val coordinate: LatLng) : KmlGeometry() {
+        override fun extractCoordinates(): List<LatLng> = listOf(coordinate)
+    }
+    
+    data class LineString(val coordinates: List<LatLng>) : KmlGeometry() {
+        override fun extractCoordinates(): List<LatLng> = coordinates
+    }
+    
+    data class Polygon(val outerBoundary: List<LatLng>, val innerBoundaries: List<List<LatLng>> = emptyList()) : KmlGeometry() {
+        override fun extractCoordinates(): List<LatLng> = outerBoundary + innerBoundaries.flatten()
+    }
+    
+    data class MultiGeometry(val geometries: List<KmlGeometry>) : KmlGeometry() {
+        override fun extractCoordinates(): List<LatLng> = geometries.flatMap { it.extractCoordinates() }
+    }
 }
 
 data class KmlStyle(

@@ -131,9 +131,9 @@ class BackupManager @Inject constructor() {
                 blockNumber = house.blockNumber?.trim() ?: "",
                 blockSequence = house.blockSequence?.trim() ?: "",
                 streetName = house.streetName?.trim()?.uppercase() ?: "",
-                number = house.number?.trim() ?: "",
-                sequence = house.sequence ?: 0,
-                complement = house.complement ?: 0,
+                number = if (house.number?.trim() == "0") "" else house.number?.trim() ?: "",
+                sequence = if (house.sequence == 0) null else house.sequence,
+                complement = if (house.complement == 0) null else house.complement,
                 data = house.data?.replace("/", "-")?.trim() ?: "",
                 listOrder = house.listOrder,
                 // Legacy Support: If createdAt is missing or 0, use listOrder as a stable differentiator 
@@ -142,7 +142,9 @@ class BackupManager @Inject constructor() {
                 ciclo = house.ciclo?.trim() ?: "1º",
                 categoria = house.categoria?.trim() ?: "BRR",
                 zona = house.zona?.trim() ?: "URB",
-                tipo = house.tipo
+                tipo = house.tipo,
+                isSynced = false,
+                lastUpdated = System.currentTimeMillis()
             )
         }
         return com.antigravity.healthagent.utils.HouseNormalizationUtils.normalizeHouses(mappedHouses)
@@ -154,7 +156,9 @@ class BackupManager @Inject constructor() {
                 agentName = activity.agentName?.trim()?.uppercase() ?: "",
                 date = activity.date?.replace("/", "-")?.trim() ?: "",
                 status = activity.status?.trim()?.uppercase() ?: "NORMAL",
-                isClosed = activity.isClosed
+                isClosed = activity.isClosed,
+                isSynced = false,
+                lastUpdated = System.currentTimeMillis()
             )
         }
     }

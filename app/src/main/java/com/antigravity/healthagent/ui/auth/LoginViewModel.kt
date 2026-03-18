@@ -27,6 +27,13 @@ class LoginViewModel @Inject constructor(
                     _authState.value = AuthState.Unauthenticated
                 } else if (!user.isAuthorized) {
                     _authState.value = AuthState.WaitingForAuthorization(user)
+                    // Check if a request already exists in Firestore to persist the 'sent' state
+                    viewModelScope.launch {
+                        val requests = authRepository.fetchAccessRequests().getOrNull() ?: emptyList()
+                        if (requests.any { it.uid == user.uid }) {
+                            _requestSent.value = true
+                        }
+                    }
                 } else {
                     // Authorized User: Trigger automatic data pull for multi-device sync
                     // We check if we already have data locally or just pull anyway (upsert)
@@ -75,10 +82,10 @@ class LoginViewModel @Inject constructor(
     private val _requestSent = MutableStateFlow(false)
     val requestSent: StateFlow<Boolean> = _requestSent.asStateFlow()
 
-    fun requestAccess() {
+    fun requestAccess(requestedName: String? = null) {
         val user = (authState.value as? AuthState.WaitingForAuthorization)?.user ?: return
         viewModelScope.launch {
-            val result = authRepository.requestAccess(user.uid, user.email ?: "", user.displayName)
+            val result = authRepository.requestAccess(user.uid, user.email ?: "", user.displayName, requestedName)
             if (result.isSuccess) {
                 _requestSent.value = true
             } else {

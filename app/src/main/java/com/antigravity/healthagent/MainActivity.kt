@@ -1,6 +1,7 @@
 package com.antigravity.healthagent
 
 import android.os.Bundle
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
     lateinit var soundManager: SoundManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         setContent {
             val viewModel: com.antigravity.healthagent.ui.home.HomeViewModel = hiltViewModel()
@@ -92,7 +94,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     when (authState) {
                         is AuthState.Authenticated -> {
-                            MainScreen(loginViewModel)
+                            MainScreen(loginViewModel, viewModel)
                         }
                         else -> {
                             LoginScreen(
@@ -103,8 +105,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             } else {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    // Loading State (Blank Screen to prevent flash)
+                // Keep the splash screen on screen until we have the theme and auth state is ready
+                splashScreen.setKeepOnScreenCondition { 
+                    themeMode == null || themeColor == null || authState is AuthState.Loading 
                 }
             }
         }
@@ -117,16 +120,18 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen(loginViewModel: LoginViewModel) {
-    var selectedTab by remember { mutableIntStateOf(2) }
-    var showSettings by remember { mutableStateOf(false) }
-    var showExitDialog by remember { mutableStateOf(false) }
-    var showAdmin by remember { mutableStateOf(false) }
-
+fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.healthagent.ui.home.HomeViewModel) {
     val authState by loginViewModel.authState.collectAsState()
     val user = (authState as? AuthState.Authenticated)?.user
     val isAdmin = user?.role == com.antigravity.healthagent.domain.repository.UserRole.ADMIN
     val isSupervisor = user?.role == com.antigravity.healthagent.domain.repository.UserRole.SUPERVISOR
+
+    var selectedTab by remember(isSupervisor) { 
+        mutableIntStateOf(if (isSupervisor) 0 else 2) 
+    }
+    var showSettings by remember { mutableStateOf(false) }
+    var showExitDialog by remember { mutableStateOf(false) }
+    var showAdmin by remember { mutableStateOf(false) }
 
     if (showAdmin) {
         val adminViewModel: com.antigravity.healthagent.ui.admin.AdminViewModel = androidx.hilt.navigation.compose.hiltViewModel()
@@ -149,7 +154,7 @@ fun MainScreen(loginViewModel: LoginViewModel) {
         val activity = context as? Activity
         var backPressedTime by remember { mutableLongStateOf(0L) }
 
-        val homeViewModel: com.antigravity.healthagent.ui.home.HomeViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+        // Use the shared homeViewModel passed from MainActivity
         val adminViewModel: com.antigravity.healthagent.ui.admin.AdminViewModel = androidx.hilt.navigation.compose.hiltViewModel()
         
         val selectedRemoteAgent by adminViewModel.selectedAgentForEdit.collectAsState()
@@ -313,7 +318,10 @@ fun MainScreen(loginViewModel: LoginViewModel) {
                         )
                     } else {
                         val onTabSelected: (Int) -> Unit = { index ->
-                            if (daysWithErrors.isNotEmpty()) {
+                            // Always allow navigation to reference tools (Semanal and Mapa)
+                            if (index == 3 || index == 4) {
+                                selectedTab = index
+                            } else if (daysWithErrors.isNotEmpty()) {
                                 if (index != 0) {
                                     homeViewModel.showMultiDayErrorDialog()
                                     selectedTab = 0
@@ -396,23 +404,27 @@ fun MainScreen(loginViewModel: LoginViewModel) {
                 } else {
                     when (selectedTab) {
                         0 -> com.antigravity.healthagent.ui.home.HomeScreen(
+                            viewModel = homeViewModel,
                             user = user,
                             onLogout = { loginViewModel.signOut() },
                             onSwitchAccount = { loginViewModel.signOut() },
                             onOpenSettings = { showSettings = true }
                         )
                         1 -> com.antigravity.healthagent.ui.rg.RGScreen(
+                            viewModel = homeViewModel,
                             user = user,
                             onLogout = { loginViewModel.signOut() },
                             onSwitchAccount = { loginViewModel.signOut() }
                         )
                         2 -> com.antigravity.healthagent.ui.boletim.BoletimScreen(
+                            viewModel = homeViewModel,
                             onOpenSettings = { showSettings = true },
                             user = user,
                             onLogout = { loginViewModel.signOut() },
                             onSwitchAccount = { loginViewModel.signOut() }
                         )
                         3 -> SemanalScreen(
+                            viewModel = homeViewModel,
                             user = user,
                             onLogout = { loginViewModel.signOut() },
                             onSwitchAccount = { loginViewModel.signOut() }
@@ -420,6 +432,13 @@ fun MainScreen(loginViewModel: LoginViewModel) {
                         4 -> QuarteiroesScreen(isEasyMode = isEasyMode)
                     }
                 }
+                
+                // Unified Sync Status Overlay for all screens
+                val uiState by homeViewModel.uiState.collectAsState()
+                com.antigravity.healthagent.ui.components.SyncStatusOverlay(
+                    syncStatus = uiState.syncStatus,
+                    isEasyMode = uiState.isEasyMode
+                )
             }
         }
     }

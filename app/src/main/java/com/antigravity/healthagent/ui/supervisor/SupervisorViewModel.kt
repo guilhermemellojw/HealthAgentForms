@@ -105,11 +105,17 @@ class SupervisorViewModel @Inject constructor(
         }
 
         var totalHouses = 0
+        val housesDetails = mutableListOf<StatDetail>()
         var totalFoci = 0
+        val fociDetails = mutableListOf<StatDetail>()
         var totalTratados = 0
+        val tratadosDetails = mutableListOf<StatDetail>()
         var totalFechados = 0
+        val fechadosDetails = mutableListOf<StatDetail>()
         var totalAbandonados = 0
+        val abandonadosDetails = mutableListOf<StatDetail>()
         var totalRecusados = 0
+        val recusadosDetails = mutableListOf<StatDetail>()
         var activeAgentsCount = 0
 
         agents.forEach { agent ->
@@ -120,41 +126,85 @@ class SupervisorViewModel @Inject constructor(
                 
                 val weekHouses = agent.houses.filter { it.data in weekDates }
                 
-                totalHouses += weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE }
+                val workedCount = weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE }
+                if (workedCount > 0) {
+                    totalHouses += workedCount
+                    housesDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, workedCount))
+                }
                 
-                totalFoci += weekHouses.count { it.comFoco }
+                val fociCount = weekHouses.count { it.comFoco }
+                if (fociCount > 0) {
+                    totalFoci += fociCount
+                    fociDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, fociCount))
+                }
                 
-                totalTratados += weekHouses.count { house ->
+                val treatedCount = weekHouses.count { house ->
                     house.a1 > 0 || house.a2 > 0 || house.b > 0 || house.c > 0 ||
                     house.d1 > 0 || house.d2 > 0 || house.e > 0 || house.eliminados > 0
                 }
+                if (treatedCount > 0) {
+                    totalTratados += treatedCount
+                    tratadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, treatedCount))
+                }
 
-                totalFechados += weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }
-                totalAbandonados += weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
-                totalRecusados += weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }
+                val closedCount = weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }
+                if (closedCount > 0) {
+                    totalFechados += closedCount
+                    fechadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, closedCount))
+                }
+
+                val abandonedCount = weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
+                if (abandonedCount > 0) {
+                    totalAbandonados += abandonedCount
+                    abandonadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, abandonedCount))
+                }
+
+                val recusedCount = weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }
+                if (recusedCount > 0) {
+                    totalRecusados += recusedCount
+                    recusadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, recusedCount))
+                }
             }
         }
 
         return AggregateSummary(
             totalHouses = totalHouses,
+            housesDetails = housesDetails.sortedByDescending { it.count },
             totalFoci = totalFoci,
+            fociDetails = fociDetails.sortedByDescending { it.count },
             totalTratados = totalTratados,
+            tratadosDetails = tratadosDetails.sortedByDescending { it.count },
             totalFechados = totalFechados,
+            fechadosDetails = fechadosDetails.sortedByDescending { it.count },
             totalAbandonados = totalAbandonados,
+            abandonadosDetails = abandonadosDetails.sortedByDescending { it.count },
             totalRecusados = totalRecusados,
+            recusadosDetails = recusadosDetails.sortedByDescending { it.count },
             activeAgents = activeAgentsCount,
             totalAgents = agents.size
         )
     }
 }
 
+data class StatDetail(
+    val agentName: String,
+    val agentEmail: String,
+    val count: Int
+)
+
 data class AggregateSummary(
     val totalHouses: Int = 0,
+    val housesDetails: List<StatDetail> = emptyList(),
     val totalFoci: Int = 0,
+    val fociDetails: List<StatDetail> = emptyList(),
     val totalTratados: Int = 0,
+    val tratadosDetails: List<StatDetail> = emptyList(),
     val totalFechados: Int = 0,
+    val fechadosDetails: List<StatDetail> = emptyList(),
     val totalAbandonados: Int = 0,
+    val abandonadosDetails: List<StatDetail> = emptyList(),
     val totalRecusados: Int = 0,
+    val recusadosDetails: List<StatDetail> = emptyList(),
     val activeAgents: Int = 0,
     val totalAgents: Int = 0
 )

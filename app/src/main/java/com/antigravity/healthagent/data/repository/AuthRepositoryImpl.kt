@@ -494,13 +494,14 @@ class AuthRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun requestAccess(uid: String, email: String, displayName: String?): Result<Unit> {
+    override suspend fun requestAccess(uid: String, email: String, displayName: String?, requestedName: String?): Result<Unit> {
         return try {
             val request = mapOf(
                 "id" to uid,
                 "uid" to uid,
                 "email" to email,
                 "displayName" to displayName,
+                "requestedName" to requestedName,
                 "timestamp" to System.currentTimeMillis(),
                 "status" to "PENDING"
             )

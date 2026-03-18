@@ -34,6 +34,7 @@ class SettingsManager @Inject constructor(
     private val EASY_MODE_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("easy_mode")
     private val SOLAR_MODE_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("solar_mode")
     private val REMOTE_AGENT_UID_KEY = stringPreferencesKey("remote_agent_uid")
+    private val LAST_SYNC_TIMESTAMP_KEY = androidx.datastore.preferences.core.longPreferencesKey("last_sync_timestamp")
     
 
 
@@ -216,9 +217,22 @@ class SettingsManager @Inject constructor(
         }
     }
 
+    val lastSyncTimestamp: Flow<Long> = context.dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { preferences ->
+            preferences[LAST_SYNC_TIMESTAMP_KEY] ?: 0L
+        }
+
+    suspend fun setLastSyncTimestamp(timestamp: Long) {
+        context.dataStore.edit { preferences ->
+            preferences[LAST_SYNC_TIMESTAMP_KEY] = timestamp
+        }
+    }
+
     suspend fun clearSessionSettings() {
         context.dataStore.edit { preferences ->
             preferences.remove(REMOTE_AGENT_UID_KEY)
+            preferences.remove(LAST_SYNC_TIMESTAMP_KEY)
             // Reset other temporary session state if any
             preferences[IS_APP_MODE_SELECTED_KEY] = false 
         }

@@ -19,7 +19,7 @@ interface AuthRepository {
     suspend fun deleteUser(uid: String): Result<Unit>
     
     // Authorization Requests
-    suspend fun requestAccess(uid: String, email: String, displayName: String?): Result<Unit>
+    suspend fun requestAccess(uid: String, email: String, displayName: String?, requestedName: String? = null): Result<Unit>
     suspend fun fetchAccessRequests(): Result<List<AccessRequest>>
     suspend fun respondToAccessRequest(requestId: String, approved: Boolean, agentName: String? = null): Result<Unit>
 }
@@ -48,6 +48,7 @@ data class AccessRequest(
     val uid: String = "",
     val email: String = "",
     val displayName: String? = null,
+    val requestedName: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
     val status: String = "PENDING"
 )

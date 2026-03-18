@@ -338,7 +338,14 @@ class AdminViewModel @Inject constructor(
     }
 
     val maxOpenHouses: StateFlow<Int> = _systemSettings.map { settings ->
-        (settings["max_open_houses"] as? Long)?.toInt() ?: 25
+        val raw = settings["max_open_houses"]
+        when(raw) {
+            is Long -> raw.toInt()
+            is Int -> raw
+            is Number -> raw.toInt()
+            is String -> raw.toIntOrNull() ?: 25
+            else -> 25
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 25)
 
     fun restoreToSelf(context: Context, uri: Uri) {

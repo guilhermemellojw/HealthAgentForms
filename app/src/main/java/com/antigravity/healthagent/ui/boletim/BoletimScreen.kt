@@ -29,8 +29,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.draw.alpha
 
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +50,7 @@ import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.CompactDropdown
 import com.antigravity.healthagent.ui.components.MeshGradient
+import com.antigravity.healthagent.ui.components.SyncStatusOverlay
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.utils.formatStreetName
 
@@ -662,12 +662,12 @@ private fun shareToWhatsApp(
     sb.append("📊 *Relatório Diário - $date*\n\n")
     sb.append("👤 *Agente:* $agentName\n")
 
-    if (trabalhados > 0) sb.append("\n🏡 *Trabalhados:* $trabalhados")
-    if (tratados > 0) sb.append("\n💧 *Tratados:* $tratados")
-    if (comFoco > 0) sb.append("\n🦟 *Com Foco:* $comFoco")
-    if (recusados > 0) sb.append("\n🚫 *Recusados:* $recusados")
-    if (fechados > 0) sb.append("\n🚪 *Fechados:* $fechados")
-    if (abandonados > 0) sb.append("\n🏚️ *Abandonados:* $abandonados")
+    sb.append("\n🏡 *Trabalhados:* $trabalhados")
+    sb.append("\n🚪 *Fechados:* $fechados")
+    sb.append("\n💧 *Tratados:* $tratados")
+    sb.append("\n🦟 *Com Foco:* $comFoco")
+    sb.append("\n🚫 *Recusados:* $recusados")
+    sb.append("\n🏚️ *Abandonados:* $abandonados")
 
     val message = sb.toString().trim()
 

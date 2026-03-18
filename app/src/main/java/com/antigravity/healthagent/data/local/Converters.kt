@@ -42,4 +42,16 @@ class Converters {
             Treatment.values().find { it.code == value }
         }
     }
+
+    @TypeConverter
+    fun fromTombstoneType(value: com.antigravity.healthagent.data.local.model.TombstoneType): String = value.name
+
+    @TypeConverter
+    fun toTombstoneType(value: String): com.antigravity.healthagent.data.local.model.TombstoneType {
+        return try {
+            com.antigravity.healthagent.data.local.model.TombstoneType.valueOf(value)
+        } catch (e: IllegalArgumentException) {
+            com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE
+        }
+    }
 }
