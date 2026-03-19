@@ -123,7 +123,8 @@ class BackupManager @Inject constructor() {
     }
 
     private fun sanitizeHouses(houses: List<House>): List<House> {
-        val mappedHouses = houses.map { house ->
+        val mappedHouses = houses.mapIndexed { index, house ->
+            val stableOrder = if (house.listOrder == 0L) index.toLong() else house.listOrder
             house.copy(
                 agentName = house.agentName?.trim()?.uppercase() ?: "",
                 municipio = house.municipio?.trim()?.uppercase() ?: "BOM JARDIM",
@@ -135,10 +136,10 @@ class BackupManager @Inject constructor() {
                 sequence = if (house.sequence == 0) null else house.sequence,
                 complement = if (house.complement == 0) null else house.complement,
                 data = house.data?.replace("/", "-")?.trim() ?: "",
-                listOrder = house.listOrder,
-                // Legacy Support: If createdAt is missing or 0, use listOrder as a stable differentiator 
-                // for this specific backup file. This preserves collisions that were separate in the JSON.
-                createdAt = if (house.createdAt == 0L) house.listOrder else house.createdAt,
+                listOrder = stableOrder,
+                // Legacy Support: Ensure createdAt is unique even if missing in old JSOn.
+                // We use stableOrder (index-based) as a stable differentiator for this import.
+                createdAt = if (house.createdAt == 0L) stableOrder else house.createdAt,
                 ciclo = house.ciclo?.trim() ?: "1º",
                 categoria = house.categoria?.trim() ?: "BRR",
                 zona = house.zona?.trim() ?: "URB",

@@ -594,6 +594,13 @@ class AuthRepositoryImpl @Inject constructor(
             if (newAgentName != null && newAgentName.isNotBlank()) {
                 finalUpdates["agentName"] = newAgentName
                 syncRepository.addAgentName(newAgentName)
+                
+                // Propagate to agents collection for data consistency
+                try {
+                    firestore.collection("agents").document(uid).update("agentName", newAgentName).await()
+                } catch(e: Exception) {
+                    // Agent doc might not exist yet, ignoring is fine as push will create it later
+                }
             }
             
             firestore.collection("users").document(uid).update(finalUpdates).await()
@@ -696,7 +703,12 @@ class AuthRepositoryImpl @Inject constructor(
             if (approved) {
                 val userRef = firestore.collection("users").document(uid)
                 val updates = mutableMapOf<String, Any>("isAuthorized" to true)
-                if (agentName != null) updates["agentName"] = agentName
+                
+                // Prioritize manual name from admin, then requested name from user, then null
+                val finalAgentName = agentName?.takeIf { it.isNotBlank() } 
+                    ?: doc.getString("requestedName")?.takeIf { it.isNotBlank() }
+                
+                if (finalAgentName != null) updates["agentName"] = finalAgentName
                 batch.update(userRef, updates)
                 
                 // If they have a pre-registration, migrate it now using Admin permissions

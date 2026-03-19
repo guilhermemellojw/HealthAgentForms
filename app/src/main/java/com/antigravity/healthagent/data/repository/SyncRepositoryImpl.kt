@@ -501,9 +501,12 @@ class SyncRepositoryImpl @Inject constructor(
     override suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>): Result<Unit> {
         return try {
             database.withTransaction {
-                // Deduplicate Houses locally to prevent auto-generated ID duplicates
+                // Deduplicate Houses locally to prevent auto-generated ID duplicates.
+                // We group by the natural key and store a mutable list of existing IDs 
+                // to ensure a 1-to-1 mapping during restoration.
                 val localHouses = houseDao.getAllHouses().first()
                 val localHouseGroups = localHouses.groupBy { it.generateNaturalKey() }
+                    .mapValues { (_, houses) -> houses.toMutableList() }
                 
                 val normalizedActivities = activities.map { 
                     val finalAgentName = if (it.agentName.isNotBlank()) it.agentName else agentName
@@ -517,7 +520,9 @@ class SyncRepositoryImpl @Inject constructor(
 
                 normalizedHouses.forEach { restoredHouse ->
                     val key = restoredHouse.generateNaturalKey()
-                    val existingId = localHouseGroups[key]?.firstOrNull()?.id ?: 0
+                    // 1-to-1 Mapping: Consume an existing ID if available for this specific key.
+                    // This prevents multiple houses from the backup overwriting the same local record.
+                    val existingId = localHouseGroups[key]?.removeFirstOrNull()?.id ?: 0
                     val finalAgentName = if (restoredHouse.agentName.isNotBlank()) restoredHouse.agentName else agentName
                     
                     housesToUpsert.add(restoredHouse.copy(
@@ -532,9 +537,9 @@ class SyncRepositoryImpl @Inject constructor(
                 
                 // Cleanup ghosts
                 for ((key, matches) in localHouseGroups) {
-                    if (matches.size > 1) {
+                    if (matches.isNotEmpty()) {
                         val keptId = housesToUpsert.find { it.generateNaturalKey() == key }?.id
-                        matches.forEach { if (it.id != keptId && it.id != 0) houseDao.deleteHouse(it) }
+                        matches.forEach { house -> if (house.id != keptId && house.id != 0) houseDao.deleteHouse(house) }
                     }
                 }
             }
@@ -728,7 +733,8 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun recordActivityDeletion(date: String, agentName: String): Result<Unit> {
         return try {
-            val tombstone = "$date|$agentName"
+            val upperName = agentName.trim().uppercase()
+            val tombstone = "$date|$upperName"
             tombstoneDao.insertTombstone(
                 com.antigravity.healthagent.data.local.model.Tombstone(
                     type = com.antigravity.healthagent.data.local.model.TombstoneType.ACTIVITY,

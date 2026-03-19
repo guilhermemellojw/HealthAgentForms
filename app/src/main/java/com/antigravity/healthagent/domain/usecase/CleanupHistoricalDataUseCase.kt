@@ -42,7 +42,7 @@ class CleanupHistoricalDataUseCase @Inject constructor(
 
                     if (housesToRemove.isNotEmpty() || activitiesToRemove.isNotEmpty()) {
                         val houseKeys = housesToRemove.map { it.generateNaturalKey() }
-                        val activityTombstones = activitiesToRemove.map { "${it.date}|${it.agentName}" }
+                        val activityTombstones = activitiesToRemove.map { "${it.date}|${it.agentName.uppercase()}" }
                         
                         // Delete from cloud and record tombstones for THIS agent
                         syncRepository.recordBulkDeletions(houseKeys, activityTombstones, agent.uid)
@@ -68,7 +68,7 @@ class CleanupHistoricalDataUseCase @Inject constructor(
                     // Record tombstones for local user (if not already handled by global)
                     if (!isGlobal) {
                          val houseKeys = localHousesToRemove.map { it.generateNaturalKey() }
-                         val activityTombstones = localActivitiesToRemove.map { "${it.date}|${it.agentName}" }
+                         val activityTombstones = localActivitiesToRemove.map { "${it.date}|${it.agentName.uppercase()}" }
                          syncRepository.recordBulkDeletions(houseKeys, activityTombstones)
                     }
 

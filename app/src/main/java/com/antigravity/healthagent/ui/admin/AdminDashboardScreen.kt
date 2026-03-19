@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,12 +69,14 @@ fun AdminSettingsTab(viewModel: AdminViewModel) {
         Text("Configurações Globais", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
         val maxHouses by viewModel.maxOpenHouses.collectAsState()
+        var tempMaxHouses by remember(maxHouses) { mutableFloatStateOf(maxHouses.toFloat()) }
         PremiumCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("Meta Diária (Global): $maxHouses", style = MaterialTheme.typography.bodyMedium)
+                Text("Meta Diária (Global): ${tempMaxHouses.toInt()}", style = MaterialTheme.typography.bodyMedium)
                 Slider(
-                    value = maxHouses.toFloat(),
-                    onValueChange = { viewModel.updateSystemSetting("max_open_houses", it.toLong()) },
+                    value = tempMaxHouses,
+                    onValueChange = { tempMaxHouses = it },
+                    onValueChangeFinished = { viewModel.updateSystemSetting("max_open_houses", tempMaxHouses.toLong()) },
                     valueRange = 25f..35f,
                     steps = 9
                 )
@@ -466,7 +469,11 @@ fun AddProfileDialog(
 @Composable
 fun AdminDashboardScreen(
     viewModel: AdminViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
+    onLogout: () -> Unit = {},
+    onSwitchAccount: () -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val users by viewModel.users.collectAsState()
@@ -486,6 +493,10 @@ fun AdminDashboardScreen(
     
     var showApprovalDialog by remember { mutableStateOf(false) }
     var pendingRequest by remember { mutableStateOf<com.antigravity.healthagent.domain.repository.AccessRequest?>(null) }
+
+    var showDeleteUserDialog by remember { mutableStateOf(false) }
+    var userToDelete by remember { mutableStateOf<UnifiedProfile?>(null) }
+    var deleteCloudDataWithUser by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -513,7 +524,7 @@ fun AdminDashboardScreen(
                     selectedUidForRestore = viewModel.getCurrentUserUid()
                     filePickerLauncher.launch("application/json")
                 }) { Icon(Icons.Default.Restore, "Restaurar meus dados") }
-                IconButton(onClick = { viewModel.refreshAll() }) { Icon(Icons.Default.Refresh, null) } 
+                // Redundant Refresh Icon removed in favor of Pull-to-Refresh
             }
         ) },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -601,13 +612,19 @@ fun AdminDashboardScreen(
                             }
 
                             // 4. Unified Profiles List
-                            if (unifiedProfiles.isEmpty()) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text("Nenhum usuário encontrado.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            } else {
-                                LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    items(unifiedProfiles) { profile ->
+                            val isRefreshing = uiState is AdminUiState.Loading
+                            PullToRefreshBox(
+                                isRefreshing = isRefreshing,
+                                onRefresh = { viewModel.refreshAll() },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                if (unifiedProfiles.isEmpty()) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text("Nenhum usuário encontrado.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                } else {
+                                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+                                        items(unifiedProfiles) { profile ->
                                         UnifiedProfileCard(
                                             profile = profile,
                                             agentNamesList = agentNames,
@@ -617,12 +634,9 @@ fun AdminDashboardScreen(
                                                 profile.uid?.let { viewModel.updateUserProfile(it, mapOf("agentName" to name)) }
                                             },
                                             onDelete = {
-                                                confirmTitle = "Excluir"; confirmMessage = "Confirmar exclusão de ${profile.email ?: profile.agentName}?"; 
-                                                onConfirmAction = { 
-                                                    if (profile.uid != null) viewModel.deleteUser(profile.uid)
-                                                    else profile.agentData?.uid?.let { viewModel.deleteAgent(it) }
-                                                }; 
-                                                showConfirmDialog = true 
+                                                userToDelete = profile
+                                                deleteCloudDataWithUser = false
+                                                showDeleteUserDialog = true
                                             },
                                             onRestore = { selectedUidForRestore = profile.uid ?: profile.agentData?.uid; filePickerLauncher.launch("application/json") },
                                             onEditAgent = { viewModel.selectAgentForEdit(profile.agentData); onNavigateBack() },
@@ -631,6 +645,7 @@ fun AdminDashboardScreen(
                                         )
                                     }
                                 }
+                            }
                             }
                         }
                     } else if (selectedTab == 1) {
@@ -672,6 +687,42 @@ fun AdminDashboardScreen(
             }
         )
     }
+
+    if (showDeleteUserDialog && userToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteUserDialog = false },
+            title = { Text("Excluir Perfil") },
+            text = {
+                Column {
+                    Text("Confirmar a exclusão de ${userToDelete?.email ?: userToDelete?.agentName}?")
+                    if (userToDelete?.agentData != null) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = deleteCloudDataWithUser, onCheckedChange = { deleteCloudDataWithUser = it })
+                            Text("Excluir também dados da nuvem (imóveis e atividades)", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val uid = userToDelete?.uid
+                        if (uid != null) {
+                            viewModel.deleteUser(uid, deleteCloudDataWithUser)
+                        } else {
+                            userToDelete?.agentData?.uid?.let { viewModel.deleteAgent(it) }
+                        }
+                        showDeleteUserDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Excluir") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteUserDialog = false }) { Text("Cancelar") }
+            }
+        )
+    }
 }
 
 @Composable
@@ -708,7 +759,7 @@ fun ApprovalDialog(
     onDismiss: () -> Unit,
     onConfirm: (String?) -> Unit
 ) {
-    var selectedName by remember { mutableStateOf<String?>(null) }
+    var selectedName by remember { mutableStateOf<String?>(request.requestedName?.takeIf { it.isNotBlank() }) }
     var expanded by remember { mutableStateOf(false) }
 
     AlertDialog(

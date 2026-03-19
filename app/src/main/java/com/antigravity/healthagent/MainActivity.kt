@@ -137,7 +137,14 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
         val adminViewModel: com.antigravity.healthagent.ui.admin.AdminViewModel = androidx.hilt.navigation.compose.hiltViewModel()
         com.antigravity.healthagent.ui.admin.AdminDashboardScreen(
             viewModel = adminViewModel,
-            onNavigateBack = { showAdmin = false }
+            onNavigateBack = { showAdmin = false },
+            user = user,
+            onLogout = { loginViewModel.signOut() },
+            onSwitchAccount = { loginViewModel.signOut() },
+            onOpenSettings = { 
+                showAdmin = false
+                showSettings = true
+            }
         )
     } else if (showSettings) {
         com.antigravity.healthagent.ui.settings.SettingsScreen(
@@ -147,7 +154,10 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
                 showAdmin = true
             },
             isAdmin = isAdmin,
-            isSupervisor = isSupervisor
+            isSupervisor = isSupervisor,
+            user = user,
+            onLogout = { loginViewModel.signOut() },
+            onSwitchAccount = { loginViewModel.signOut() }
         )
     } else {
         val context = LocalContext.current

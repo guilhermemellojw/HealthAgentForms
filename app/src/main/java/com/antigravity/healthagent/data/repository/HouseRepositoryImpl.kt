@@ -70,7 +70,11 @@ class HouseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun updateDayActivity(dayActivity: DayActivity) {
-        dayActivityDao.insertDayActivity(dayActivity.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
+        dayActivityDao.insertDayActivity(dayActivity.copy(
+            agentName = dayActivity.agentName.uppercase(),
+            isSynced = false, 
+            lastUpdated = System.currentTimeMillis()
+        ))
     }
     
     override suspend fun <T> runInTransaction(block: suspend () -> T): T {
@@ -91,9 +95,12 @@ class HouseRepositoryImpl @Inject constructor(
 
     override suspend fun restoreAgentData(agentName: String, houses: List<House>, activities: List<DayActivity>) {
         database.withTransaction {
-            // Deduplicate Houses locally to prevent auto-generated ID duplicates
+            // Deduplicate Houses locally to prevent auto-generated ID duplicates.
+            // We group by the natural key and store a mutable list of existing IDs 
+            // to ensure a 1-to-1 mapping during restoration.
             val localHouses = houseDao.getAllHouses().first()
             val localHouseGroups = localHouses.groupBy { it.generateNaturalKey() }
+                .mapValues { (_, houses) -> houses.toMutableList() }
             
             val normalizedActivities = activities.map { 
                 it.copy(
@@ -106,7 +113,9 @@ class HouseRepositoryImpl @Inject constructor(
 
             normalizedHouses.forEach { restoredHouse ->
                 val key = restoredHouse.generateNaturalKey()
-                val existingId = localHouseGroups[key]?.firstOrNull()?.id ?: 0
+                // 1-to-1 Mapping: Consume an existing ID if available for this specific key.
+                // This prevents multiple houses from the backup overwriting the same local record.
+                val existingId = localHouseGroups[key]?.removeFirstOrNull()?.id ?: 0
                 
                 housesToUpsert.add(restoredHouse.copy(
                     id = existingId,
@@ -120,9 +129,9 @@ class HouseRepositoryImpl @Inject constructor(
             
             // Cleanup ghosts
             for ((key, matches) in localHouseGroups) {
-                if (matches.size > 1) {
+                if (matches.isNotEmpty()) {
                     val keptId = housesToUpsert.find { it.generateNaturalKey() == key }?.id
-                    matches.forEach { if (it.id != keptId && it.id != 0) houseDao.deleteHouse(it) }
+                    matches.forEach { house -> if (house.id != keptId && house.id != 0) houseDao.deleteHouse(house) }
                 }
             }
         }
@@ -147,19 +156,20 @@ class HouseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun closeAllDays(agentName: String) {
+        val upperName = agentName.uppercase()
         database.withTransaction {
             // 1. Close all existing activity records for this agent
-            dayActivityDao.closeAllActivities(agentName)
+            dayActivityDao.closeAllActivities(upperName)
 
             // 2. Ensure days with houses have a (closed) activity record
-            val dates = houseDao.getDistinctDates(agentName)
+            val dates = houseDao.getDistinctDates(upperName)
             
             dates.forEach { date ->
-                val activity = dayActivityDao.getDayActivity(date, agentName)
+                val activity = dayActivityDao.getDayActivity(date, upperName)
                 if (activity == null) {
-                    dayActivityDao.insertDayActivity(DayActivity(date, "NORMAL", true, agentName, isSynced = false, lastUpdated = System.currentTimeMillis()))
+                    dayActivityDao.insertDayActivity(DayActivity(date, "NORMAL", true, upperName, isSynced = false, lastUpdated = System.currentTimeMillis()))
                 } else if (!activity.isClosed) {
-                    dayActivityDao.insertDayActivity(activity.copy(isClosed = true, isSynced = false, lastUpdated = System.currentTimeMillis()))
+                    dayActivityDao.insertDayActivity(activity.copy(isClosed = true, agentName = upperName, isSynced = false, lastUpdated = System.currentTimeMillis()))
                 }
             }
         }

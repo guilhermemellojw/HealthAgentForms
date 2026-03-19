@@ -515,16 +515,11 @@ fun HomeScreen(
                             )
                         }
 
-                        if (user != null) {
-                            UserIconMenu(
-                                user = user,
-                                onLogout = onLogout,
-                                onSwitchAccount = onSwitchAccount,
-                                onOpenSettings = onOpenSettings
-                            )
-                        }
                     }
                 },
+                user = user,
+                onLogout = onLogout,
+                onSwitchAccount = onSwitchAccount,
                 scrollBehavior = scrollBehavior,
                 onOpenSettings = onOpenSettings
             )

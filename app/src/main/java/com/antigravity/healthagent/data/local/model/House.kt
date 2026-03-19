@@ -55,7 +55,8 @@ data class House(
         val normalizedBairro = bairro.trim().replace(Regex("\\s+"), " ")
         val normalizedAgent = agentName.trim().replace(Regex("\\s+"), " ")
         
-        return "${normalizedAgent}_${normalizedDate}_${blockNumber.trim()}_${blockSequence.trim()}_${normalizedStreet}_${number.trim()}_${sequence ?: 0}_${complement ?: 0}_${normalizedBairro}_${visitSegment}".uppercase()
+        // Uniqueness is guaranteed by createdAt. visitSegment is removed as it's too unstable for a primary key.
+        return "${normalizedAgent}_${normalizedDate}_${blockNumber.trim()}_${blockSequence.trim()}_${normalizedStreet}_${number.trim()}_${sequence ?: 0}_${complement ?: 0}_${normalizedBairro}_${createdAt}".uppercase()
     }
 
     fun toFirestoreMap(): Map<String, Any?> {

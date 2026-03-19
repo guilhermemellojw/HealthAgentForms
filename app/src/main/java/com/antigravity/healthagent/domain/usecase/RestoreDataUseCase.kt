@@ -40,7 +40,7 @@ class RestoreDataUseCase @Inject constructor(
             }
             val normalizedActivities = backupData.dayActivities.map { 
                 it.copy(
-                    agentName = it.agentName.ifBlank { agentName },
+                    agentName = it.agentName.ifBlank { agentName }.trim().uppercase(),
                     date = it.date.replace("/", "-"),
                     isSynced = false,
                     lastUpdated = System.currentTimeMillis()

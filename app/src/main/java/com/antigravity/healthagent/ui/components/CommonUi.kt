@@ -720,31 +720,39 @@ fun UserAvatar(
         avatarColors[user.uid.hashCode().let { if (it < 0) -it else it } % avatarColors.size]
     }
 
+    var hasImageFailed by remember { mutableStateOf(false) }
+    
+    val initials = remember(user.displayName, user.email) {
+        (user.displayName ?: user.email ?: "?").take(1).uppercase()
+    }
+
     Surface(
         modifier = modifier
             .size(size)
-            .shadow(elevation = 2.dp, shape = CircleShape)
-            .border(1.dp, Color.White.copy(alpha = 0.4f), CircleShape),
-        shape = CircleShape,
-        color = backgroundColor
+            .clip(CircleShape),
+        color = backgroundColor,
+        tonalElevation = 4.dp,
+        shadowElevation = 2.dp
     ) {
-        if (!user.photoUrl.isNullOrEmpty()) {
+        if (!user.photoUrl.isNullOrEmpty() && !hasImageFailed) {
             AsyncImage(
                 model = user.photoUrl,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize().clip(CircleShape),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                onState = { state ->
+                    if (state is coil.compose.AsyncImagePainter.State.Error) {
+                        hasImageFailed = true
+                    }
+                }
             )
         } else {
-            val initial = remember(user.displayName, user.email) {
-                (user.displayName ?: user.email ?: "?").take(1).uppercase()
-            }
             Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = initial,
+                    text = initials,
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = (size.value * 0.5).sp,

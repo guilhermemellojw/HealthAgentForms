@@ -22,8 +22,8 @@ class HouseManagementUseCaseTest {
         override fun getAllHouses(): Flow<List<House>> = flowOf(emptyList())
         override fun getDistinctAgentNames(): Flow<List<String>> = flowOf(emptyList())
         override fun getAllHousesOrderedByBlock(): Flow<List<House>> = flowOf(emptyList())
-        override fun getDayActivities(dates: List<String>, agentName: String): Flow<List<DayActivity>> = flowOf(emptyList())
-        override fun getDayActivityFlow(date: String, agentName: String): Flow<DayActivity?> = flowOf(null)
+        override fun getDayActivities(dates: List<String>, agentName: String, agentUid: String?): Flow<List<DayActivity>> = flowOf(emptyList())
+        override fun getDayActivityFlow(date: String, agentName: String, agentUid: String?): Flow<DayActivity?> = flowOf(null)
         override suspend fun getHouseById(id: Long): House? = null
         override suspend fun getAllHousesOnce(): List<House> = emptyList()
         override suspend fun insertHouse(house: House) {}
@@ -33,7 +33,7 @@ class HouseManagementUseCaseTest {
         override suspend fun deleteHouse(house: House) {}
         override suspend fun replaceAllHouses(houses: List<House>) {}
         override suspend fun updateDayActivity(dayActivity: DayActivity) {}
-        override suspend fun getDayActivity(date: String, agentName: String): DayActivity? = null
+        override suspend fun getDayActivity(date: String, agentName: String, agentUid: String?): DayActivity? = null
         override suspend fun getAllDayActivitiesOnce(): List<DayActivity> = emptyList()
         override suspend fun replaceAllDayActivities(activities: List<DayActivity>) {}
         override suspend fun restoreAgentData(agentName: String, houses: List<House>, activities: List<DayActivity>) {}
@@ -64,6 +64,7 @@ class HouseManagementUseCaseTest {
         override suspend fun deleteByAgent(agentName: String) {}
         override suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>) {}
         override suspend fun cleanupZeroValues() {}
+        override suspend fun updateAgentNameForAll(oldName: String, newName: String) {}
     }
 
     private val dummyCustomStreetDao = object : CustomStreetDao {
@@ -92,7 +93,8 @@ class HouseManagementUseCaseTest {
         override suspend fun deleteAgentActivity(agentUid: String, activityDate: String): Result<Unit> = Result.success(Unit)
         override suspend fun recordHouseDeletion(house: House): Result<Unit> = Result.success(Unit)
         override suspend fun recordActivityDeletion(date: String, agentName: String): Result<Unit> = Result.success(Unit)
-        override suspend fun recordBulkDeletions(houseKeys: List<String>, activityDates: List<String>): Result<Unit> = Result.success(Unit)
+        override suspend fun recordBulkDeletions(houseKeys: List<String>, activityDates: List<String>, targetUid: String?): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteAllCloudData(): Result<Unit> = Result.success(Unit)
         override suspend fun performDataCleanup(): Result<Unit> = Result.success(Unit)
     }
 

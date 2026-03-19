@@ -59,13 +59,21 @@ class AdminViewModel @Inject constructor(
     private val _accessRequests = MutableStateFlow<List<com.antigravity.healthagent.domain.repository.AccessRequest>>(emptyList())
     val accessRequests: StateFlow<List<com.antigravity.healthagent.domain.repository.AccessRequest>> = _accessRequests.asStateFlow()
 
+    private val _lastSuccessfulAgents = MutableStateFlow<List<AgentData>>(emptyList())
+
     val unifiedProfiles: StateFlow<List<UnifiedProfile>> = combine(
         users,
         uiState,
         agentNames,
+        _lastSuccessfulAgents,
         _searchQuery
-    ) { usersList, agentsState, namesList, query ->
-        val agentsList = (agentsState as? AdminUiState.Success)?.agents ?: emptyList()
+    ) { usersList, agentsState, namesList, lastAgents, query ->
+        val agentsList = if (agentsState is AdminUiState.Success) {
+            _lastSuccessfulAgents.value = agentsState.agents
+            agentsState.agents
+        } else {
+            lastAgents
+        }
         
         // Build the unified list
         val result = mutableListOf<UnifiedProfile>()
@@ -272,11 +280,15 @@ class AdminViewModel @Inject constructor(
         }
     }
 
-    fun deleteUser(uid: String) {
+    fun deleteUser(uid: String, deleteCloudData: Boolean = false) {
         viewModelScope.launch {
+            if (deleteCloudData) {
+                syncRepository.deleteAgent(uid)
+            }
             val result = authRepository.deleteUser(uid)
             if (result.isSuccess) {
                 loadUsers()
+                loadAgentsData()
             }
         }
     }

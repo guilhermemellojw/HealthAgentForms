@@ -36,8 +36,9 @@ class HouseManagementUseCase @Inject constructor(
     }
 
     suspend fun deleteProduction(date: String, agentName: String) {
-        repository.deleteProduction(date, agentName)
-        syncRepository.recordActivityDeletion(date, agentName)
+        val upperName = agentName.trim().uppercase()
+        repository.deleteProduction(date, upperName)
+        syncRepository.recordActivityDeletion(date, upperName)
     }
 
     suspend fun updateHouseWithContext(

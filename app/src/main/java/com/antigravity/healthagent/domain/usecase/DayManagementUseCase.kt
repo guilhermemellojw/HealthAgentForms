@@ -13,18 +13,20 @@ class DayManagementUseCase @Inject constructor(
 ) {
 
     suspend fun getDayActivity(date: String, agentName: String): DayActivity? {
-        return repository.getDayActivity(date, agentName)
+        return repository.getDayActivity(date, agentName.uppercase())
     }
 
     suspend fun unlockDay(date: String, agentName: String) {
-        val activity = repository.getDayActivity(date, agentName)
+        val upperName = agentName.uppercase()
+        val activity = repository.getDayActivity(date, upperName)
         val status = activity?.status?.takeIf { it.isNotBlank() } ?: "NORMAL"
-        repository.updateDayActivity(DayActivity(date, status, false, agentName))
+        repository.updateDayActivity(DayActivity(date, status, false, upperName))
     }
 
     suspend fun closeDay(date: String, agentName: String) {
-        val activity = repository.getDayActivity(date, agentName) ?: DayActivity(date, "NORMAL", false, agentName)
-        repository.updateDayActivity(activity.copy(isClosed = true))
+        val upperName = agentName.uppercase()
+        val activity = repository.getDayActivity(date, upperName) ?: DayActivity(date, "NORMAL", false, upperName)
+        repository.updateDayActivity(activity.copy(isClosed = true, agentName = upperName))
     }
 
     fun isDateLocked(activity: DayActivity?): Boolean {
@@ -69,7 +71,7 @@ class DayManagementUseCase @Inject constructor(
                 
                 // Check if this day has a non-NORMAL status
                 val nextDateStr = sdf.format(cal.time)
-                val activity = repository.getDayActivity(nextDateStr, agentName)
+                val activity = repository.getDayActivity(nextDateStr, agentName.uppercase())
                 val status = activity?.status ?: "NORMAL"
                 
                 // If status is NORMAL or blank, this is a valid work day

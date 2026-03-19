@@ -44,7 +44,10 @@ fun SettingsScreen(
     onOpenAdmin: () -> Unit = {},
     isAdmin: Boolean = false,
     isSupervisor: Boolean = false,
-    viewModel: HomeViewModel = hiltViewModel()
+    viewModel: HomeViewModel = hiltViewModel(),
+    user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
+    onLogout: () -> Unit = {},
+    onSwitchAccount: () -> Unit = {}
 ) {
     val canAccessAdmin = isAdmin || isSupervisor
     // Intercept system back button
@@ -253,7 +256,10 @@ fun SettingsScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Voltar")
                     }
-                }
+                },
+                user = user,
+                onLogout = onLogout,
+                onSwitchAccount = onSwitchAccount
             )
         },
         containerColor = Color.Transparent,
