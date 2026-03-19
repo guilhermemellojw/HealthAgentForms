@@ -21,7 +21,10 @@ interface AuthRepository {
     // Authorization Requests
     suspend fun requestAccess(uid: String, email: String, displayName: String?, requestedName: String? = null): Result<Unit>
     suspend fun fetchAccessRequests(): Result<List<AccessRequest>>
+    suspend fun fetchAccessRequest(uid: String): Result<AccessRequest?>
     suspend fun respondToAccessRequest(requestId: String, approved: Boolean, agentName: String? = null): Result<Unit>
+
+    val pendingAccessRequests: Flow<List<AccessRequest>>
 }
 
 enum class UserRole {

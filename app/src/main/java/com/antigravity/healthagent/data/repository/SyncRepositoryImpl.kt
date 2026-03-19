@@ -9,6 +9,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -70,7 +71,7 @@ class SyncRepositoryImpl @Inject constructor(
                     ?: "").uppercase()
                 
                 if (officialAgentName.isNotBlank()) {
-                    userDocRef.update("agentName", officialAgentName).await()
+                    userDocRef.set(mapOf("agentName" to officialAgentName), com.google.firebase.firestore.SetOptions.merge()).await()
                 }
             }
 
@@ -378,7 +379,7 @@ class SyncRepositoryImpl @Inject constructor(
             val docId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
             val agentData = mapOf(
                 "email" to normalizedEmail,
-                "agentName" to agentName,
+                "agentName" to agentName?.trim()?.uppercase()?.takeIf { it.isNotBlank() },
                 "lastSyncTime" to 0L,
                 "isPreRegistered" to true
             )
@@ -423,13 +424,19 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun fetchAgentNames(): Result<List<String>> {
         return try {
-            val snapshot = firestore.collection("metadata").document("agent_info")
-                .get().await()
+            val snapshot = withTimeoutOrNull(2500) {
+                firestore.collection("metadata").document("agent_info")
+                    .get().await()
+            }
+            
+            if (snapshot == null) {
+                return Result.success(com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES)
+            }
             
             val names = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
             Result.success(names.sorted())
         } catch (e: Exception) {
-            // Fallback to AppConstants if Firestore metadata doesn't exist yet
+            // Fallback to AppConstants if Firestore metadata doesn't exist yet or is unreachable
             Result.success(com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES)
         }
     }
@@ -542,16 +549,18 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun fetchBairros(): Result<List<String>> {
         return try {
-            val doc = firestore.collection("metadata").document("locations").get().await()
-            val bairros = (doc.get("bairros") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
-            if (bairros.isEmpty()) {
-                // Return default from AppConstants if cloud is empty
-                Result.success(com.antigravity.healthagent.utils.AppConstants.BAIRROS)
-            } else {
-                Result.success(bairros.sorted())
+            val snapshot = withTimeoutOrNull(2500) {
+                firestore.collection("metadata").document("bairros")
+                    .get().await()
             }
+            
+            if (snapshot == null) {
+                return Result.success(com.antigravity.healthagent.utils.AppConstants.BAIRROS)
+            }
+            
+            val bairros = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            Result.success(bairros.sorted())
         } catch (e: Exception) {
-            // Fallback
             Result.success(com.antigravity.healthagent.utils.AppConstants.BAIRROS)
         }
     }
@@ -592,8 +601,15 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun fetchSystemSettings(): Result<Map<String, Any>> {
         return try {
-            val doc = firestore.collection("metadata").document("settings").get().await()
-            Result.success(doc.data ?: emptyMap())
+            val snapshot = withTimeoutOrNull(2500) {
+                firestore.collection("metadata").document("system_settings")
+                    .get().await()
+            }
+            
+            if (snapshot == null) return Result.success(emptyMap<String, Any>())
+            
+            val settings = snapshot.data ?: emptyMap<String, Any>()
+            Result.success(settings)
         } catch (e: Exception) {
             Result.failure(e)
         }

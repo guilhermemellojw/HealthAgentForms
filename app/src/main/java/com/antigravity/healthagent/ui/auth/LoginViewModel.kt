@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.antigravity.healthagent.domain.repository.AuthRepository
 import com.antigravity.healthagent.domain.repository.AuthUser
+import com.antigravity.healthagent.domain.repository.AccessRequest
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,10 +28,10 @@ class LoginViewModel @Inject constructor(
                     _authState.value = AuthState.Unauthenticated
                 } else if (!user.isAuthorized) {
                     _authState.value = AuthState.WaitingForAuthorization(user)
-                    // Check if a request already exists in Firestore to persist the 'sent' state
+                    // Check if *this* user already has a pending request
                     viewModelScope.launch {
-                        val requests = authRepository.fetchAccessRequests().getOrNull() ?: emptyList()
-                        if (requests.any { it.uid == user.uid }) {
+                        val request = authRepository.fetchAccessRequest(user.uid).getOrNull()
+                        if (request != null && request.status == "PENDING") {
                             _requestSent.value = true
                         }
                     }

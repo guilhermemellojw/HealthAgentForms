@@ -131,6 +131,13 @@ class AdminViewModel @Inject constructor(
 
     init {
         refreshAll()
+        
+        // Collect real-time access requests once and for all
+        viewModelScope.launch {
+            authRepository.pendingAccessRequests.collect { requests ->
+                _accessRequests.value = requests
+            }
+        }
     }
 
     fun refreshAll() {
@@ -141,22 +148,15 @@ class AdminViewModel @Inject constructor(
             loadAgentNames()
             loadBairros()
             loadSystemSettings()
-            loadAccessRequests()
         }
     }
 
-    private suspend fun loadAccessRequests() {
-        val result = authRepository.fetchAccessRequests()
-        if (result.isSuccess) {
-            _accessRequests.value = result.getOrNull() ?: emptyList()
-        }
-    }
+    // loadAccessRequests is now handled by the real-time collector in refreshAll
 
     fun approveAccess(requestId: String, agentName: String?) {
         viewModelScope.launch {
             val result = authRepository.respondToAccessRequest(requestId, true, agentName)
             if (result.isSuccess) {
-                loadAccessRequests()
                 loadUsers()
                 _uiEvent.emit("Acesso aprovado")
             }
@@ -167,7 +167,6 @@ class AdminViewModel @Inject constructor(
         viewModelScope.launch {
             val result = authRepository.respondToAccessRequest(requestId, false)
             if (result.isSuccess) {
-                loadAccessRequests()
                 _uiEvent.emit("Acesso rejeitado")
             }
         }

@@ -28,6 +28,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 import java.io.File
 import java.text.SimpleDateFormat
@@ -177,6 +178,10 @@ class HomeViewModel @Inject constructor(
 
     val warningSound: StateFlow<String> = settingsManager.warningSound
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "SYSTEM_NOTIFICATION_2")
+
+    val pendingAccessRequestsCount: StateFlow<Int> = authRepository.pendingAccessRequests
+        .map { it.size }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     private val dateCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private fun getTimestamp(date: String): Long {
@@ -448,26 +453,28 @@ class HomeViewModel @Inject constructor(
     }
 
     private suspend fun loadDynamicConfig() {
-        // 1. Sync Bairros
-        val bairrosResult = syncRepository.fetchBairros()
-        if (bairrosResult.isSuccess) {
-            _bairrosList.value = bairrosResult.getOrNull() ?: com.antigravity.healthagent.utils.AppConstants.BAIRROS
-        }
+        withTimeoutOrNull(5000) {
+            // 1. Sync Bairros
+            val bairrosResult = syncRepository.fetchBairros()
+            if (bairrosResult.isSuccess) {
+                _bairrosList.value = bairrosResult.getOrNull() ?: com.antigravity.healthagent.utils.AppConstants.BAIRROS
+            }
 
-        // 2. Sync Global System Settings (e.g. max_open_houses)
-        val settingsResult = syncRepository.fetchSystemSettings()
-        if (settingsResult.isSuccess) {
-            val settings = settingsResult.getOrNull() ?: emptyMap()
-            val raw = settings["max_open_houses"]
-            if (raw != null) {
-                val intVal = when(raw) {
-                    is Long -> raw.toInt()
-                    is Int -> raw
-                    is Number -> raw.toInt()
-                    is String -> raw.toIntOrNull() ?: 25
-                    else -> 25
+            // 2. Sync Global System Settings (e.g. max_open_houses)
+            val settingsResult = syncRepository.fetchSystemSettings()
+            if (settingsResult.isSuccess) {
+                val settings = settingsResult.getOrNull() ?: emptyMap()
+                val raw = settings["max_open_houses"]
+                if (raw != null) {
+                    val intVal = when(raw) {
+                        is Long -> raw.toInt()
+                        is Int -> raw
+                        is Number -> raw.toInt()
+                        is String -> raw.toIntOrNull() ?: 25
+                        else -> 25
+                    }
+                    settingsManager.setMaxOpenHouses(intVal)
                 }
-                settingsManager.setMaxOpenHouses(intVal)
             }
         }
     }
@@ -596,9 +603,24 @@ class HomeViewModel @Inject constructor(
                 android.util.Log.e("HomeViewModel", "Error migrating data", e)
             }
             
-            val result = syncRepository.fetchAgentNames()
-            if (result.isSuccess) {
-                _agentNames.value = result.getOrNull() ?: emptyList()
+            // 1. Fetch Agent Names (with 3s timeout)
+            val agentNamesResult = withTimeoutOrNull(3000) { syncRepository.fetchAgentNames() }
+            if (agentNamesResult != null && agentNamesResult.isSuccess) {
+                _agentNames.value = agentNamesResult.getOrNull() ?: com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES
+            } else if (agentNamesResult == null) {
+                // Timeout happened, use default
+                _agentNames.value = com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES
+                android.util.Log.w("HomeViewModel", "Agent names fetch timed out, using defaults")
+            }
+
+            // 2. Fetch Bairros (with 3s timeout)
+            val bairrosResult = withTimeoutOrNull(3000) { syncRepository.fetchBairros() }
+            if (bairrosResult != null && bairrosResult.isSuccess) {
+                _bairrosList.value = bairrosResult.getOrNull() ?: com.antigravity.healthagent.utils.AppConstants.BAIRROS
+            } else if (bairrosResult == null) {
+                // Timeout happened, use default
+                _bairrosList.value = com.antigravity.healthagent.utils.AppConstants.BAIRROS
+                android.util.Log.w("HomeViewModel", "Bairros fetch timed out, using defaults")
             }
             
             loadDynamicConfig()
@@ -697,7 +719,7 @@ class HomeViewModel @Inject constructor(
         // Keep agentName synced with AuthUser or RemoteAgent
         viewModelScope.launch {
             combine(authRepository.currentUserAsync, _remoteAgent) { user, remote ->
-                remote ?: user?.agentName ?: user?.email ?: ""
+                remote ?: user?.agentName?.takeIf { it.isNotBlank() } ?: user?.email?.takeIf { it.isNotBlank() } ?: "AGENTE"
             }.collect { name ->
                 val current = _agentName.value
                 val newIsEmail = name.contains("@")

@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -397,11 +398,11 @@ fun SettingsScreen(
                 item {
                     SettingsSection(
                         title = "Preferências de Trabalho",
-                        icon = Icons.Outlined.Assignment // Assignment fits and has an outlined version
+                        icon = Icons.Outlined.Assignment
                     ) {
                         val maxHouses by viewModel.maxOpenHouses.collectAsState()
                         
-                        // Meta Diária is read-only for regular users
+                        // Meta Diária card
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
@@ -421,39 +422,63 @@ fun SettingsScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         val isEasyMode by viewModel.easyMode.collectAsState()
                         
-                        ListItem(
-                            headlineContent = { Text("Modo Fácil") },
-                            supportingContent = { Text("Interface simplificada com botões maiores") },
-                            leadingContent = { Icon(Icons.Outlined.AccessibilityNew, contentDescription = null) },
-                            trailingContent = {
+                        // Modo Fácil card
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().clickable { viewModel.updateEasyMode(!isEasyMode) },
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Outlined.AccessibilityNew, null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Modo Fácil", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                                    Text("Botões maiores e interface simples", style = MaterialTheme.typography.bodySmall)
+                                }
                                 Switch(
                                     checked = isEasyMode,
-                                    onCheckedChange = { viewModel.updateEasyMode(it) }
+                                    onCheckedChange = { viewModel.updateEasyMode(it) },
+                                    modifier = Modifier.scale(0.8f)
                                 )
-                            },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            modifier = Modifier.fillMaxWidth().clickable { viewModel.updateEasyMode(!isEasyMode) }
-                        )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         val isSolarMode by viewModel.solarMode.collectAsState()
                         
-                        ListItem(
-                            headlineContent = { Text("Modo Solar") },
-                            supportingContent = { Text("Alto contraste para visibilidade no sol") },
-                            leadingContent = { Icon(Icons.Outlined.WbSunny, contentDescription = null) },
-                            trailingContent = {
+                        // Modo Solar card
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().clickable { viewModel.updateSolarMode(!isSolarMode) },
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Outlined.WbSunny, null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Modo Solar", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                                    Text("Alto contraste para o sol", style = MaterialTheme.typography.bodySmall)
+                                }
                                 Switch(
                                     checked = isSolarMode,
-                                    onCheckedChange = { viewModel.updateSolarMode(it) }
+                                    onCheckedChange = { viewModel.updateSolarMode(it) },
+                                    modifier = Modifier.scale(0.8f)
                                 )
-                            },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            modifier = Modifier.fillMaxWidth().clickable { viewModel.updateSolarMode(!isSolarMode) }
-                        )
+                            }
+                        }
                     }
                 }
 
@@ -463,25 +488,22 @@ fun SettingsScreen(
                         title = "Dados e Backup Local",
                         icon = Icons.Outlined.Storage
                     ) {
-                        ListItem(
-                            headlineContent = { Text("Exportar Backup") },
-                            supportingContent = { Text("Gerar arquivo JSON para segurança") },
-                            leadingContent = { Icon(Icons.Default.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                            modifier = Modifier.fillMaxWidth().clickable { 
-                                viewModel.backupDataAndShare(context) 
-                            }
+                        SettingsItemCard(
+                            onClick = { viewModel.backupDataAndShare(context) },
+                            headline = "Exportar Backup",
+                            supportingText = "Gerar arquivo JSON para segurança",
+                            leadingIcon = Icons.Default.Share
                         )
                         
                         if (isAdmin) {
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
                             
-                            ListItem(
-                                headlineContent = { Text("Restaurar Backup") },
-                                supportingContent = { Text("Importar dados de um arquivo JSON") },
-                                leadingContent = { Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                                modifier = Modifier.fillMaxWidth().clickable { 
-                                    showRestoreConfirm = true
-                                }
+                            SettingsItemCard(
+                                onClick = { showRestoreConfirm = true },
+                                headline = "Restaurar Backup",
+                                supportingText = "Importar dados de um arquivo JSON",
+                                leadingIcon = Icons.Default.FolderOpen,
+                                color = MaterialTheme.colorScheme.error
                             )
                         }
                     }
@@ -494,51 +516,73 @@ fun SettingsScreen(
                             title = "Administração",
                             icon = Icons.Outlined.AdminPanelSettings
                         ) {
-                            ListItem(
-                                headlineContent = { Text("Painel de Gestão") },
-                                supportingContent = { Text("Controle de usuários e sincronização") },
-                                leadingContent = { Icon(Icons.Default.Security, null, tint = MaterialTheme.colorScheme.primary) },
-                                modifier = Modifier.fillMaxWidth().clickable { onOpenAdmin() }
+                            val pendingCount by viewModel.pendingAccessRequestsCount.collectAsState()
+
+                            SettingsItemCard(
+                                onClick = { onOpenAdmin() },
+                                headline = "Painel de Gestão",
+                                supportingText = "Controle de usuários e sincronização",
+                                leadingIcon = Icons.Default.Security,
+                                badgeCount = if (pendingCount > 0) pendingCount else null
                             )
 
                             if (isAdmin) {
                                 Spacer(modifier = Modifier.height(16.dp))
                                 
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(16.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
+                                // Zona de Perigo label
+                                Row(
+                                    modifier = Modifier.padding(bottom = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column(modifier = Modifier.padding(bottom = 8.dp)) {
-                                        Row(
-                                            modifier = Modifier.padding(16.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
-                                            Spacer(Modifier.width(8.dp))
-                                            Text(
-                                                "ZONA DE PERIGO", 
-                                                style = MaterialTheme.typography.labelMedium, 
-                                                fontWeight = FontWeight.Black, 
-                                                color = MaterialTheme.colorScheme.error
-                                            )
+                                    Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "ZONA DE PERIGO", 
+                                        style = MaterialTheme.typography.labelSmall, 
+                                        fontWeight = FontWeight.Black, 
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+
+                                // Limpar Histórico card
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().clickable { showCleanupPicker = true },
+                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.error)
+                                        Spacer(Modifier.width(12.dp))
+                                        Column {
+                                            Text("Limpar Histórico Antigo", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
+                                            Text("Remover dados de meses passados", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
                                         }
-                                        
-                                        ListItem(
-                                            headlineContent = { Text("Limpar Histórico Antigo", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
-                                            supportingContent = { Text("Remover dados anteriores a uma data", color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)) },
-                                            leadingContent = { Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.error) },
-                                            modifier = Modifier.clickable { showCleanupPicker = true },
-                                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                                        )
-                                        ListItem(
-                                            headlineContent = { Text("Apagar Tudo", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
-                                            supportingContent = { Text("Resetar banco de dados local", color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)) },
-                                            leadingContent = { Icon(Icons.Default.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
-                                            modifier = Modifier.clickable { showEraseConfirm = true },
-                                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Apagar Tudo card
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().clickable { showEraseConfirm = true },
+                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.DeleteForever, null, tint = MaterialTheme.colorScheme.error)
+                                        Spacer(Modifier.width(12.dp))
+                                        Column {
+                                            Text("Apagar Tudo", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
+                                            Text("Resetar banco de dados local", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
+                                        }
                                     }
                                 }
                             }
@@ -684,5 +728,40 @@ fun SoundSelectionGroup(
         if (index < sounds.size - 1) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         }
+    }
+}
+
+@Composable
+fun SettingsItemCard(
+    onClick: () -> Unit,
+    headline: String,
+    supportingText: String,
+    leadingIcon: ImageVector,
+    color: Color = MaterialTheme.colorScheme.primary,
+    textColor: Color = MaterialTheme.colorScheme.onSurface,
+    badgeCount: Int? = null
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onClick() },
+        color = color.copy(alpha = 0.08f),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.15f))
+    ) {
+        ListItem(
+            headlineContent = { Text(headline, fontWeight = FontWeight.Bold, color = textColor) },
+            supportingContent = { Text(supportingText, style = MaterialTheme.typography.bodySmall) },
+            leadingContent = { Icon(leadingIcon, null, tint = color) },
+            trailingContent = {
+                if (badgeCount != null) {
+                    Badge(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ) {
+                        Text(badgeCount.toString())
+                    }
+                }
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+        )
     }
 }

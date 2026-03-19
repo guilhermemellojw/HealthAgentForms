@@ -115,6 +115,12 @@ fun LoginScreen(
                             style = MaterialTheme.typography.bodyLarge,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "ID: ${(authState as AuthState.WaitingForAuthorization).user.uid}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
                         val requestSent by viewModel.requestSent.collectAsState()
                         var requestedName by remember { mutableStateOf("") }
                         
