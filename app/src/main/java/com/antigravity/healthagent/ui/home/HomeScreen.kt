@@ -726,7 +726,6 @@ fun HomeScreen(
                             isEasyMode = uiState.isEasyMode,
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
-                        val agentNames by viewModel.agentNames.collectAsState()
 
                         HomeHeader(
                             municipio = uiState.municipality,
@@ -737,13 +736,12 @@ fun HomeScreen(
                             tipo = uiState.type,
                             atividade = uiState.activity,
                             agentName = uiState.agentName,
-                            agentNamesList = uiState.agentNames,
                             isDayClosed = uiState.isDayClosed,
                             onUpdateHeader = { m, b, c, z, t, d, ci, a ->
                                 viewModel.updateHeader(m, b, c, z, t, d, ci, a)
                             },
                             onUpdateBairro = { viewModel.updateHeader(uiState.municipality, it, "BRR", uiState.zone, uiState.type, uiState.data, uiState.cycle, uiState.activity) },
-                            onUpdateAgentName = { viewModel.updateAgentName(it) },
+                            onUpdateAgentName = { /* No longer needed from dropdown */ },
                             onUpdateMunicipio = { viewModel.updateHeader(it, uiState.neighborhood, "BRR", uiState.zone, uiState.type, uiState.data, uiState.cycle, uiState.activity) },
                             onUpdateZona = { viewModel.updateHeader(uiState.municipality, uiState.neighborhood, "BRR", it, uiState.type, uiState.data, uiState.cycle, uiState.activity) },
                             onUpdateCategoria = { viewModel.updateHeader(uiState.municipality, uiState.neighborhood, it, uiState.zone, uiState.type, uiState.data, uiState.cycle, uiState.activity) },

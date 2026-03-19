@@ -38,7 +38,6 @@ data class HomeUiState(
     val weeklySummaryTotals: WeeklySummaryTotals = WeeklySummaryTotals(),
     val boletimList: List<BoletimSummary> = emptyList(),
     val bairrosList: List<String> = emptyList(),
-    val agentNames: List<String> = emptyList(),
     val currentBlock: String = "",
     val currentBlockSequence: String = "",
     val currentStreet: String = "",

@@ -195,7 +195,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun setRemoteAgent(agent: AgentData?) {
-        _remoteAgent.value = agent?.email
+        _remoteAgent.value = agent?.agentName ?: agent?.email
         _remoteAgentUid.value = agent?.uid
         
         // Persist for background processes
@@ -381,7 +381,7 @@ class HomeViewModel @Inject constructor(
             rgFilteredList, _selectedRgBlock, availableYears, activityOptions,
             weekRangeText, customActivities, settingsManager.easyMode, settingsManager.solarMode,
             settingsManager.maxOpenHouses, rgBlocks, weeklySummary, boletimList,
-            agentNames, bairrosList, rgBairros, _syncStatus, weeklySummaryTotals
+            bairrosList, rgBairros, _syncStatus, weeklySummaryTotals
         ) { args ->
             val h = args[0] as List<House>
             val d = args[1] as String
@@ -421,8 +421,7 @@ class HomeViewModel @Inject constructor(
                     rgBlocks = args[29] as List<BlockSegment>,
                     weeklySummary = args[30] as List<DaySummary>,
                     boletimList = args[31] as List<BoletimSummary>,
-                    agentNames = args[32] as List<String>,
-                    bairrosList = args[33] as List<String>,
+                    bairrosList = args[32] as List<String>,
                     currentBlock = args[16] as String,
                     currentBlockSequence = args[17] as String,
                     currentStreet = args[18] as String,
@@ -438,9 +437,9 @@ class HomeViewModel @Inject constructor(
                     isEasyMode = args[26] as Boolean,
                     isSolarMode = args[27] as Boolean,
                     maxOpenHouses = args[28] as Int,
-                    rgBairros = args[34] as List<String>,
-                    syncStatus = args[35] as SyncStatus,
-                    weeklySummaryTotals = args[36] as WeeklySummaryTotals
+                    rgBairros = args[33] as List<String>,
+                    syncStatus = args[34] as SyncStatus,
+                    weeklySummaryTotals = args[35] as WeeklySummaryTotals
                 )
             }
         }.launchIn(viewModelScope)
