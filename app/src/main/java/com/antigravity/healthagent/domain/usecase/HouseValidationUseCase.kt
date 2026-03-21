@@ -43,7 +43,7 @@ class HouseValidationUseCase @Inject constructor() {
                 if (house.blockNumber.isBlank()) missingFields.add("Quarteirão")
                 
                 val totalDeposits = house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e
-                val hasTreatment = totalDeposits > 0 || house.eliminados > 0 || house.larvicida > 0.0
+                val hasTreatment = totalDeposits > 0 || house.eliminados > 0 || house.larvicida > 0.0 || house.comFoco
                 
                 if (house.situation != Situation.NONE && hasTreatment) {
                     missingFields.add("Tratamento em Imóvel não Trabalhado")
@@ -90,7 +90,7 @@ class HouseValidationUseCase @Inject constructor() {
         if (house.blockNumber.isBlank()) invalidFields.add("blockNumber")
 
         val totalDeposits = house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e
-        val hasTreatment = totalDeposits > 0 || house.eliminados > 0 || house.larvicida > 0.0
+        val hasTreatment = totalDeposits > 0 || house.eliminados > 0 || house.larvicida > 0.0 || house.comFoco
         
         if (house.situation != Situation.NONE && hasTreatment) {
             invalidFields.add("situation_treatment")

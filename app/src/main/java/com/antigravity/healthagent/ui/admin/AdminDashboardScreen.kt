@@ -1,14 +1,14 @@
+// Admin Dashboard Screen - Unified View
 package com.antigravity.healthagent.ui.admin
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -18,25 +18,23 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.UserRole
-import com.antigravity.healthagent.utils.AppConstants
-import kotlinx.coroutines.launch
+import com.antigravity.healthagent.domain.repository.AuthUser
+import com.antigravity.healthagent.domain.repository.AccessRequest
+import com.antigravity.healthagent.data.local.model.House
+import com.antigravity.healthagent.data.local.model.DayActivity
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.foundation.background
-import androidx.compose.ui.draw.clip
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.MeshGradient
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import android.content.Context
 
 // --- Helper Components ---
 
@@ -118,7 +116,8 @@ fun UnifiedProfileCard(
     onRestore: () -> Unit,
     onEditAgent: () -> Unit,
     onDeleteHouse: (String, String) -> Unit,
-    onDeleteActivity: (String, String) -> Unit
+    onDeleteActivity: (String, String) -> Unit,
+    onClearSyncError: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     
@@ -135,7 +134,7 @@ fun UnifiedProfileCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                     Surface(
-                        shape = androidx.compose.foundation.shape.CircleShape,
+                        shape = CircleShape,
                         color = if (profile.isPreRegistered) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                         modifier = Modifier.size(40.dp)
                     ) {
@@ -153,7 +152,7 @@ fun UnifiedProfileCard(
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis
                         )
                         if (profile.isPreRegistered) {
                             Text(
@@ -219,7 +218,27 @@ fun UnifiedProfileCard(
                         val lastSync = if (profile.agentData.lastSyncTime > 0) {
                             SimpleDateFormat("dd/MM HH:mm", Locale.US).format(Date(profile.agentData.lastSyncTime))
                         } else "Nunca"
-                        Text("Sinc: $lastSync", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Sinc: $lastSync", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (profile.agentData.lastSyncError != null) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.SyncProblem, 
+                                        null, 
+                                        modifier = Modifier.size(12.dp), 
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        "Erro no Sync", 
+                                        style = MaterialTheme.typography.labelSmall, 
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
                     } else if (profile.isPreRegistered && profile.uid == null) {
                          Text("Pendente", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                     }
@@ -252,7 +271,7 @@ fun UnifiedProfileCard(
                                 leadingIcon = { Icon(Icons.Default.AdminPanelSettings, null, modifier = Modifier.size(18.dp)) }
                             )
                             DropdownMenu(expanded = showRoleMenu, onDismissRequest = { showRoleMenu = false }) {
-                                UserRole.values().forEach { role ->
+                                UserRole.entries.forEach { role ->
                                     DropdownMenuItem(
                                         text = { Text(role.name) },
                                         onClick = { onRoleChange(role); showRoleMenu = false }
@@ -303,6 +322,35 @@ fun UnifiedProfileCard(
                             AgentStatSubItem(label = "Dias", value = data.activities.size.toString())
                         }
                         
+                        // Sync Error Action
+                        if (data.lastSyncError != null) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            PremiumCard(
+                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Error, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Erro de Sincronização", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(data.lastSyncError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    TextButton(
+                                        onClick = onClearSyncError,
+                                        modifier = Modifier.align(Alignment.End),
+                                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                                    ) {
+                                        Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Limpar Erro")
+                                    }
+                                }
+                            }
+                        }
+                        
                         // Granular Control
                         Spacer(modifier = Modifier.height(16.dp))
                         GranularDataSection(
@@ -310,7 +358,8 @@ fun UnifiedProfileCard(
                             houses = data.houses,
                             activities = data.activities,
                             onDeleteHouse = onDeleteHouse,
-                            onDeleteActivity = onDeleteActivity
+                            onDeleteActivity = onDeleteActivity,
+                            onClearSyncError = onClearSyncError
                         )
                     }
 
@@ -368,7 +417,7 @@ fun AddProfileDialog(
     onDismiss: () -> Unit,
     onConfirm: (String?, String?, UserRole, Boolean) -> Unit
 ) {
-    var mode by remember { androidx.compose.runtime.mutableIntStateOf(0) } // 0: Novo Usuário, 1: Apenas Nome, 2: Vincular
+    var mode by remember { mutableIntStateOf(0) } // 0: Novo Usuário, 1: Apenas Nome, 2: Vincular
     var email by remember { mutableStateOf("") }
     var agentName by remember { mutableStateOf<String?>(null) }
     var customName by remember { mutableStateOf("") }
@@ -426,7 +475,7 @@ fun AddProfileDialog(
                             Text("Papel: ${role.name}")
                         }
                         DropdownMenu(expanded = expandedRole, onDismissRequest = { expandedRole = false }) {
-                            UserRole.values().forEach { r ->
+                            UserRole.entries.forEach { r ->
                                 DropdownMenuItem(text = { Text(r.name) }, onClick = { role = r; expandedRole = false })
                             }
                         }
@@ -470,7 +519,7 @@ fun AddProfileDialog(
 fun AdminDashboardScreen(
     viewModel: AdminViewModel,
     onNavigateBack: () -> Unit,
-    user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
+    user: AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
     onOpenSettings: () -> Unit = {}
@@ -492,7 +541,7 @@ fun AdminDashboardScreen(
     var onConfirmAction by remember { mutableStateOf<() -> Unit>({}) }
     
     var showApprovalDialog by remember { mutableStateOf(false) }
-    var pendingRequest by remember { mutableStateOf<com.antigravity.healthagent.domain.repository.AccessRequest?>(null) }
+    var pendingRequest by remember { mutableStateOf<AccessRequest?>(null) }
 
     var showDeleteUserDialog by remember { mutableStateOf(false) }
     var userToDelete by remember { mutableStateOf<UnifiedProfile?>(null) }
@@ -612,40 +661,44 @@ fun AdminDashboardScreen(
                             }
 
                             // 4. Unified Profiles List
+                            // Fallback to Box/CircularProgressIndicator if PullToRefreshBox is unresolved
                             val isRefreshing = uiState is AdminUiState.Loading
-                            PullToRefreshBox(
-                                isRefreshing = isRefreshing,
-                                onRefresh = { viewModel.refreshAll() },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                if (unifiedProfiles.isEmpty()) {
-                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        Text("Nenhum usuário encontrado.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            
+                            Box(modifier = Modifier.weight(1f)) {
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    if (isRefreshing) {
+                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                                     }
-                                } else {
-                                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
-                                        items(unifiedProfiles) { profile ->
-                                        UnifiedProfileCard(
-                                            profile = profile,
-                                            agentNamesList = agentNames,
-                                            onAuthorize = { viewModel.authorizeUser(profile.uid ?: "", it) },
-                                            onRoleChange = { viewModel.changeUserRole(profile.uid ?: "", it) },
-                                            onUpdateName = { name ->
-                                                profile.uid?.let { viewModel.updateUserProfile(it, mapOf("agentName" to name)) }
-                                            },
-                                            onDelete = {
-                                                userToDelete = profile
-                                                deleteCloudDataWithUser = false
-                                                showDeleteUserDialog = true
-                                            },
-                                            onRestore = { selectedUidForRestore = profile.uid ?: profile.agentData?.uid; filePickerLauncher.launch("application/json") },
-                                            onEditAgent = { viewModel.selectAgentForEdit(profile.agentData); onNavigateBack() },
-                                            onDeleteHouse = { uid, id -> confirmTitle = "Excluir Imóvel"; confirmMessage = "Deseja excluir este registro de imóvel da nuvem?"; onConfirmAction = { viewModel.deleteAgentHouse(uid, id) }; showConfirmDialog = true },
-                                            onDeleteActivity = { uid, date -> confirmTitle = "Excluir Atividade"; confirmMessage = "Deseja excluir este registro de atividade ($date) da nuvem?"; onConfirmAction = { viewModel.deleteAgentActivity(uid, date) }; showConfirmDialog = true }
-                                        )
+                                    if (unifiedProfiles.isEmpty()) {
+                                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            Text("Nenhum usuário encontrado.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    } else {
+                                        LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+                                            items(unifiedProfiles) { profile ->
+                                                UnifiedProfileCard(
+                                                    profile = profile,
+                                                    agentNamesList = agentNames,
+                                                    onAuthorize = { viewModel.authorizeUser(profile.uid ?: "", it) },
+                                                    onRoleChange = { viewModel.changeUserRole(profile.uid ?: "", it) },
+                                                    onUpdateName = { name ->
+                                                        profile.uid?.let { viewModel.updateUserProfile(it, mapOf("agentName" to name)) }
+                                                    },
+                                                    onDelete = {
+                                                        userToDelete = profile
+                                                        deleteCloudDataWithUser = false
+                                                        showDeleteUserDialog = true
+                                                    },
+                                                    onRestore = { selectedUidForRestore = profile.uid ?: profile.agentData?.uid; filePickerLauncher.launch("application/json") },
+                                                    onEditAgent = { viewModel.selectAgentForEdit(profile.agentData); onNavigateBack() },
+                                                    onDeleteHouse = { uid, id -> confirmTitle = "Excluir Imóvel"; confirmMessage = "Deseja excluir este registro de imóvel da nuvem?"; onConfirmAction = { viewModel.deleteAgentHouse(uid, id) }; showConfirmDialog = true },
+                                                    onDeleteActivity = { uid, date -> confirmTitle = "Excluir Atividade"; confirmMessage = "Deseja excluir este registro de atividade ($date) da nuvem?"; onConfirmAction = { viewModel.deleteAgentActivity(uid, date) }; showConfirmDialog = true },
+                                                    onClearSyncError = { profile.uid?.let { viewModel.clearSyncError(it) } }
+                                                )
+                                            }
+                                        }
                                     }
                                 }
-                            }
                             }
                         }
                     } else if (selectedTab == 1) {
@@ -727,7 +780,7 @@ fun AdminDashboardScreen(
 
 @Composable
 fun AccessRequestCard(
-    request: com.antigravity.healthagent.domain.repository.AccessRequest,
+    request: AccessRequest,
     onApprove: () -> Unit,
     onReject: () -> Unit
 ) {
@@ -754,7 +807,7 @@ fun AccessRequestCard(
 
 @Composable
 fun ApprovalDialog(
-    request: com.antigravity.healthagent.domain.repository.AccessRequest,
+    request: AccessRequest,
     agentNamesList: List<String>,
     onDismiss: () -> Unit,
     onConfirm: (String?) -> Unit
@@ -791,10 +844,11 @@ fun ApprovalDialog(
 @Composable
 fun GranularDataSection(
     agentUid: String,
-    houses: List<com.antigravity.healthagent.data.local.model.House>,
-    activities: List<com.antigravity.healthagent.data.local.model.DayActivity>,
+    houses: List<House>,
+    activities: List<DayActivity>,
     onDeleteHouse: (String, String) -> Unit,
-    onDeleteActivity: (String, String) -> Unit
+    onDeleteActivity: (String, String) -> Unit,
+    onClearSyncError: () -> Unit
 ) {
     var showHouses by remember { mutableStateOf(false) }
     var showActivities by remember { mutableStateOf(false) }

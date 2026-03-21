@@ -64,10 +64,11 @@ class SyncWorker @AssistedInject constructor(
                 Result.success()
             } else {
                 val exception = result.exceptionOrNull()
-                Log.e("SyncWorker", "Sync failed: ${exception?.message}")
+                val errorMsg = exception?.message ?: "Erro de sincronização em segundo plano"
+                Log.e("SyncWorker", "Sync failed: $errorMsg")
                 
-                // If it's a permission error, don't retry - it won't fix itself without user action
-                if (exception?.message?.contains("Acesso negado", ignoreCase = true) == true) {
+                // If it's a permission error, don't retry
+                if (errorMsg.contains("Acesso negado", ignoreCase = true) == true) {
                     Result.failure()
                 } else {
                     Result.retry()

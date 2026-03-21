@@ -394,17 +394,19 @@ fun HouseRowItem(
                                 tint = MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 1f else 0.5f)
                             )
                         }
-                        IconButton(
-                            onClick = { showDeleteDialog = true },
-                            modifier = Modifier.size(32.dp),
-                            enabled = enabled
-                        ) {
-                            Icon(
-                                Icons.Default.Delete, 
-                                contentDescription = "Excluir", 
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.error.copy(alpha = if(enabled) 1f else 0.5f)
-                            )
+                        if (enabled) {
+                            IconButton(
+                                onClick = { showDeleteDialog = true },
+                                modifier = Modifier.size(32.dp),
+                                enabled = enabled
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete, 
+                                    contentDescription = "Excluir", 
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.error.copy(alpha = if(enabled) 1f else 0.5f)
+                                )
+                            }
                         }
                     }
                 }
@@ -577,9 +579,10 @@ fun EasyHouseCard(
             Surface(
                 onClick = onShowTreatment,
                 color = Color.Transparent,
+                enabled = enabled,
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, if (isTreated) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f) 
-                                           else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
+                border = BorderStroke(1.dp, if (isTreated) MaterialTheme.colorScheme.tertiary.copy(alpha = if(enabled) 0.7f else 0.3f) 
+                                           else MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 0.7f else 0.3f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -650,8 +653,9 @@ fun EasyHouseCard(
                     Surface(
                         onClick = onShowContext,
                         color = Color.Transparent,
+                        enabled = enabled,
                         shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 0.7f else 0.3f)),
                         modifier = Modifier.weight(1f)
                     ) {
                         Row(
@@ -659,16 +663,17 @@ fun EasyHouseCard(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 1f else 0.4f))
                             Spacer(Modifier.width(8.dp))
-                            Text("Editar Local", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            Text("Editar Local", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 1f else 0.4f))
                         }
                     }
                     Surface(
                         onClick = onToggleReorder,
                         color = Color.Transparent,
+                        enabled = enabled,
                         shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 0.7f else 0.3f)),
                         modifier = Modifier.weight(0.8f)
                     ) {
                         Row(
@@ -676,9 +681,9 @@ fun EasyHouseCard(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
-                            Icon(Icons.Default.SwapVert, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.SwapVert, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 1f else 0.4f))
                             Spacer(Modifier.width(8.dp))
-                            Text("Mover", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            Text("Mover", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 1f else 0.4f))
                         }
                     }
                 }
@@ -687,9 +692,10 @@ fun EasyHouseCard(
 
                 IconButton(
                     onClick = { onDelete(house) },
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(48.dp),
+                    enabled = enabled
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Excluir", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Default.Delete, contentDescription = "Excluir", tint = MaterialTheme.colorScheme.error.copy(alpha = if(enabled) 1f else 0.4f), modifier = Modifier.size(24.dp))
                 }
             }
         }

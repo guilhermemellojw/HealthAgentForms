@@ -39,7 +39,6 @@ data class House(
     val quarteiraoConcluido: Boolean = false,
     val listOrder: Long = 0, // For manual reordering
     val visitSegment: Int = 0, // To distinguish return trips to the same street
-    @get:com.google.firebase.firestore.Exclude
     val createdAt: Long = System.currentTimeMillis(),
     val isSynced: Boolean = false,
     @get:com.google.firebase.firestore.Exclude

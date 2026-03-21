@@ -89,6 +89,11 @@ interface SyncRepository {
      * NUCLEAR OPTION: Deletes ALL data for ALL agents in the cloud.
      */
     suspend fun deleteAllCloudData(): Result<Unit>
+
+    /**
+     * Clears the sync error message for a specific agent.
+     */
+    suspend fun clearSyncError(uid: String): Result<Unit>
 }
 
 data class AgentData(
@@ -97,5 +102,6 @@ data class AgentData(
     val agentName: String? = null,
     val houses: List<House>,
     val activities: List<DayActivity>,
-    val lastSyncTime: Long = 0L
+    val lastSyncTime: Long = 0L,
+    val lastSyncError: String? = null
 )

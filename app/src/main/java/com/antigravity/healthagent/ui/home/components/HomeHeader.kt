@@ -51,6 +51,7 @@ fun HomeHeader(
     onMoveDateBackward: () -> Unit = {},
     onMoveDateForward: () -> Unit = {},
     isEasyMode: Boolean = false,
+    isSolarMode: Boolean = false,
     bairrosList: List<String> = AppConstants.BAIRROS
 ) {
     var isHeaderExpanded by remember { mutableStateOf(false) }
@@ -66,7 +67,7 @@ fun HomeHeader(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp),
-        isSolarMode = false // Standard mode for header
+        isSolarMode = isSolarMode
     ) {
         Column(
             modifier = Modifier.padding(

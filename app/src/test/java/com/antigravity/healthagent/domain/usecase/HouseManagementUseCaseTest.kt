@@ -60,9 +60,11 @@ class HouseManagementUseCaseTest {
         override suspend fun deleteHouse(house: House) {}
         override suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, now: Long) {}
         override suspend fun deleteHousesByDateAndAgent(date: String, agentName: String) {}
+        override suspend fun getHousesByDateAndAgent(date: String, agentName: String): List<House> = emptyList()
         override suspend fun deleteAll() {}
         override suspend fun deleteByAgent(agentName: String) {}
         override suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>) {}
+        override suspend fun getHousesByAgentAndDates(agentName: String, dates: List<String>): List<House> = emptyList()
         override suspend fun cleanupZeroValues() {}
         override suspend fun updateAgentNameForAll(oldName: String, newName: String) {}
     }
@@ -96,12 +98,13 @@ class HouseManagementUseCaseTest {
         override suspend fun recordBulkDeletions(houseKeys: List<String>, activityDates: List<String>, targetUid: String?): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAllCloudData(): Result<Unit> = Result.success(Unit)
         override suspend fun performDataCleanup(): Result<Unit> = Result.success(Unit)
+        override suspend fun clearSyncError(uid: String): Result<Unit> = Result.success(Unit)
     }
 
     // Real StreetRepository with dummy DAOs
     private val streetRepository = StreetRepository(dummyHouseDao, dummyCustomStreetDao)
 
-    private val useCase = HouseManagementUseCase(dummyRepository, streetRepository, dummySyncRepository)
+    private val useCase = HouseManagementUseCase(dummyRepository, streetRepository)
     private val date = "2026-01-26"
 
     @Test

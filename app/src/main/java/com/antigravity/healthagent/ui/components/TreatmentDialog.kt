@@ -11,6 +11,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.filled.BugReport
 import com.antigravity.healthagent.data.local.model.House
 
@@ -130,15 +131,19 @@ fun TreatmentDialog(
 
                         // Right: Com Foco Logic - Styled
                         Surface(
-                            checked = comFoco,
-                            onCheckedChange = { comFoco = it },
                             shape = RoundedCornerShape(16.dp),
                             border = androidx.compose.foundation.BorderStroke(
                                 width = if (comFoco) 2.dp else 1.dp,
                                 color = if (comFoco) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
                             ),
                             color = if (comFoco) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surface,
-                            modifier = Modifier.padding(start = 12.dp)
+                            modifier = Modifier
+                                .padding(start = 12.dp)
+                                .toggleable(
+                                    value = comFoco,
+                                    onValueChange = { comFoco = it },
+                                    role = androidx.compose.ui.semantics.Role.Checkbox
+                                )
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -146,7 +151,7 @@ fun TreatmentDialog(
                             ) {
                                 Checkbox(
                                     checked = comFoco,
-                                    onCheckedChange = null, // Handled by Surface
+                                    onCheckedChange = null,
                                     colors = CheckboxDefaults.colors(
                                         checkedColor = MaterialTheme.colorScheme.error,
                                         uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant

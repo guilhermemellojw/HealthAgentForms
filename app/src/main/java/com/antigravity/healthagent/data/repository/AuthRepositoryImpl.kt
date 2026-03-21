@@ -90,16 +90,24 @@ class AuthRepositoryImpl @Inject constructor(
                                 launch { settingsManager.saveUserProfile(updatedUser) }
                             }
                     } catch (e: Exception) {
-                        android.util.Log.e("AuthRepository", "Error fetching user data", e)
-                        // Fallback to basic Firebase user if Firestore fails (likely offline)
-                        trySend(AuthUser(
-                            uid = firebaseUser.uid,
-                            email = firebaseUser.email ?: "",
-                            displayName = firebaseUser.displayName,
-                            photoUrl = firebaseUser.photoUrl?.toString(),
-                            role = UserRole.AGENT,
-                            isAuthorized = false
-                        ))
+                        android.util.Log.e("AuthRepository", "Error fetching user data, trying cache fallback", e)
+                        
+                        // DEEP FALLBACK: If getFullUserData fails (e.g. timeout + cache error), 
+                        // try one last time to get ANYTHING from cache to avoid kicking user out.
+                        val lastResortCached = settingsManager.cachedUser.firstOrNull()
+                        if (lastResortCached != null && lastResortCached.uid == firebaseUser.uid) {
+                             trySend(lastResortCached)
+                        } else {
+                            // Only if we have ABSOLUTELY NO CACHE, send the generic unauthorized user
+                            trySend(AuthUser(
+                                uid = firebaseUser.uid,
+                                email = firebaseUser.email ?: "",
+                                displayName = firebaseUser.displayName,
+                                photoUrl = firebaseUser.photoUrl?.toString(),
+                                role = UserRole.AGENT,
+                                isAuthorized = false
+                            ))
+                        }
                     }
                 }
             }
@@ -225,8 +233,9 @@ class AuthRepositoryImpl @Inject constructor(
         }
 
         // 2. Check if we actually have internet by reloading the user with a strict timeout
+        // Reduced timeout to 1.5s for faster offline fallback
         val isOnline = try {
-            withTimeoutOrNull(2000) {
+            withTimeoutOrNull(1500) {
                 firebaseUser.reload().await()
                 true
             } ?: false
@@ -239,11 +248,11 @@ class AuthRepositoryImpl @Inject constructor(
         // 3. Try to get doc from cache first if offline, or from server with timeout if online
         try {
             val source = if (isOnline) Source.DEFAULT else Source.CACHE
-            userDoc = withTimeoutOrNull(3000) {
+            userDoc = withTimeoutOrNull(2000) {
                 firestore.collection("users").document(uid).get(source).await()
             }
         } catch (e: Exception) {
-            android.util.Log.w("AuthRepository", "Firestore fetch failed (source: $isOnline): ${e.message}")
+            android.util.Log.w("AuthRepository", "Firestore fetch failed (source online=$isOnline): ${e.message}")
         }
 
         // 4. SAFETY FALLBACK: Check if this user is explicitly listed in the 'admins' collection
@@ -646,9 +655,6 @@ class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun deleteUser(uid: String): Result<Unit> {
         return try {
-            // Also clean up agent data (houses, activities) to prevent ghost data
-            syncRepository.deleteAgent(uid)
-            
             val batch = firestore.batch()
             batch.delete(firestore.collection("users").document(uid))
             batch.delete(firestore.collection("admins").document(uid))

@@ -137,7 +137,7 @@ fun HealthAgentFormsTheme(
             secondaryContainer = SolarPalette.secondaryContainer,
             onSecondaryContainer = SolarPalette.onSecondaryContainer,
             background = Color.Black,
-            surface = Color.Black,
+            surface = Color(0xFF1E293B),
             onBackground = Color.White,
             onSurface = Color.White,
             surfaceVariant = Color(0xFF1E293B),

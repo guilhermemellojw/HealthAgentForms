@@ -24,7 +24,7 @@ object HouseUiStateMapper {
             house = house,
             invalidFields = invalidFields,
             highlightErrors = invalidFields.isNotEmpty(),
-            isTreated = treatmentParts.isNotEmpty(),
+            isTreated = treatmentParts.isNotEmpty() || house.comFoco,
             blockDisplay = if (house.blockSequence.isNotBlank()) "${house.blockNumber} / ${house.blockSequence}" else house.blockNumber,
             formattedStreet = formattedStreet,
             treatmentShortSummary = treatmentParts.joinToString(" | ")

@@ -49,6 +49,9 @@ interface HouseDao {
     @Query("DELETE FROM houses WHERE data = :date AND UPPER(agentName) = UPPER(:agentName)")
     suspend fun deleteHousesByDateAndAgent(date: String, agentName: String)
 
+    @Query("SELECT * FROM houses WHERE data = :date AND UPPER(agentName) = UPPER(:agentName) ORDER BY listOrder ASC")
+    suspend fun getHousesByDateAndAgent(date: String, agentName: String): List<House>
+
     @Transaction
     suspend fun upsertHouses(houses: List<House>) {
         // We use Upsert (insertAll with REPLACE) to update cloud data locally 
@@ -70,6 +73,9 @@ interface HouseDao {
 
     @Query("DELETE FROM houses WHERE UPPER(agentName) = UPPER(:agentName) AND data IN (:dates)")
     suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>)
+
+    @Query("SELECT * FROM houses WHERE UPPER(agentName) = UPPER(:agentName) AND data IN (:dates) ORDER BY listOrder ASC")
+    suspend fun getHousesByAgentAndDates(agentName: String, dates: List<String>): List<House>
 
     @Query("""
         UPDATE houses 

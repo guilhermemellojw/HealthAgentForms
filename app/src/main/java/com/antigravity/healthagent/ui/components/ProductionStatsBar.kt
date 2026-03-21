@@ -17,7 +17,8 @@ import com.antigravity.healthagent.ui.home.DashboardTotals
 fun ProductionStatsBar(
     totals: DashboardTotals,
     modifier: Modifier = Modifier,
-    isEasyMode: Boolean = false
+    isEasyMode: Boolean = false,
+    isSolarMode: Boolean = false
 ) {
     Box(
         modifier = modifier.fillMaxWidth()
@@ -30,22 +31,25 @@ fun ProductionStatsBar(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            StatItem(label = "VISITAS", value = totals.totalRegisteredHouses.toString(), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
+            val textColor = if (isSolarMode) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onPrimary
+            val dividerColor = if (isSolarMode) MaterialTheme.colorScheme.outline.copy(alpha = 0.2f) else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f)
+
+            StatItem(label = "VISITAS", value = totals.totalRegisteredHouses.toString(), color = textColor, isEasyMode = isEasyMode)
             
-            VerticalDivider(modifier = Modifier.height(28.dp).padding(horizontal = 4.dp), thickness = 1.dp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f))
+            VerticalDivider(modifier = Modifier.height(28.dp).padding(horizontal = 4.dp), thickness = 1.dp, color = dividerColor)
             
-            StatItem(label = "A1", value = totals.a1.toString(), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
-            StatItem(label = "A2", value = totals.a2.toString(), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
-            StatItem(label = "B", value = totals.b.toString(), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
-            StatItem(label = "C", value = totals.c.toString(), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
-            StatItem(label = "D1", value = totals.d1.toString(), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
-            StatItem(label = "D2", value = totals.d2.toString(), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
-            StatItem(label = "E", value = totals.e.toString(), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
+            StatItem(label = "A1", value = totals.a1.toString(), color = textColor, isEasyMode = isEasyMode)
+            StatItem(label = "A2", value = totals.a2.toString(), color = textColor, isEasyMode = isEasyMode)
+            StatItem(label = "B", value = totals.b.toString(), color = textColor, isEasyMode = isEasyMode)
+            StatItem(label = "C", value = totals.c.toString(), color = textColor, isEasyMode = isEasyMode)
+            StatItem(label = "D1", value = totals.d1.toString(), color = textColor, isEasyMode = isEasyMode)
+            StatItem(label = "D2", value = totals.d2.toString(), color = textColor, isEasyMode = isEasyMode)
+            StatItem(label = "E", value = totals.e.toString(), color = textColor, isEasyMode = isEasyMode)
             
-            VerticalDivider(modifier = Modifier.height(28.dp).padding(horizontal = 4.dp), thickness = 1.dp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f))
+            VerticalDivider(modifier = Modifier.height(28.dp).padding(horizontal = 4.dp), thickness = 1.dp, color = dividerColor)
             
-            StatItem(label = "ELIMINADOS", value = totals.eliminados.toString(), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
-            StatItem(label = "LARVICIDA", value = String.format(java.util.Locale("pt", "BR"), "%.1fg", totals.larvicida), color = MaterialTheme.colorScheme.onPrimary, isEasyMode = isEasyMode)
+            StatItem(label = "ELIMINADOS", value = totals.eliminados.toString(), color = textColor, isEasyMode = isEasyMode)
+            StatItem(label = "LARVICIDA", value = String.format(java.util.Locale("pt", "BR"), "%.1fg", totals.larvicida), color = textColor, isEasyMode = isEasyMode)
         }
     }
 }

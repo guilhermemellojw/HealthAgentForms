@@ -716,11 +716,16 @@ fun HomeScreen(
                 ) {
                 item(key = "header") {
                     Column {
-                        ProductionStatsBar(
-                            totals = uiState.dashboardTotals,
-                            isEasyMode = uiState.isEasyMode,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
+                        PremiumCard(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                            isSolarMode = uiState.isSolarMode
+                        ) {
+                            ProductionStatsBar(
+                                totals = uiState.dashboardTotals,
+                                isEasyMode = uiState.isEasyMode,
+                                isSolarMode = uiState.isSolarMode
+                            )
+                        }
 
                         HomeHeader(
                             municipio = uiState.municipality,
@@ -743,7 +748,8 @@ fun HomeScreen(
                             onSelectDate = { datePickerDialog.show() },
                             onMoveDateBackward = { viewModel.moveDateBackward() },
                             onMoveDateForward = { viewModel.moveDateForward() },
-                            isEasyMode = uiState.isEasyMode
+                            isEasyMode = uiState.isEasyMode,
+                            isSolarMode = uiState.isSolarMode
                         )
                     }
                 }

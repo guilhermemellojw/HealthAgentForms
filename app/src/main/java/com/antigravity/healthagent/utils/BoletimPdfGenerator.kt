@@ -748,7 +748,7 @@ object BoletimPdfGenerator {
         
         // Imov Trat Sum (Match HomeViewModel logic)
         val totalTreated = houses.count { 
-            (it.a1 + it.a2 + it.b + it.c + it.d1 + it.d2 + it.e + it.eliminados) > 0 || it.larvicida > 0.0 
+            (it.a1 + it.a2 + it.b + it.c + it.d1 + it.d2 + it.e + it.eliminados) > 0 || it.larvicida > 0.0 || it.comFoco
         }
         drawCell(canvas, linePaint, boldPaint, totalTreated.toString(), totX, cursorY, cwImovTrat, totalRowH); totX += cwImovTrat
 

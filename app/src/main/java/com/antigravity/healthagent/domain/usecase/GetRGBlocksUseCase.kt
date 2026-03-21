@@ -31,7 +31,7 @@ class GetRGBlocksUseCase @Inject constructor() {
         val sortedHouses = bairroHouses.sortedWith(compareBy({ getTimestamp(it.data) }, { it.createdAt }))
         val groupedByBlock = sortedHouses.groupBy { Pair(it.blockNumber, it.blockSequence) }
         
-        groupedByBlock.keys.sortedWith(compareBy({ it.first.padStart(10, '0') }, { it.second })).forEach { key ->
+        groupedByBlock.keys.sortedWith(compareBy({ it.first.padStart(10, '0') }, { it.second.padStart(10, '0') })).forEach { key ->
             val (bNum, bSeq) = key
             val blockHouses = groupedByBlock[key] ?: return@forEach 
             

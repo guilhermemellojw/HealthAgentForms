@@ -12,7 +12,9 @@ import android.os.Environment
 import com.antigravity.healthagent.R
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
+import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.utils.formatStreetName
+import com.antigravity.healthagent.utils.fitToWidth
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -341,12 +343,13 @@ object RGPdfGenerator {
         val footerY = cursorY + listHeaderHeight + (maxRows * itemHeight) + 10
         
         // Calculate Totals
-        val totalResidencial = houses.count { it.propertyType == PropertyType.R }
-        val totalComercial = houses.count { it.propertyType == PropertyType.C }
-        val totalTerreno = houses.count { it.propertyType == PropertyType.TB }
-        val totalPonto = houses.count { it.propertyType == PropertyType.PE }
-        val totalOutros = houses.count { it.propertyType == PropertyType.O }
-        val totalPendentes = houses.count { it.situation != com.antigravity.healthagent.data.local.model.Situation.NONE && it.situation != com.antigravity.healthagent.data.local.model.Situation.EMPTY } 
+        // Totals - ONLY count Situation.NONE (Worked) for these categories
+        val totalResidencial = houses.count { it.propertyType == PropertyType.R && it.situation == Situation.NONE }
+        val totalComercial = houses.count { it.propertyType == PropertyType.C && it.situation == Situation.NONE }
+        val totalTerreno = houses.count { it.propertyType == PropertyType.TB && it.situation == Situation.NONE }
+        val totalPonto = houses.count { it.propertyType == PropertyType.PE && it.situation == Situation.NONE }
+        val totalOutros = houses.count { it.propertyType == PropertyType.O && it.situation == Situation.NONE }
+        val totalPendentes = houses.count { it.situation != Situation.NONE && it.situation != Situation.EMPTY } 
         // "Pendentes" in the image usually refers to closed/refused, so 'recuperado' or 'fechado'. 
         // Actually looking at the image, "Pendencia" column has things like "F".
         // The stats table has "Pendentes". Let's assume it means non-worked houses?
@@ -426,21 +429,23 @@ object RGPdfGenerator {
         val lastHouse = houses.lastOrNull()
         
         // Collect all distinct agent names found in the list
-        val distinctAgentNames = houses
+        val rawAgentName = houses
             .mapNotNull { it.agentName }
             .filter { it.isNotBlank() }
             .distinct()
-            
-        val agentName = if (distinctAgentNames.isNotEmpty()) {
-            distinctAgentNames.joinToString(" / ").uppercase()
-        } else {
-             ""
-        }
-        val dateValue = lastHouse?.data ?: ""
-
+            .let {
+                if (it.isNotEmpty()) it.joinToString(" / ").uppercase() else ""
+            }
+        
         val sigH = 20f
         val totalSigWidth = PAGE_WIDTH - 2 * MARGIN
         
+        // Truncate agent name if too long for signature box
+        val maxSigNameWidth = totalSigWidth - (textPaint.measureText("ASSINATURA:") + 15f)
+        val agentName = rawAgentName.fitToWidth(textPaint, maxSigNameWidth)
+
+        val dateValue = lastHouse?.data ?: ""
+
         // --- Row 1: NOME ---
         // Single column
         drawRect(canvas, linePaint, MARGIN, fy, totalSigWidth, sigH)
@@ -559,7 +564,7 @@ object RGPdfGenerator {
         cur += wComp
         drawRect(canvas, line, cur, y, wTipo, h); drawCenteredText(canvas, text, house.propertyType.code, cur, y, wTipo, h)
         cur += wTipo
-        val pendText = if(house.situation == com.antigravity.healthagent.data.local.model.Situation.NONE) "—" else house.situation.code
+        val pendText = if(house.situation == Situation.NONE) "—" else house.situation.code
         drawRect(canvas, line, cur, y, wPend, h); drawCenteredText(canvas, text, pendText, cur, y, wPend, h)
     }
     

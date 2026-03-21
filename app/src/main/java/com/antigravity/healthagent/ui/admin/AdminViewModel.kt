@@ -282,13 +282,24 @@ class AdminViewModel @Inject constructor(
 
     fun deleteUser(uid: String, deleteCloudData: Boolean = false) {
         viewModelScope.launch {
-            if (deleteCloudData) {
-                syncRepository.deleteAgent(uid)
-            }
-            val result = authRepository.deleteUser(uid)
-            if (result.isSuccess) {
-                loadUsers()
-                loadAgentsData()
+            try {
+                if (deleteCloudData) {
+                    val syncResult = syncRepository.deleteAgent(uid)
+                    if (syncResult.isFailure) {
+                        _uiEvent.emit("Aviso: Falha ao excluir dados da nuvem")
+                    }
+                }
+                
+                val result = authRepository.deleteUser(uid)
+                if (result.isSuccess) {
+                    _uiEvent.emit("Perfil excluído com sucesso")
+                    loadUsers()
+                    loadAgentsData()
+                } else {
+                    _uiEvent.emit("Erro ao excluir perfil: ${result.exceptionOrNull()?.message}")
+                }
+            } catch (e: Exception) {
+                _uiEvent.emit("Erro inesperado: ${e.message}")
             }
         }
     }
@@ -392,6 +403,16 @@ class AdminViewModel @Inject constructor(
             if (result.isSuccess) {
                 loadAgentsData()
                 _uiEvent.emit("Registro de atividade excluído")
+            }
+        }
+    }
+
+    fun clearSyncError(uid: String) {
+        viewModelScope.launch {
+            val result = syncRepository.clearSyncError(uid)
+            if (result.isSuccess) {
+                _uiEvent.emit("Erro de sincronização limpo")
+                loadAgentsData()
             }
         }
     }

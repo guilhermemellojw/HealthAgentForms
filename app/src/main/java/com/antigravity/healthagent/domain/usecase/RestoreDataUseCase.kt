@@ -25,11 +25,11 @@ class RestoreDataUseCase @Inject constructor(
             
             // Normalize the imported data so it aligns with the target user securely.
             // Critical: Reset the id to 0 so Room treats them as new entries instead of overriding existing rows.
-            // Preference: Keep the original agentName if it is already set (important for legacy data/multi-agent).
+            // Force the agentName to the target user's configured name to prevent natural key mismatches and duplication.
             val normalizedHouses = backupData.houses.map { 
                 it.copy(
                     id = 0, 
-                    agentName = it.agentName.ifBlank { agentName }.trim().uppercase(),
+                    agentName = agentName.trim().uppercase(),
                     number = if (it.number.trim() == "0") "" else it.number.trim().uppercase(),
                     sequence = if (it.sequence == 0) null else it.sequence,
                     complement = if (it.complement == 0) null else it.complement,
@@ -40,7 +40,7 @@ class RestoreDataUseCase @Inject constructor(
             }
             val normalizedActivities = backupData.dayActivities.map { 
                 it.copy(
-                    agentName = it.agentName.ifBlank { agentName }.trim().uppercase(),
+                    agentName = agentName.trim().uppercase(),
                     date = it.date.replace("/", "-"),
                     isSynced = false,
                     lastUpdated = System.currentTimeMillis()
