@@ -12,21 +12,21 @@ class DayManagementUseCase @Inject constructor(
     private val repository: HouseRepository
 ) {
 
-    suspend fun getDayActivity(date: String, agentName: String): DayActivity? {
-        return repository.getDayActivity(date, agentName.uppercase())
+    suspend fun getDayActivity(date: String, agentName: String, agentUid: String? = null): DayActivity? {
+        return repository.getDayActivity(date, agentName.uppercase(), agentUid)
     }
 
-    suspend fun unlockDay(date: String, agentName: String) {
+    suspend fun unlockDay(date: String, agentName: String, agentUid: String? = null) {
         val upperName = agentName.uppercase()
-        val activity = repository.getDayActivity(date, upperName)
+        val activity = repository.getDayActivity(date, upperName, agentUid)
         val status = activity?.status?.takeIf { it.isNotBlank() } ?: "NORMAL"
-        repository.updateDayActivity(DayActivity(date, status, false, upperName))
+        repository.updateDayActivity(DayActivity(date, status, false, upperName, agentUid ?: ""))
     }
 
-    suspend fun closeDay(date: String, agentName: String) {
+    suspend fun closeDay(date: String, agentName: String, agentUid: String? = null) {
         val upperName = agentName.uppercase()
-        val activity = repository.getDayActivity(date, upperName) ?: DayActivity(date, "NORMAL", false, upperName)
-        repository.updateDayActivity(activity.copy(isClosed = true, agentName = upperName))
+        val activity = repository.getDayActivity(date, upperName, agentUid) ?: DayActivity(date, "NORMAL", false, upperName, agentUid ?: "")
+        repository.updateDayActivity(activity.copy(isClosed = true, agentName = upperName, agentUid = agentUid ?: ""))
     }
 
     fun isDateLocked(activity: DayActivity?): Boolean {

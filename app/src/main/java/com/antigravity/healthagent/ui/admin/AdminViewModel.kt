@@ -80,7 +80,14 @@ class AdminViewModel @Inject constructor(
         
         // 1. Start with users who have accounts
         usersList.forEach { user ->
-            val agentData = agentsList.find { it.uid == user.uid || it.email == user.email }
+            // Prioritize UID match to ensure data isolation
+            var agentData = agentsList.find { it.uid == user.uid }
+            
+            // Fallback to email match ONLY if no UID-linked data exists AND the email-matched data is unlinked
+            if (agentData == null) {
+                agentData = agentsList.find { it.email == user.email && (it.uid == null || it.uid.startsWith("pre_")) }
+            }
+
             result.add(
                 UnifiedProfile(
                     uid = user.uid,
@@ -370,6 +377,29 @@ class AdminViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 25)
 
+    val globalCustomActivities: StateFlow<Set<String>> = _systemSettings.map { settings ->
+        val raw = settings["custom_activities"]
+        when(raw) {
+            is List<*> -> raw.mapNotNull { it?.toString() }.toSet()
+            is String -> raw.split(",").filter { it.isNotBlank() }.toSet()
+            else -> emptySet()
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    fun addGlobalActivity(activity: String) {
+        val current = globalCustomActivities.value
+        if (activity !in current) {
+            updateSystemSetting("custom_activities", (current + activity).toList())
+        }
+    }
+
+    fun removeGlobalActivity(activity: String) {
+        val current = globalCustomActivities.value
+        if (activity in current) {
+            updateSystemSetting("custom_activities", (current - activity).toList())
+        }
+    }
+
     fun restoreToSelf(context: Context, uri: Uri) {
         val myUid = authRepository.getCurrentUserUid() ?: return
         restoreAgentBackup(context, myUid, uri)
@@ -413,6 +443,18 @@ class AdminViewModel @Inject constructor(
             if (result.isSuccess) {
                 _uiEvent.emit("Erro de sincronização limpo")
                 loadAgentsData()
+            }
+        }
+    }
+
+    fun migrateData(authUser: com.antigravity.healthagent.domain.repository.AuthUser) {
+        viewModelScope.launch {
+            val result = authRepository.migratePreRegistration(authUser)
+            if (result.isSuccess) {
+                _uiEvent.emit("Dados migrados com sucesso")
+                refreshAll()
+            } else {
+                _uiEvent.emit("Erro ao migrar dados: ${result.exceptionOrNull()?.message}")
             }
         }
     }

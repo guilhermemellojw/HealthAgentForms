@@ -79,14 +79,17 @@ fun HomeScreen(
     val showMultiDayErrorDialog by viewModel.showMultiDayErrorDialog.collectAsState()
     var showUnlockDialog by remember { mutableStateOf(false) }
     val integrityDialogMessage by viewModel.integrityDialogMessage.collectAsState()
+    val validationErrors by viewModel.validationErrorDetails.collectAsState()
+    val scrollToHouseId by viewModel.scrollToHouseId.collectAsState()
     
     // Logic: Only show error dialogs if App Mode is selected
     // This prevents errors from interrupting the onboarding flow
     val areDialogsAllowed = (uiState.isAppModeSelected == true)
  
     if (areDialogsAllowed && integrityDialogMessage != null) {
-        IntegrityDialog(
-            message = integrityDialogMessage ?: "",
+        ValidationErrorsDialog(
+            errors = validationErrors,
+            onHouseClick = { id -> viewModel.onHouseClick(id) },
             onDismiss = { viewModel.dismissIntegrityDialog() },
             isEasyMode = uiState.isEasyMode
         )
@@ -244,6 +247,7 @@ fun HomeScreen(
 
 
 
+
     
     
 
@@ -288,10 +292,9 @@ fun HomeScreen(
     }
 
     // Auto-scroll to validation error house
-    LaunchedEffect(uiState.validationErrorHouseIds) {
-        if (uiState.validationErrorHouseIds.isNotEmpty()) {
-            val firstErrorId = uiState.validationErrorHouseIds.first()
-            val indexInUi = uiHouses.indexOfFirst { it.house.id == firstErrorId }
+    LaunchedEffect(scrollToHouseId) {
+        scrollToHouseId?.let { id ->
+            val indexInUi = uiHouses.indexOfFirst { it.house.id == id }
             if (indexInUi != -1) {
                 // Delay slightly to ensure layout is ready
                 kotlinx.coroutines.delay(100)
@@ -570,7 +573,7 @@ fun HomeScreen(
                 
                 val fabColor = when {
                     hasErrors -> MaterialTheme.colorScheme.errorContainer
-                    isGoalReached -> MaterialTheme.colorScheme.tertiaryContainer
+                    isGoalReached -> Color(0xFF00C853) // Emerald Green 700
                     else -> MaterialTheme.colorScheme.primary
                 }
                 val fabContentColor = if (hasErrors) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary
@@ -695,7 +698,7 @@ fun HomeScreen(
             Column(modifier = Modifier.fillMaxSize()) {
                 // Item 1: Minimalist Progress Line
                 if (!isSearchActive && !isReorderMode) {
-                    val productionCount = uiState.pendingCount // Situation.NONE (Normal Visits) matches the Meta logic
+                    val productionCount = uiState.dashboardTotals.totalHouses
                     val progress = (productionCount.toFloat() / (if (maxOpenHouses > 0) maxOpenHouses else 25).toFloat()).coerceIn(0f, 1f)
                     val isGoalReached = productionCount >= maxOpenHouses && maxOpenHouses > 0
                     

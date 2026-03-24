@@ -85,7 +85,10 @@ data class HouseUiState(
     val isTreated: Boolean,
     val blockDisplay: String,
     val formattedStreet: String,
-    val treatmentShortSummary: String
+    val treatmentShortSummary: String,
+    val observation: String = "",
+    val isDuplicate: Boolean = false,
+    val errorLabels: List<String> = emptyList()
 )
 
 data class BlockSegment(

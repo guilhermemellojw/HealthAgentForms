@@ -402,7 +402,7 @@ fun PremiumCard(
             containerColor = containerColor
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
+        border = BorderStroke(1.dp, if (isSolarMode) MaterialTheme.colorScheme.outline else Color.White.copy(alpha = 0.15f))
     ) {
         Column(
             modifier = Modifier

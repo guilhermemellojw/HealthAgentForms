@@ -29,7 +29,8 @@ class RestoreDataUseCase @Inject constructor(
             val normalizedHouses = backupData.houses.map { 
                 it.copy(
                     id = 0, 
-                    agentName = agentName.trim().uppercase(),
+                    agentName = if (it.agentName.isNotBlank()) it.agentName.trim().uppercase() else agentName.trim().uppercase(),
+                    agentUid = targetUid,
                     number = if (it.number.trim() == "0") "" else it.number.trim().uppercase(),
                     sequence = if (it.sequence == 0) null else it.sequence,
                     complement = if (it.complement == 0) null else it.complement,
@@ -40,13 +41,14 @@ class RestoreDataUseCase @Inject constructor(
             }
             val normalizedActivities = backupData.dayActivities.map { 
                 it.copy(
-                    agentName = agentName.trim().uppercase(),
+                    agentName = if (it.agentName.isNotBlank()) it.agentName.trim().uppercase() else agentName.trim().uppercase(),
+                    agentUid = targetUid,
                     date = it.date.replace("/", "-"),
                     isSynced = false,
                     lastUpdated = System.currentTimeMillis()
                 ) 
             }
-
+ 
             // 3. Perform restoration locally ONLY if targetUid is the current user.
             // If an Admin is restoring data for someone else, we only push to the cloud.
             val currentUserUid = authRepository.getCurrentUserUid()
@@ -54,7 +56,8 @@ class RestoreDataUseCase @Inject constructor(
                 val result = syncRepository.restoreLocalData(
                     agentName = agentName,
                     houses = normalizedHouses,
-                    activities = normalizedActivities
+                    activities = normalizedActivities,
+                    agentUid = targetUid
                 )
                 if (result.isFailure) return@withContext result
             }

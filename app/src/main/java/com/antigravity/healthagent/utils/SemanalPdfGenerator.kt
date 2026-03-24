@@ -377,31 +377,30 @@ object SemanalPdfGenerator {
         val rowH = 15f
         val dash = "—"
 
-        // Block completion logic matching Boletim logic (Intra-day checks only)
+        // --- O(N) Pre-calculations ---
+        val housesByDate = allHouses.groupBy { it.data }
         val allBlockCompletions = mutableListOf<Pair<String, String>>() // List of (BlockDisplayName, Date)
 
         weekDates.forEach { date ->
-            val dayHouses = allHouses.filter { it.data == date }
-            if (dayHouses.isEmpty()) return@forEach
-
-            // 1. Identify all unique blocks worked on this day (scoped by Bairro)
+            val dayHouses = housesByDate[date] ?: return@forEach
+            
+            // 1. Identify all unique blocks worked on this day
             val dayBlocks = dayHouses.map { Triple(it.blockNumber, it.blockSequence, it.bairro.trim().formatStreetName()) }.distinct()
             
-            // 2. For each block worked today, check if it was completed TODAY
+            // 2. Pre-sort day houses by listOrder once
+            val dayHousesSorted = dayHouses.sortedBy { it.listOrder }
+            val housesByBlock = dayHouses.groupBy { "${it.blockNumber}|${it.blockSequence}|${it.bairro.trim().formatStreetName()}" }
+
             dayBlocks.forEach { (bNum, bSeq, bairro) ->
-                val blockHousesInDay = dayHouses.filter { it.blockNumber == bNum && it.blockSequence == bSeq && it.bairro.trim().formatStreetName() == bairro }
+                val blockKey = "$bNum|$bSeq|$bairro"
+                val blockHousesInDay = housesByBlock[blockKey] ?: emptyList()
                 
-                // a) Manual Completion Flag anywhere in the day's block entries
                 val hasManual = blockHousesInDay.any { it.quarteiraoConcluido }
-                
-                // b) Localidade (Bairro) Concluída flag anywhere in the day's block entries
                 val hasBairroManual = blockHousesInDay.any { it.localidadeConcluida }
                 
-                // c) Auto-concluded: The LAST house of this block (by listOrder) has a successor in the SAME day's production
-                val dayHousesSorted = dayHouses.sortedBy { it.listOrder }
+                // Auto-concluded: The LAST house of this block in THIS daily list has a successor in the same daily list
                 val lastInBlockOnDay = blockHousesInDay.maxByOrNull { it.listOrder }
-                val lastInBlockId = lastInBlockOnDay?.id
-                val indexOfLast = dayHousesSorted.indexOfFirst { it.id == lastInBlockId }
+                val indexOfLast = if (lastInBlockOnDay != null) dayHousesSorted.indexOfFirst { it.id == lastInBlockOnDay.id } else -1
                 val hasSuccessorOnSameDay = indexOfLast != -1 && indexOfLast < dayHousesSorted.size - 1
 
                 if (hasManual || hasBairroManual || hasSuccessorOnSameDay) {
@@ -422,7 +421,7 @@ object SemanalPdfGenerator {
         val totCompletedBlocks = mutableSetOf<String>()
 
         weekDates.forEach { date ->
-            val dayHouses = allHouses.filter { it.data == date }
+            val dayHouses = housesByDate[date] ?: emptyList()
             val status = activities[date] ?: ""
 
             tx = MARGIN_LEFT
@@ -436,144 +435,125 @@ object SemanalPdfGenerator {
                 val statusPaint = Paint(boldPaint).apply { textSize = 9f; letterSpacing = 0.1f }
                 val annotationWidth = tableWidth - colData - colQuart
                 
-                // Annotation area spanning from "Imóveis Tratados" group through "Larvicida"
+                // Annotation area
                 drawCell(canvas, linePaint, statusPaint, status, tx, cursorY, annotationWidth, rowH)
                 tx += annotationWidth
                 
                 // Final Quarteirão cell
                 drawCell(canvas, linePaint, textPaint, "", tx, cursorY, colQuart, rowH)
             } else {
-                // Property Types
-                // Property Types - Filter by OPEN houses only (Situation.NONE or EMPTY)
-                // This ensures Closed (F), Refused (REC), etc. do NOT count towards treated properties
-                val res = dayHouses.count { it.propertyType == PropertyType.R && it.situation == Situation.NONE }
-                val com = dayHouses.count { it.propertyType == PropertyType.C && it.situation == Situation.NONE }
-                val tb = dayHouses.count { it.propertyType == PropertyType.TB && it.situation == Situation.NONE }
-                val out = dayHouses.count { it.propertyType == PropertyType.O && it.situation == Situation.NONE }
-                val pe = dayHouses.count { it.propertyType == PropertyType.PE && it.situation == Situation.NONE }
-                val dayTotalVisits = res + com + tb + out + pe
-                
-                // Pendencies
-                val fec = dayHouses.count { it.situation == Situation.F }
-                val rec = dayHouses.count { it.situation == Situation.REC }
-                val recup = 0 // Placeholder
-                
-                // Amostras
-                val samples = 0 
-                
-                // Deposits
-                val dists = intArrayOf(
-                    dayHouses.sumOf { it.a1 },
-                    dayHouses.sumOf { it.a2 },
-                    dayHouses.sumOf { it.b },
-                    dayHouses.sumOf { it.c },
-                    dayHouses.sumOf { it.d1 },
-                    dayHouses.sumOf { it.d2 },
-                    dayHouses.sumOf { it.e }
-                )
-                val dayTotalDeps = dists.sum()
-                
-                val elim = dayHouses.sumOf { it.eliminados }
-                val larv = dayHouses.sumOf { it.larvicida }
-                
-                // Helper to draw dash if zero
-                fun dsh(v: Int): String = if (v == 0) dash else v.toString()
-                fun dshD(v: Double): String = if (v == 0.0) dash else String.format(java.util.Locale("pt", "BR"), "%.0f", v)
-
-                drawCell(canvas, linePaint, textPaint, dsh(res), tx, cursorY, colRes, rowH); tx += colRes
-                drawCell(canvas, linePaint, textPaint, dsh(com), tx, cursorY, colCom, rowH); tx += colCom
-                drawCell(canvas, linePaint, textPaint, dsh(tb), tx, cursorY, colTB, rowH); tx += colTB
-                drawCell(canvas, linePaint, textPaint, dsh(out), tx, cursorY, colOut, rowH); tx += colOut
-                drawCell(canvas, linePaint, textPaint, dsh(pe), tx, cursorY, colPE, rowH); tx += colPE
-                drawCell(canvas, linePaint, boldPaint, dsh(dayTotalVisits), tx, cursorY, colTotalVisits, rowH); tx += colTotalVisits
-                
-                drawCell(canvas, linePaint, textPaint, dsh(fec), tx, cursorY, colFEC, rowH); tx += colFEC
-                drawCell(canvas, linePaint, textPaint, dsh(rec), tx, cursorY, colREC, rowH); tx += colREC
-                drawCell(canvas, linePaint, textPaint, dsh(recup), tx, cursorY, colRecup, rowH); tx += colRecup
-                
-                drawCell(canvas, linePaint, textPaint, dsh(samples), tx, cursorY, colAmostras, rowH); tx += colAmostras
-                
-                for (i in 0..6) {
-                    drawCell(canvas, linePaint, textPaint, dsh(dists[i]), tx, cursorY, colDep, rowH)
-                    tx += colDep
-                    totDeps[i] += dists[i]
-                }
-                
-                // Block completion logic - Updated for Bairro uniqueness AND multi-date support
-                val dayCompletedBlocks = allBlockCompletions.filter { it.second == date }
-                    .map { it.first }
-                    .distinct()
-                    .sorted()
-                
-                val blocksStr = if (dayCompletedBlocks.isEmpty()) dash else dayCompletedBlocks.joinToString("   ")
-                totCompletedBlocks.addAll(dayCompletedBlocks)
-
-                drawCell(canvas, linePaint, boldPaint, dsh(dayTotalDeps), tx, cursorY, colTotalDeps, rowH); tx += colTotalDeps
-                drawCell(canvas, linePaint, textPaint, dsh(elim), tx, cursorY, colElim, rowH); tx += colElim
-                drawCell(canvas, linePaint, textPaint, dshD(larv), tx, cursorY, colLarv, rowH); tx += colLarv
-                
-                // Draw Blocks with auto-scale
-                if (blocksStr != dash) {
-                    val availableW = colQuart - 4f // padding
-                    var currentTextSize = 8f
-                    var fitPaint = Paint(textPaint).apply { textSize = currentTextSize }
-                    
-                    while (fitPaint.measureText(blocksStr) > availableW && currentTextSize > 4f) {
-                        currentTextSize -= 0.5f
-                        fitPaint = Paint(textPaint).apply { textSize = currentTextSize }
-                    }
-                    
-                    drawCell(canvas, linePaint, fitPaint, blocksStr, tx, cursorY, colQuart, rowH)
+                if (dayHouses.isEmpty()) {
+                    // Empty working day with no specific status (should not happen normally but for safety)
+                    val annotationWidth = tableWidth - colData - colQuart
+                    drawCell(canvas, linePaint, textPaint, dash, tx, cursorY, annotationWidth, rowH)
+                    tx += annotationWidth
+                    drawCell(canvas, linePaint, textPaint, dash, tx, cursorY, colQuart, rowH)
                 } else {
-                    drawCell(canvas, linePaint, textPaint, blocksStr, tx, cursorY, colQuart, rowH)
-                }
-                
-                // Only show neighborhoods for blocks that were actually COMPLETED today
-                val concludedBairrosToday = allHouses.filter { h -> 
-                    dayCompletedBlocks.any { bId -> 
-                        val matchId = if (h.blockSequence.isNotBlank()) "${h.blockNumber}/${h.blockSequence}" else h.blockNumber
-                        matchId == bId && h.data == date
-                    }
-                }.map { it.bairro.trim().formatStreetName() }.distinct().sorted()
-
-                if (concludedBairrosToday.isNotEmpty()) {
-                    val labelPaint = Paint(textPaint).apply { textSize = 7f }
-                    val labelX = MARGIN_LEFT + tableWidth + 5f
+                    // Property Types - Filter by OPEN houses only
+                    val res = dayHouses.count { it.propertyType == PropertyType.R && it.situation == Situation.NONE }
+                    val com = dayHouses.count { it.propertyType == PropertyType.C && it.situation == Situation.NONE }
+                    val tb = dayHouses.count { it.propertyType == PropertyType.TB && it.situation == Situation.NONE }
+                    val out = dayHouses.count { it.propertyType == PropertyType.O && it.situation == Situation.NONE }
+                    val pe = dayHouses.count { it.propertyType == PropertyType.PE && it.situation == Situation.NONE }
+                    val dayTotalVisits = res + com + tb + out + pe
                     
-                    if (concludedBairrosToday.size == 1) {
-                        // Vertically centered
-                        canvas.drawText(concludedBairrosToday[0], labelX, cursorY + (rowH / 2f) + (labelPaint.textSize / 2f) - 1f, labelPaint)
+                    val fec = dayHouses.count { it.situation == Situation.F }
+                    val rec = dayHouses.count { it.situation == Situation.REC }
+                    val recup = 0 // Placeholder
+                    val samples = 0 
+                    
+                    val dists = intArrayOf(
+                        dayHouses.sumOf { it.a1 },
+                        dayHouses.sumOf { it.a2 },
+                        dayHouses.sumOf { it.b },
+                        dayHouses.sumOf { it.c },
+                        dayHouses.sumOf { it.d1 },
+                        dayHouses.sumOf { it.d2 },
+                        dayHouses.sumOf { it.e }
+                    )
+                    val dayTotalDeps = dists.sum()
+                    val elim = dayHouses.sumOf { it.eliminados }
+                    val larv = dayHouses.sumOf { it.larvicida }
+                    
+                    fun dsh(v: Int): String = if (v == 0) dash else v.toString()
+                    fun dshD(v: Double): String = if (v == 0.0) dash else String.format(java.util.Locale("pt", "BR"), "%.0f", v)
+
+                    drawCell(canvas, linePaint, textPaint, dsh(res), tx, cursorY, colRes, rowH); tx += colRes
+                    drawCell(canvas, linePaint, textPaint, dsh(com), tx, cursorY, colCom, rowH); tx += colCom
+                    drawCell(canvas, linePaint, textPaint, dsh(tb), tx, cursorY, colTB, rowH); tx += colTB
+                    drawCell(canvas, linePaint, textPaint, dsh(out), tx, cursorY, colOut, rowH); tx += colOut
+                    drawCell(canvas, linePaint, textPaint, dsh(pe), tx, cursorY, colPE, rowH); tx += colPE
+                    drawCell(canvas, linePaint, boldPaint, dsh(dayTotalVisits), tx, cursorY, colTotalVisits, rowH); tx += colTotalVisits
+                    
+                    drawCell(canvas, linePaint, textPaint, dsh(fec), tx, cursorY, colFEC, rowH); tx += colFEC
+                    drawCell(canvas, linePaint, textPaint, dsh(rec), tx, cursorY, colREC, rowH); tx += colREC
+                    drawCell(canvas, linePaint, textPaint, dsh(recup), tx, cursorY, colRecup, rowH); tx += colRecup
+                    drawCell(canvas, linePaint, textPaint, dsh(samples), tx, cursorY, colAmostras, rowH); tx += colAmostras
+                    
+                    for (i in 0..6) {
+                        drawCell(canvas, linePaint, textPaint, dsh(dists[i]), tx, cursorY, colDep, rowH)
+                        tx += colDep
+                        totDeps[i] += dists[i]
+                    }
+                    
+                    val dayCompletedBlocks = allBlockCompletions.filter { it.second == date }
+                        .map { it.first }
+                        .distinct()
+                        .sorted()
+                    
+                    val blocksStr = if (dayCompletedBlocks.isEmpty()) dash else dayCompletedBlocks.joinToString("   ")
+                    totCompletedBlocks.addAll(dayCompletedBlocks)
+
+                    drawCell(canvas, linePaint, boldPaint, dsh(dayTotalDeps), tx, cursorY, colTotalDeps, rowH); tx += colTotalDeps
+                    drawCell(canvas, linePaint, textPaint, dsh(elim), tx, cursorY, colElim, rowH); tx += colElim
+                    drawCell(canvas, linePaint, textPaint, dshD(larv), tx, cursorY, colLarv, rowH); tx += colLarv
+                    
+                    // Draw Blocks with auto-scale
+                    if (blocksStr != dash) {
+                        val availableW = colQuart - 4f
+                        var currentTextSize = 8f
+                        var fitPaint = Paint(textPaint).apply { textSize = currentTextSize }
+                        while (fitPaint.measureText(blocksStr) > availableW && currentTextSize > 4f) {
+                            currentTextSize -= 0.5f
+                            fitPaint = Paint(textPaint).apply { textSize = currentTextSize }
+                        }
+                        drawCell(canvas, linePaint, fitPaint, blocksStr, tx, cursorY, colQuart, rowH)
                     } else {
-                        // Multi-line stack (Max 2 lines effectively due to space, but code handles list)
-                        // Ensuring it fits within rowH (15f). 7f text size leaves little room.
-                        // We will check if need to reduce size for > 2 items or just print first 2.
-                        // User request: "use a second line (under the first line... do not exceed the cell height)"
-                        
-                        // If 2 items: 6.5 and 13.5 (roughly centered spread)
-                        // If > 2 items: We might need smaller font or just show top 2 with ellipsis? 
-                        // Assuming max 2 distinct bairros concluded per day is typical limit.
-                        
-                        if (concludedBairrosToday.size > 2) {
-                            // Shrink font slightly to try fitting 3? 15f height is very tight for 3 lines.
-                            // Better strategy: Print first 2.
-                             canvas.drawText(concludedBairrosToday[0], labelX, cursorY + 6.5f, labelPaint)
-                             canvas.drawText(concludedBairrosToday[1] + "...", labelX, cursorY + 13.5f, labelPaint)
+                        drawCell(canvas, linePaint, textPaint, blocksStr, tx, cursorY, colQuart, rowH)
+                    }
+                    
+                    // Neighborhoods for completed blocks
+                    val concludedBairrosToday = dayHouses.filter { h -> 
+                        val matchId = if (h.blockSequence.isNotBlank()) "${h.blockNumber}/${h.blockSequence}" else h.blockNumber
+                        dayCompletedBlocks.contains(matchId)
+                    }.map { it.bairro.trim().formatStreetName() }.distinct().sorted()
+
+                    if (concludedBairrosToday.isNotEmpty()) {
+                        val labelPaint = Paint(textPaint).apply { textSize = 7f }
+                        val labelX = MARGIN_LEFT + tableWidth + 5f
+                        if (concludedBairrosToday.size == 1) {
+                            canvas.drawText(concludedBairrosToday[0], labelX, cursorY + (rowH / 2f) + (labelPaint.textSize / 2f) - 1f, labelPaint)
                         } else {
-                             concludedBairrosToday.forEachIndexed { index, name ->
-                                 val yPos = if (index == 0) cursorY + 6.5f else cursorY + 13.5f
-                                 canvas.drawText(name, labelX, yPos, labelPaint)
+                             if (concludedBairrosToday.size > 2) {
+                                 canvas.drawText(concludedBairrosToday[0], labelX, cursorY + 6.5f, labelPaint)
+                                 canvas.drawText(concludedBairrosToday[1] + "...", labelX, cursorY + 13.5f, labelPaint)
+                             } else {
+                                 concludedBairrosToday.forEachIndexed { index, name ->
+                                     val yPos = if (index == 0) cursorY + 6.5f else cursorY + 13.5f
+                                     canvas.drawText(name, labelX, yPos, labelPaint)
+                                 }
                              }
                         }
                     }
+                    
+                    // Accumulate totals
+                    totRes += res; totCom += com; totTB += tb; totOut += out; totPE += pe; totVisits += dayTotalVisits
+                    totFEC += fec; totREC += rec; totRecup += recup
+                    totAmostras += samples
+                    totTotalDeps += dayTotalDeps
+                    totElim += elim
+                    totLarv += larv
                 }
-                
-                // Accumulate totals
-                totRes += res; totCom += com; totTB += tb; totOut += out; totPE += pe; totVisits += dayTotalVisits
-                totFEC += fec; totREC += rec; totRecup += recup
-                totAmostras += samples
-                totTotalDeps += dayTotalDeps
-                totElim += elim
-                totLarv += larv
             }
             cursorY += rowH
         }

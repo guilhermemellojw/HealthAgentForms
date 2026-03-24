@@ -146,6 +146,12 @@ class SettingsManager @Inject constructor(
         }
     }
 
+    suspend fun setCustomActivities(activities: Set<String>) {
+        context.dataStore.edit { preferences ->
+            preferences[CUSTOM_ACTIVITIES_KEY] = activities
+        }
+    }
+
     suspend fun removeCustomActivity(activity: String) {
         context.dataStore.edit { preferences ->
             val currentSet = preferences[CUSTOM_ACTIVITIES_KEY] ?: emptySet()

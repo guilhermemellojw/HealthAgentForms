@@ -606,11 +606,12 @@ fun BoletimScreen(
                     )
                 }
             }
+            }
         }
     }
 }
 }
-}
+
 
 
 @Composable

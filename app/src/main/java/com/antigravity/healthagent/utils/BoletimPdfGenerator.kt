@@ -197,17 +197,34 @@ object BoletimPdfGenerator {
     }
 
     private fun calculateBlockStats(allHouses: List<House>, chunk: List<House>): BlockStats {
+        if (chunk.isEmpty()) return BlockStats(emptyList(), emptyList(), false, false)
+        
+        // O(N) Pre-calculation: Map each block to its last house index in the full list
+        // Block key: blockNumber|blockSequence|bairro
+        val blockToLastIndex = mutableMapOf<String, Int>()
+        allHouses.forEachIndexed { index, h ->
+            val key = "${h.blockNumber}|${h.blockSequence}|${h.bairro.trim().formatStreetName()}"
+            blockToLastIndex[key] = index
+        }
+
+        val chunkHouseIds = chunk.map { it.id }.toSet()
         val workedBlocks = chunk.map { Pair(it.blockNumber, it.blockSequence) }.distinct()
         val currentBairro = chunk.firstOrNull()?.bairro ?: ""
         val completedBlocks = mutableListOf<Pair<String, String>>()
         
         workedBlocks.forEach { (bNum, bSeq) ->
-            val hasManual = chunk.any { it.blockNumber == bNum && it.blockSequence == bSeq && it.quarteiraoConcluido }
-            val housesWithId = allHouses.filter { it.blockNumber == bNum && it.blockSequence == bSeq && it.bairro == currentBairro }
-            val lastInB = housesWithId.lastOrNull()
-            val isLastHouseInChunk = chunk.contains(lastInB)
-            val indexOfLastInFull = allHouses.indexOf(lastInB)
-            val hasSuccessor = indexOfLastInFull != -1 && indexOfLastInFull < allHouses.size - 1
+            val blockHousesInChunk = chunk.filter { it.blockNumber == bNum && it.blockSequence == bSeq }
+            val hasManual = blockHousesInChunk.any { it.quarteiraoConcluido }
+            
+            val key = "$bNum|$bSeq|${currentBairro.trim().formatStreetName()}"
+            val lastIndexInFull = blockToLastIndex[key] ?: -1
+            
+            // Auto-concluded if the LAST house of this block in the WHOLE list is in this chunk
+            // AND it's not the absolute last house of the whole list (meaning it has a successor)
+            val lastHouseInFull = if (lastIndexInFull != -1) allHouses[lastIndexInFull] else null
+            val isLastHouseInChunk = lastHouseInFull != null && chunkHouseIds.contains(lastHouseInFull.id)
+            val hasSuccessor = lastIndexInFull != -1 && lastIndexInFull < allHouses.size - 1
+            
             val autoConcluido = isLastHouseInChunk && hasSuccessor
 
             if (hasManual || autoConcluido) {

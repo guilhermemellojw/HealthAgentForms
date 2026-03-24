@@ -45,12 +45,24 @@ fun ProductionProgressBar(
     
     // Choose colors based on theme
     val primaryColor = MaterialTheme.colorScheme.primary
-    val successColor = MaterialTheme.colorScheme.tertiaryContainer
-    val dynamicColor = androidx.compose.ui.graphics.lerp(primaryColor, successColor, progress)
+    val successColor = MaterialTheme.colorScheme.tertiary
+    val dynamicColor = if (isGoalReached) successColor else androidx.compose.ui.graphics.lerp(primaryColor, successColor, progress)
     
-    // We keep the logic for exact completion if needed, or just use dynamic everywhere.
-    // The user wants it to "vary while adding", so dynamicColor is best.
-    val displayColor = dynamicColor
+    val fillGradient = if (isGoalReached) {
+        Brush.horizontalGradient(
+            colors = listOf(
+                MaterialTheme.colorScheme.tertiary,
+                MaterialTheme.colorScheme.tertiaryContainer
+            )
+        )
+    } else {
+        Brush.horizontalGradient(
+            colors = listOf(
+                MaterialTheme.colorScheme.primary,
+                MaterialTheme.colorScheme.primaryContainer
+            )
+        )
+    }
     
     // Adjust sizes for Easy Mode
     val barHeight = if (isEasyMode) 10.dp else 6.dp
@@ -72,10 +84,10 @@ fun ProductionProgressBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "IMOVÉIS ABERTOS",
+                    text = if (isGoalReached) "META ALCANÇADA! 🎉" else "VISITAS REGISTRADAS",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f),
-                    fontWeight = FontWeight.Bold,
+                    color = if (isGoalReached) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    fontWeight = FontWeight.Black,
                     fontSize = labelSize,
                     modifier = Modifier.weight(1f)
                 )
@@ -100,7 +112,7 @@ fun ProductionProgressBar(
                 Text(
                     text = "$current / $total",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onPrimary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = countSize
                 )
@@ -114,7 +126,7 @@ fun ProductionProgressBar(
                     .fillMaxWidth()
                     .height(barHeight)
                     .clip(RoundedCornerShape(barHeight / 2))
-                    .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
             ) {
                 // Progress Fill
                 Box(
@@ -122,14 +134,7 @@ fun ProductionProgressBar(
                         .fillMaxWidth(animatedProgress)
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(barHeight / 2))
-                        .background(
-                            brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.tertiaryContainer,
-                                    MaterialTheme.colorScheme.tertiary
-                                )
-                            )
-                        )
+                        .background(brush = fillGradient)
                 )
             }
         }

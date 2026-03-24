@@ -261,7 +261,7 @@ class HouseManagementUseCase @Inject constructor(
     }
 
     suspend fun migrateStreetNamesToFormat() {
-        val allHouses = repository.getAllHousesOnce()
+        val allHouses = repository.getAllHousesSnapshot()
         val toUpdate = allHouses.filter { it.streetName != it.streetName.formatStreetName() }
         if (toUpdate.isNotEmpty()) {
             val updated = toUpdate.map { it.copy(streetName = it.streetName.formatStreetName()) }
@@ -270,7 +270,7 @@ class HouseManagementUseCase @Inject constructor(
     }
 
     suspend fun migrateBairrosToTitleCase() {
-        val allHouses = repository.getAllHousesOnce()
+        val allHouses = repository.getAllHousesSnapshot()
         val toUpdate = allHouses.filter { it.bairro != it.bairro.formatStreetName() }
         if (toUpdate.isNotEmpty()) {
             val updated = toUpdate.map { it.copy(bairro = it.bairro.formatStreetName()) }
@@ -279,7 +279,7 @@ class HouseManagementUseCase @Inject constructor(
     }
 
     suspend fun migrateDateFormats() {
-        val allHouses = repository.getAllHousesOnce()
+        val allHouses = repository.getAllHousesSnapshot()
         val housesToUpdate = allHouses.filter { it.data.contains("/") }
         
         if (housesToUpdate.isNotEmpty()) {
@@ -288,7 +288,7 @@ class HouseManagementUseCase @Inject constructor(
             repository.updateHouses(updatedHouses)
         }
         
-        val allActivities = repository.getAllDayActivitiesOnce()
+        val allActivities = repository.getAllDayActivitiesSnapshot()
         val activitiesToUpdate = allActivities.filter { it.date.contains("/") }
         
         if (activitiesToUpdate.isNotEmpty()) {
@@ -299,7 +299,7 @@ class HouseManagementUseCase @Inject constructor(
                  // Repository doesn't have a direct 'updatePrimaryKey' but SyncRepositoryImpl does some similar stuff.
                  // In Room, for primary key changes, usually we delete and re-insert.
                  repository.runInTransaction {
-                     repository.deleteProduction(activity.date, activity.agentName)
+                     repository.deleteProduction(activity.date, activity.agentName, activity.agentUid)
                      repository.updateDayActivity(activity.copy(date = newDate))
                  }
              }

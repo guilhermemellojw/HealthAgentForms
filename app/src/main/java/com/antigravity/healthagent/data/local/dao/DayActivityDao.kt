@@ -19,19 +19,25 @@ interface DayActivityDao {
     suspend fun insertDayActivity(dayActivity: DayActivity)
 
     @Query("SELECT * FROM day_activities")
-    suspend fun getAllDayActivities(): List<DayActivity>
+    fun getAllDayActivitiesSnapshot(): List<DayActivity>
+
+    @Query("SELECT COUNT(*) FROM day_activities")
+    suspend fun count(): Int
+
+    @Query("SELECT * FROM day_activities WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    suspend fun getAllDayActivities(agentName: String, agentUid: String): List<DayActivity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(activities: List<DayActivity>)
 
-    @Query("SELECT * FROM day_activities WHERE isSynced = 0")
-    suspend fun getUnsyncedActivities(): List<DayActivity>
+    @Query("SELECT * FROM day_activities WHERE isSynced = 0 AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    suspend fun getUnsyncedActivities(agentName: String, agentUid: String): List<DayActivity>
 
-    @Query("UPDATE day_activities SET isSynced = 1 WHERE date IN (:dates) AND UPPER(agentName) = UPPER(:agentName)")
-    suspend fun markAsSynced(dates: List<String>, agentName: String)
+    @Query("UPDATE day_activities SET isSynced = 1 WHERE date IN (:dates) AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    suspend fun markAsSynced(dates: List<String>, agentName: String, agentUid: String)
 
-    @Query("DELETE FROM day_activities WHERE date = :date AND UPPER(agentName) = UPPER(:agentName)")
-    suspend fun deleteDayActivity(date: String, agentName: String)
+    @Query("DELETE FROM day_activities WHERE date = :date AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    suspend fun deleteDayActivity(date: String, agentName: String, agentUid: String)
 
     @Transaction
     suspend fun upsertDayActivities(activities: List<DayActivity>) {
@@ -49,18 +55,21 @@ interface DayActivityDao {
     @Query("DELETE FROM day_activities")
     suspend fun deleteAll()
 
-    @Query("DELETE FROM day_activities WHERE UPPER(agentName) = UPPER(:agentName)")
-    suspend fun deleteByAgent(agentName: String)
+    @Query("DELETE FROM day_activities WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
+    suspend fun deleteByAgent(agentName: String, agentUid: String)
 
-    @Query("DELETE FROM day_activities WHERE UPPER(agentName) = UPPER(:agentName) AND date IN (:dates)")
-    suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>)
+    @Query("DELETE FROM day_activities WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND date IN (:dates)")
+    suspend fun deleteByAgentAndDates(agentName: String, agentUid: String, dates: List<String>)
 
-    @Query("SELECT COUNT(*) FROM day_activities WHERE isClosed = 0 AND UPPER(agentName) = UPPER(:agentName)")
-    suspend fun countOpenDays(agentName: String): Int
+    @Query("SELECT COUNT(*) FROM day_activities WHERE isClosed = 0 AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    suspend fun countOpenDays(agentName: String, agentUid: String): Int
 
-    @Query("UPDATE day_activities SET isClosed = 1, isSynced = 0, lastUpdated = :now WHERE UPPER(agentName) = UPPER(:agentName)")
-    suspend fun closeAllActivities(agentName: String, now: Long = System.currentTimeMillis())
+    @Query("UPDATE day_activities SET isClosed = 1, isSynced = 0, lastUpdated = :now WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    suspend fun closeAllActivities(agentName: String, agentUid: String, now: Long = System.currentTimeMillis())
 
-    @Query("UPDATE day_activities SET agentName = :newName WHERE agentName = :oldName")
-    suspend fun updateAgentNameForAll(oldName: String, newName: String)
+    @Query("UPDATE day_activities SET agentName = :newName WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND agentName = :oldName)")
+    suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String)
+
+    @Query("UPDATE day_activities SET agentUid = :targetUid WHERE agentUid = '' AND (UPPER(agentName) = UPPER(:agentName) OR UPPER(agentName) = UPPER(:email))")
+    suspend fun updateAgentUidForAll(agentName: String, email: String, targetUid: String)
 }

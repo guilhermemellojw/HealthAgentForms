@@ -69,6 +69,7 @@ fun HouseRowItem(
     var showContextDialog by remember { mutableStateOf(false) }
     var showTreatmentDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showObservationDialog by remember { mutableStateOf(false) }
     
     val animatedBgColor by animateColorAsState(
         targetValue = when {
@@ -128,6 +129,17 @@ fun HouseRowItem(
         )
     }
 
+    if (showObservationDialog) {
+        ObservationDialog(
+            currentObservation = house.observation,
+            onDismiss = { showObservationDialog = false },
+            onConfirm = { 
+                onUpdate(house.copy(observation = it))
+                showObservationDialog = false
+            }
+        )
+    }
+
     if (isEasyMode) {
         // Easy Mode doesn't need SwipeToDismissBox overhead
         EasyHouseCard(
@@ -140,6 +152,7 @@ fun HouseRowItem(
             onMoveUp = onMoveUp,
             onMoveDown = onMoveDown,
             onToggleReorder = onEnableReorder,
+            onShowObservation = { showObservationDialog = true },
             isReorderMode = isReorderMode,
             highlightErrors = highlightErrors,
             invalidFields = invalidFields,
@@ -222,29 +235,57 @@ fun HouseRowItem(
                                     )
                                 }
                                 Spacer(Modifier.width(8.dp))
+                                houseState.errorLabels.forEach { label ->
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.error,
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = " $label ",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color.White,
+                                            fontSize = 8.sp
+                                        )
+                                    }
+                                    Spacer(Modifier.width(4.dp))
+                                }
                                 Text(
                                     text = formattedStreet,
                                     style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = if (isMissingStreet) FontWeight.Bold else FontWeight.Normal,
+                                    fontWeight = if (isMissingStreet) FontWeight.Bold else FontWeight.Black,
                                     color = if (highlightErrors && isMissingStreet) MaterialTheme.colorScheme.error
-                                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.5f),
+                                            else MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.5f),
                                     maxLines = 1,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                             }
     
-                            // Move Date Icon (Right)
+                            // Move Date & Observation Icons (Right)
                             if (enabled) {
-                                IconButton(
-                                    onClick = onMoveDate,
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.DateRange,
-                                        contentDescription = "Mover Data",
-                                        modifier = Modifier.size(20.dp),
-                                        tint = MaterialTheme.colorScheme.primary 
-                                    )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = { showObservationDialog = true },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            if (house.observation.isNotBlank()) Icons.Default.NoteAlt else Icons.Default.EditNote,
+                                            contentDescription = "Ver Observação",
+                                            modifier = Modifier.size(20.dp),
+                                            tint = if (house.observation.isNotBlank()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary 
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = onMoveDate,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.DateRange,
+                                            contentDescription = "Mover Data",
+                                            modifier = Modifier.size(20.dp),
+                                            tint = MaterialTheme.colorScheme.primary 
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -426,6 +467,7 @@ fun EasyHouseCard(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onToggleReorder: () -> Unit,
+    onShowObservation: () -> Unit,
     isReorderMode: Boolean,
     highlightErrors: Boolean,
     invalidFields: Set<String>,
@@ -466,7 +508,7 @@ fun EasyHouseCard(
                         text = house.streetName.formatStreetName().ifBlank { "NOME DA RUA" },
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.primary
                     )
                     Text(
                         text = "Quarteirão ${house.blockNumber} • ${house.bairro.uppercase()}",
@@ -475,19 +517,37 @@ fun EasyHouseCard(
                     )
                 }
 
-                Surface(
-                    onClick = onMoveDate,
-                    color = Color.Transparent,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.DateRange,
-                            contentDescription = "Mover Data",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        onClick = onShowObservation,
+                        color = Color.Transparent,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                if (house.observation.isNotBlank()) Icons.Default.NoteAlt else Icons.Default.EditNote,
+                                contentDescription = "Observação",
+                                tint = if (house.observation.isNotBlank()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = onMoveDate,
+                        color = Color.Transparent,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.DateRange,
+                                contentDescription = "Mover Data",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
             }

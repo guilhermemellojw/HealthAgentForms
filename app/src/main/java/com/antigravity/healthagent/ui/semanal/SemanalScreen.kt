@@ -50,7 +50,8 @@ fun SemanalScreen(
     viewModel: HomeViewModel = hiltViewModel(),
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
-    onSwitchAccount: () -> Unit = {}
+    onSwitchAccount: () -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showAddActivityDialog by remember { mutableStateOf(false) }
@@ -118,7 +119,8 @@ fun SemanalScreen(
                 },
                 user = user,
                 onLogout = onLogout,
-                onSwitchAccount = onSwitchAccount
+                onSwitchAccount = onSwitchAccount,
+                onOpenSettings = onOpenSettings
             )
         },
         containerColor = Color.Transparent,
@@ -261,6 +263,17 @@ fun SemanalScreen(
                         contentPadding = PaddingValues(bottom = 80.dp, start = 12.dp, end = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(if (uiState.isEasyMode) 16.dp else 12.dp)
                     ) {
+                        item {
+                            Text(
+                                text = "RESUMO POR DIA",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                                fontSize = if (uiState.isEasyMode) 12.sp else 10.sp
+                            )
+                        }
+
                         itemsIndexed(uiState.weeklySummary, key = { _, day -> day.date }) { _, day ->
                             WeeklyDayRow(
                                 day = day,
@@ -268,9 +281,31 @@ fun SemanalScreen(
                                 onStatusChange = { viewModel.updateDayStatus(day.date, it) },
                                 onClick = { viewModel.navigateToDate(day.date) },
                                 isEasyMode = uiState.isEasyMode,
-                                isSolarMode = uiState.isSolarMode,
-                                modifier = Modifier
+                                isSolarMode = uiState.isSolarMode
                             )
+                        }
+
+                        if (uiState.weeklyObservations.isNotEmpty()) {
+                            item {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "OBSERVAÇÕES DA SEMANA",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                    fontSize = if (uiState.isEasyMode) 12.sp else 10.sp
+                                )
+                            }
+
+                            items(uiState.weeklyObservations) { house ->
+                                ObservationCard(
+                                    house = house,
+                                    isEasyMode = uiState.isEasyMode,
+                                    isSolarMode = uiState.isSolarMode,
+                                    onClick = { viewModel.navigateToDate(house.data) }
+                                )
+                            }
                         }
                     }
                 }
@@ -441,7 +476,7 @@ fun WeeklyDayRow(
                         "ABERTOS", 
                         style = MaterialTheme.typography.labelSmall, 
                         color = MaterialTheme.colorScheme.primary, 
-                        fontSize = if (isEasyMode) 10.sp else 8.sp, 
+                        fontSize = (if (isEasyMode) 10.sp else 8.sp), 
                         fontWeight = FontWeight.Black
                     )
                     Text(
@@ -462,6 +497,73 @@ fun WeeklyDayRow(
                 modifier = Modifier.weight(2f),
                 isEasyMode = isEasyMode
             )
+        }
+    }
+}
+
+@Composable
+fun ObservationCard(
+    house: com.antigravity.healthagent.data.local.model.House,
+    isEasyMode: Boolean = false,
+    isSolarMode: Boolean = false,
+    onClick: () -> Unit = {}
+) {
+    PremiumCard(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        isSolarMode = isSolarMode,
+        contentPadding = if (isEasyMode) PaddingValues(8.dp) else PaddingValues(12.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = house.data,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+                
+                Text(
+                    text = "${house.bairro.uppercase()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(6.dp))
+            
+            Text(
+                text = "${house.streetName}, ${house.number}${house.sequence?.let { "-$it" } ?: ""}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            
+            Spacer(modifier = Modifier.height(4.dp))
+            
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = house.observation,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(8.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

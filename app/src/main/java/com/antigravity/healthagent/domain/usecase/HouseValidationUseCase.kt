@@ -7,32 +7,52 @@ import javax.inject.Inject
 
 class HouseValidationUseCase @Inject constructor() {
 
+    data class ErrorDetail(
+        val houseId: Int,
+        val streetName: String,
+        val location: String, // e.g. "Nº 123"
+        val description: String,
+        val isDuplicate: Boolean = false
+    )
+
     data class ValidationResult(
         val isValid: Boolean,
         val errorHouseIds: Set<Int> = emptySet(),
+        val errorDetails: List<ErrorDetail> = emptyList(),
         val dialogMessage: String? = null
     )
 
     fun validateCurrentDay(currentDate: String, allHouses: List<House>, strict: Boolean = true): ValidationResult {
-        val currentHouses = allHouses.filter { it.data == currentDate }
+        val currentHouses = allHouses.filter { it.data == currentDate }.sortedBy { it.listOrder }
+        if (currentHouses.isEmpty()) return ValidationResult(isValid = true)
 
-        if (currentHouses.isEmpty()) {
-            return ValidationResult(isValid = true)
+        val errorDetails = mutableListOf<ErrorDetail>()
+        val errorHouseIds = mutableSetOf<Int>()
+
+        // 1. Duplicate Validation (Address + Segment)
+        val duplicateGroups = currentHouses.groupBy { house ->
+            "${house.visitSegment}_${house.streetName.trim().uppercase()}_${house.number.trim().uppercase()}_${house.sequence ?: 0}_${house.complement ?: 0}"
+        }.filter { it.value.size > 1 }
+
+        duplicateGroups.forEach { (_, houses) ->
+            houses.forEach { house ->
+                errorHouseIds.add(house.id)
+                val location = if (house.number.isNotBlank()) "Nº ${house.number}" else "Seq. ${house.sequence ?: "?"}"
+                errorDetails.add(ErrorDetail(
+                    houseId = house.id,
+                    streetName = house.streetName,
+                    location = location,
+                    description = "Imóvel Duplicado nesta visita",
+                    isDuplicate = true
+                ))
+            }
         }
 
-        // First house exemption if untouched (even in strict mode)
-        if (currentHouses.size == 1 && currentHouses.first().situation == Situation.EMPTY) {
-            return ValidationResult(isValid = true)
-        }
-
-        // 1. Field Validation
-        val incompleteHouses = currentHouses.filter { !isHouseValid(it, strict = strict) }
-
-        if (incompleteHouses.isNotEmpty()) {
-            val sb = StringBuilder()
-            sb.append("Foram encontradas pendências nos seguintes imóveis:\n\n")
-            
-            incompleteHouses.forEach { house ->
+        // 2. Field Validation
+        currentHouses.forEach { house ->
+            val invalidFields = getInvalidFields(house, strict)
+            if (invalidFields.isNotEmpty()) {
+                errorHouseIds.add(house.id)
                 val missingFields = mutableListOf<String>()
                 if (house.number.isBlank() && (house.sequence == null || house.sequence == 0)) missingFields.add("Número/Sequência")
                 if (house.propertyType == PropertyType.EMPTY) missingFields.add("Tipo")
@@ -45,26 +65,25 @@ class HouseValidationUseCase @Inject constructor() {
                 val totalDeposits = house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e
                 val hasTreatment = totalDeposits > 0 || house.eliminados > 0 || house.larvicida > 0.0 || house.comFoco
                 
-                if (house.situation != Situation.NONE && hasTreatment) {
-                    missingFields.add("Tratamento em Imóvel não Trabalhado")
-                }
-                if (house.larvicida > 0.0 && totalDeposits == 0) {
-                    missingFields.add("Larvicida sem Depósito Inspecionado")
-                }
+                if (house.situation != Situation.NONE && hasTreatment) missingFields.add("Tratamento Indevido")
+                if (house.larvicida > 0.0 && totalDeposits == 0) missingFields.add("Larvicida sem Depósitos")
                 
                 val location = if (house.number.isNotBlank()) "Nº ${house.number}" else "Seq. ${house.sequence ?: "?"}"
-                sb.append("• ${house.streetName} ($location): Falta ${missingFields.joinToString(", ")}\n")
+                errorDetails.add(ErrorDetail(
+                    houseId = house.id,
+                    streetName = house.streetName,
+                    location = location,
+                    description = "Pendências: ${missingFields.joinToString(", ")}"
+                ))
             }
-            
-            return ValidationResult(
-                isValid = false,
-                errorHouseIds = incompleteHouses.map { it.id }.toSet(),
-                dialogMessage = sb.toString()
-            )
         }
 
-
-        return ValidationResult(isValid = true)
+        return ValidationResult(
+            isValid = errorHouseIds.isEmpty(),
+            errorHouseIds = errorHouseIds,
+            errorDetails = errorDetails,
+            dialogMessage = if (errorDetails.isNotEmpty()) "Existem pendências de dados" else null
+        )
     }
 
     // Extracted from private HomeViewModel method

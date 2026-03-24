@@ -36,6 +36,7 @@ data class HomeUiState(
     val rgBlocks: List<BlockSegment> = emptyList(),
     val weeklySummary: List<DaySummary> = emptyList(),
     val weeklySummaryTotals: WeeklySummaryTotals = WeeklySummaryTotals(),
+    val weeklyObservations: List<House> = emptyList(),
     val boletimList: List<BoletimSummary> = emptyList(),
     val bairrosList: List<String> = emptyList(),
     val currentBlock: String = "",

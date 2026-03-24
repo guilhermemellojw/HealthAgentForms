@@ -24,6 +24,8 @@ interface AuthRepository {
     suspend fun fetchAccessRequest(uid: String): Result<AccessRequest?>
     suspend fun respondToAccessRequest(requestId: String, approved: Boolean, agentName: String? = null): Result<Unit>
 
+    suspend fun migratePreRegistration(user: AuthUser): Result<Unit>
+ 
     val pendingAccessRequests: Flow<List<AccessRequest>>
 }
 

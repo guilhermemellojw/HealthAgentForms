@@ -64,7 +64,7 @@ interface SyncRepository {
     /**
      * Surgically restores houses and activities into local database for a specific agent.
      */
-    suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>): Result<Unit>
+    suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>, agentUid: String? = null): Result<Unit>
 
     /**
      * Dynamic Configuration (Super Admin)

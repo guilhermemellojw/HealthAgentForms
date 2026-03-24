@@ -33,6 +33,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.Scaffold
+import com.antigravity.healthagent.ui.components.GlassTopAppBar
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -81,7 +84,11 @@ import androidx.compose.ui.draw.scale
 @Composable
 fun QuarteiroesScreen(
     viewModel: QuarteiroesViewModel = hiltViewModel(),
-    isEasyMode: Boolean = false
+    isEasyMode: Boolean = false,
+    user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
+    onLogout: () -> Unit = {},
+    onSwitchAccount: () -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -164,7 +171,19 @@ fun QuarteiroesScreen(
     val fabSize = if (isEasyMode) 64.dp else 56.dp
     val fabIconSize = if (isEasyMode) 32.dp else 24.dp
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Scaffold(
+        topBar = {
+            GlassTopAppBar(
+                title = { Text("Mapa de Quarteirões", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) },
+                user = user,
+                onLogout = onLogout,
+                onSwitchAccount = onSwitchAccount,
+                onOpenSettings = onOpenSettings
+            )
+        },
+        containerColor = Color.Transparent
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
             cameraPositionState = cameraPositionState,
@@ -341,6 +360,7 @@ fun QuarteiroesScreen(
             }
         }
     }
+}
 }
 
 @Composable

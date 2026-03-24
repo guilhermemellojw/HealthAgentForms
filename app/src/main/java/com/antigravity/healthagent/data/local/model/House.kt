@@ -39,6 +39,8 @@ data class House(
     val quarteiraoConcluido: Boolean = false,
     val listOrder: Long = 0, // For manual reordering
     val visitSegment: Int = 0, // To distinguish return trips to the same street
+    val agentUid: String = "", // Crucial for multi-agent data isolation
+    val observation: String = "", // Agent notes for the visit
     val createdAt: Long = System.currentTimeMillis(),
     val isSynced: Boolean = false,
     @get:com.google.firebase.firestore.Exclude
@@ -54,8 +56,9 @@ data class House(
         val normalizedBairro = bairro.trim().replace(Regex("\\s+"), " ")
         val normalizedAgent = agentName.trim().replace(Regex("\\s+"), " ")
         
-        // Uniqueness is guaranteed by createdAt. visitSegment is removed as it's too unstable for a primary key.
-        return "${normalizedAgent}_${normalizedDate}_${blockNumber.trim()}_${blockSequence.trim()}_${normalizedStreet}_${number.trim()}_${sequence ?: 0}_${complement ?: 0}_${normalizedBairro}_${createdAt}".uppercase()
+        // Uniqueness is guaranteed by agentUid + normalizedAgent + date + address details + visitSegment.
+        // We remove createdAt to ensure the key is stable even if the house object is recreated.
+        return "${agentUid}_${normalizedAgent}_${normalizedDate}_${blockNumber.trim()}_${blockSequence.trim()}_${normalizedStreet}_${number.trim()}_${sequence ?: 0}_${complement ?: 0}_${normalizedBairro}_${visitSegment}".uppercase()
     }
 
     fun toFirestoreMap(): Map<String, Any?> {
@@ -85,7 +88,9 @@ data class House(
             "quarteiraoConcluido" to quarteiraoConcluido,
             "listOrder" to listOrder,
             "visitSegment" to visitSegment,
-            "createdAt" to createdAt,
+            "agentUid" to agentUid,
+            "lastSyncTime" to System.currentTimeMillis(),
+            "observation" to observation,
             "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
         )
     }

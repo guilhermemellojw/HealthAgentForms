@@ -39,7 +39,8 @@ fun RGScreen(
     viewModel: HomeViewModel = hiltViewModel(),
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
-    onSwitchAccount: () -> Unit = {}
+    onSwitchAccount: () -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     
@@ -76,7 +77,8 @@ fun RGScreen(
                 },
                 user = user,
                 onLogout = onLogout,
-                onSwitchAccount = onSwitchAccount
+                onSwitchAccount = onSwitchAccount,
+                onOpenSettings = onOpenSettings
             )
         },
         floatingActionButton = {

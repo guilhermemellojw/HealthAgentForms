@@ -6,23 +6,32 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface HouseDao {
-    @Query("SELECT * FROM houses ORDER BY listOrder ASC")
-    fun getAllHouses(): Flow<List<House>>
+    @Query("SELECT * FROM houses ORDER BY listOrder ASC, id ASC")
+    fun getAllHousesSnapshot(): List<House>
 
-    @Query("SELECT * FROM houses ORDER BY bairro ASC, blockNumber ASC, listOrder ASC")
-    fun getAllHousesOrderedByBlock(): Flow<List<House>>
+    @Query("SELECT * FROM houses ORDER BY listOrder ASC, id ASC")
+    fun getAllHousesSnapshotFlow(): Flow<List<House>>
+
+    @Query("SELECT COUNT(*) FROM houses")
+    suspend fun count(): Int
+
+    @Query("SELECT * FROM houses WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)) ORDER BY listOrder ASC, id ASC")
+    fun getAllHouses(agentName: String, agentUid: String): Flow<List<House>>
+
+    @Query("SELECT * FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) ORDER BY bairro ASC, blockNumber ASC, listOrder ASC, id ASC")
+    fun getAllHousesOrderedByBlock(agentName: String, agentUid: String): Flow<List<House>>
 
     @Query("SELECT DISTINCT agentName FROM houses")
     fun getDistinctAgentNames(): Flow<List<String>>
 
-    @Query("SELECT * FROM houses WHERE isSynced = 0")
-    suspend fun getUnsyncedHouses(): List<House>
+    @Query("SELECT * FROM houses WHERE isSynced = 0 AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    suspend fun getUnsyncedHouses(agentName: String, agentUid: String): List<House>
 
     @Query("UPDATE houses SET isSynced = 1 WHERE id IN (:ids)")
     suspend fun markAsSynced(ids: List<Int>)
 
-    @Query("SELECT DISTINCT data FROM houses WHERE UPPER(agentName) = UPPER(:agentName)")
-    suspend fun getDistinctDates(agentName: String): List<String>
+    @Query("SELECT DISTINCT data FROM houses WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
+    suspend fun getDistinctDates(agentName: String, agentUid: String): List<String>
 
     @Query("SELECT * FROM houses WHERE id = :id")
     suspend fun getHouseById(id: Long): House?
@@ -42,15 +51,15 @@ interface HouseDao {
     @Delete
     suspend fun deleteHouse(house: House)
 
-    @Query("UPDATE houses SET data = :newDate, isSynced = 0, lastUpdated = :now WHERE data = :oldDate AND UPPER(agentName) = UPPER(:agentName)")
-    suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, now: Long = System.currentTimeMillis())
+    @Query("UPDATE houses SET data = :newDate, isSynced = 0, lastUpdated = :now WHERE data = :oldDate AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String, now: Long = System.currentTimeMillis())
 
 
-    @Query("DELETE FROM houses WHERE data = :date AND UPPER(agentName) = UPPER(:agentName)")
-    suspend fun deleteHousesByDateAndAgent(date: String, agentName: String)
+    @Query("DELETE FROM houses WHERE data = :date AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    suspend fun deleteHousesByDateAndAgent(date: String, agentName: String, agentUid: String)
 
-    @Query("SELECT * FROM houses WHERE data = :date AND UPPER(agentName) = UPPER(:agentName) ORDER BY listOrder ASC")
-    suspend fun getHousesByDateAndAgent(date: String, agentName: String): List<House>
+    @Query("SELECT * FROM houses WHERE data = :date AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) ORDER BY listOrder ASC")
+    suspend fun getHousesByDateAndAgent(date: String, agentName: String, agentUid: String): List<House>
 
     @Transaction
     suspend fun upsertHouses(houses: List<House>) {
@@ -68,14 +77,14 @@ interface HouseDao {
     @Query("DELETE FROM houses")
     suspend fun deleteAll()
 
-    @Query("DELETE FROM houses WHERE UPPER(agentName) = UPPER(:agentName)")
-    suspend fun deleteByAgent(agentName: String)
+    @Query("DELETE FROM houses WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
+    suspend fun deleteByAgent(agentName: String, agentUid: String)
 
-    @Query("DELETE FROM houses WHERE UPPER(agentName) = UPPER(:agentName) AND data IN (:dates)")
-    suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>)
+    @Query("DELETE FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND data IN (:dates)")
+    suspend fun deleteByAgentAndDates(agentName: String, agentUid: String, dates: List<String>)
 
-    @Query("SELECT * FROM houses WHERE UPPER(agentName) = UPPER(:agentName) AND data IN (:dates) ORDER BY listOrder ASC")
-    suspend fun getHousesByAgentAndDates(agentName: String, dates: List<String>): List<House>
+    @Query("SELECT * FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND data IN (:dates) ORDER BY listOrder ASC")
+    suspend fun getHousesByAgentAndDates(agentName: String, agentUid: String, dates: List<String>): List<House>
 
     @Query("""
         UPDATE houses 
@@ -86,6 +95,9 @@ interface HouseDao {
     """)
     suspend fun cleanupZeroValues()
 
-    @Query("UPDATE houses SET agentName = :newName WHERE agentName = :oldName")
-    suspend fun updateAgentNameForAll(oldName: String, newName: String)
+    @Query("UPDATE houses SET agentName = :newName WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND agentName = :oldName)")
+    suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String)
+
+    @Query("UPDATE houses SET agentUid = :targetUid WHERE agentUid = '' AND (UPPER(agentName) = UPPER(:agentName) OR UPPER(agentName) = UPPER(:email))")
+    suspend fun updateAgentUidForAll(agentName: String, email: String, targetUid: String)
 }

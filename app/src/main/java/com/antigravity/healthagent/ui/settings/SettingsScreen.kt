@@ -242,6 +242,15 @@ fun SettingsScreen(
         ringtonePickerLauncher.launch(intent)
     }
 
+    val isEasyMode by viewModel.easyMode.collectAsState()
+    val isSolarMode by viewModel.solarMode.collectAsState()
+    
+    val itemContainerColor = if (isSolarMode) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+    val itemBorderColor = if (isSolarMode) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+    
+    val dangerContainerColor = if (isSolarMode) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.error.copy(alpha = 0.08f)
+    val dangerBorderColor = if (isSolarMode) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
+
     Scaffold(
         topBar = {
             GlassTopAppBar(
@@ -277,7 +286,8 @@ fun SettingsScreen(
                 item {
                     SettingsSection(
                         title = "Personalização",
-                        icon = Icons.Outlined.Palette
+                        icon = Icons.Outlined.Palette,
+                        isSolarMode = isSolarMode
                     ) {
                         val currentMode by viewModel.themeMode.collectAsState(initial = "SYSTEM")
                         
@@ -404,40 +414,17 @@ fun SettingsScreen(
                 item {
                     SettingsSection(
                         title = "Preferências de Trabalho",
-                        icon = Icons.Outlined.Assignment
+                        icon = Icons.Outlined.Assignment,
+                        isSolarMode = isSolarMode
                     ) {
-                        val maxHouses by viewModel.maxOpenHouses.collectAsState()
                         
-                        // Meta Diária card
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.Flag, null, tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(12.dp))
-                                Column {
-                                    Text("Meta Diária", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
-                                    Text("$maxHouses Imóveis", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        val isEasyMode by viewModel.easyMode.collectAsState()
                         
                         // Modo Fácil card
                         Surface(
                             modifier = Modifier.fillMaxWidth().clickable { viewModel.updateEasyMode(!isEasyMode) },
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                            color = itemContainerColor,
                             shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                            border = BorderStroke(1.dp, itemBorderColor)
                         ) {
                             Row(
                                 modifier = Modifier.padding(12.dp),
@@ -458,15 +445,13 @@ fun SettingsScreen(
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))
-
-                        val isSolarMode by viewModel.solarMode.collectAsState()
                         
                         // Modo Solar card
                         Surface(
                             modifier = Modifier.fillMaxWidth().clickable { viewModel.updateSolarMode(!isSolarMode) },
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                            color = itemContainerColor,
                             shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                            border = BorderStroke(1.dp, itemBorderColor)
                         ) {
                             Row(
                                 modifier = Modifier.padding(12.dp),
@@ -476,7 +461,7 @@ fun SettingsScreen(
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Modo Solar", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
-                                    Text("Alto contraste para o sol", style = MaterialTheme.typography.bodySmall)
+                                    Text("Tema de alto contraste para visibilidade externa", style = MaterialTheme.typography.bodySmall)
                                 }
                                 Switch(
                                     checked = isSolarMode,
@@ -492,13 +477,15 @@ fun SettingsScreen(
                 item {
                     SettingsSection(
                         title = "Dados e Backup Local",
-                        icon = Icons.Outlined.Storage
+                        icon = Icons.Outlined.Storage,
+                        isSolarMode = isSolarMode
                     ) {
                         SettingsItemCard(
                             onClick = { viewModel.backupDataAndShare(context) },
                             headline = "Exportar Backup",
                             supportingText = "Gerar arquivo JSON para segurança",
-                            leadingIcon = Icons.Default.Share
+                            leadingIcon = Icons.Default.Share,
+                            isSolarMode = isSolarMode
                         )
                         
                         if (isAdmin) {
@@ -509,7 +496,8 @@ fun SettingsScreen(
                                 headline = "Restaurar Backup",
                                 supportingText = "Importar dados de um arquivo JSON",
                                 leadingIcon = Icons.Default.FolderOpen,
-                                color = MaterialTheme.colorScheme.error
+                                color = MaterialTheme.colorScheme.error,
+                                isSolarMode = isSolarMode
                             )
                         }
                     }
@@ -520,7 +508,8 @@ fun SettingsScreen(
                     item {
                         SettingsSection(
                             title = "Administração",
-                            icon = Icons.Outlined.AdminPanelSettings
+                            icon = Icons.Outlined.AdminPanelSettings,
+                            isSolarMode = isSolarMode
                         ) {
                             val pendingCount by viewModel.pendingAccessRequestsCount.collectAsState()
 
@@ -529,7 +518,8 @@ fun SettingsScreen(
                                 headline = "Painel de Gestão",
                                 supportingText = "Controle de usuários e sincronização",
                                 leadingIcon = Icons.Default.Security,
-                                badgeCount = if (pendingCount > 0) pendingCount else null
+                                badgeCount = if (pendingCount > 0) pendingCount else null,
+                                isSolarMode = isSolarMode
                             )
 
                             if (isAdmin) {
@@ -553,9 +543,9 @@ fun SettingsScreen(
                                 // Limpar Histórico card
                                 Surface(
                                     modifier = Modifier.fillMaxWidth().clickable { showCleanupPicker = true },
-                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+                                    color = dangerContainerColor,
                                     shape = RoundedCornerShape(12.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
+                                    border = BorderStroke(1.dp, dangerBorderColor)
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(12.dp),
@@ -565,7 +555,7 @@ fun SettingsScreen(
                                         Spacer(Modifier.width(12.dp))
                                         Column {
                                             Text("Limpar Histórico Antigo", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
-                                            Text("Remover dados de meses passados", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
+                                            Text("Remover dados de meses passados", style = MaterialTheme.typography.bodySmall, color = if (isSolarMode) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
                                         }
                                     }
                                 }
@@ -575,9 +565,9 @@ fun SettingsScreen(
                                 // Apagar Tudo card
                                 Surface(
                                     modifier = Modifier.fillMaxWidth().clickable { showEraseConfirm = true },
-                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+                                    color = dangerContainerColor,
                                     shape = RoundedCornerShape(12.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
+                                    border = BorderStroke(1.dp, dangerBorderColor)
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(12.dp),
@@ -587,7 +577,7 @@ fun SettingsScreen(
                                         Spacer(Modifier.width(12.dp))
                                         Column {
                                             Text("Apagar Tudo", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
-                                            Text("Resetar banco de dados local", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
+                                            Text("Resetar banco de dados local", style = MaterialTheme.typography.bodySmall, color = if (isSolarMode) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
                                         }
                                     }
                                 }
@@ -615,9 +605,13 @@ fun SettingsScreen(
 fun SettingsSection(
     title: String,
     icon: ImageVector,
+    isSolarMode: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    PremiumCard(modifier = Modifier.fillMaxWidth()) {
+    PremiumCard(
+        modifier = Modifier.fillMaxWidth(),
+        isSolarMode = isSolarMode
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 16.dp)) {
                 Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
@@ -743,15 +737,28 @@ fun SettingsItemCard(
     headline: String,
     supportingText: String,
     leadingIcon: ImageVector,
+    isSolarMode: Boolean = false,
     color: Color = MaterialTheme.colorScheme.primary,
     textColor: Color = MaterialTheme.colorScheme.onSurface,
     badgeCount: Int? = null
 ) {
+    val containerColor = if (isSolarMode) {
+        MaterialTheme.colorScheme.surfaceVariant
+    } else {
+        color.copy(alpha = 0.08f)
+    }
+
+    val borderColor = if (isSolarMode) {
+        MaterialTheme.colorScheme.outline
+    } else {
+        color.copy(alpha = 0.15f)
+    }
+
     Surface(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onClick() },
-        color = color.copy(alpha = 0.08f),
+        color = containerColor,
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.15f))
+        border = BorderStroke(1.dp, borderColor)
     ) {
         ListItem(
             headlineContent = { Text(headline, fontWeight = FontWeight.Bold, color = textColor) },

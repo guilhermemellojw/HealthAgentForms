@@ -126,6 +126,9 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
     val isAdmin = user?.role == com.antigravity.healthagent.domain.repository.UserRole.ADMIN
     val isSupervisor = user?.role == com.antigravity.healthagent.domain.repository.UserRole.SUPERVISOR
 
+    // Shared ViewModels for consistency across tabs/screens
+    val adminViewModel: com.antigravity.healthagent.ui.admin.AdminViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+
     var selectedTab by remember(isSupervisor) { 
         mutableIntStateOf(if (isSupervisor) 0 else 2) 
     }
@@ -134,7 +137,6 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
     var showAdmin by remember { mutableStateOf(false) }
 
     if (showAdmin) {
-        val adminViewModel: com.antigravity.healthagent.ui.admin.AdminViewModel = androidx.hilt.navigation.compose.hiltViewModel()
         com.antigravity.healthagent.ui.admin.AdminDashboardScreen(
             viewModel = adminViewModel,
             onNavigateBack = { showAdmin = false },
@@ -165,7 +167,6 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
         var backPressedTime by remember { mutableLongStateOf(0L) }
 
         // Use the shared homeViewModel passed from MainActivity
-        val adminViewModel: com.antigravity.healthagent.ui.admin.AdminViewModel = androidx.hilt.navigation.compose.hiltViewModel()
         
         val selectedRemoteAgent by adminViewModel.selectedAgentForEdit.collectAsState()
 
@@ -424,7 +425,8 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
                             viewModel = homeViewModel,
                             user = user,
                             onLogout = { loginViewModel.signOut() },
-                            onSwitchAccount = { loginViewModel.signOut() }
+                            onSwitchAccount = { loginViewModel.signOut() },
+                            onOpenSettings = { showSettings = true }
                         )
                         2 -> com.antigravity.healthagent.ui.boletim.BoletimScreen(
                             viewModel = homeViewModel,
@@ -437,9 +439,16 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
                             viewModel = homeViewModel,
                             user = user,
                             onLogout = { loginViewModel.signOut() },
-                            onSwitchAccount = { loginViewModel.signOut() }
+                            onSwitchAccount = { loginViewModel.signOut() },
+                            onOpenSettings = { showSettings = true }
                         )
-                        4 -> QuarteiroesScreen(isEasyMode = isEasyMode)
+                        4 -> QuarteiroesScreen(
+                            isEasyMode = isEasyMode,
+                            user = user,
+                            onLogout = { loginViewModel.signOut() },
+                            onSwitchAccount = { loginViewModel.signOut() },
+                            onOpenSettings = { showSettings = true }
+                        )
                     }
                 }
                 

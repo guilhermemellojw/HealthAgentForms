@@ -52,7 +52,8 @@ class RestoreDataUseCaseTest {
             syncRepository.restoreLocalData(
                 agentName = any(),
                 houses = capture(houseSlot),
-                activities = capture(activitySlot)
+                activities = capture(activitySlot),
+                agentUid = targetUid
             )
         }
 

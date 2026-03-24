@@ -49,15 +49,19 @@ class SyncWorker @AssistedInject constructor(
                 return Result.success()
             }
 
-            val houses = houseRepository.getAllHousesOnce()
-            val activities = houseRepository.getAllDayActivitiesOnce()
+            // Fetch current agent's name from cached user profile
+            val agentName = withTimeoutOrNull(2000) { settingsManager.cachedUser.first()?.agentName } ?: ""
+            val uid = currentUser.uid
+
+            val houses = houseRepository.getAllHousesOnce(agentName, uid)
+            val activities = houseRepository.getAllDayActivitiesOnce(agentName, uid)
             
             if (houses.isEmpty() && activities.isEmpty()) {
                 Log.d("SyncWorker", "No data to sync.")
                 return Result.success()
             }
 
-            val result = syncRepository.pushLocalDataToCloud(houses, activities)
+            val result = syncRepository.pushLocalDataToCloud(houses, activities, uid)
             
             if (result.isSuccess) {
                 Log.d("SyncWorker", "Sync successful.")

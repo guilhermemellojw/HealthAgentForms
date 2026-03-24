@@ -17,14 +17,15 @@ class CleanupHistoricalDataUseCase @Inject constructor(
      * @param agentName Name of the local agent (optional if global)
      * @param isGlobal If true, cleans up data for all agents in the cloud
      */
-    suspend operator fun invoke(beforeDate: String, agentName: String, isGlobal: Boolean = false): Result<Unit> {
+    suspend operator fun invoke(beforeDate: String, agentName: String, agentUid: String, isGlobal: Boolean = false): Result<Unit> {
         return try {
+            val normalizedBeforeDate = beforeDate.replace("/", "-")
             val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
-            val limitDate = try { sdf.parse(beforeDate) } catch (e: Exception) { null } 
+            val limitDate = try { sdf.parse(normalizedBeforeDate) } catch (e: Exception) { null } 
                 ?: return Result.failure(Exception("Formato de data inválido. Use DD-MM-YYYY."))
 
             if (isGlobal) {
-                // GLOBAL CLEANUP (Admin Only)
+                // GLOBAL CLEANUP (Admin Only in Cloud)
                 val allAgentsResult = syncRepository.fetchAllAgentsData()
                 if (allAgentsResult.isFailure) return Result.failure(allAgentsResult.exceptionOrNull() ?: Exception("Falha ao buscar agentes"))
                 
@@ -32,11 +33,11 @@ class CleanupHistoricalDataUseCase @Inject constructor(
                 
                 for (agent in agents) {
                     val housesToRemove = agent.houses.filter {
-                        val d = try { sdf.parse(it.data) } catch (e: Exception) { null }
+                        val d = try { sdf.parse(it.data.replace("/", "-")) } catch (e: Exception) { null }
                         d != null && d.before(limitDate)
                     }
                     val activitiesToRemove = agent.activities.filter {
-                        val d = try { sdf.parse(it.date) } catch (e: Exception) { null }
+                        val d = try { sdf.parse(it.date.replace("/", "-")) } catch (e: Exception) { null }
                         d != null && d.before(limitDate)
                     }
 
@@ -50,25 +51,38 @@ class CleanupHistoricalDataUseCase @Inject constructor(
                 }
             }
             
-            // LOCAL CLEANUP (Current Agent) - always performed if agentName is provided
+            // LOCAL CLEANUP (Current Agent)
             if (agentName.isNotBlank()) {
-                val allLocalHouses = houseRepository.getAllHousesOnce().filter { it.agentName.equals(agentName, ignoreCase = true) }
-                val allLocalActivities = houseRepository.getAllDayActivitiesOnce().filter { it.agentName.equals(agentName, ignoreCase = true) }
+                // repository.getAllHousesOnce and getAllDayActivitiesOnce are now isolated by default
+                val allLocalHouses = houseRepository.getAllHousesOnce(agentName, agentUid)
+                val allLocalActivities = houseRepository.getAllDayActivitiesOnce(agentName, agentUid)
 
                 val localHousesToRemove = allLocalHouses.filter {
-                    val d = try { sdf.parse(it.data) } catch (e: Exception) { null }
+                    val d = try { sdf.parse(it.data.replace("/", "-")) } catch (e: Exception) { null }
                     d != null && d.before(limitDate)
                 }
                 val localActivitiesToRemove = allLocalActivities.filter {
-                    val d = try { sdf.parse(it.date) } catch (e: Exception) { null }
+                    val d = try { sdf.parse(it.date.replace("/", "-")) } catch (e: Exception) { null }
                     d != null && d.before(limitDate)
                 }
 
                 if (localHousesToRemove.isNotEmpty() || localActivitiesToRemove.isNotEmpty()) {
-                    // Delete locally from Room (now handles tombstones automatically)
-                    val datesToDelete = localActivitiesToRemove.map { it.date }
-                    if (datesToDelete.isNotEmpty()) {
-                        houseRepository.deleteByAgentAndDates(agentName, datesToDelete)
+                    // 1. Delete Daily Activities (and record tombstones)
+                    val activityDatesToDelete = localActivitiesToRemove.map { it.date }
+                    if (activityDatesToDelete.isNotEmpty()) {
+                        houseRepository.deleteByAgentAndDates(agentName, activityDatesToDelete, agentUid)
+                    }
+
+                    // 2. Explicitly delete Houses (Independent of activities)
+                    // This ensures we clean up even if a "day" was partially created but has no activity record.
+                    val houseIdsToDelete = localHousesToRemove.map { it.id }
+                    if (houseIdsToDelete.isNotEmpty()) {
+                        houseRepository.updateHouses(localHousesToRemove.map { it.copy(isSynced = false) }) // Ensure tombstones work if needed, OR just delete
+                        // Actually, the repository.deleteByAgentAndDates might already handle houses if it deletes by date.
+                        // But to be safe, we ensure houseRepository has a way to delete specific houses if they don't match activity dates.
+                        
+                        // Let's check houseRepository interface again... it has deleteHouse(house).
+                        localHousesToRemove.forEach { houseRepository.deleteHouse(it) }
                     }
                 }
             }

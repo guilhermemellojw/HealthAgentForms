@@ -51,8 +51,8 @@ class SyncRepositoryImpl @Inject constructor(
             var officialAgentName = existingAgentName.uppercase()
 
             // 1. Fetch Local Data and Tombstones
-            val unsyncedHouses = houseDao.getUnsyncedHouses()
-            val unsyncedActivities = dayActivityDao.getUnsyncedActivities()
+            val unsyncedHouses = houseDao.getUnsyncedHouses(officialAgentName, uid)
+            val unsyncedActivities = dayActivityDao.getUnsyncedActivities(officialAgentName, uid)
             val tombstones = tombstoneDao.getAllTombstones()
 
             // Optimistic return if nothing to do (and not a forced replacement)
@@ -134,7 +134,7 @@ class SyncRepositoryImpl @Inject constructor(
 
             // Activities
             activitiesToPush.forEach { activity ->
-                val activityData = activity.copy(agentName = officialAgentName).toFirestoreMap()
+                val activityData = activity.copy(agentName = officialAgentName, agentUid = uid).toFirestoreMap()
                 operations.add(userDocRef.collection("day_activities").document(activity.date.replace("/", "-")) to activityData)
             }
 
@@ -157,18 +157,27 @@ class SyncRepositoryImpl @Inject constructor(
             operations.add(0, userDocRef to metadata)
 
             // Commit in Batches
-            operations.chunked(400).forEach { chunk ->
+            val chunks = operations.chunked(400)
+            chunks.forEachIndexed { index, chunk ->
                 val batch = firestore.batch()
                 chunk.forEach { (ref, data) ->
                     when (data) {
                         is com.google.firebase.firestore.FieldValue -> batch.delete(ref)
                         is Map<*, *> -> {
-                            // Using set(merge=true) for both metadata and data documents to handle missing/new docs gracefully.
                             @Suppress("UNCHECKED_CAST")
                             batch.set(ref, data as Map<String, Any>, com.google.firebase.firestore.SetOptions.merge())
                         }
                     }
                 }
+                
+                // OPTIMIZATION: Include final metadata update in the LAST batch to save 1 write operation
+                if (index == chunks.size - 1) {
+                    batch.update(userDocRef, mapOf(
+                        "lastSyncTime" to System.currentTimeMillis(),
+                        "lastSyncError" to com.google.firebase.firestore.FieldValue.delete()
+                    ))
+                }
+                
                 kotlinx.coroutines.withTimeout(60000L) { batch.commit().await() }
             }
 
@@ -180,20 +189,22 @@ class SyncRepositoryImpl @Inject constructor(
                     houseDao.markAsSynced(housesToPush.map { it.id })
                 }
                 if (activitiesToPush.isNotEmpty()) {
-                    dayActivityDao.markAsSynced(activitiesToPush.map { it.date }, officialAgentName)
+                    dayActivityDao.markAsSynced(activitiesToPush.map { it.date }, officialAgentName, uid)
                 }
                 if (tombstones.isNotEmpty()) {
                     tombstoneDao.deleteTombstones(tombstones.map { it.id })
                 }
             }
 
-            // Final Metadata Update: Mark success and clear Error
-            userDocRef.update(
-                mapOf(
-                    "lastSyncTime" to System.currentTimeMillis(),
-                    "lastSyncError" to com.google.firebase.firestore.FieldValue.delete()
-                )
-            ).await()
+            // Final Metadata Update: Mark success and clear Error (Handled in batch above if operations existed)
+            if (operations.isEmpty()) {
+                userDocRef.update(
+                    mapOf(
+                        "lastSyncTime" to System.currentTimeMillis(),
+                        "lastSyncError" to com.google.firebase.firestore.FieldValue.delete()
+                    )
+                ).await()
+            }
 
             Result.success(Unit)
         } catch (e: com.google.firebase.firestore.FirebaseFirestoreException) {
@@ -242,10 +253,10 @@ class SyncRepositoryImpl @Inject constructor(
                 }
 
                 val housesSnapshot = agentDoc.reference.collection("houses").get().await()
-                val houses = housesSnapshot.documents.mapNotNull { it.toHouseSafe() }
+                val houses = housesSnapshot.documents.mapNotNull { it.toHouseSafe(uid) }
 
                 val activitiesSnapshot = agentDoc.reference.collection("day_activities").get().await()
-                val activities = activitiesSnapshot.documents.mapNotNull { it.toDayActivitySafe() }
+                val activities = activitiesSnapshot.documents.mapNotNull { it.toDayActivitySafe(uid) }
 
                 // IMPROVEMENT: If agentName is missing in the main doc, recover it from the data
                 if (agentName.isNullOrBlank()) {
@@ -283,7 +294,14 @@ class SyncRepositoryImpl @Inject constructor(
             val isTargetDifferentUser = targetUid != null && targetUid != auth.currentUser?.uid
             
             // 2. Fetch Sync State
-            val lastSync = if (isTargetDifferentUser) 0L else settingsManager.lastSyncTimestamp.first()
+            var lastSync = if (isTargetDifferentUser) 0L else settingsManager.lastSyncTimestamp.first()
+            
+            // RECOVERY: If we think we have a lastSync but the local database is suspiciously empty, FORCE a full pull.
+            // This handles cases like re-installs where DataStore (lastSync) is restored via AutoBackup but Room (DB) is not.
+            if (lastSync > 0 && !isTargetDifferentUser && houseDao.count() == 0) {
+                android.util.Log.w("SyncRepository", "Local database is empty but lastSync is $lastSync. Forcing full pull.")
+                lastSync = 0L
+            }
             
             android.util.Log.i("SyncRepository", "Pulling: Incremental from $lastSync")
             
@@ -307,7 +325,7 @@ class SyncRepositoryImpl @Inject constructor(
                 userDocRef.collection("houses")
                     .whereGreaterThan("lastUpdated", com.google.firebase.Timestamp(lastSync / 1000, ((lastSync % 1000) * 1000000).toInt()))
             }
-            val housesDelta = housesQuery.get().await().documents.mapNotNull { it.toHouseSafe() }
+            val housesDelta = housesQuery.get().await().documents.mapNotNull { it.toHouseSafe(uid) }
             
             val activitiesQuery = if (lastSync == 0L) {
                 userDocRef.collection("day_activities")
@@ -315,10 +333,24 @@ class SyncRepositoryImpl @Inject constructor(
                 userDocRef.collection("day_activities")
                     .whereGreaterThan("lastUpdated", com.google.firebase.Timestamp(lastSync / 1000, ((lastSync % 1000) * 1000000).toInt()))
             }
-            val activitiesDelta = activitiesQuery.get().await().documents.mapNotNull { it.toDayActivitySafe() }
+            val activitiesDelta = activitiesQuery.get().await().documents.mapNotNull { it.toDayActivitySafe(uid) }
 
-            // 4. Fetch Agent Doc for Tombstones and Server Time
+            // 4. Fetch Agent Doc and Recover Metadata if missing
             val agentDoc = userDocRef.get().await()
+            var currentAgentName = agentDoc.getString("agentName") ?: ""
+            
+            // RECOVERY: If agentName is missing in the 'agents' doc, try the 'users' doc (Set by AuthRepository)
+            if (currentAgentName.isBlank()) {
+                currentAgentName = try {
+                    firestore.collection("users").document(uid).get().await().getString("agentName") ?: ""
+                } catch (e: Exception) { "" }
+                
+                // If recovered, store it back to the 'agents' doc for future efficiency
+                if (currentAgentName.isNotBlank()) {
+                    userDocRef.set(mapOf("agentName" to currentAgentName.uppercase()), com.google.firebase.firestore.SetOptions.merge())
+                }
+            }
+
             val serverTime = agentDoc.getTimestamp("lastUpdated")?.toDate()?.time ?: System.currentTimeMillis()
             
             database.withTransaction {
@@ -336,16 +368,22 @@ class SyncRepositoryImpl @Inject constructor(
                         android.util.Log.i("SyncRepository", "Reconciling ${cloudDeletedHouses.size} cloud deletions.")
                         
                         // Delete cloud-tombstoned items locally
-                        val allLocalHouses = houseDao.getAllHouses().first()
-                        allLocalHouses.forEach { house ->
-                            if (house.generateNaturalKey() in cloudDeletedHouses) houseDao.deleteHouse(house)
+                        // Optimization: Avoid full list iteration if tombstone list is small
+                        if (cloudDeletedHouses.isNotEmpty()) {
+                            val allLocalHouses = houseDao.getAllHouses(currentAgentName, uid).first()
+                            val housesToDelete = allLocalHouses.filter { it.generateNaturalKey() in cloudDeletedHouses }
+                            if (housesToDelete.isNotEmpty()) {
+                                housesToDelete.forEach { houseDao.deleteHouse(it) }
+                            }
                         }
                         
-                        cloudDeletedActivities.forEach { tombstone ->
-                            val parts = tombstone.split("|")
-                            val date = parts[0]
-                            val agentName = if (parts.size > 1) parts[1] else agentDoc.getString("agentName") ?: ""
-                            dayActivityDao.deleteDayActivity(date, agentName)
+                        if (cloudDeletedActivities.isNotEmpty()) {
+                             cloudDeletedActivities.forEach { tombstone ->
+                                val parts = tombstone.split("|")
+                                val date = parts[0]
+                                val agentName = if (parts.size > 1) parts[1] else agentDoc.getString("agentName") ?: ""
+                                dayActivityDao.deleteDayActivity(date, agentName, uid)
+                            }
                         }
                         
                         // Clear cloud tombstones once applied locally
@@ -356,29 +394,35 @@ class SyncRepositoryImpl @Inject constructor(
                     }
                 }
 
+                // RECOVERY FROM DATA: If currentAgentName is still blank, try to peek into the pulled data
+                var finalAgentName = currentAgentName.uppercase()
+                if (finalAgentName.isBlank()) {
+                    finalAgentName = (housesDelta.firstOrNull { it.agentName.isNotBlank() }?.agentName 
+                        ?: activitiesDelta.firstOrNull { it.agentName.isNotBlank() }?.agentName
+                        ?: "").uppercase()
+                }
+
                 // 5. Apply Delta Locally
-                val currentAgentName = agentDoc.getString("agentName") ?: ""
-                
-                // Propagate agentName to 'users' collection so AuthRepository emits the updated name
-                if (currentAgentName.isNotBlank() && !isTargetDifferentUser) {
+                // Propagate recovered agentName to 'users' collection so AuthRepository/UI emits the updated name
+                if (finalAgentName.isNotBlank() && currentAgentName.isBlank() && !isTargetDifferentUser) {
                     try {
                         firestore.collection("users").document(uid)
-                            .update("agentName", currentAgentName.uppercase())
+                            .update("agentName", finalAgentName)
                             .await()
                     } catch (e: Exception) {
-                        android.util.Log.e("SyncRepository", "Failed to propagate agentName to user doc", e)
+                        android.util.Log.e("SyncRepository", "Failed to propagate recovered agentName to user doc", e)
                     }
                 }
-                
-                val localHouses = houseDao.getAllHouses().first().groupBy { it.generateNaturalKey() }
-                val localActivities = dayActivityDao.getAllDayActivities().groupBy { "${it.date}|${it.agentName.uppercase()}" }
+
+                val localHouses = houseDao.getAllHouses(finalAgentName, uid).first().groupBy { it.generateNaturalKey() }
+                val localActivities = dayActivityDao.getAllDayActivities(finalAgentName, uid).groupBy { "${it.date}|${it.agentName.uppercase()}" }
                 
                 // PERFORMANCE: Pre-calculate locked dates to avoid repeated lookups
                 val lockedKeys = localActivities.filter { it.value.any { act -> act.isClosed } }.keys
                 
                 val housesToUpsert = housesDelta.mapNotNull { cloudHouse ->
                     val key = cloudHouse.generateNaturalKey()
-                    val dateKey = "${cloudHouse.data}|${currentAgentName.uppercase()}"
+                    val dateKey = "${cloudHouse.data}|${finalAgentName}"
                     
                     // Protection 1: Locked Day Protection
                     if (dateKey in lockedKeys) {
@@ -394,17 +438,24 @@ class SyncRepositoryImpl @Inject constructor(
                         return@mapNotNull null
                     }
 
+                    // REordering Protection: If cloud has listOrder=0 (likely missing field), preserve local order if available
+                    val finalListOrder = if (cloudHouse.listOrder == 0L && existing != null && existing.listOrder != 0L) {
+                        existing.listOrder
+                    } else {
+                        cloudHouse.listOrder
+                    }
+
                     cloudHouse.copy(
                         id = existing?.id ?: 0,
-                        agentName = currentAgentName.uppercase(),
+                        listOrder = finalListOrder,
+                        agentName = finalAgentName,
                         isSynced = true // Pulled data is synced
                     )
                 }
                 
                 val activitiesToUpsert = activitiesDelta.mapNotNull { activity ->
                     val normalizedDate = activity.date.replace("/", "-")
-                    val agentName = currentAgentName.uppercase()
-                    val key = "$normalizedDate|$agentName"
+                    val key = "$normalizedDate|$finalAgentName"
                     
                     // Protection 1: Locked Day Protection
                     val existing = localActivities[key]?.firstOrNull()
@@ -421,7 +472,7 @@ class SyncRepositoryImpl @Inject constructor(
 
                     activity.copy(
                         date = normalizedDate,
-                        agentName = agentName,
+                        agentName = finalAgentName,
                         isSynced = true
                     )
                 }
@@ -580,13 +631,14 @@ class SyncRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>): Result<Unit> {
+    override suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>, agentUid: String?): Result<Unit> {
+        val finalUid = agentUid ?: ""
         return try {
             database.withTransaction {
                 // Deduplicate Houses locally to prevent auto-generated ID duplicates.
                 // We group by the natural key and store a mutable list of existing IDs 
                 // to ensure a 1-to-1 mapping during restoration.
-                val localHouses = houseDao.getAllHouses().first()
+                val localHouses = houseDao.getAllHouses(agentName, finalUid).first()
                 val localHouseGroups = localHouses.groupBy { it.generateNaturalKey() }
                     .mapValues { (_, houses) -> houses.toMutableList() }
                 
@@ -594,6 +646,7 @@ class SyncRepositoryImpl @Inject constructor(
                     val finalAgentName = if (it.agentName.isNotBlank()) it.agentName else agentName
                     it.copy(
                         agentName = finalAgentName.uppercase(),
+                        agentUid = finalUid,
                         date = it.date.replace("/", "-")
                     ) 
                 }
@@ -610,6 +663,7 @@ class SyncRepositoryImpl @Inject constructor(
                     housesToUpsert.add(restoredHouse.copy(
                         id = existingId,
                         agentName = finalAgentName.uppercase(),
+                        agentUid = finalUid,
                         data = restoredHouse.data.replace("/", "-")
                     ))
                 }
@@ -690,7 +744,7 @@ class SyncRepositoryImpl @Inject constructor(
     override suspend fun fetchSystemSettings(): Result<Map<String, Any>> {
         return try {
             val snapshot = withTimeoutOrNull(1500) {
-                firestore.collection("metadata").document("system_settings")
+                firestore.collection("metadata").document("settings")
                     .get().await()
             }
             
@@ -941,7 +995,7 @@ class SyncRepositoryImpl @Inject constructor(
         }
     }
     
-    private fun com.google.firebase.firestore.DocumentSnapshot.toHouseSafe(): House? {
+    private fun com.google.firebase.firestore.DocumentSnapshot.toHouseSafe(uid: String): House? {
         return try {
             val house = this.toObject(House::class.java) ?: return null
             val createdAtRaw = this.get("createdAt")
@@ -957,14 +1011,14 @@ class SyncRepositoryImpl @Inject constructor(
                 is Long -> lastUpdatedRaw
                 else -> house.lastUpdated
             }
-            house.copy(createdAt = createdAt, lastUpdated = lastUpdated)
+            house.copy(createdAt = createdAt, lastUpdated = lastUpdated, agentUid = uid)
         } catch (e: Exception) {
             android.util.Log.e("SyncRepository", "toHouseSafe: Error mapping ${this.id}", e)
             null
         }
     }
 
-    private fun com.google.firebase.firestore.DocumentSnapshot.toDayActivitySafe(): DayActivity? {
+    private fun com.google.firebase.firestore.DocumentSnapshot.toDayActivitySafe(uid: String): DayActivity? {
         return try {
             val activity = this.toObject(DayActivity::class.java) ?: return null
             val lastUpdatedRaw = this.get("lastUpdated")
@@ -974,7 +1028,7 @@ class SyncRepositoryImpl @Inject constructor(
                 is Long -> lastUpdatedRaw
                 else -> activity.lastUpdated
             }
-            activity.copy(lastUpdated = lastUpdated)
+            activity.copy(lastUpdated = lastUpdated, agentUid = uid)
         } catch (e: Exception) {
             android.util.Log.e("SyncRepository", "toDayActivitySafe: Error mapping ${this.id}", e)
             null

@@ -27,8 +27,8 @@ class BackupWorker @AssistedInject constructor(
     override suspend fun doWork(): Result {
         return try {
             Log.d("BackupWorker", "Starting auto-backup...")
-            val houses = repository.getAllHousesOnce()
-            val activities = repository.getAllDayActivitiesOnce()
+            val houses = repository.getAllHousesSnapshot()
+            val activities = repository.getAllDayActivitiesSnapshot()
             val backupData = BackupData(houses, activities)
 
             // Create filename with timestamp

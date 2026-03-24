@@ -5,15 +5,16 @@ import com.antigravity.healthagent.data.local.model.DayActivity
 import kotlinx.coroutines.flow.Flow
 
 interface HouseRepository {
-    fun getAllHouses(): Flow<List<House>>
+    fun getAllHouses(agentName: String, agentUid: String): Flow<List<House>>
     fun getDistinctAgentNames(): Flow<List<String>>
-    fun getAllHousesOrderedByBlock(): Flow<List<House>>
+    fun getAllHousesOrderedByBlock(agentName: String, agentUid: String): Flow<List<House>>
     suspend fun getHouseById(id: Long): House?
-    suspend fun getAllHousesOnce(): List<House> // Snapshot for backup
+    suspend fun getAllHousesOnce(agentName: String, agentUid: String): List<House> // Snapshot for isolated backup
+    suspend fun getAllHousesSnapshot(): List<House> // Full snapshot for auto-backup
     suspend fun insertHouse(house: House)
     suspend fun updateHouse(house: House)
     suspend fun updateHouses(houses: List<House>)
-    suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String)
+    suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String? = null)
     suspend fun deleteHouse(house: House)
     suspend fun replaceAllHouses(houses: List<House>) // Restore
 
@@ -21,14 +22,18 @@ interface HouseRepository {
     fun getDayActivities(dates: List<String>, agentName: String, agentUid: String? = null): Flow<List<DayActivity>>
     fun getDayActivityFlow(date: String, agentName: String, agentUid: String? = null): Flow<DayActivity?>
     suspend fun updateDayActivity(dayActivity: DayActivity)
+    suspend fun deleteDayActivity(date: String, agentName: String, agentUid: String? = null)
     suspend fun <T> runInTransaction(block: suspend () -> T): T
     suspend fun getDayActivity(date: String, agentName: String, agentUid: String? = null): DayActivity?
-    suspend fun getAllDayActivitiesOnce(): List<DayActivity>
+    suspend fun getAllDayActivitiesOnce(agentName: String, agentUid: String): List<DayActivity>
+    suspend fun getAllDayActivitiesSnapshot(): List<DayActivity>
     suspend fun replaceAllDayActivities(activities: List<DayActivity>)
-    suspend fun restoreAgentData(agentName: String, houses: List<House>, activities: List<DayActivity>)
-    suspend fun deleteProduction(date: String, agentName: String) // Deletes houses, might need check
-    suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>)
-    suspend fun countOpenDays(agentName: String): Int
-    suspend fun closeAllDays(agentName: String)
+    suspend fun restoreAgentData(agentName: String, houses: List<House>, activities: List<DayActivity>, agentUid: String? = null)
+    suspend fun deleteProduction(date: String, agentName: String, agentUid: String? = null) 
+    suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>, agentUid: String? = null)
+    suspend fun countOpenDays(agentName: String, agentUid: String? = null): Int
+    suspend fun closeAllDays(agentName: String, agentUid: String? = null)
     suspend fun clearAllData()
+    suspend fun migrateLocalData(agentName: String, email: String, targetUid: String)
+    suspend fun deduplicateAgentData(agentName: String, agentUid: String)
 }

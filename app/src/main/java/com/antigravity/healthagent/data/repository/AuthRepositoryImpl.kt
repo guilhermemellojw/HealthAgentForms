@@ -136,15 +136,26 @@ class AuthRepositoryImpl @Inject constructor(
         // Final Sync: Try to push any unsynced local data to the cloud before clearing
         kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
             try {
-                val houses = houseDao.getAllHouses().first()
-                val activities = activityDao.getAllDayActivities()
-                if (houses.isNotEmpty() || activities.isNotEmpty()) {
-                    android.util.Log.i("AuthRepository", "Performing final sync before logout (${houses.size} houses)...")
-                    val result = syncRepository.pushLocalDataToCloud(houses, activities)
-                    if (result.isSuccess) {
-                        android.util.Log.i("AuthRepository", "Final sync successful.")
-                    } else {
-                        android.util.Log.e("AuthRepository", "Final sync failed: ${result.exceptionOrNull()?.message}")
+                val firebaseUser = auth.currentUser
+                if (firebaseUser != null) {
+                    val userProfile = try { getFullUserData(firebaseUser) } catch(e: Exception) { 
+                        // Fallback: search settingsManager cache if offline
+                        settingsManager.cachedUser.firstOrNull() ?: AuthUser(firebaseUser.uid, firebaseUser.email ?: "", firebaseUser.displayName, null, UserRole.AGENT, false)
+                    }
+                    val agentName = userProfile.agentName ?: ""
+                    val uid = firebaseUser.uid
+
+                    val houses = houseDao.getAllHouses(agentName, uid).first()
+                    val activities = activityDao.getAllDayActivities(agentName, uid)
+                    
+                    if (houses.isNotEmpty() || activities.isNotEmpty()) {
+                        android.util.Log.i("AuthRepository", "Performing final sync before logout for $agentName (${houses.size} houses)...")
+                        val result = syncRepository.pushLocalDataToCloud(houses, activities, uid)
+                        if (result.isSuccess) {
+                            android.util.Log.i("AuthRepository", "Final sync successful.")
+                        } else {
+                            android.util.Log.e("AuthRepository", "Final sync failed: ${result.exceptionOrNull()?.message}")
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -190,27 +201,37 @@ class AuthRepositoryImpl @Inject constructor(
         // 0. CHECK BOOTSTRAP ADMINS
         if (BOOTSTRAP_ADMINS.contains(email)) {
             android.util.Log.i("AuthRepository", "Bootstrap Admin detected: $email")
-            // Proactively ensure they are in the 'admins' collection and authorized
+            // Proactively ensure they are in the 'admins' collection and authorized with timeout
             try {
-                firestore.collection("admins").document(uid).set(mapOf("email" to email)).await()
-                firestore.collection("users").document(uid).update(
-                    "role", UserRole.ADMIN.name,
-                    "isAuthorized", true
-                ).await()
+                withTimeoutOrNull(2000) {
+                    firestore.collection("admins").document(uid).set(mapOf("email" to email)).await()
+                    firestore.collection("users").document(uid).update(
+                        "role", UserRole.ADMIN.name,
+                        "isAuthorized", true
+                    ).await()
+                }
             } catch (e: Exception) {
-                android.util.Log.e("AuthRepository", "Failed to persist bootstrap admin status", e)
-                // If update fails, user might not exist yet, try to create
+                android.util.Log.e("AuthRepository", "Failed to persist bootstrap admin status or timed out", e)
+                // If update fails, user might not exist yet, try to create with timeout
                 try {
-                    val newUser = mapOf(
-                        "email" to email,
-                        "displayName" to firebaseUser.displayName,
-                        "role" to UserRole.ADMIN.name,
-                        "isAuthorized" to true,
-                        "createdAt" to System.currentTimeMillis()
-                    )
-                    firestore.collection("users").document(uid).set(newUser).await()
+                    withTimeoutOrNull(2000) {
+                        val newUser = mapOf(
+                            "email" to email,
+                            "displayName" to firebaseUser.displayName,
+                            "role" to UserRole.ADMIN.name,
+                            "isAuthorized" to true,
+                            "createdAt" to System.currentTimeMillis()
+                        )
+                        firestore.collection("users").document(uid).set(newUser).await()
+                        // Ensure they also have an entry in 'agents' collection for sync consistency
+                        firestore.collection("agents").document(uid).set(mapOf(
+                            "email" to email,
+                            "agentName" to null,
+                            "isPreRegistered" to false
+                        ), com.google.firebase.firestore.SetOptions.merge()).await()
+                    }
                 } catch(e2: Exception) {
-                    android.util.Log.e("AuthRepository", "Failed to create bootstrap admin profile", e2)
+                    android.util.Log.e("AuthRepository", "Failed to create bootstrap admin profile or timed out", e2)
                 }
             }
             return AuthUser(
@@ -227,43 +248,38 @@ class AuthRepositoryImpl @Inject constructor(
         // 1. Immediate Cache Check
         val cached = settingsManager.cachedUser.firstOrNull()
         if (cached != null && cached.uid == uid) {
-            // Start a background refresh but return cached data immediately if we likely have no net
-             android.util.Log.i("AuthRepository", "Returning cached profile for $email")
-             // We continue to check online if needed, but this helps the UI start up
+             android.util.Log.i("AuthRepository", "Checking for updates for $email (cached role: ${cached.role})")
+             // Performance Optimization: If we have a cached user, we can return it if the network is likely off
+             // But we still want to try a refresh to ensure roles/permissions are up to date.
         }
 
-        // 2. Check if we actually have internet by reloading the user with a strict timeout
-        // Reduced timeout to 1.5s for faster offline fallback
-        val isOnline = try {
-            withTimeoutOrNull(1500) {
+        // 2. Combined Network Check: Try to refresh user status and fetch doc in one go
+        // Use a single timeout for EVERYTHING network-related to avoid sequential delays
+        val userStatus = withTimeoutOrNull(2500) {
+            try {
+                // Parallel-ish check (await blocks sequentially but within one timeout)
                 firebaseUser.reload().await()
-                true
-            } ?: false
-        } catch (_: Exception) {
-            false
-        }
-        
-        var userDoc: com.google.firebase.firestore.DocumentSnapshot? = null
-        
-        // 3. Try to get doc from cache first if offline, or from server with timeout if online
-        try {
-            val source = if (isOnline) Source.DEFAULT else Source.CACHE
-            userDoc = withTimeoutOrNull(2000) {
-                firestore.collection("users").document(uid).get(source).await()
+                val doc = firestore.collection("users").document(uid).get(Source.SERVER).await()
+                val isAdminInColl = firestore.collection("admins").document(uid).get().await().exists()
+                Triple(true, doc, isAdminInColl)
+            } catch (e: Exception) { 
+                android.util.Log.w("AuthRepository", "Online check failed: ${e.message}")
+                null 
             }
-        } catch (e: Exception) {
-            android.util.Log.w("AuthRepository", "Firestore fetch failed (source online=$isOnline): ${e.message}")
         }
 
-        // 4. SAFETY FALLBACK: Check if this user is explicitly listed in the 'admins' collection
-        // Only do this if online or if we specifically need to verify admin status during initial login
-        val isAdminInCollection = if (isOnline) {
-             try {
-                withTimeoutOrNull(2000) {
-                    firestore.collection("admins").document(uid).get().await().exists()
-                } ?: false
-            } catch (e: Exception) { false }
-        } else false
+        val isOnline = userStatus?.first ?: false
+        var userDoc = userStatus?.second
+        val isAdminInCollection = userStatus?.third ?: false
+
+        if (!isOnline) {
+            // OFFLINE: Try Firestore cache immediately with very short timeout
+            try {
+                userDoc = withTimeoutOrNull(800) { 
+                    firestore.collection("users").document(uid).get(Source.CACHE).await() 
+                }
+            } catch (_: Exception) {}
+        }
         
         if (userDoc == null && isAdminInCollection) {
             return getAdminFallback(firebaseUser, uid, email)
@@ -312,7 +328,7 @@ class AuthRepositoryImpl @Inject constructor(
                     // After migration, try to get the new document
                     val newAgentDoc = firestore.collection("agents").document(uid).get().await()
                     if (newAgentDoc.exists()) {
-                         migratedAgentName = newAgentDoc.getString("name")
+                         migratedAgentName = newAgentDoc.getString("agentName")
                     }
                 }
 
@@ -445,6 +461,16 @@ class AuthRepositoryImpl @Inject constructor(
             agentName = agentName?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
         )
 
+        // Proactive ID Recovery: Link any orphaned local data to this real UID
+        if (isAuthorized) {
+            try {
+                houseDao.updateAgentUidForAll(user.agentName ?: "", user.email ?: "", user.uid)
+                activityDao.updateAgentUidForAll(user.agentName ?: "", user.email ?: "", user.uid)
+            } catch (e: Exception) {
+                android.util.Log.e("AuthRepository", "Proactive migration failed", e)
+            }
+        }
+
         // Cache the successful profile
         settingsManager.saveUserProfile(user)
         
@@ -519,27 +545,31 @@ class AuthRepositoryImpl @Inject constructor(
         }
     }
 
-    internal suspend fun migratePreRegistration(email: String, targetUid: String) {
+    override suspend fun migratePreRegistration(user: AuthUser): Result<Unit> {
+        val email = user.email ?: return Result.failure(Exception("Email do usuário não disponível para migração"))
+        return migratePreRegistration(email, user.uid)
+    }
+
+    internal suspend fun migratePreRegistration(email: String, targetUid: String): Result<Unit> {
         val preDocId = "pre_${email.replace(".", "_").replace("@", "_")}"
         android.util.Log.i("AuthRepository", "Starting atomic migration for $email to $targetUid")
         
         val batch = firestore.batch()
-        var hasMetadata = false
-        var hasData = false
+        var preAgentName: String? = null
 
         // 1. Prepare Metadata Migration (users collection)
         try {
             val preUserDoc = firestore.collection("users").document(preDocId).get().await()
             if (preUserDoc.exists()) {
                 val updates = mutableMapOf<String, Any?>()
+                preAgentName = preUserDoc.getString("agentName")
+                preAgentName?.let { updates["agentName"] = it }
                 preUserDoc.getString("role")?.let { updates["role"] = it }
-                preUserDoc.getString("agentName")?.let { updates["agentName"] = it }
                 updates["isAuthorized"] = true
                 updates["isPreRegistered"] = false
                 
                 batch.set(firestore.collection("users").document(targetUid), updates, com.google.firebase.firestore.SetOptions.merge())
                 batch.delete(firestore.collection("users").document(preDocId))
-                hasMetadata = true
             }
         } catch (e: Exception) {
             android.util.Log.e("AuthRepository", "Error preparing metadata migration", e)
@@ -558,31 +588,53 @@ class AuthRepositoryImpl @Inject constructor(
                 batch.delete(firestore.collection("agents").document(preDocId))
 
                 // Migrate subcollections (Houses/Activities)
+                // Firestore batch limit is 500. Each sub-doc migration is 2 ops (set+delete).
+                // We'll commit the batch whenever it approaches 450 ops and START A NEW ONE.
+                var opsInBatch = 2 // Metadata + AgentDoc
+                var currentBatch = batch
+
                 val houses = firestore.collection("agents").document(preDocId).collection("houses").get().await()
                 for (h in houses) {
-                    batch.set(newAgentRef.collection("houses").document(h.id), h.data ?: emptyMap<String, Any>())
-                    batch.delete(h.reference)
+                    if (opsInBatch >= 450) {
+                        currentBatch.commit().await()
+                        currentBatch = firestore.batch()
+                        opsInBatch = 0
+                    }
+                    currentBatch.set(newAgentRef.collection("houses").document(h.id), h.data ?: emptyMap<String, Any>())
+                    currentBatch.delete(h.reference)
+                    opsInBatch += 2
                 }
+                
                 val acts = firestore.collection("agents").document(preDocId).collection("day_activities").get().await()
                 for (a in acts) {
-                    batch.set(newAgentRef.collection("day_activities").document(a.id), a.data ?: emptyMap<String, Any>())
-                    batch.delete(a.reference)
+                    if (opsInBatch >= 450) {
+                        currentBatch.commit().await()
+                        currentBatch = firestore.batch()
+                        opsInBatch = 0
+                    }
+                    currentBatch.set(newAgentRef.collection("day_activities").document(a.id), a.data ?: emptyMap<String, Any>())
+                    currentBatch.delete(a.reference)
+                    opsInBatch += 2
                 }
-                hasData = true
+                
+                // Final commit if there are pending ops in the latest batch
+                if (opsInBatch > 0) {
+                    currentBatch.commit().await()
+                }
             }
         } catch (e: Exception) {
             android.util.Log.e("AuthRepository", "Error preparing agent data migration", e)
         }
 
-        // 3. Commit if anything was found
-        if (hasMetadata || hasData) {
-            try {
-                withTimeoutOrNull(10000) { batch.commit().await() }
-                android.util.Log.i("AuthRepository", "Migration committed successfully for $email")
-            } catch (e: Exception) {
-                android.util.Log.e("AuthRepository", "Migration commit failed", e)
-            }
+        // 3. Perform Local Migration (Very Important for offline visibility)
+        try {
+            // We use both name and email to find local records (placeholders) and link to targetUid
+            houseDao.updateAgentUidForAll(preAgentName ?: "", email, targetUid)
+            activityDao.updateAgentUidForAll(preAgentName ?: "", email, targetUid)
+        } catch (e: Exception) {
+            android.util.Log.e("AuthRepository", "Local migration failed", e)
         }
+        return Result.success(Unit)
     }
 
     override suspend fun changeUserRole(uid: String, role: UserRole): Result<Unit> {
@@ -612,7 +664,18 @@ class AuthRepositoryImpl @Inject constructor(
                 }
             }
             
+            
             firestore.collection("users").document(uid).update(finalUpdates).await()
+            
+            // Also ensure agents collection has the basic metadata if it doesn't exist
+            val agentMetadata = mutableMapOf<String, Any?>()
+            if (newAgentName != null) agentMetadata["agentName"] = newAgentName
+            updates["email"]?.let { agentMetadata["email"] = it }
+            
+            if (agentMetadata.isNotEmpty()) {
+                firestore.collection("agents").document(uid).set(agentMetadata, com.google.firebase.firestore.SetOptions.merge()).await()
+            }
+            
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -655,6 +718,12 @@ class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun deleteUser(uid: String): Result<Unit> {
         return try {
+            // Robust cleanup: Delete both Auth-related docs and visit data
+            // We use syncRepository.deleteAgent (which handles subcollections) to avoid orphaned data
+            syncRepository.deleteAgent(uid).onFailure { 
+                android.util.Log.e("AuthRepository", "Failed to delete agent data during user deletion: ${it.message}")
+            }
+
             val batch = firestore.batch()
             batch.delete(firestore.collection("users").document(uid))
             batch.delete(firestore.collection("admins").document(uid))
