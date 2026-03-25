@@ -31,7 +31,9 @@ fun AppModeSelectionDialog(
     ) {
         Card(
             shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+            ),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
             modifier = Modifier.padding(16.dp)
         ) {

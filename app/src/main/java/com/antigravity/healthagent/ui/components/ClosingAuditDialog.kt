@@ -27,7 +27,9 @@ fun ClosingAuditDialog(
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Card(
             shape = RoundedCornerShape(if (isEasyMode) 28.dp else 24.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+            ),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp)
         ) {

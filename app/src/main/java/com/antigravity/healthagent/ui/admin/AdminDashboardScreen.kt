@@ -749,7 +749,8 @@ fun UnifiedProfileCard(
 
     PremiumCard(
         modifier = Modifier.fillMaxWidth(),
-        containerColor = if (profile.isPreRegistered) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surface
+        containerColor = if (profile.isPreRegistered) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) 
+                        else MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             // Header: User Info

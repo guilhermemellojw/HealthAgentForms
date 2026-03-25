@@ -81,7 +81,7 @@ fun SupervisorAgentsScreen(
                 errorMessage?.let { error ->
                     PremiumCard(
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
                     ) {
                         Row(
                             modifier = Modifier.padding(16.dp),
