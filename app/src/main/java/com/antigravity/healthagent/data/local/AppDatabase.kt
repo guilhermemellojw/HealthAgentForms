@@ -11,7 +11,7 @@ import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.CustomStreet
 import com.antigravity.healthagent.data.local.model.Tombstone
 
-@Database(entities = [House::class, DayActivity::class, CustomStreet::class, Tombstone::class], version = 19, exportSchema = false)
+@Database(entities = [House::class, DayActivity::class, CustomStreet::class, Tombstone::class], version = 20, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun houseDao(): HouseDao
@@ -118,6 +118,13 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_18_19 = object : androidx.room.migration.Migration(18, 19) {
             override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE houses ADD COLUMN observation TEXT NOT NULL DEFAULT ''")
+            }
+        }
+        val MIGRATION_19_20 = object : androidx.room.migration.Migration(19, 20) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE houses ADD COLUMN latitude REAL")
+                database.execSQL("ALTER TABLE houses ADD COLUMN longitude REAL")
+                database.execSQL("ALTER TABLE houses ADD COLUMN focusCaptureTime INTEGER")
             }
         }
     }

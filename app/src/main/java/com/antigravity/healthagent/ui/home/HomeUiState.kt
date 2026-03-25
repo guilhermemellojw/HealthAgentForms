@@ -12,6 +12,15 @@ data class SyncStatus(
     val message: String? = null
 )
 
+data class BackupConfirmation(
+    val backupAgentName: String,
+    val currentAgentName: String,
+    val housesCount: Int,
+    val activitiesCount: Int,
+    val uri: android.net.Uri,
+    val isFullRestore: Boolean
+)
+
 data class HomeUiState(
     val houses: List<HouseUiState> = emptyList(),
     val dashboardTotals: DashboardTotals = DashboardTotals(),
@@ -54,5 +63,6 @@ data class HomeUiState(
     val isEasyMode: Boolean = false,
     val isSolarMode: Boolean = false,
     val maxOpenHouses: Int = 25,
-    val syncStatus: SyncStatus = SyncStatus()
+    val syncStatus: SyncStatus = SyncStatus(),
+    val backupConfirmation: BackupConfirmation? = null
 )

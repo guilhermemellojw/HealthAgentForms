@@ -12,14 +12,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import com.antigravity.healthagent.data.local.model.House
+import com.google.android.gms.maps.model.LatLng
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.CheckCircle
 
 @Composable
 fun TreatmentDialog(
     house: House,
     onDismiss: () -> Unit,
     onConfirm: (House) -> Unit,
+    onGetLocation: (callback: (LatLng) -> Unit) -> Unit = {},
     isEasyMode: Boolean = false
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -34,6 +41,37 @@ fun TreatmentDialog(
     var eliminados by remember { androidx.compose.runtime.mutableIntStateOf(house.eliminados) }
     var larvicida by remember { androidx.compose.runtime.mutableDoubleStateOf(house.larvicida) }
     var comFoco by remember { mutableStateOf(house.comFoco) }
+    
+    var latitude by remember { mutableStateOf(house.latitude) }
+    var longitude by remember { mutableStateOf(house.longitude) }
+    var focusCaptureTime by remember { mutableStateOf(house.focusCaptureTime) }
+
+    var showMapPicker by remember { mutableStateOf(false) }
+
+    // Auto-capture GPS if "Com Foco" is checked and we don't have location yet
+    androidx.compose.runtime.LaunchedEffect(comFoco) {
+        if (comFoco && latitude == null && longitude == null) {
+            onGetLocation { latLng ->
+                latitude = latLng.latitude
+                longitude = latLng.longitude
+                focusCaptureTime = System.currentTimeMillis()
+            }
+        }
+    }
+
+    if (showMapPicker) {
+        LocationPickerDialog(
+            initialLocation = if (latitude != null && longitude != null) LatLng(latitude!!, longitude!!) else null,
+            onDismiss = { showMapPicker = false },
+            onConfirm = { latLng ->
+                latitude = latLng.latitude
+                longitude = latLng.longitude
+                focusCaptureTime = System.currentTimeMillis()
+                showMapPicker = false
+            },
+            isEasyMode = isEasyMode
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -169,6 +207,109 @@ fun TreatmentDialog(
                         }
                     }
                 }
+                
+                // Location Capture Section (Only if Com Foco)
+                if (comFoco) {
+                    item {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), thickness = 0.5.dp)
+                        Text(
+                            "Localização do Foco",
+                            fontWeight = FontWeight.Bold,
+                            style = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Status Indicator
+                            if (latitude != null && longitude != null) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f).height(if (isEasyMode) 52.dp else 44.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center,
+                                        modifier = Modifier.padding(horizontal = 8.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.CheckCircle, 
+                                            contentDescription = null, 
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            "Capturado", 
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            } else if (comFoco) {
+                                // Warning for focus without coordinates
+                                Surface(
+                                    color = MaterialTheme.colorScheme.errorContainer,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f).height(if (isEasyMode) 52.dp else 44.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center,
+                                        modifier = Modifier.padding(horizontal = 8.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Warning, 
+                                            contentDescription = null, 
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            "Sem GPS", 
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
+                            }
+
+                            // GPS Button
+                            OutlinedButton(
+                                onClick = {
+                                    onGetLocation { latLng ->
+                                        latitude = latLng.latitude
+                                        longitude = latLng.longitude
+                                        focusCaptureTime = System.currentTimeMillis()
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).height(if (isEasyMode) 52.dp else 44.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp)
+                            ) {
+                                Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("GPS", fontSize = 12.sp)
+                            }
+                            
+                            // Map Button
+                            OutlinedButton(
+                                onClick = { showMapPicker = true },
+                                modifier = Modifier.weight(1f).height(if (isEasyMode) 52.dp else 44.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp)
+                            ) {
+                                Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Mapa", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -187,7 +328,9 @@ fun TreatmentDialog(
                     onClick = {
                         haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                         onConfirm(house.copy(
-                            a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e, eliminados = eliminados, larvicida = larvicida, comFoco = comFoco
+                            a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e, 
+                            eliminados = eliminados, larvicida = larvicida, comFoco = comFoco,
+                            latitude = latitude, longitude = longitude, focusCaptureTime = focusCaptureTime
                         ))
                     },
                     modifier = Modifier.weight(1.3f).height(if (isEasyMode) 52.dp else 48.dp),

@@ -43,13 +43,20 @@ data class House(
     val observation: String = "", // Agent notes for the visit
     val createdAt: Long = System.currentTimeMillis(),
     val isSynced: Boolean = false,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val focusCaptureTime: Long? = null,
     @get:com.google.firebase.firestore.Exclude
     val lastUpdated: Long = System.currentTimeMillis()
 ) {
     @com.google.firebase.firestore.DocumentId
     @androidx.room.Ignore
     var cloudId: String? = null
-    // Helper to generate a consistent natural key for deduplication
+    /**
+     * Generates a stable natural key for synchronization and deduplication.
+     * WARNING: Any modification to the fields used in this key (agentName, agentUid, data, block, street, number, etc.)
+     * will break synchronization by changing the document ID in Firestore, leading to duplicates.
+     */
     fun generateNaturalKey(): String {
         val normalizedDate = data.replace("/", "-")
         val normalizedStreet = streetName.trim().replace(Regex("\\s+"), " ")
@@ -91,6 +98,9 @@ data class House(
             "agentUid" to agentUid,
             "lastSyncTime" to System.currentTimeMillis(),
             "observation" to observation,
+            "latitude" to latitude,
+            "longitude" to longitude,
+            "focusCaptureTime" to focusCaptureTime,
             "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
         )
     }

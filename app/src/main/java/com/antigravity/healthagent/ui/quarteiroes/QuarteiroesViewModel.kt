@@ -10,12 +10,44 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
+import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.data.local.model.House
+import com.antigravity.healthagent.data.settings.SettingsManager
+import com.antigravity.healthagent.domain.repository.AuthRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
+import android.content.Context
+import kotlinx.coroutines.flow.*
 
 @HiltViewModel
 class QuarteiroesViewModel @Inject constructor(
-    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
-    private val kmlManager: KmlManager
+    @ApplicationContext private val context: Context,
+    private val kmlManager: KmlManager,
+    private val houseRepository: HouseRepository,
+    private val settingsManager: SettingsManager,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
+    
+    val focusHouses: StateFlow<List<House>> = combine(
+        settingsManager.cachedUser,
+        settingsManager.remoteAgentUid
+    ) { user, remoteUid ->
+        val name = user?.agentName ?: user?.email ?: ""
+        val uid = remoteUid ?: user?.uid ?: ""
+        name to uid
+    }.flatMapLatest { (name, uid) ->
+        if (name.isNotBlank()) {
+            houseRepository.getAllHouses(name, uid)
+        } else {
+            flowOf(emptyList())
+        }
+    }
+        .map { houses -> 
+            houses.filter { it.comFoco && it.latitude != null && it.longitude != null } 
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     private val _kmlUri = MutableStateFlow<android.net.Uri?>(null)
     val kmlUri: StateFlow<android.net.Uri?> = _kmlUri.asStateFlow()
@@ -246,5 +278,21 @@ class QuarteiroesViewModel @Inject constructor(
                 _mapType.value = com.google.maps.android.compose.MapType.NORMAL
             }
         }
+    }
+
+    fun refreshData() {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                loadSavedKml()
+                kotlinx.coroutines.delay(1000)
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun getCurrentUserUid(): String? {
+        return authRepository.getCurrentUserUid()
     }
 }

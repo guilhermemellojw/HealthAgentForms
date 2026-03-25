@@ -166,9 +166,8 @@ class HouseRepositoryImpl @Inject constructor(
             }
 
             val housesToUpsert = mutableListOf<House>()
-            val normalizedHouses = com.antigravity.healthagent.utils.HouseNormalizationUtils.normalizeHouses(houses)
 
-            normalizedHouses.forEach { restoredHouse ->
+            houses.forEach { restoredHouse ->
                 val key = restoredHouse.generateNaturalKey()
                 // 1-to-1 Mapping: Consume an existing ID if available for this specific key.
                 // This prevents multiple houses from the backup overwriting the same local record.

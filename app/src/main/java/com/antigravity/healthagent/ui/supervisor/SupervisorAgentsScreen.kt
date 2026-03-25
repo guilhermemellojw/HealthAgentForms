@@ -176,7 +176,8 @@ fun SupervisorAgentCard(agent: AgentData) {
                     Text(
                         text = "Sinc: $lastSync",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
                     )
                 }
                 
@@ -208,7 +209,8 @@ fun SupervisorAgentCard(agent: AgentData) {
                     Text(
                         text = "Total de dias registrados: ${agent.activities.size}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
@@ -228,8 +230,8 @@ fun AgentStatItem(label: String, value: String, color: Color = MaterialTheme.col
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.primary
         )
     }
 }

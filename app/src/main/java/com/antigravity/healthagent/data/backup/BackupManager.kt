@@ -148,7 +148,7 @@ class BackupManager @Inject constructor() {
                 lastUpdated = System.currentTimeMillis()
             )
         }
-        return com.antigravity.healthagent.utils.HouseNormalizationUtils.normalizeHouses(mappedHouses)
+        return mappedHouses
     }
 
     private fun sanitizeActivities(activities: List<DayActivity>): List<DayActivity> {

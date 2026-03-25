@@ -73,17 +73,6 @@ class CleanupHistoricalDataUseCase @Inject constructor(
                         houseRepository.deleteByAgentAndDates(agentName, activityDatesToDelete, agentUid)
                     }
 
-                    // 2. Explicitly delete Houses (Independent of activities)
-                    // This ensures we clean up even if a "day" was partially created but has no activity record.
-                    val houseIdsToDelete = localHousesToRemove.map { it.id }
-                    if (houseIdsToDelete.isNotEmpty()) {
-                        houseRepository.updateHouses(localHousesToRemove.map { it.copy(isSynced = false) }) // Ensure tombstones work if needed, OR just delete
-                        // Actually, the repository.deleteByAgentAndDates might already handle houses if it deletes by date.
-                        // But to be safe, we ensure houseRepository has a way to delete specific houses if they don't match activity dates.
-                        
-                        // Let's check houseRepository interface again... it has deleteHouse(house).
-                        localHousesToRemove.forEach { houseRepository.deleteHouse(it) }
-                    }
                 }
             }
 

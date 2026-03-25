@@ -554,13 +554,13 @@ class AuthRepositoryImpl @Inject constructor(
         val preDocId = "pre_${email.replace(".", "_").replace("@", "_")}"
         android.util.Log.i("AuthRepository", "Starting atomic migration for $email to $targetUid")
         
-        val batch = firestore.batch()
         var preAgentName: String? = null
 
         // 1. Prepare Metadata Migration (users collection)
         try {
             val preUserDoc = firestore.collection("users").document(preDocId).get().await()
             if (preUserDoc.exists()) {
+                val metaBatch = firestore.batch()
                 val updates = mutableMapOf<String, Any?>()
                 preAgentName = preUserDoc.getString("agentName")
                 preAgentName?.let { updates["agentName"] = it }
@@ -568,8 +568,9 @@ class AuthRepositoryImpl @Inject constructor(
                 updates["isAuthorized"] = true
                 updates["isPreRegistered"] = false
                 
-                batch.set(firestore.collection("users").document(targetUid), updates, com.google.firebase.firestore.SetOptions.merge())
-                batch.delete(firestore.collection("users").document(preDocId))
+                metaBatch.set(firestore.collection("users").document(targetUid), updates, com.google.firebase.firestore.SetOptions.merge())
+                metaBatch.delete(firestore.collection("users").document(preDocId))
+                metaBatch.commit().await()
             }
         } catch (e: Exception) {
             android.util.Log.e("AuthRepository", "Error preparing metadata migration", e)
@@ -584,15 +585,14 @@ class AuthRepositoryImpl @Inject constructor(
                 agentData["uid"] = targetUid
                 
                 val newAgentRef = firestore.collection("agents").document(targetUid)
-                batch.set(newAgentRef, agentData, com.google.firebase.firestore.SetOptions.merge())
-                batch.delete(firestore.collection("agents").document(preDocId))
+                var currentBatch = firestore.batch()
+                currentBatch.set(newAgentRef, agentData, com.google.firebase.firestore.SetOptions.merge())
+                currentBatch.delete(firestore.collection("agents").document(preDocId))
 
                 // Migrate subcollections (Houses/Activities)
                 // Firestore batch limit is 500. Each sub-doc migration is 2 ops (set+delete).
                 // We'll commit the batch whenever it approaches 450 ops and START A NEW ONE.
                 var opsInBatch = 2 // Metadata + AgentDoc
-                var currentBatch = batch
-
                 val houses = firestore.collection("agents").document(preDocId).collection("houses").get().await()
                 for (h in houses) {
                     if (opsInBatch >= 450) {

@@ -50,7 +50,8 @@ fun HouseRowItem(
 
     isEasyMode: Boolean = false,
     isSolarMode: Boolean = false,
-    focusRequester: androidx.compose.ui.focus.FocusRequester? = null
+    focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
+    onGetLocation: (callback: (com.google.android.gms.maps.model.LatLng) -> Unit) -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
     val house = houseState.house
@@ -114,7 +115,8 @@ fun HouseRowItem(
                 onUpdate(updatedHouse)
                 showTreatmentDialog = false
             },
-            isEasyMode = isEasyMode
+            isEasyMode = isEasyMode,
+            onGetLocation = onGetLocation
         )
     }
 
@@ -160,7 +162,8 @@ fun HouseRowItem(
             isTreated = isTreated,
             animatedBgColor = animatedBgColor,
             isSolarMode = isSolarMode,
-            focusRequester = focusRequester
+            focusRequester = focusRequester,
+            onGetLocation = onGetLocation
         )
     } else {
         Card(
@@ -475,7 +478,8 @@ fun EasyHouseCard(
     isTreated: Boolean,
     animatedBgColor: Color,
     isSolarMode: Boolean = false,
-    focusRequester: androidx.compose.ui.focus.FocusRequester? = null
+    focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
+    onGetLocation: (callback: (com.google.android.gms.maps.model.LatLng) -> Unit) -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -677,6 +681,34 @@ fun EasyHouseCard(
                         tint = if (isTreated) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f) 
                                else Color(0xFF00897B).copy(alpha = 0.5f)
                     )
+                }
+            }
+
+            if (house.comFoco) {
+                val hasCoords = house.latitude != null
+                Surface(
+                    color = if (hasCoords) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.2f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            if (hasCoords) Icons.Default.LocationOn else Icons.Default.GpsOff, 
+                            contentDescription = null, 
+                            tint = if (hasCoords) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error, 
+                            modifier = Modifier.size(16.dp)
+                        )
+                        androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (hasCoords) "Coordenadas registradas" else "Foco sem localização GPS", 
+                            style = MaterialTheme.typography.labelMedium, 
+                            color = if (hasCoords) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
+                            fontWeight = if (hasCoords) FontWeight.Normal else FontWeight.Bold
+                        )
+                    }
                 }
             }
 

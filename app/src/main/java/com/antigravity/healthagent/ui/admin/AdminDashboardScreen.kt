@@ -8,7 +8,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -389,7 +390,17 @@ fun AdminDashboardScreen(
                 TabRow(selectedTabIndex = selectedTab, containerColor = Color.Transparent) {
                     tabs.forEachIndexed { index, title -> Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) }) }
                 }
-                Box(modifier = Modifier.weight(1f)) {
+                
+                val pullToRefreshState = rememberPullToRefreshState()
+                val isRefreshing = uiState is AdminUiState.Loading
+
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = { viewModel.refreshAll() },
+                    state = pullToRefreshState,
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
                     if (selectedTab == 0) {
                         // Gestão Tab (Combined Profiles, Requests, and Master List)
                         Column(modifier = Modifier.fillMaxSize()) {
@@ -477,8 +488,8 @@ fun AdminDashboardScreen(
                                                 UnifiedProfileCard(
                                                     profile = profile,
                                                     agentNamesList = agentNames,
-                                                    onAuthorize = { viewModel.authorizeUser(profile.uid ?: "", it) },
-                                                    onRoleChange = { viewModel.changeUserRole(profile.uid ?: "", it) },
+                                                    onAuthorize = { authorized -> viewModel.authorizeUser(profile.uid ?: "", authorized) },
+                                                    onRoleChange = { role -> viewModel.changeUserRole(profile.uid ?: "", role) },
                                                     onUpdateName = { name ->
                                                         profile.uid?.let { viewModel.updateUserProfile(it, mapOf("agentName" to name)) }
                                                     },
@@ -493,9 +504,6 @@ fun AdminDashboardScreen(
                                                     onDeleteActivity = { uid, date -> confirmTitle = "Excluir Atividade"; confirmMessage = "Deseja excluir este registro de atividade ($date) da nuvem?"; onConfirmAction = { viewModel.deleteAgentActivity(uid, date) }; showConfirmDialog = true },
                                                     onClearSyncError = { profile.uid?.let { viewModel.clearSyncError(it) } },
                                                     onMigrateData = {
-                                                        // We need an AuthUser object for migration. 
-                                                        // profiles list is derived from users and agents. 
-                                                        // Let's find the actual AuthUser from the users list.
                                                         val authUser = users.find { it.uid == profile.uid }
                                                         if (authUser != null) {
                                                             confirmTitle = "Migrar Dados"; confirmMessage = "Deseja migrar os dados de conta não vinculada para este perfil (${authUser.email})?"; onConfirmAction = { viewModel.migrateData(authUser) }; showConfirmDialog = true
@@ -515,12 +523,13 @@ fun AdminDashboardScreen(
             }
         }
     }
+}
 
     if (showAddProfileDialog) {
         AddProfileDialog(
             agentNamesList = agentNames,
             onDismiss = { showAddProfileDialog = false },
-            onConfirm = { email, name, role, authorized ->
+            onConfirm = { email: String?, name: String?, role: UserRole, authorized: Boolean ->
                 if (email != null) {
                     viewModel.createUser(email, role, name, authorized)
                 } else if (name != null) {

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Checkbox
@@ -34,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
@@ -93,6 +96,7 @@ fun QuarteiroesScreen(
     val context = LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val kmlFolders by viewModel.kmlFolders.collectAsState()
+    val focusHouses by viewModel.focusHouses.collectAsState()
 
     var hasLocationPermission by remember {
         mutableStateOf(
@@ -183,15 +187,58 @@ fun QuarteiroesScreen(
         },
         containerColor = Color.Transparent
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-        GoogleMap(
-            modifier = Modifier.fillMaxSize(),
-            cameraPositionState = cameraPositionState,
-            properties = mapProperties,
-            uiSettings = uiSettings
+        val isLoading by viewModel.isLoading.collectAsState()
+        val pullToRefreshState = rememberPullToRefreshState()
+
+        PullToRefreshBox(
+            isRefreshing = isLoading,
+            onRefresh = { viewModel.refreshData() },
+            state = pullToRefreshState,
+            modifier = Modifier.padding(padding).fillMaxSize()
         ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                GoogleMap(
+                    modifier = Modifier.fillMaxSize(),
+                    cameraPositionState = cameraPositionState,
+                    properties = mapProperties,
+                    uiSettings = uiSettings
+                ) {
             // Render visible KML Data
             RenderKmlFolders(folders = kmlFolders)
+            
+            // Render Focus Points (Radar)
+            focusHouses.forEach { house ->
+                val lat = house.latitude
+                val lng = house.longitude
+                if (lat != null && lng != null) {
+                    val position = LatLng(lat, lng)
+                    MarkerComposable(
+                        keys = arrayOf(house.id, position),
+                        state = remember(house.id) { MarkerState(position = position) },
+                        title = "FOCO: ${house.streetName} nº ${house.number}",
+                        snippet = "Quadra: ${house.blockNumber} | ${house.bairro}"
+                    ) {
+                        Box(
+                            modifier = Modifier.size(36.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.error,
+                                shape = androidx.compose.foundation.shape.CircleShape,
+                                modifier = Modifier.fillMaxSize(),
+                                shadowElevation = 4.dp
+                            ) {
+                                Icon(
+                                    Icons.Default.BugReport,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.padding(6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Top Left Controls: Layers (Quarteirões)
@@ -268,13 +315,54 @@ fun QuarteiroesScreen(
             }
         }
 
-        // Bottom Right Controls: My Location and Import
+        // Bottom Right Controls: My Location, Focus Radar and Import
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp),
             horizontalAlignment = Alignment.End
         ) {
+            // Focus Radar Zoom
+            if (focusHouses.isNotEmpty()) {
+                val validFocusHouses = focusHouses.filter { it.latitude != null && it.longitude != null }
+                if (validFocusHouses.isNotEmpty()) {
+                    FloatingActionButton(
+                        onClick = {
+                            scope.launch {
+                                if (validFocusHouses.size == 1) {
+                                    val house = validFocusHouses.first()
+                                    cameraPositionState.animate(
+                                        update = CameraUpdateFactory.newLatLngZoom(
+                                            LatLng(house.latitude!!, house.longitude!!),
+                                            18f
+                                        ),
+                                        durationMs = 800
+                                    )
+                                } else {
+                                    val builder = com.google.android.gms.maps.model.LatLngBounds.builder()
+                                    validFocusHouses.forEach {
+                                        builder.include(LatLng(it.latitude!!, it.longitude!!))
+                                    }
+                                    cameraPositionState.animate(
+                                        update = CameraUpdateFactory.newLatLngBounds(builder.build(), 150),
+                                        durationMs = 800
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier.padding(bottom = 16.dp).size(fabSize),
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.error
+                    ) {
+                        Icon(
+                            Icons.Default.BugReport, 
+                            contentDescription = "Ver Focos",
+                            modifier = Modifier.size(fabIconSize)
+                        )
+                    }
+                }
+            }
+
              FloatingActionButton(
                 onClick = {
                     if (hasLocationPermission) {
@@ -294,7 +382,7 @@ fun QuarteiroesScreen(
                                     Toast.makeText(context, "Localização não encontrada", Toast.LENGTH_SHORT).show()
                                 }
                             }
-                        } catch (e: SecurityException) {
+                        } catch (_: SecurityException) {
                             Toast.makeText(context, "Erro ao obter localização", Toast.LENGTH_SHORT).show()
                         }
                     } else {
@@ -349,7 +437,7 @@ fun QuarteiroesScreen(
                     kmlFolders.forEach { folder ->
                         FolderItem(
                             folder = folder, 
-                            onToggle = { id, isVisible ->
+                            onToggle = { id: String, isVisible: Boolean ->
                                 viewModel.toggleFolderVisibility(id, isVisible)
                             },
                             isEasyMode = isEasyMode
@@ -359,6 +447,7 @@ fun QuarteiroesScreen(
                 }
             }
         }
+    }
     }
 }
 }
@@ -457,7 +546,7 @@ fun RenderGeometry(geometry: KmlGeometry, style: KmlStyle?, name: String, descri
 
             MarkerComposable(
                 keys = arrayOf(iconBitmap ?: Unit, geometry.coordinate), // Force Re-render when bitmap loads
-                state = MarkerState(position = geometry.coordinate),
+                state = remember(geometry.coordinate) { MarkerState(position = geometry.coordinate) },
                 title = name,
                 snippet = description,
                 alpha = if (tintColor != null) tintColor.alpha else 1f

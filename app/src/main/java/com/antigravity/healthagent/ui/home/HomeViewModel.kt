@@ -163,6 +163,9 @@ class HomeViewModel @Inject constructor(
     private val _duplicateHouseConfirmation = MutableStateFlow<House?>(null)
     val duplicateHouseConfirmation: StateFlow<House?> = _duplicateHouseConfirmation.asStateFlow()
 
+    private val _backupConfirmation = MutableStateFlow<BackupConfirmation?>(null)
+    val backupConfirmation: StateFlow<BackupConfirmation?> = _backupConfirmation.asStateFlow()
+
     // --- State Injections ---
     val easyMode: StateFlow<Boolean> = settingsManager.easyMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -278,14 +281,6 @@ class HomeViewModel @Inject constructor(
         repository.getAllHouses(name, effectiveUid) 
     }
 
-    // List of agent names for selection
-    val agentNames: StateFlow<List<String>> = combine(_agentNames, repository.getDistinctAgentNames()) { remote, local ->
-        (remote + local)
-            .map { it.trim().uppercase() }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .sorted()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val isDayClosed: StateFlow<Boolean> = combine(_data, _agentName, _remoteAgentUid, _currentUserUid) { date, name, remoteUid, currentUid ->
         val effectiveUid = remoteUid ?: currentUid
@@ -434,7 +429,7 @@ class HomeViewModel @Inject constructor(
             weekRangeText, customActivities, settingsManager.easyMode, settingsManager.solarMode,
             settingsManager.maxOpenHouses, rgBlocks, weeklySummary, boletimList,
             bairrosList, rgBairros, _syncStatus, weeklySummaryTotals, isDayClosed,
-            weeklyObservations
+            weeklyObservations, _backupConfirmation
         ) { args ->
             val h = args[0] as List<House>
             val d = args[1] as String
@@ -494,7 +489,8 @@ class HomeViewModel @Inject constructor(
                     maxOpenHouses = args[28] as Int,
                     rgBairros = args[33] as List<String>,
                     syncStatus = args[34] as SyncStatus,
-                    weeklySummaryTotals = args[35] as WeeklySummaryTotals
+                    weeklySummaryTotals = args[35] as WeeklySummaryTotals,
+                    backupConfirmation = args[38] as BackupConfirmation?
                 )
             }
         }.launchIn(viewModelScope)
@@ -1638,7 +1634,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             val activity = dayManagementUseCase.getDayActivity(d, _agentName.value)
             if (activity?.isClosed == true) {
-                dayManagementUseCase.unlockDay(d, _agentName.value)
+                dayManagementUseCase.unlockDay(d, _agentName.value, _remoteAgentUid.value)
             }
             _data.value = d
             _showMultiDayErrorDialog.value = false
@@ -1667,10 +1663,8 @@ class HomeViewModel @Inject constructor(
     fun backupData(context: Context, uri: android.net.Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val currentAgent = _agentName.value
-                val currentUid = _remoteAgentUid.value ?: ""
-                val h = repository.getAllHousesOnce(currentAgent, currentUid)
-                val a = repository.getAllDayActivitiesOnce(currentAgent, currentUid)
+                val h = repository.getAllHousesSnapshot()
+                val a = repository.getAllDayActivitiesSnapshot()
                 BackupManager().exportData(context, uri, BackupData(h, a))
                 withContext(Dispatchers.Main) {
                     _uiEvent.value = "Backup concluído com sucesso!"
@@ -1686,10 +1680,8 @@ class HomeViewModel @Inject constructor(
     fun backupDataAndShare(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val currentAgent = _agentName.value
-                val currentUid = _remoteAgentUid.value ?: ""
-                val h = repository.getAllHousesOnce(currentAgent, currentUid)
-                val a = repository.getAllDayActivitiesOnce(currentAgent, currentUid)
+                val h = repository.getAllHousesSnapshot()
+                val a = repository.getAllDayActivitiesSnapshot()
                 val backupData = BackupData(h, a)
                 
                 // Generate Filename
@@ -1740,61 +1732,118 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val backupData = BackupManager().importData(context, uri)
-                var targetAgent = _agentName.value.trim()
+                val currentAgent = _agentName.value.trim().uppercase()
                 
-                // Smart Agent Adoption: If current is blank, try to find one in the backup
-                val agentsInBackup = (backupData.houses.map { it.agentName } + backupData.dayActivities.map { it.agentName })
+                // Detection: Find the agent name in the backup
+                val backupAgent = (backupData.houses.map { it.agentName } + backupData.dayActivities.map { it.agentName })
                     .filter { it.isNotBlank() }
                     .distinct()
+                    .firstOrNull()?.trim()?.uppercase() ?: ""
                 
-                if (targetAgent.isBlank() && agentsInBackup.isNotEmpty()) {
-                    targetAgent = agentsInBackup.first()
-                    withContext(Dispatchers.Main) {
-                        _agentName.value = targetAgent
-                    }
+                // Mismatch Check
+                if (currentAgent.isNotBlank() && backupAgent.isNotBlank() && currentAgent != backupAgent) {
+                    _backupConfirmation.value = BackupConfirmation(
+                        backupAgentName = backupAgent,
+                        currentAgentName = currentAgent,
+                        housesCount = backupData.houses.size,
+                        activitiesCount = backupData.dayActivities.size,
+                        uri = uri,
+                        isFullRestore = true
+                    )
+                    return@launch
                 }
 
-                // Ensure all restored data belongs to the target agent unconditionally
-                val sanitizedHouses = backupData.houses.map { 
-                    it.copy(id = 0, agentName = targetAgent) 
-                }
-                val sanitizedActivities = backupData.dayActivities.map { 
-                    it.copy(agentName = targetAgent) 
-                }
-
-                // If it's a full restore, we might want to restore ALL agents data 
-                // but usually the UI expects to restore into "some" context. 
-                // To be safe and compatible with repository.restoreAgentData:
-                if (targetAgent.isNotBlank()) {
-                     repository.restoreAgentData(targetAgent, sanitizedHouses, sanitizedActivities)
-                } else {
-                     // Fallback to replacing all if no agent context at all (rare)
-                     repository.replaceAllHouses(sanitizedHouses)
-                     repository.replaceAllDayActivities(sanitizedActivities)
-                }
-                
-                // 3. Push to cloud with replacement to ensure consistency
-                val pushResult = syncRepository.pushLocalDataToCloud(
-                    houses = sanitizedHouses,
-                    activities = sanitizedActivities,
-                    targetUid = _remoteAgentUid.value,
-                    shouldReplace = true
-                )
-
-                withContext(Dispatchers.Main) {
-                    if (pushResult.isSuccess) {
-                        _uiEvent.value = "Backup restaurado com sucesso (Local e Nuvem)!"
-                    } else {
-                        _uiEvent.value = "Backup restaurado localmente, mas falhou ao atualizar nuvem: ${pushResult.exceptionOrNull()?.message}"
-                    }
-                    soundManager.playPop()
-                }
+                performRestore(context, uri, backupData)
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     _uiEvent.value = "Erro ao restaurar backup: ${e.message}"
                     soundManager.playWarning()
                 }
             }
+        }
+    }
+
+    private suspend fun performRestore(context: Context, uri: android.net.Uri, backupData: BackupData) {
+        try {
+            var targetAgent = _agentName.value.trim()
+            
+            // Smart Agent Adoption: If current is blank, try to find one in the backup
+            val agentsInBackup = (backupData.houses.map { it.agentName } + backupData.dayActivities.map { it.agentName })
+                .filter { it.isNotBlank() }
+                .distinct()
+            
+            if (targetAgent.isBlank() && agentsInBackup.isNotEmpty()) {
+                targetAgent = agentsInBackup.first()
+                withContext(Dispatchers.Main) {
+                    _agentName.value = targetAgent
+                }
+            }
+
+            // Ensure all restored data belongs to the target agent context
+            val sanitizedHouses = backupData.houses.map { 
+                it.copy(id = 0, agentName = targetAgent) 
+            }
+            val sanitizedActivities = backupData.dayActivities.map { 
+                it.copy(agentName = targetAgent) 
+            }
+
+            if (targetAgent.isNotBlank()) {
+                 repository.restoreAgentData(targetAgent, sanitizedHouses, sanitizedActivities)
+            } else {
+                 repository.replaceAllHouses(sanitizedHouses)
+                 repository.replaceAllDayActivities(sanitizedActivities)
+            }
+            
+            val pushResult = syncRepository.pushLocalDataToCloud(
+                houses = sanitizedHouses,
+                activities = sanitizedActivities,
+                targetUid = _remoteAgentUid.value,
+                shouldReplace = true
+            )
+
+            withContext(Dispatchers.Main) {
+                if (pushResult.isSuccess) {
+                    _uiEvent.value = "Backup restaurado com sucesso (Local e Nuvem)!"
+                } else {
+                    _uiEvent.value = "Backup restaurado localmente, mas falhou ao atualizar nuvem: ${pushResult.exceptionOrNull()?.message}"
+                }
+                soundManager.playPop()
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                _uiEvent.value = "Erro na finalização do restauro: ${e.message}"
+                soundManager.playWarning()
+            }
+        }
+    }
+
+    fun confirmBackupImport(context: Context) {
+        val confirmation = _backupConfirmation.value ?: return
+        val uri = confirmation.uri
+        val isFullRestore = confirmation.isFullRestore
+        _backupConfirmation.value = null
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val backupData = BackupManager().importData(context, uri)
+                if (isFullRestore) {
+                    performRestore(context, uri, backupData)
+                } else {
+                    performImportDayData(context, uri, backupData)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    _uiEvent.value = "Erro ao processar confirmação: ${e.message}"
+                    soundManager.playWarning()
+                }
+            }
+        }
+    }
+
+    fun cancelBackupImport() {
+        if (_backupConfirmation.value != null) {
+            _backupConfirmation.value = null
+            _uiEvent.value = "Importação cancelada pelo usuário."
         }
     }
 
@@ -1880,54 +1929,88 @@ class HomeViewModel @Inject constructor(
     fun importDayData(context: Context, uri: android.net.Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                var targetAgent = _agentName.value.trim()
                 val backupData = BackupManager().importData(context, uri)
+                val currentAgent = _agentName.value.trim().uppercase()
                 
-                val agentsInBackup = backupData.houses.map { it.agentName }.filter { it.isNotBlank() }.distinct()
+                val backupAgent = (backupData.houses.map { it.agentName } + backupData.dayActivities.map { it.agentName })
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .firstOrNull()?.trim()?.uppercase() ?: ""
+
+                if (currentAgent.isNotBlank() && backupAgent.isNotBlank() && currentAgent != backupAgent) {
+                   _backupConfirmation.value = BackupConfirmation(
+                       backupAgentName = backupAgent,
+                       currentAgentName = currentAgent,
+                       housesCount = backupData.houses.size,
+                       activitiesCount = backupData.dayActivities.size,
+                       uri = uri,
+                       isFullRestore = false
+                   )
+                   return@launch
+                }
                 
-                if (targetAgent.isBlank() && agentsInBackup.isNotEmpty()) {
-                    targetAgent = agentsInBackup.first()
-                    withContext(Dispatchers.Main) {
-                        _agentName.value = targetAgent
-                    }
-                }
-
-                val currentHouses = houses.value
-                val existingHouseKeys = currentHouses.map { it.generateNaturalKey() }.toSet()
-
-                var importedCount = 0
-                var skippedCount = 0
-
-                // Assign imported houses to the target agent to prevent mixing unconditionally
-                backupData.houses.forEach { house ->
-                    val sanitizedHouse = house.copy(id = 0, agentName = targetAgent)
-                    val key = sanitizedHouse.generateNaturalKey()
-                    
-                    if (!existingHouseKeys.contains(key)) {
-                        repository.insertHouse(sanitizedHouse)
-                        importedCount++
-                    } else {
-                        skippedCount++
-                    }
-                }
-
-                // Also assign activities unconditionally
-                backupData.dayActivities.forEach { 
-                    repository.updateDayActivity(it.copy(agentName = targetAgent)) 
-                }
-
-                withContext(Dispatchers.Main) {
-                    val message = if (skippedCount > 0) {
-                        "Importado: $importedCount, Ignorado (duplicado): $skippedCount"
-                    } else {
-                        "Dados importados com sucesso ($importedCount imóveis)"
-                    }
-                    _uiEvent.value = message
-                }
+                performImportDayData(context, uri, backupData)
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    _uiEvent.value = "Erro ao importar dados: ${e.message}"
+                    _uiEvent.value = "Erro ao importar: ${e.message}"
+                    soundManager.playWarning()
                 }
+            }
+        }
+    }
+
+    private suspend fun performImportDayData(context: Context, uri: android.net.Uri, backupData: BackupData) {
+        try {
+            var targetAgent = _agentName.value.trim()
+            val agentsInBackup = (backupData.houses.map { it.agentName } + backupData.dayActivities.map { it.agentName })
+                .filter { it.isNotBlank() }
+                .distinct()
+            
+            if (targetAgent.isBlank() && agentsInBackup.isNotEmpty()) {
+                targetAgent = agentsInBackup.first()
+                withContext(Dispatchers.Main) {
+                    _agentName.value = targetAgent
+                }
+            }
+
+            val currentHouses = houses.value
+            val existingHouseKeys = currentHouses.map { it.generateNaturalKey() }.toSet()
+
+            var importedCount = 0
+            var skippedCount = 0
+
+            // Multi-tenant safe re-assignment to targetAgent
+            val targetUid = _remoteAgentUid.value ?: _currentUserUid.value
+            backupData.houses.forEach { house ->
+                val sanitizedHouse = house.copy(id = 0, agentName = targetAgent, agentUid = targetUid)
+                val key = sanitizedHouse.generateNaturalKey()
+                
+                if (!existingHouseKeys.contains(key)) {
+                    repository.insertHouse(sanitizedHouse)
+                    importedCount++
+                } else {
+                    skippedCount++
+                }
+            }
+
+            // Also assign activities unconditionally
+            backupData.dayActivities.forEach { 
+                repository.updateDayActivity(it.copy(agentName = targetAgent, agentUid = targetUid)) 
+            }
+            
+            withContext(Dispatchers.Main) {
+                val message = if (skippedCount > 0) {
+                    "Importado: $importedCount, Ignorado (duplicado): $skippedCount"
+                } else {
+                    "Dados importados com sucesso ($importedCount imóveis)"
+                }
+                _uiEvent.value = message
+                soundManager.playPop()
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                _uiEvent.value = "Erro na finalização da importação: ${e.message}"
+                soundManager.playWarning()
             }
         }
     }

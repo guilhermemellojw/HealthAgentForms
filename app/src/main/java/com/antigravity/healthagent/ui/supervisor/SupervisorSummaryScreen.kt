@@ -10,6 +10,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,16 +70,24 @@ fun SupervisorSummaryScreen(
         },
         containerColor = Color.Transparent
     ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-            MeshGradient(modifier = Modifier.fillMaxSize())
-            
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
+        val pullToRefreshState = rememberPullToRefreshState()
+
+        PullToRefreshBox(
+            isRefreshing = isLoading,
+            onRefresh = { viewModel.refreshData() },
+            state = pullToRefreshState,
+            modifier = Modifier.padding(paddingValues).fillMaxSize()
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                MeshGradient(modifier = Modifier.fillMaxSize())
+                
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
                 // Error Message
                 errorMessage?.let { error ->
                     PremiumCard(
@@ -254,7 +264,8 @@ fun SupervisorSummaryScreen(
                 Text(
                     text = "Este resumo contempla todos os registros enviados pelos agentes para o período selecionado.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Medium,
                     lineHeight = 16.sp,
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
@@ -269,6 +280,7 @@ fun SupervisorSummaryScreen(
             }
         }
     }
+}
 }
 
 @Composable
@@ -303,8 +315,8 @@ fun StatItem(
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.primary,
             textAlign = TextAlign.Center
         )
     }
@@ -365,7 +377,8 @@ fun StatDetailsDialog(
                         Text(
                             text = "Nenhum dado registrado",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 } else {
@@ -394,7 +407,8 @@ fun StatDetailsDialog(
                                     Text(
                                         text = detail.agentEmail,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold,
                                         maxLines = 1,
                                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                     )
@@ -421,5 +435,7 @@ fun StatDetailsDialog(
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
-    }
+
+}
+
 }

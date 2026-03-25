@@ -392,7 +392,7 @@ fun PremiumCard(
     isSolarMode: Boolean = false,
     onClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(16.dp),
-    containerColor: Color = if (isSolarMode) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+    containerColor: Color = if (isSolarMode) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
     content: @Composable ColumnScope.() -> Unit
 ) {
     Card(

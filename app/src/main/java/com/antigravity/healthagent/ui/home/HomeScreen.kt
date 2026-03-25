@@ -25,6 +25,13 @@ import androidx.compose.ui.unit.*
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import android.widget.Toast
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.maps.model.LatLng
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.ui.components.*
@@ -70,6 +77,36 @@ fun HomeScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    
+    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+    var locationPermissionGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        locationPermissionGranted = isGranted
+    }
+
+    val onGetLocation: (callback: (LatLng) -> Unit) -> Unit = { callback ->
+        if (locationPermissionGranted) {
+            try {
+                fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+                    if (location != null) {
+                        callback(LatLng(location.latitude, location.longitude))
+                    } else {
+                        Toast.makeText(context, "Buscando localização...", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: SecurityException) {
+                locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+        } else {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
 
     val uiState by viewModel.uiState.collectAsState()
     val uiEvent by viewModel.uiEvent.collectAsState()
@@ -890,10 +927,9 @@ fun HomeScreen(
                         onEnableReorder = onEnableReorder,
                         onMoveDate = onMoveDate,
                         streetSuggestions = streetSuggestions,
-                        enabled = !uiState.isDayClosed,
-                        isEasyMode = uiState.isEasyMode,
                         isSolarMode = uiState.isSolarMode,
-                        focusRequester = focusRequester
+                        focusRequester = focusRequester,
+                        onGetLocation = onGetLocation
                     )
                     }
                 }
