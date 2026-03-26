@@ -2,8 +2,17 @@ package com.antigravity.healthagent.data.local.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.Index
 
-@Entity(tableName = "houses")
+@Entity(
+    tableName = "houses",
+    indices = [
+        Index(
+            value = ["agentUid", "agentName", "data", "blockNumber", "blockSequence", "streetName", "number", "sequence", "complement", "bairro", "visitSegment"],
+            unique = true
+        )
+    ]
+)
 data class House(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val blockNumber: String = "",

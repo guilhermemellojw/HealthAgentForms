@@ -61,7 +61,17 @@ class HouseRepositoryImpl @Inject constructor(
 
     override suspend fun updateHouse(house: House) {
         ensureDayNotLocked(house.data, house.agentName, house.agentUid)
-        houseDao.updateHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
+        database.withTransaction {
+            val existing = houseDao.getHouseById(house.id.toLong())
+            if (existing != null) {
+                val oldKey = existing.generateNaturalKey()
+                val newKey = house.generateNaturalKey()
+                if (oldKey != newKey) {
+                    tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = oldKey))
+                }
+            }
+            houseDao.updateHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
+        }
         syncScheduler.scheduleSync()
     }
 
@@ -74,7 +84,19 @@ class HouseRepositoryImpl @Inject constructor(
             ensureDayNotLocked(date, agent, uid)
         }
         
-        houseDao.updateAll(houses.map { it.copy(isSynced = false, lastUpdated = System.currentTimeMillis()) })
+        database.withTransaction {
+            houses.forEach { house ->
+                val existing = houseDao.getHouseById(house.id.toLong())
+                if (existing != null) {
+                    val oldKey = existing.generateNaturalKey()
+                    val newKey = house.generateNaturalKey()
+                    if (oldKey != newKey) {
+                        tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = oldKey))
+                    }
+                }
+            }
+            houseDao.updateAll(houses.map { it.copy(isSynced = false, lastUpdated = System.currentTimeMillis()) })
+        }
         syncScheduler.scheduleSync()
     }
 
@@ -82,7 +104,14 @@ class HouseRepositoryImpl @Inject constructor(
         val finalUid = agentUid ?: ""
         ensureDayNotLocked(oldDate, agentName, finalUid)
         ensureDayNotLocked(newDate, agentName, finalUid)
-        houseDao.updateHousesDate(oldDate, newDate, agentName, finalUid)
+        
+        database.withTransaction {
+            val houses = houseDao.getHousesByDateAndAgent(oldDate, agentName.uppercase(), finalUid)
+            val tombstones = houses.map { Tombstone(type = TombstoneType.HOUSE, naturalKey = it.generateNaturalKey()) }
+            tombstoneDao.insertTombstones(tombstones)
+            
+            houseDao.updateHousesDate(oldDate, newDate, agentName, finalUid)
+        }
         syncScheduler.scheduleSync()
     }
 

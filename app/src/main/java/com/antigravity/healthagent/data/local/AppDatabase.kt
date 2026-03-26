@@ -11,7 +11,7 @@ import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.CustomStreet
 import com.antigravity.healthagent.data.local.model.Tombstone
 
-@Database(entities = [House::class, DayActivity::class, CustomStreet::class, Tombstone::class], version = 20, exportSchema = false)
+@Database(entities = [House::class, DayActivity::class, CustomStreet::class, Tombstone::class], version = 21, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun houseDao(): HouseDao
@@ -20,6 +20,22 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun tombstoneDao(): com.antigravity.healthagent.data.local.dao.TombstoneDao
 
     companion object {
+        val MIGRATION_20_21 = object : androidx.room.migration.Migration(20, 21) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // 1. Delete existing duplicates to prevent migration failure
+                database.execSQL("""
+                    DELETE FROM houses WHERE id NOT IN (
+                        SELECT MIN(id) FROM houses 
+                        GROUP BY agentUid, agentName, data, blockNumber, blockSequence, streetName, number, IFNULL(sequence, 0), IFNULL(complement, 0), bairro, visitSegment
+                    )
+                """)
+                // 2. Create the unique index
+                database.execSQL("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS `index_houses_agentUid_agentName_data_blockNumber_blockSequence_streetName_number_sequence_complement_bairro_visitSegment` 
+                    ON `houses` (`agentUid`, `agentName`, `data`, `blockNumber`, `blockSequence`, `streetName`, `number`, `sequence`, `complement`, `bairro`, `visitSegment`)
+                """)
+            }
+        }
         val MIGRATION_12_13 = object : androidx.room.migration.Migration(12, 13) {
             override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
                 // 1. Create the new table
