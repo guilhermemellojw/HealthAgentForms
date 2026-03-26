@@ -27,8 +27,8 @@ class GetRGBlocksUseCase @Inject constructor() {
         val bairroHouses = allHouses.filter { it.bairro.equals(selectedBairro, ignoreCase = true) }
         val segments = mutableListOf<BlockSegment>()
         
-        // Use createdAt for global chronological sorting across multiple agents (perfect for offline pairs)
-        val sortedHouses = bairroHouses.sortedWith(compareBy({ getTimestamp(it.data) }, { it.createdAt }))
+        // Use listOrder for internal house sequence (supports manual reordering)
+        val sortedHouses = bairroHouses.sortedWith(compareBy({ getTimestamp(it.data) }, { it.listOrder }))
         val groupedByBlock = sortedHouses.groupBy { Pair(it.blockNumber, it.blockSequence) }
         
         groupedByBlock.keys.sortedWith(compareBy({ it.first.padStart(10, '0') }, { it.second.padStart(10, '0') })).forEach { key ->
@@ -52,7 +52,7 @@ class GetRGBlocksUseCase @Inject constructor() {
                 // 3. Complete all of the first agent's houses before moving to the next
                 val dayHouses = dayHousesForBlock.sortedWith(compareBy(
                     { sortedAgents.indexOf(it.agentName) },
-                    { it.createdAt }
+                    { it.listOrder }
                 ))
                 
                 currentSegmentHouses.addAll(dayHouses)
@@ -62,7 +62,7 @@ class GetRGBlocksUseCase @Inject constructor() {
                 
                 // Auto-Conclusion logic: did the agent(s) work on something else AFTER this block on the same day?
                 // We sort all global work that day by absolute creation time to detect block transitions
-                val allWorkThatDay = allHouses.filter { it.data == date }.sortedBy { it.createdAt }
+                val allWorkThatDay = allHouses.filter { it.data == date }.sortedBy { it.listOrder }
                 val indexOfLast = allWorkThatDay.indexOfFirst { it.id == lastHouseOfDay.id }
                 val autoConcluded = indexOfLast != -1 && indexOfLast < allWorkThatDay.size - 1
                 

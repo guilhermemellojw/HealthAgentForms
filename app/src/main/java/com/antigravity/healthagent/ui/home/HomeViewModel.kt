@@ -281,6 +281,9 @@ class HomeViewModel @Inject constructor(
         repository.getAllHouses(name, effectiveUid) 
     }
 
+    // Global list for RG view (all agents)
+    private val globalHousesFlow = repository.getAllHousesSnapshotFlow()
+
 
     val isDayClosed: StateFlow<Boolean> = combine(_data, _agentName, _remoteAgentUid, _currentUserUid) { date, name, remoteUid, currentUid ->
         val effectiveUid = remoteUid ?: currentUid
@@ -383,7 +386,7 @@ class HomeViewModel @Inject constructor(
         }.distinct().sortedDescending()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(Calendar.getInstance().get(Calendar.YEAR).toString()))
 
-    val rgBlocks: StateFlow<List<BlockSegment>> = combine(allHousesFlow, _selectedRgBairro, _rgYear) { h, b, y ->
+    val rgBlocks: StateFlow<List<BlockSegment>> = combine(globalHousesFlow, _selectedRgBairro, _rgYear) { h, b, y ->
         getRGBlocksUseCase(h, b, y)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -405,9 +408,8 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    val rgBairros: StateFlow<List<String>> = combine(allHousesFlow, _rgYear, _agentName) { all, year, agent ->
+    val rgBairros: StateFlow<List<String>> = combine(globalHousesFlow, _rgYear) { all, year ->
         filterByYear(all, year)
-            .filter { it.agentName.equals(agent, ignoreCase = true) }
             .map { it.bairro.trim().formatStreetName() }
             .distinct()
             .sorted()

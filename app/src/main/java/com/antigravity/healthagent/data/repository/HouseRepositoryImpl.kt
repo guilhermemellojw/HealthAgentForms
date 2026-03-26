@@ -53,6 +53,10 @@ class HouseRepositoryImpl @Inject constructor(
         return houseDao.getAllHousesSnapshot()
     }
 
+    override fun getAllHousesSnapshotFlow(): kotlinx.coroutines.flow.Flow<List<House>> {
+        return houseDao.getAllHousesSnapshotFlow()
+    }
+
     override suspend fun insertHouse(house: House) {
         ensureDayNotLocked(house.data, house.agentName, house.agentUid)
         houseDao.insertHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
