@@ -276,7 +276,6 @@ fun HomeScreen(
     val situationLimitHouse by viewModel.situationLimitConfirmation.collectAsState()
     if (situationLimitHouse != null) {
         SituationLimitDialog(
-            onConfirm = { viewModel.confirmSituationExceeded() },
             onDismiss = { viewModel.dismissSituationLimitConfirmation() },
             isEasyMode = uiState.isEasyMode
         )
@@ -382,7 +381,7 @@ fun HomeScreen(
         }
     }
 
-    if (showLongPressMenu && houseToMove != null && !uiState.isSupervisor) {
+    if (showLongPressMenu && houseToMove != null && (!uiState.isSupervisor || uiState.isAdmin)) {
         AlertDialog(
             onDismissRequest = { showLongPressMenu = false; houseToMove = null },
             title = { Text("Opções do Imóvel") },
@@ -548,10 +547,20 @@ fun HomeScreen(
                                 }
                             }
                         ) {
+                            val lockerColor = when {
+                                uiState.isDayClosed -> MaterialTheme.colorScheme.error
+                                uiState.isManualUnlock -> Color(0xFFFF9800) // Orange/Amber for manual override
+                                else -> MaterialTheme.colorScheme.onPrimary
+                            }
                             Icon(
                                 if (uiState.isDayClosed) Icons.Default.Lock else Icons.Default.LockOpen,
-                                contentDescription = if (uiState.isDayClosed) "Dia Fechado" else "Dia Aberto",
-                                tint = if (uiState.isDayClosed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onPrimary
+                                contentDescription = when {
+                                    uiState.isDayClosed -> "Dia Fechado"
+                                    uiState.isManualUnlock -> "Edição Extra Habilitada"
+                                    else -> "Dia Aberto"
+                                },
+                                tint = lockerColor,
+                                modifier = Modifier.size(24.dp)
                             )
                         }
 
@@ -566,7 +575,7 @@ fun HomeScreen(
         },
 
         floatingActionButton = {
-            if (!isReorderMode && !uiState.isDayClosed && !uiState.isSupervisor) {
+            if (!isReorderMode && (!uiState.isDayClosed || uiState.isAdmin) && !uiState.isSupervisor) {
                 // Scroll Logic for FAB
                 val isScrollingUp = remember {
                     derivedStateOf {
@@ -610,10 +619,15 @@ fun HomeScreen(
                 
                 val fabColor = when {
                     hasErrors -> MaterialTheme.colorScheme.errorContainer
-                    isGoalReached -> Color(0xFF00C853) // Emerald Green 700
+                    isGoalReached && !uiState.isManualUnlock -> Color(0xFF00C853) // Emerald Green 700
+                    uiState.isManualUnlock -> Color(0xFFFF9800) // Orange/Amber for manual override
                     else -> MaterialTheme.colorScheme.primary
                 }
-                val fabContentColor = if (hasErrors) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary
+                val fabContentColor = when {
+                    hasErrors -> MaterialTheme.colorScheme.onErrorContainer
+                    uiState.isManualUnlock -> Color.White
+                    else -> MaterialTheme.colorScheme.onPrimary
+                }
                 
                 val fabOnClick: () -> Unit = {
                     if (hasErrors) {
@@ -643,7 +657,9 @@ fun HomeScreen(
                                 snackbarHostState.showSnackbar("Preencha todos os campos do cabeçalho")
                             }
                         } else {
-                            if (viewModel.validateCurrentDay(showDialog = true)) {
+                            if (isGoalReached && !uiState.isManualUnlock) {
+                                viewModel.startDayClosingFlow()
+                            } else if (viewModel.validateCurrentDay(showDialog = true)) {
                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                                 lastAddRequestTime = System.currentTimeMillis()
                                 viewModel.addNewHouse()
@@ -654,13 +670,13 @@ fun HomeScreen(
 
                 val fabText = when {
                     hasErrors -> "CORRIGIR ERROS"
-                    isGoalReached -> "FECHAR PRODUÇÃO"
+                    isGoalReached && !uiState.isManualUnlock -> "FECHAR PRODUÇÃO"
                     else -> "ADICIONAR"
                 }
                 
                 val fabIcon = when {
                     hasErrors -> Icons.Default.Warning
-                    isGoalReached -> Icons.Default.Check
+                    isGoalReached && !uiState.isManualUnlock -> Icons.Default.Check
                     else -> Icons.Default.Add
                 }
 

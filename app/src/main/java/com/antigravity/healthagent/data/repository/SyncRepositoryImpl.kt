@@ -365,41 +365,6 @@ class SyncRepositoryImpl @Inject constructor(
                     houseDao.deleteAll()
                     dayActivityDao.deleteAll()
                     tombstoneDao.deleteAll()
-                } else {
-                    // Reconcile Cloud Deletions (Tombstones)
-                    val cloudDeletedHouses = (agentDoc.get("deleted_house_ids") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
-                    val cloudDeletedActivities = (agentDoc.get("deleted_activity_dates") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
-                    
-                    if (cloudDeletedHouses.isNotEmpty() || cloudDeletedActivities.isNotEmpty()) {
-                        android.util.Log.i("SyncRepository", "Reconciling ${cloudDeletedHouses.size} cloud deletions.")
-                        
-                        // Delete cloud-tombstoned items locally
-                        // Optimization: Avoid full list iteration if tombstone list is small
-                        if (cloudDeletedHouses.isNotEmpty()) {
-                            val allLocalHouses = houseDao.getAllHouses(currentAgentName, uid).first()
-                            val housesToDelete = allLocalHouses.filter { it.generateNaturalKey() in cloudDeletedHouses }
-                            if (housesToDelete.isNotEmpty()) {
-                                housesToDelete.forEach { houseDao.deleteHouse(it) }
-                            }
-                        }
-                        
-                        if (cloudDeletedActivities.isNotEmpty()) {
-                             cloudDeletedActivities.forEach { tombstone ->
-                                val parts = tombstone.split("|")
-                                val date = parts[0]
-                                val agentName = if (parts.size > 1) parts[1] else agentDoc.getString("agentName") ?: ""
-                                dayActivityDao.deleteDayActivity(date, agentName, uid)
-                            }
-                        }
-                        
-                        // Clear cloud tombstones once applied locally
-                        userDocRef.update(
-                            "deleted_house_ids", com.google.firebase.firestore.FieldValue.delete(),
-                            "deleted_activity_dates", com.google.firebase.firestore.FieldValue.delete()
-                        ).await()
-                    }
-                }
-
                 // RECOVERY FROM DATA: If currentAgentName is still blank, try to peek into the pulled data
                 var finalAgentName = currentAgentName.uppercase()
                 if (finalAgentName.isBlank()) {
@@ -408,7 +373,6 @@ class SyncRepositoryImpl @Inject constructor(
                         ?: "").uppercase()
                 }
 
-                // 5. Apply Delta Locally
                 // Propagate recovered agentName to 'users' collection so AuthRepository/UI emits the updated name
                 if (finalAgentName.isNotBlank() && currentAgentName.isBlank() && !isTargetDifferentUser) {
                     try {
@@ -420,14 +384,70 @@ class SyncRepositoryImpl @Inject constructor(
                     }
                 }
 
-                val localHouses = houseDao.getAllHouses(finalAgentName, uid).first().groupBy { it.generateNaturalKey() }
-                val localActivities = dayActivityDao.getAllDayActivities(finalAgentName, uid).groupBy { "${it.date}|${it.agentName.uppercase()}" }
-                
-                // PERFORMANCE: Pre-calculate locked dates to avoid repeated lookups
+                // PERFORMANCE: Pre-calculate locked dates for the active agent to avoid repeated lookups
+                val localActivities = if (finalAgentName.isNotBlank()) {
+                    dayActivityDao.getAllDayActivities(finalAgentName, uid).groupBy { "${it.date}|${it.agentName.uppercase()}" }
+                } else emptyMap()
                 val lockedKeys = localActivities.filter { it.value.any { act -> act.isClosed } }.keys
+
+                if (!isTargetDifferentUser) {
+                    // Reconcile Cloud Deletions (Tombstones)
+                    val cloudDeletedHouses = (agentDoc.get("deleted_house_ids") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                    val cloudDeletedActivities = (agentDoc.get("deleted_activity_dates") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                    
+                    if (cloudDeletedHouses.isNotEmpty() || cloudDeletedActivities.isNotEmpty()) {
+                        android.util.Log.i("SyncRepository", "Reconciling ${cloudDeletedHouses.size} cloud deletions.")
+                        
+                        // Delete cloud-tombstoned items locally
+                        if (cloudDeletedHouses.isNotEmpty()) {
+                            val allLocalHouses = houseDao.getAllHouses(finalAgentName.ifBlank { "" }, uid).first()
+                            // Protection: Skip deletion if the house belongs to a LOCKED day locally
+                            val housesToDelete = allLocalHouses.filter { house ->
+                                val key = house.generateNaturalKey()
+                                val dateKey = "${house.data}|${house.agentName.uppercase()}"
+                                key in cloudDeletedHouses && dateKey !in lockedKeys
+                            }
+                            if (housesToDelete.isNotEmpty()) {
+                                housesToDelete.forEach { houseDao.deleteHouse(it) }
+                            }
+                        }
+                        
+                        if (cloudDeletedActivities.isNotEmpty()) {
+                             cloudDeletedActivities.forEach { tombstone ->
+                                val parts = tombstone.split("|")
+                                val date = parts[0]
+                                val actAgentName = (if (parts.size > 1) parts[1] else finalAgentName).uppercase()
+                                val key = "$date|$actAgentName"
+                                
+                                // Protection: Skip deletion if the activity is already LOCKED locally
+                                if (key !in lockedKeys) {
+                                    dayActivityDao.deleteDayActivity(date, actAgentName, uid)
+                                } else {
+                                    android.util.Log.i("SyncRepository", "Pull: Skipping cloud deletion of activity $key - LOCKED locally.")
+                                }
+                            }
+                        }
+                        
+                        // Clear cloud tombstones once applied locally (or skipped due to lock)
+                        userDocRef.update(
+                            "deleted_house_ids", com.google.firebase.firestore.FieldValue.delete(),
+                            "deleted_activity_dates", com.google.firebase.firestore.FieldValue.delete()
+                        ).await()
+                    }
+                }
+
+                // 5. Apply Delta Locally
+                val localHouses = houseDao.getAllHouses(finalAgentName, uid).first().groupBy { it.generateNaturalKey() }
                 
                 val housesToUpsert = housesDelta.mapNotNull { cloudHouse ->
                     val key = cloudHouse.generateNaturalKey()
+                    val dateKey = "${cloudHouse.data}|${finalAgentName}"
+                    
+                    // Protection 1: Locked Day Protection
+                    if (dateKey in lockedKeys) {
+                        android.util.Log.i("SyncRepository", "Pull: Skipping update for house $key - Day is LOCKED locally.")
+                        return@mapNotNull null
+                    }
                     val dateKey = "${cloudHouse.data}|${finalAgentName}"
                     
                     // Protection 1: Locked Day Protection

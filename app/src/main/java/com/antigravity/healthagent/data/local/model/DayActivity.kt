@@ -8,6 +8,7 @@ data class DayActivity(
     val date: String = "", // Format: DD-MM-YYYY
     val status: String = "",
     val isClosed: Boolean = false,
+    val isManualUnlock: Boolean = false,
     val agentName: String = "",
     val agentUid: String = "",
     val isSynced: Boolean = false,
@@ -19,6 +20,7 @@ data class DayActivity(
             "date" to date.replace("/", "-"),
             "status" to status,
             "isClosed" to isClosed,
+            "isManualUnlock" to isManualUnlock,
             "agentName" to agentName.uppercase(),
             "agentUid" to agentUid,
             "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()

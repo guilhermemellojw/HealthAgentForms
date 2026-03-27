@@ -193,9 +193,11 @@ class HouseRepositoryImpl @Inject constructor(
                 ) 
             }
             
-            // Lock Check: Ensure none of the restored activities are overwriting a locked local day
+            // Restoration is a high-level repair operation. We bypass ensureDayNotLocked
+            // because if an admin or user is restoring a full backup, they intend to 
+            // overwrite the current local state regardless of its lock status.
             normalizedActivities.forEach { 
-                ensureDayNotLocked(it.date, agentName, finalUid) 
+                // No ensureDayNotLocked call here
             }
 
             val housesToUpsert = mutableListOf<House>()

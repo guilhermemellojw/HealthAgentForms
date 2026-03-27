@@ -86,6 +86,11 @@ class HomeViewModel @Inject constructor(
     }
 
     private val _isSupervisor = MutableStateFlow(false)
+    private val _isAdmin = MutableStateFlow(false)
+
+    fun setAdmin(isAdmin: Boolean) {
+        _isAdmin.value = isAdmin
+    }
 
     private val _currentBlock = MutableStateFlow("")
     val currentBlock: StateFlow<String> = _currentBlock.asStateFlow()
@@ -276,7 +281,9 @@ class HomeViewModel @Inject constructor(
     // Agent-filtered list for initialization and reactive updates
     private val allHousesFlow = combine(_agentName, _remoteAgentUid, _currentUserUid) { name, remoteUid, currentUid -> 
         Triple(name, remoteUid, currentUid) 
-    }.flatMapLatest { (name, remoteUid, currentUid) -> 
+    }.distinctUntilChanged()
+    .flowOn(Dispatchers.Default)
+    .flatMapLatest { (name, remoteUid, currentUid) -> 
         val effectiveUid = remoteUid ?: currentUid
         repository.getAllHouses(name, effectiveUid) 
     }
@@ -290,6 +297,13 @@ class HomeViewModel @Inject constructor(
         Triple(date, name, effectiveUid)
     }.flatMapLatest { (date, name, uid) ->
         repository.getDayActivityFlow(date, name, uid).map { it?.isClosed == true }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val isWorkdayManualUnlock: StateFlow<Boolean> = combine(_data, _agentName, _remoteAgentUid, _currentUserUid) { date, name, remoteUid, currentUid ->
+        val effectiveUid = remoteUid ?: currentUid
+        Triple(date, name, effectiveUid)
+    }.flatMapLatest { (date, name, uid) ->
+        repository.getDayActivityFlow(date, name, uid).map { it?.isManualUnlock == true }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val houses: StateFlow<List<House>> = allHousesFlow
@@ -430,8 +444,8 @@ class HomeViewModel @Inject constructor(
             rgFilteredList, _selectedRgBlock, availableYears, activityOptions,
             weekRangeText, customActivities, settingsManager.easyMode, settingsManager.solarMode,
             settingsManager.maxOpenHouses, rgBlocks, weeklySummary, boletimList,
-            bairrosList, rgBairros, _syncStatus, weeklySummaryTotals, isDayClosed,
-            weeklyObservations, _backupConfirmation
+            bairrosList, rgBairros, _syncStatus, weeklySummaryTotals, isDayClosed, isWorkdayManualUnlock,
+            weeklyObservations, _backupConfirmation, _isAdmin
         ) { args ->
             val h = args[0] as List<House>
             val d = args[1] as String
@@ -460,8 +474,10 @@ class HomeViewModel @Inject constructor(
                     data = d,
                     agentName = name,
                     isDayClosed = args[36] as Boolean,
+                    isManualUnlock = args[37] as Boolean,
                     searchQuery = q,
                     isSupervisor = supervisor,
+                    isAdmin = args[40] as Boolean,
                     municipality = args[5] as String,
                     neighborhood = args[6] as String,
                     category = args[7] as String,
@@ -471,7 +487,7 @@ class HomeViewModel @Inject constructor(
                     activity = args[11] as Int,
                     rgBlocks = args[29] as List<BlockSegment>,
                     weeklySummary = args[30] as List<DaySummary>,
-                    weeklyObservations = args[37] as List<House>,
+                    weeklyObservations = args[38] as List<House>,
                     boletimList = args[31] as List<BoletimSummary>,
                     bairrosList = args[32] as List<String>,
                     currentBlock = args[16] as String,
@@ -492,7 +508,7 @@ class HomeViewModel @Inject constructor(
                     rgBairros = args[33] as List<String>,
                     syncStatus = args[34] as SyncStatus,
                     weeklySummaryTotals = args[35] as WeeklySummaryTotals,
-                    backupConfirmation = args[38] as BackupConfirmation?
+                    backupConfirmation = args[39] as BackupConfirmation?
                 )
             }
         }.launchIn(viewModelScope)
@@ -748,23 +764,27 @@ class HomeViewModel @Inject constructor(
 
         // Set initial date to the last work day (most recent day with houses) or generate tutorial data
         viewModelScope.launch {
-            // Check directly from repo to avoid StateFlow initial value race conditions
-            val allHouses = withContext(Dispatchers.IO) {
-                repository.getAllHousesOnce(_agentName.value, _remoteAgentUid.value ?: _currentUserUid.value)
-            }
-            
-            if (allHouses.isNotEmpty()) {
-                val lastWorkDayHouse = allHouses.maxByOrNull { house ->
-                    try {
-                        dateFormatter.parse(house.data)?.time ?: 0L
-                    } catch (e: Exception) {
-                        0L
+            try {
+                // Check directly from repo to avoid StateFlow initial value race conditions
+                val allHouses = withContext(Dispatchers.IO) {
+                    repository.getAllHousesOnce(_agentName.value, _remoteAgentUid.value ?: _currentUserUid.value)
+                }
+                
+                if (allHouses.isNotEmpty()) {
+                    val lastWorkDayHouse = allHouses.maxByOrNull { house ->
+                        try {
+                            dateFormatter.parse(house.data)?.time ?: 0L
+                        } catch (e: Exception) {
+                            0L
+                        }
+                    }
+                    if (lastWorkDayHouse != null) {
+                        _data.value = lastWorkDayHouse.data
+                        _agentName.value = lastWorkDayHouse.agentName
                     }
                 }
-                if (lastWorkDayHouse != null) {
-                    _data.value = lastWorkDayHouse.data
-                    _agentName.value = lastWorkDayHouse.agentName
-                }
+            } catch (e: Exception) {
+                android.util.Log.e("HomeViewModel", "Error in initial date fetch", e)
             }
         }
 
@@ -788,8 +808,12 @@ class HomeViewModel @Inject constructor(
                     _currentBlock.value = lastHouse.blockNumber
                     _currentBlockSequence.value = lastHouse.blockSequence
                     _currentStreet.value = lastHouse.streetName
-                    _agentName.value = lastHouse.agentName
                     _municipio.value = lastHouse.municipio
+                    
+                    // ONLY update agentName if it's currently empty, to avoid loops
+                    if (_agentName.value.isBlank()) {
+                        _agentName.value = lastHouse.agentName
+                    }
                 }
                 // Clear validation highlights when switching days
                 _validationErrorHouseIds.value = emptySet()
@@ -880,9 +904,21 @@ class HomeViewModel @Inject constructor(
                         _showHistoryUnlockConfirmation.value = true
                     }
                 } else {
-                    // Lock icon only for opening. Closing now handled by startDayClosingFlow (Audit).
-                    // We show a message to the user for clarity.
-                    _uiEvent.value = "Para fechar o dia, realize a auditoria."
+                    // Toggling locker when OPEN allows manual override of meta-limits
+                    val manualUnlock = isWorkdayManualUnlock.value
+                    val currentAgent = _agentName.value
+                    val currentData = _data.value
+                    
+                    val activity = dayManagementUseCase.getDayActivity(currentData, currentAgent, currentUid)
+                        ?: com.antigravity.healthagent.data.local.model.DayActivity(date = currentData, agentName = currentAgent, agentUid = currentUid ?: "")
+                    
+                    repository.updateDayActivity(activity.copy(isManualUnlock = !manualUnlock))
+                    
+                    if (!manualUnlock) {
+                        _uiEvent.value = "Edição extra habilitada para este dia."
+                    } else {
+                        _uiEvent.value = "Edição extra desabilitada."
+                    }
                 }
             } catch (e: Exception) {
                 _uiEvent.value = "Erro ao alterar estado do dia: ${e.message}"
@@ -1080,10 +1116,12 @@ class HomeViewModel @Inject constructor(
             try {
                 // Pre-check for open limit inside the safe scope
                 val currentOpen = houses.value.count { it.data == _data.value && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
-                if (currentOpen >= maxOpenHouses.value && maxOpenHouses.value > 0) {
-                    if (validateCurrentDay(showDialog = true)) {
-                        startDayClosingFlow()
-                    }
+                val isUnlocked = isWorkdayManualUnlock.value
+                val isAdmin = _isAdmin.value
+                
+                if (currentOpen >= maxOpenHouses.value && maxOpenHouses.value > 0 && !isUnlocked && !isAdmin) {
+                    soundManager.playWarning()
+                    _situationLimitConfirmation.value = House(data = _data.value) // DUMMY to trigger dialog
                     return@launch
                 }
 
@@ -1116,7 +1154,7 @@ class HomeViewModel @Inject constructor(
                         prediction = houseManagementUseCase.predictBasedOnHistory(houses.value, lastGlobalHouse)
                     } else {
                         // No history at all, just blank prediction
-                        prediction = HouseManagementUseCase.HousePrediction("", null, null, com.antigravity.healthagent.data.local.model.PropertyType.EMPTY, Situation.NONE)
+                        prediction = HouseManagementUseCase.HousePrediction("", 0, 0, com.antigravity.healthagent.data.local.model.PropertyType.EMPTY, Situation.NONE)
                     }
                 } else {
                     // Standard intra-day prediction
@@ -1157,7 +1195,7 @@ class HomeViewModel @Inject constructor(
                     listOrder = maxOrder + 1
                 )
 
-                houseManagementUseCase.insertHouse(houseToInsert)
+                houseManagementUseCase.insertHouse(houseToInsert, houses.value)
                 soundManager.playPop()
                 
                 // Unified delayed validation (3s)
@@ -1176,10 +1214,17 @@ class HomeViewModel @Inject constructor(
     fun updateHouse(house: House) {
         val original = houses.value.find { it.id == house.id }
 
-        if (original != null && (house.situation == Situation.NONE || house.situation == Situation.EMPTY) && 
-            (original.situation != Situation.NONE && original.situation != Situation.EMPTY)) {
-            val open = houses.value.count { it.data == _data.value && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
-            if (open >= maxOpenHouses.value) {
+        // Limit Enforcement: Only block if CHANGING to worked and meta was reached.
+        // This allows fixing typo's/errors on already "surpassed" days.
+        val houseIsWorked = (house.situation == Situation.NONE || house.situation == Situation.EMPTY)
+        val originalIsWorked = original != null && (original.situation == Situation.NONE || original.situation == Situation.EMPTY)
+
+        if (houseIsWorked && !originalIsWorked) {
+            val openCount = houses.value.count { it.data == _data.value && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+            val isUnlocked = isWorkdayManualUnlock.value
+            val isAdmin = _isAdmin.value
+            
+            if (openCount >= maxOpenHouses.value && maxOpenHouses.value > 0 && !isUnlocked && !isAdmin) {
                 soundManager.playWarning()
                 _situationLimitConfirmation.value = house
                 return
@@ -1202,7 +1247,7 @@ class HomeViewModel @Inject constructor(
                     _currentStreet.value = result.updatedHouse.streetName
                     houseManagementUseCase.updateHouses(result.subsequentHouses + result.updatedHouse)
                 } else {
-                    houseManagementUseCase.updateHouse(result.updatedHouse)
+                    houseManagementUseCase.updateHouse(result.updatedHouse, houses.value)
                 }
                 
                 // If this house had a validation error highlight, remove it as it's being corrected
@@ -1219,7 +1264,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 recentlyDeletedHouse = house
-                houseManagementUseCase.deleteHouse(house)
+                houseManagementUseCase.deleteHouse(house, houses.value)
                 soundManager.playPop()
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error deleting house", e)
@@ -1231,7 +1276,7 @@ class HomeViewModel @Inject constructor(
     fun restoreDeletedHouse() {
         recentlyDeletedHouse?.let {
             viewModelScope.launch { 
-                houseManagementUseCase.insertHouse(it.copy(id = 0))
+                houseManagementUseCase.insertHouse(it.copy(id = 0), houses.value)
                 recentlyDeletedHouse = null 
                 soundManager.playPop()
             }
@@ -1240,7 +1285,9 @@ class HomeViewModel @Inject constructor(
 
     fun persistListOrder(reorderedList: List<House>) {
         viewModelScope.launch {
-            houseManagementUseCase.updateHouses(reorderedList.mapIndexed { index, h -> h.copy(listOrder = index.toLong()) })
+            val updatedList = reorderedList.mapIndexed { index, h -> h.copy(listOrder = index.toLong()) }
+            val recalculated = houseManagementUseCase.recalculateVisitSegments(updatedList)
+            houseManagementUseCase.updateHouses(recalculated)
         }
     }
 
@@ -1261,8 +1308,9 @@ class HomeViewModel @Inject constructor(
 
     fun moveHouseToDate(house: House, newDate: String) {
         val existingOpen = houses.value.count { it.data == newDate && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
-        if (existingOpen >= maxOpenHouses.value && (house.situation == Situation.NONE || house.situation == Situation.EMPTY)) {
-            _moveConfirmationData.value = house to newDate
+        if (existingOpen >= maxOpenHouses.value && maxOpenHouses.value > 0 && (house.situation == Situation.NONE || house.situation == Situation.EMPTY)) {
+            soundManager.playWarning()
+            _uiEvent.value = "Impossível mover: Meta Diária do dia de destino atingida!"
             return
         }
         performMoveHouse(house, newDate)
@@ -1649,7 +1697,7 @@ class HomeViewModel @Inject constructor(
     fun showMultiDayErrorDialog() { _showMultiDayErrorDialog.value = true }
 
     fun confirmSituationExceeded() {
-        _situationLimitConfirmation.value?.let { performUpdateHouse(it); _situationLimitConfirmation.value = null }
+        _situationLimitConfirmation.value = null
     }
     fun dismissSituationLimitConfirmation() { _situationLimitConfirmation.value = null }
 
