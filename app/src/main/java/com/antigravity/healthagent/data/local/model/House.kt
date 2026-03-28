@@ -18,8 +18,8 @@ data class House(
     val blockNumber: String = "",
     val streetName: String = "",
     val number: String = "",
-    val sequence: Int? = null,
-    val complement: Int? = null,
+    val sequence: Int = 0,
+    val complement: Int = 0,
     val propertyType: PropertyType = PropertyType.EMPTY,
     val situation: Situation = Situation.EMPTY,
     // Daily Header Context
@@ -74,7 +74,7 @@ data class House(
         
         // Uniqueness is guaranteed by agentUid + normalizedAgent + date + address details + visitSegment.
         // We remove createdAt to ensure the key is stable even if the house object is recreated.
-        return "${agentUid}_${normalizedAgent}_${normalizedDate}_${blockNumber.trim()}_${blockSequence.trim()}_${normalizedStreet}_${number.trim()}_${sequence ?: 0}_${complement ?: 0}_${normalizedBairro}_${visitSegment}".uppercase()
+        return "${agentUid}_${normalizedAgent}_${normalizedDate}_${blockNumber.trim()}_${blockSequence.trim()}_${normalizedStreet}_${number.trim()}_${sequence}_${complement}_${normalizedBairro}_${visitSegment}".uppercase()
     }
 
     fun toFirestoreMap(): Map<String, Any?> {

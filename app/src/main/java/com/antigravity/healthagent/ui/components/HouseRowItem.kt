@@ -315,8 +315,8 @@ fun HouseRowItem(
     
                         DebouncedCompactInputBox(
                             label = "SEQUÊNCIA",
-                            initialValue = house.sequence?.toString() ?: "",
-                            onValueChange = { onUpdate(house.copy(sequence = it.trim().toIntOrNull())) },
+                            initialValue = if (house.sequence == 0) "" else house.sequence.toString(),
+                            onValueChange = { onUpdate(house.copy(sequence = it.trim().toIntOrNull() ?: 0)) },
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                                 keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
                                 imeAction = androidx.compose.ui.text.input.ImeAction.Next
@@ -328,8 +328,8 @@ fun HouseRowItem(
     
                         DebouncedCompactInputBox(
                             label = "COMPLEMENTO",
-                            initialValue = house.complement?.toString() ?: "",
-                            onValueChange = { onUpdate(house.copy(complement = it.trim().toIntOrNull())) },
+                            initialValue = if (house.complement == 0) "" else house.complement.toString(),
+                            onValueChange = { onUpdate(house.copy(complement = it.trim().toIntOrNull() ?: 0)) },
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                                 keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
                                 imeAction = androidx.compose.ui.text.input.ImeAction.Done
@@ -597,8 +597,8 @@ fun EasyHouseCard(
             ) {
                 DebouncedCompactInputBox(
                     label = "SEQUÊNCIA",
-                    initialValue = house.sequence?.toString() ?: "",
-                    onValueChange = { onUpdate(house.copy(sequence = it.trim().toIntOrNull())) },
+                    initialValue = if (house.sequence == 0) "" else house.sequence.toString(),
+                    onValueChange = { onUpdate(house.copy(sequence = it.trim().toIntOrNull() ?: 0)) },
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                         keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
                         imeAction = androidx.compose.ui.text.input.ImeAction.Next
@@ -609,8 +609,8 @@ fun EasyHouseCard(
                 )
                 DebouncedCompactInputBox(
                     label = "COMPLEMENTO",
-                    initialValue = house.complement?.toString() ?: "",
-                    onValueChange = { onUpdate(house.copy(complement = it.trim().toIntOrNull())) },
+                    initialValue = if (house.complement == 0) "" else house.complement.toString(),
+                    onValueChange = { onUpdate(house.copy(complement = it.trim().toIntOrNull() ?: 0)) },
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                         keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
                         imeAction = androidx.compose.ui.text.input.ImeAction.Done

@@ -186,7 +186,8 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
         }
 
         // Propagate role to HomeViewModel
-        LaunchedEffect(isSupervisor) {
+        LaunchedEffect(isAdmin, isSupervisor) {
+            homeViewModel.setAdmin(isAdmin)
             homeViewModel.setSupervisor(isSupervisor)
         }
 

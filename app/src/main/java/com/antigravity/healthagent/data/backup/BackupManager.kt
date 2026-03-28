@@ -133,8 +133,8 @@ class BackupManager @Inject constructor() {
                 blockSequence = house.blockSequence?.trim() ?: "",
                 streetName = house.streetName?.trim()?.uppercase() ?: "",
                 number = if (house.number?.trim() == "0") "" else house.number?.trim() ?: "",
-                sequence = if (house.sequence == 0) null else house.sequence,
-                complement = if (house.complement == 0) null else house.complement,
+                sequence = house.sequence,
+                complement = house.complement,
                 data = house.data?.replace("/", "-")?.trim() ?: "",
                 listOrder = stableOrder,
                 // Legacy Support: Ensure createdAt is unique even if missing in old JSOn.

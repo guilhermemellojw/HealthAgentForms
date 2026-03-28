@@ -13,24 +13,32 @@ class HouseManagementUseCase @Inject constructor(
     private val streetRepository: StreetRepository
 ) {
 
-    suspend fun insertHouse(house: House) {
+    suspend fun insertHouse(house: House, allHouses: List<House>) {
         val sanitized = sanitizeHouse(house)
-        repository.insertHouse(sanitized)
+        val withNewHouse = (allHouses + sanitized).sortedBy { it.listOrder }
+        val recalculated = recalculateVisitSegments(withNewHouse)
+        repository.updateHouses(recalculated) // updateHouses handles insert/replace via OnConflictStrategy
         streetRepository.saveCustomStreet(sanitized.streetName, sanitized.bairro)
     }
 
-    suspend fun updateHouse(house: House) {
+    suspend fun updateHouse(house: House, allHouses: List<House>) {
         val sanitized = sanitizeHouse(house)
-        repository.updateHouse(sanitized)
+        val updatedList = allHouses.map { if (it.id == house.id) sanitized else it }.sortedBy { it.listOrder }
+        val recalculated = recalculateVisitSegments(updatedList)
+        repository.updateHouses(recalculated)
         streetRepository.saveCustomStreet(sanitized.streetName, sanitized.bairro)
     }
 
     suspend fun updateHouses(houses: List<House>) {
+        // Assume these are already recalculated if coming from a flow that does it
         repository.updateHouses(houses)
     }
 
-    suspend fun deleteHouse(house: House) {
+    suspend fun deleteHouse(house: House, allHouses: List<House>) {
         repository.deleteHouse(house)
+        val remaining = allHouses.filter { it.id != house.id }.sortedBy { it.listOrder }
+        val recalculated = recalculateVisitSegments(remaining)
+        repository.updateHouses(recalculated)
     }
 
     suspend fun deleteProduction(date: String, agentName: String) {
@@ -54,22 +62,57 @@ class HouseManagementUseCase @Inject constructor(
             originalHouse.streetName != sanitized.streetName
         )
         
-        val housesToUpdate = if (localizationChanged) {
-            allHouses.filter { 
-                it.data == sanitized.data && it.listOrder > sanitized.listOrder 
-            }.map { 
-                it.copy(
-                    bairro = sanitized.bairro,
-                    blockNumber = sanitized.blockNumber,
-                    blockSequence = sanitized.blockSequence,
-                    streetName = sanitized.streetName
-                )
+        val sequenceUpdated = if (localizationChanged) {
+            allHouses.map { h ->
+                if (h.id == house.id) {
+                    sanitized
+                } else if (h.data == sanitized.data && h.listOrder > sanitized.listOrder) {
+                    // Propagate location change to subsequent houses for the SAME day
+                    h.copy(
+                        bairro = sanitized.bairro,
+                        blockNumber = sanitized.blockNumber,
+                        blockSequence = sanitized.blockSequence,
+                        streetName = sanitized.streetName
+                    )
+                } else {
+                    h
+                }
             }
         } else {
-            emptyList()
+            allHouses.map { if (it.id == house.id) sanitized else it }
+        }
+
+        // 3. Recalculate segments for the affected day
+        val dayToRecalculate = sanitized.data
+        val affectedHouses = sequenceUpdated.filter { it.data == dayToRecalculate }.sortedBy { it.listOrder }
+        val recalculatedDay = recalculateVisitSegments(affectedHouses)
+        
+        // Find the specific updated house in the recalculated list
+        val finalUpdatedHouse = recalculatedDay.find { it.id == house.id } ?: sanitized
+        
+        // The list of "houses to update" should be those that changed
+        val housesThatChanged = recalculatedDay.filter { dayHouse ->
+            val original = allHouses.find { it.id == dayHouse.id }
+            original == null || original != dayHouse
         }
         
-        return HouseUpdateResult(sanitized, housesToUpdate, localizationChanged)
+        return HouseUpdateResult(finalUpdatedHouse, housesThatChanged, localizationChanged)
+    }
+
+    fun recalculateVisitSegments(houses: List<House>): List<House> {
+        if (houses.isEmpty()) return emptyList()
+        
+        var currentSegment = 0
+        var lastStreet = ""
+        
+        return houses.sortedBy { it.listOrder }.map { house ->
+            val street = house.streetName.trim().uppercase()
+            if (lastStreet.isNotEmpty() && street != lastStreet) {
+                currentSegment++
+            }
+            lastStreet = street
+            house.copy(visitSegment = currentSegment)
+        }
     }
 
     data class HouseUpdateResult(
@@ -96,8 +139,8 @@ class HouseManagementUseCase @Inject constructor(
         val normalizedNumber = house.number.trim().uppercase().let { 
             if (it == "0") "" else it 
         }
-        val normalizedSequence = if (house.sequence == 0) null else house.sequence
-        val normalizedComplement = if (house.complement == 0) null else house.complement
+        val normalizedSequence = house.sequence
+        val normalizedComplement = house.complement
 
         return house.copy(
             blockNumber = house.blockNumber.trim().uppercase(),
@@ -120,8 +163,8 @@ class HouseManagementUseCase @Inject constructor(
 
     data class HousePrediction(
         val number: String,
-        val sequence: Int?,
-        val complement: Int?, // Added complement field
+        val sequence: Int,
+        val complement: Int, // Added complement field
         val propertyType: PropertyType,
         val situation: Situation
     )
@@ -140,7 +183,7 @@ class HouseManagementUseCase @Inject constructor(
         }.sortedBy { it.listOrder }
 
         if (currentHouses.isEmpty()) {
-            return HousePrediction("", null, null, PropertyType.EMPTY, Situation.NONE)
+            return HousePrediction("", 0, 0, PropertyType.EMPTY, Situation.NONE)
         }
 
         val last = currentHouses.last()
@@ -214,14 +257,14 @@ class HouseManagementUseCase @Inject constructor(
 
         // Sequence prediction
         val nextSequence = if (last.number == preLast.number) {
-            val lastSeq = last.sequence ?: 0
-            val preLastSeq = preLast.sequence ?: 0
+            val lastSeq = last.sequence
+            val preLastSeq = preLast.sequence
             val diff = lastSeq - preLastSeq
             val next = lastSeq + diff
-            if (next > 0) next else null
+            if (next >= 0) next else 0
         } else {
             // If numbers are different, see if sequence was constant
-            if (last.sequence == preLast.sequence) last.sequence else null
+            if (last.sequence == preLast.sequence) last.sequence else 0
         }
         
         // Complement Prediction
@@ -229,20 +272,20 @@ class HouseManagementUseCase @Inject constructor(
              // Same number logic
              if (last.sequence == preLast.sequence) {
                  // Same Number AND Sequence -> Predict Complement
-                 val lastCompl = last.complement ?: 0
-                 val preLastCompl = preLast.complement ?: 0
+                 val lastCompl = last.complement
+                 val preLastCompl = preLast.complement
                  val diff = lastCompl - preLastCompl
                  // If diff is 0 (e.g. repeated manually), assume +1, else follow diff
                  val effectiveDiff = if (diff == 0) 1 else diff
                  val next = lastCompl + effectiveDiff
-                 if (next > 0) next else null
+                 if (next >= 0) next else 0
              } else {
-                 // Sequence number changed -> Reset complement (usually starts at 1 or null)
-                 null
+                 // Sequence number changed -> Reset complement (starts at 0)
+                 0
              }
         } else {
-             // Number changed -> Check if complement was constant? Unlikely. Reset.
-             null
+             // Number changed -> Reset.
+             0
         }
 
         // PropertyType prediction

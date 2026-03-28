@@ -365,6 +365,7 @@ class SyncRepositoryImpl @Inject constructor(
                     houseDao.deleteAll()
                     dayActivityDao.deleteAll()
                     tombstoneDao.deleteAll()
+                }
                 // RECOVERY FROM DATA: If currentAgentName is still blank, try to peek into the pulled data
                 var finalAgentName = currentAgentName.uppercase()
                 if (finalAgentName.isBlank()) {
@@ -441,13 +442,6 @@ class SyncRepositoryImpl @Inject constructor(
                 
                 val housesToUpsert = housesDelta.mapNotNull { cloudHouse ->
                     val key = cloudHouse.generateNaturalKey()
-                    val dateKey = "${cloudHouse.data}|${finalAgentName}"
-                    
-                    // Protection 1: Locked Day Protection
-                    if (dateKey in lockedKeys) {
-                        android.util.Log.i("SyncRepository", "Pull: Skipping update for house $key - Day is LOCKED locally.")
-                        return@mapNotNull null
-                    }
                     val dateKey = "${cloudHouse.data}|${finalAgentName}"
                     
                     // Protection 1: Locked Day Protection

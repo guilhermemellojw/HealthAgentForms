@@ -18,8 +18,8 @@ object CsvGenerator {
             builder.append("${house.blockNumber},")
             builder.append("${house.streetName.replace(",", " ")},") // Basic escape for commas
             builder.append("${house.number},")
-            builder.append("${house.sequence ?: ""},")
-            builder.append("${house.complement ?: ""},")
+            builder.append("${if (house.sequence == 0) "" else house.sequence},")
+            builder.append("${if (house.complement == 0) "" else house.complement},")
             builder.append("${house.tipo},")
             builder.append("${house.zona},")
             builder.append("${house.categoria},")

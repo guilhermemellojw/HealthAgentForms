@@ -281,8 +281,8 @@ fun SupervisorSummaryScreen(
         }
     }
 }
-}
 
+}
 @Composable
 fun StatItem(
     label: String,
@@ -435,7 +435,5 @@ fun StatDetailsDialog(
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
-
-}
-
+    }
 }

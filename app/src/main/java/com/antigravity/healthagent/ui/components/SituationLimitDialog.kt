@@ -11,7 +11,6 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun SituationLimitDialog(
-    onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     isEasyMode: Boolean = false
 ) {
@@ -21,35 +20,23 @@ fun SituationLimitDialog(
             Text(
                 "Meta Diária Atingida", 
                 fontWeight = FontWeight.ExtraBold,
-                style = if (isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge
+                style = if (isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.error
             ) 
         },
         text = { 
             Text(
-                "Você está prestes a exceder a Meta Diária de imóveis abertos para hoje.\n\nDeseja continuar?",
+                "O limite diário de imóveis trabalhados (Meta Diária) foi atingido.\n\nPara adicionar mais imóveis ou alterar situações para 'Trabalhado', você deve primeiro concluir o dia atual ou ajustar a meta nas configurações.",
                 style = if (isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
             ) 
         },
         confirmButton = {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth().height(if (isEasyMode) 52.dp else 48.dp),
+                shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp)
             ) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f).height(if (isEasyMode) 52.dp else 48.dp),
-                    shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp)
-                ) {
-                    Text("Cancelar", fontWeight = FontWeight.Bold)
-                }
-                Button(
-                    onClick = onConfirm,
-                    modifier = Modifier.weight(1.3f).height(if (isEasyMode) 52.dp else 48.dp),
-                    shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Continuar", fontWeight = FontWeight.Bold)
-                }
+                Text("Entendido", fontWeight = FontWeight.Bold)
             }
         },
         shape = RoundedCornerShape(if (isEasyMode) 28.dp else 24.dp)

@@ -29,15 +29,15 @@ class HouseValidationUseCase @Inject constructor() {
         val errorDetails = mutableListOf<ErrorDetail>()
         val errorHouseIds = mutableSetOf<Int>()
 
-        // 1. Duplicate Validation (Address + Segment)
+        // 1. Duplicate Validation (Address ONLY, ignore Segment)
         val duplicateGroups = currentHouses.groupBy { house ->
-            "${house.visitSegment}_${house.streetName.trim().uppercase()}_${house.number.trim().uppercase()}_${house.sequence ?: 0}_${house.complement ?: 0}"
+            "${house.streetName.trim().uppercase()}_${house.number.trim().uppercase()}_${house.sequence}_${house.complement}"
         }.filter { it.value.size > 1 }
 
         duplicateGroups.forEach { (_, houses) ->
             houses.forEach { house ->
                 errorHouseIds.add(house.id)
-                val location = if (house.number.isNotBlank()) "Nº ${house.number}" else "Seq. ${house.sequence ?: "?"}"
+                val location = if (house.number.isNotBlank()) "Nº ${house.number}" else "Seq. ${house.sequence}"
                 errorDetails.add(ErrorDetail(
                     houseId = house.id,
                     streetName = house.streetName,
@@ -54,7 +54,7 @@ class HouseValidationUseCase @Inject constructor() {
             if (invalidFields.isNotEmpty()) {
                 errorHouseIds.add(house.id)
                 val missingFields = mutableListOf<String>()
-                if (house.number.isBlank() && (house.sequence == null || house.sequence == 0)) missingFields.add("Número/Sequência")
+                if (house.number.isBlank() && house.sequence == 0) missingFields.add("Número/Sequência")
                 if (house.propertyType == PropertyType.EMPTY) missingFields.add("Tipo")
                 if (house.situation == Situation.EMPTY) missingFields.add("Situação")
                 if (house.agentName.isBlank()) missingFields.add("Agente")
@@ -68,7 +68,7 @@ class HouseValidationUseCase @Inject constructor() {
                 if (house.situation != Situation.NONE && hasTreatment) missingFields.add("Tratamento Indevido")
                 if (house.larvicida > 0.0 && totalDeposits == 0) missingFields.add("Larvicida sem Depósitos")
                 
-                val location = if (house.number.isNotBlank()) "Nº ${house.number}" else "Seq. ${house.sequence ?: "?"}"
+                val location = if (house.number.isNotBlank()) "Nº ${house.number}" else "Seq. ${house.sequence}"
                 errorDetails.add(ErrorDetail(
                     houseId = house.id,
                     streetName = house.streetName,
@@ -94,7 +94,7 @@ class HouseValidationUseCase @Inject constructor() {
     fun getInvalidFields(house: House, strict: Boolean = true): List<String> {
         val invalidFields = mutableListOf<String>()
         
-        val hasNumberOrSeq = house.number.isNotBlank() || (house.sequence != null && house.sequence > 0)
+        val hasNumberOrSeq = house.number.isNotBlank() || house.sequence > 0
         if (!hasNumberOrSeq) invalidFields.add("number")
         
         if (house.propertyType == PropertyType.EMPTY) invalidFields.add("propertyType")

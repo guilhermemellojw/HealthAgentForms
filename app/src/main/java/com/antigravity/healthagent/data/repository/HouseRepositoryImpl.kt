@@ -294,7 +294,7 @@ class HouseRepositoryImpl @Inject constructor(
             dates.forEach { date ->
                 val activity = dayActivityDao.getDayActivity(date, upperName, finalUid)
                 if (activity == null) {
-                    dayActivityDao.insertDayActivity(DayActivity(date, "NORMAL", true, upperName, finalUid, isSynced = false, lastUpdated = System.currentTimeMillis()))
+                    dayActivityDao.insertDayActivity(DayActivity(date = date, status = "NORMAL", isClosed = true, agentName = upperName, agentUid = finalUid, isSynced = false))
                 } else if (!activity.isClosed) {
                     dayActivityDao.insertDayActivity(activity.copy(isClosed = true, agentName = upperName, agentUid = finalUid, isSynced = false, lastUpdated = System.currentTimeMillis()))
                 }

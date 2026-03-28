@@ -556,10 +556,10 @@ object RGPdfGenerator {
         val nText = house.number.ifEmpty { "—" }
         drawRect(canvas, line, cur, y, wN, h); drawCenteredText(canvas, text, nText, cur, y, wN, h)
         cur += wN
-        val seqText = house.sequence?.toString() ?: "—"
+        val seqText = house.sequence.let { if (it == 0) "—" else it.toString() }
         drawRect(canvas, line, cur, y, wSeq, h); drawCenteredText(canvas, text, seqText, cur, y, wSeq, h)
         cur += wSeq
-        val compText = house.complement?.toString() ?: "—"
+        val compText = house.complement.let { if (it == 0) "—" else it.toString() }
         drawRect(canvas, line, cur, y, wComp, h); drawCenteredText(canvas, text, compText, cur, y, wComp, h)
         cur += wComp
         drawRect(canvas, line, cur, y, wTipo, h); drawCenteredText(canvas, text, house.propertyType.code, cur, y, wTipo, h)

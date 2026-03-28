@@ -671,8 +671,10 @@ object BoletimPdfGenerator {
             fun chk(v: String?): String = if (streetName.isNotBlank() && v.isNullOrBlank()) "—" else v ?: ""
             
             drawCell(canvas, linePaint, textPaint, chk(house?.number), curX, cursorY, cwNum, gridRowH); curX += cwNum
-            drawCell(canvas, linePaint, textPaint, chk(house?.sequence?.toString()), curX, cursorY, cwSeq, gridRowH); curX += cwSeq
-            drawCell(canvas, linePaint, textPaint, chk(house?.complement?.toString()), curX, cursorY, cwComp, gridRowH); curX += cwComp
+            val seqStr = house?.sequence?.let { if (it == 0) "" else it.toString() } ?: ""
+            drawCell(canvas, linePaint, textPaint, chk(seqStr), curX, cursorY, cwSeq, gridRowH); curX += cwSeq
+            val complStr = house?.complement?.let { if (it == 0) "" else it.toString() } ?: ""
+            drawCell(canvas, linePaint, textPaint, chk(complStr), curX, cursorY, cwComp, gridRowH); curX += cwComp
             drawCell(canvas, linePaint, textPaint, house?.propertyType?.code ?: "", curX, cursorY, cwTipo, gridRowH); curX += cwTipo
             drawCell(canvas, linePaint, textPaint, "", curX, cursorY, cwHora, gridRowH); curX += cwHora
             val sit = if(house?.situation == Situation.NONE) "—" else house?.situation?.code ?: ""

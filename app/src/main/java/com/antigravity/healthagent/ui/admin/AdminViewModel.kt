@@ -17,6 +17,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
 import android.view.View
 import com.antigravity.healthagent.domain.repository.AuthUser
@@ -59,33 +62,36 @@ class AdminViewModel @Inject constructor(
     private val _accessRequests = MutableStateFlow<List<com.antigravity.healthagent.domain.repository.AccessRequest>>(emptyList())
     val accessRequests: StateFlow<List<com.antigravity.healthagent.domain.repository.AccessRequest>> = _accessRequests.asStateFlow()
 
-    private val _lastSuccessfulAgents = MutableStateFlow<List<AgentData>>(emptyList())
 
     val unifiedProfiles: StateFlow<List<UnifiedProfile>> = combine(
         users,
         uiState,
         agentNames,
-        _lastSuccessfulAgents,
         _searchQuery
-    ) { usersList, agentsState, namesList, lastAgents, query ->
+    ) { usersList, agentsState, namesList, query ->
         val agentsList = if (agentsState is AdminUiState.Success) {
-            _lastSuccessfulAgents.value = agentsState.agents
             agentsState.agents
         } else {
-            lastAgents
+            emptyList()
         }
         
+        // Use maps for faster lookup instead of nested find/none
+        val agentsByUid = agentsList.associateBy { it.uid }
+        val agentsByEmail = agentsList.filter { it.uid == null || it.uid.startsWith("pre_") }.associateBy { it.email }
+
         // Build the unified list
         val result = mutableListOf<UnifiedProfile>()
+        val processedAgentUids = mutableSetOf<String?>()
+        val processedEmails = mutableSetOf<String?>()
         
         // 1. Start with users who have accounts
         usersList.forEach { user ->
-            // Prioritize UID match to ensure data isolation
-            var agentData = agentsList.find { it.uid == user.uid }
+            // Prioritize UID match
+            var agentData = agentsByUid[user.uid]
             
-            // Fallback to email match ONLY if no UID-linked data exists AND the email-matched data is unlinked
-            if (agentData == null) {
-                agentData = agentsList.find { it.email == user.email && (it.uid == null || it.uid.startsWith("pre_")) }
+            // Fallback to email match ONLY if no UID-linked data exists
+            if (agentData == null && user.email != null) {
+                agentData = agentsByEmail[user.email]
             }
 
             result.add(
@@ -99,29 +105,36 @@ class AdminViewModel @Inject constructor(
                     agentData = agentData
                 )
             )
+            processedAgentUids.add(user.uid)
+            processedEmails.add(user.email)
+            agentData?.uid?.let { processedAgentUids.add(it) }
+            agentData?.email?.let { processedEmails.add(it) }
         }
         
-        // 2. Add Pre-registered "agents" who don't have a user account yet
+        // 2. Add Pre-registered "agents" from Firestore who don't have a user account yet
         agentsList.forEach { agent ->
-            if (result.none { it.uid == agent.uid || it.email == agent.email }) {
+            if (!processedAgentUids.contains(agent.uid) && !processedEmails.contains(agent.email)) {
                 result.add(
                     UnifiedProfile(
                         uid = agent.uid,
                         email = agent.email,
                         agentName = agent.agentName,
                         role = UserRole.AGENT, 
-                        isAuthorized = true, // Pre-registered agents are pre-approved
+                        isAuthorized = true,
                         isPreRegistered = true,
                         agentData = agent
                     )
                 )
+                processedAgentUids.add(agent.uid)
+                processedEmails.add(agent.email)
             }
         }
 
         // 3. Add names from the Master List that haven't been linked yet
+        val existingNamesUpperCase = result.mapNotNull { it.agentName?.trim()?.uppercase() }.toSet()
         namesList.forEach { name ->
             val normalizedName = name.trim().uppercase()
-            if (result.none { it.agentName?.trim()?.uppercase() == normalizedName }) {
+            if (!existingNamesUpperCase.contains(normalizedName)) {
                 result.add(
                     UnifiedProfile(
                         uid = null,
@@ -129,7 +142,7 @@ class AdminViewModel @Inject constructor(
                         agentName = name,
                         role = UserRole.AGENT,
                         isAuthorized = false,
-                        isPreRegistered = true, // Treat as pre-registered/unlinked
+                        isPreRegistered = true,
                         agentData = null
                     )
                 )
@@ -142,7 +155,10 @@ class AdminViewModel @Inject constructor(
             it.email?.contains(query, true) == true || 
             it.agentName?.contains(query, true) == true 
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .distinctUntilChanged()
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         refreshAll()

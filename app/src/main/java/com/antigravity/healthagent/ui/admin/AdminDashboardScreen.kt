@@ -523,7 +523,6 @@ fun AdminDashboardScreen(
             }
         }
     }
-}
 
     if (showAddProfileDialog) {
         AddProfileDialog(
@@ -592,6 +591,7 @@ fun AdminDashboardScreen(
             }
         )
     }
+}
 }
 
 @Composable
@@ -968,53 +968,11 @@ fun GranularDataSection(
                         Text("Nenhum imóvel", style = MaterialTheme.typography.labelSmall)
                     }
                 } else {
-                    LazyColumn(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        items(houses) { house ->
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(4.dp)) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("${house.streetName}, ${house.number}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                    Text("${house.data} • ${house.bairro}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                TextButton(onClick = { onDeleteHouse(agentUid, house.cloudId ?: house.generateNaturalKey()) }) {
-                                    Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Excluir", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                                }
-                            }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                        }
-                    }
-                }
-            }
-        }
-
-        OutlinedButton(onClick = { showActivities = !showActivities }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Event, null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Atividades (${activities.size})", style = MaterialTheme.typography.labelSmall)
-                Spacer(modifier = Modifier.weight(1f))
-                Icon(if (showActivities) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
-            }
-        }
-
-        AnimatedVisibility(visible = showActivities) {
-            Surface(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                if (activities.isEmpty()) {
-                    Box(modifier = Modifier.padding(16.dp), contentAlignment = Alignment.Center) {
-                        Text("Nenhuma atividade", style = MaterialTheme.typography.labelSmall)
-                    }
-                } else {
-                    LazyColumn(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        items(activities) { activity ->
+                    Column(modifier = Modifier.padding(8.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        activities.forEach { activity ->
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(4.dp)) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Data: ${activity.date}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                    // Placeholder for pendentes info as it's not in the model anymore
                                     Text("Status: ${activity.status}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 TextButton(onClick = { onDeleteActivity(agentUid, activity.date) }) {

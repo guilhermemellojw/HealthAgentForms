@@ -32,8 +32,8 @@ class RestoreDataUseCase @Inject constructor(
                     agentName = if (it.agentName.isNotBlank()) it.agentName.trim().uppercase() else agentName.trim().uppercase(),
                     agentUid = targetUid,
                     number = if (it.number.trim() == "0") "" else it.number.trim().uppercase(),
-                    sequence = if (it.sequence == 0) null else it.sequence,
-                    complement = if (it.complement == 0) null else it.complement,
+                    sequence = it.sequence,
+                    complement = it.complement,
                     data = it.data.replace("/", "-"),
                     isSynced = false,
                     lastUpdated = System.currentTimeMillis()
