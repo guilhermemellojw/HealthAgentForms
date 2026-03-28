@@ -839,7 +839,7 @@ fun HomeScreen(
                                 alpha = if (isDragging) 0f else 1f
                             }
                             .let {
-                                if (!uiState.isEasyMode) {
+                                if (!uiState.isEasyMode && !uiState.isDayClosed) {
                                     it.pointerInput(house.id) {
                                         detectDragGesturesAfterLongPress(
                                             onDragStart = { offset ->
@@ -945,7 +945,8 @@ fun HomeScreen(
                         streetSuggestions = streetSuggestions,
                         isSolarMode = uiState.isSolarMode,
                         focusRequester = focusRequester,
-                        onGetLocation = onGetLocation
+                        onGetLocation = onGetLocation,
+                        enabled = !uiState.isDayClosed
                     )
                     }
                 }
@@ -975,7 +976,7 @@ fun HomeScreen(
                         onEnableReorder = {},
                         onMoveDate = {},
                         streetSuggestions = emptyList(),
-                        enabled = true,
+                        enabled = !uiState.isDayClosed,
                         isEasyMode = uiState.isEasyMode,
                         focusRequester = null
                     )

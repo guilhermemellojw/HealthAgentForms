@@ -468,6 +468,10 @@ class HomeViewModel @Inject constructor(
                 cal.add(Calendar.DAY_OF_YEAR, 1)
             }
             _uiState.update { current ->
+                val dayHouses = h.filter { it.data == d }
+                val workedCount = dayHouses.count { it.situation == Situation.NONE }
+                val errorsCount = dayHouses.count { !houseValidationUseCase.isHouseValid(it, strict = true) }
+
                 current.copy(
                     houses = dayHouses.filter { it.streetName.contains(q, true) || it.number.contains(q, true) }.map { HouseUiStateMapper.map(it, houseValidationUseCase) },
                     dashboardTotals = totals,
@@ -508,7 +512,9 @@ class HomeViewModel @Inject constructor(
                     rgBairros = args[33] as List<String>,
                     syncStatus = args[34] as SyncStatus,
                     weeklySummaryTotals = args[35] as WeeklySummaryTotals,
-                    backupConfirmation = args[39] as BackupConfirmation?
+                    backupConfirmation = args[39] as BackupConfirmation?,
+                    pendingCount = workedCount,
+                    strictPendingCount = errorsCount
                 )
             }
         }.launchIn(viewModelScope)
