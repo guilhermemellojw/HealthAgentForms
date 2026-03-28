@@ -11,7 +11,7 @@ import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.CustomStreet
 import com.antigravity.healthagent.data.local.model.Tombstone
 
-@Database(entities = [House::class, DayActivity::class, CustomStreet::class, Tombstone::class], version = 25, exportSchema = false)
+@Database(entities = [House::class, DayActivity::class, CustomStreet::class, Tombstone::class], version = 26, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun houseDao(): HouseDao
@@ -20,6 +20,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun tombstoneDao(): com.antigravity.healthagent.data.local.dao.TombstoneDao
 
     companion object {
+        val MIGRATION_25_26 = object : androidx.room.migration.Migration(25, 26) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                performFullNuclearRebuild(database)
+            }
+        }
+
         val MIGRATION_24_25 = object : androidx.room.migration.Migration(24, 25) {
             override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
                 performFullNuclearRebuild(database)
@@ -247,6 +253,23 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("INSERT OR IGNORE INTO custom_streets_new (name, bairro) SELECT UPPER(TRIM(name)), UPPER(TRIM(bairro)) FROM custom_streets")
                 database.execSQL("DROP TABLE custom_streets")
                 database.execSQL("ALTER TABLE custom_streets_new RENAME TO custom_streets")
+
+                // 5. Rebuild tombstones
+                android.util.Log.d("AppDatabase", "Rebuilding tombstones...")
+                database.execSQL("DROP TABLE IF EXISTS `tombstones_new`")
+                database.execSQL("""
+                    CREATE TABLE `tombstones_new` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, 
+                        `type` TEXT NOT NULL, 
+                        `naturalKey` TEXT NOT NULL, 
+                        `agentName` TEXT NOT NULL DEFAULT '', 
+                        `agentUid` TEXT NOT NULL DEFAULT '', 
+                        `deletedAt` INTEGER NOT NULL
+                    )
+                """)
+                database.execSQL("INSERT INTO tombstones_new (id, type, naturalKey, deletedAt) SELECT id, type, naturalKey, deletedAt FROM tombstones")
+                database.execSQL("DROP TABLE tombstones")
+                database.execSQL("ALTER TABLE tombstones_new RENAME TO tombstones")
 
                 android.util.Log.i("AppDatabase", "NUCLEAR REBUILD COMPLETED SUCCESSFULLY.")
             } catch (e: Exception) {

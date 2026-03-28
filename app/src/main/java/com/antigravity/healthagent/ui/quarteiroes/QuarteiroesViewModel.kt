@@ -35,7 +35,9 @@ class QuarteiroesViewModel @Inject constructor(
         val uid = remoteUid ?: user?.uid ?: ""
         name to uid
     }.flatMapLatest { (name, uid) ->
-        if (name.isNotBlank()) {
+        if (name == "Admin" || name == "Supervisor") {
+            houseRepository.getAllHousesSnapshotFlow()
+        } else if (name.isNotBlank()) {
             houseRepository.getAllHouses(name, uid)
         } else {
             flowOf(emptyList())

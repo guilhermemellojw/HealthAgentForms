@@ -95,9 +95,29 @@ interface HouseDao {
     """)
     suspend fun cleanupZeroValues()
 
-    @Query("UPDATE houses SET agentName = :newName WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND agentName = :oldName)")
+    @Query("UPDATE houses SET agentName = :newName WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:oldName))")
     suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String)
 
-    @Query("UPDATE houses SET agentUid = :targetUid WHERE agentUid = '' AND (UPPER(agentName) = UPPER(:agentName) OR UPPER(agentName) = UPPER(:email))")
-    suspend fun updateAgentUidForAll(agentName: String, email: String, targetUid: String)
+    @Query("""
+        SELECT * FROM houses 
+        WHERE (agentUid = '' OR agentUid = :targetUid) 
+        AND UPPER(agentName) != UPPER(:properName) 
+        AND (UPPER(agentName) = UPPER(:email) OR UPPER(agentName) = UPPER(:emailPrefix))
+    """)
+    suspend fun getOrphanHouses(email: String, emailPrefix: String, targetUid: String, properName: String): List<House>
+
+    @Query("""
+        SELECT COUNT(*) FROM houses 
+        WHERE agentUid = :uid AND UPPER(agentName) = UPPER(:name) AND data = :date 
+        AND UPPER(blockNumber) = UPPER(:blockNum) AND UPPER(blockSequence) = UPPER(:blockSeq) 
+        AND UPPER(streetName) = UPPER(:street) AND UPPER(number) = UPPER(:num) AND sequence = :seq 
+        AND complement = :compl AND UPPER(bairro) = UPPER(:bairro) AND visitSegment = :segment
+    """)
+    suspend fun checkClash(uid: String, name: String, date: String, blockNum: String, blockSeq: String, street: String, num: String, seq: Int, compl: Int, bairro: String, segment: Int): Int
+
+    @Query("DELETE FROM houses WHERE id = :id")
+    suspend fun deleteHouseById(id: Int)
+
+    @Query("UPDATE houses SET agentUid = :uid, agentName = :name WHERE id = :id")
+    suspend fun updateHouseIdentity(id: Int, uid: String, name: String)
 }

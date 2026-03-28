@@ -29,7 +29,7 @@ class GetRGBlocksUseCase @Inject constructor() {
         
         // Use listOrder for internal house sequence (supports manual reordering)
         val sortedHouses = bairroHouses.sortedWith(compareBy({ getTimestamp(it.data) }, { it.listOrder }))
-        val groupedByBlock = sortedHouses.groupBy { Pair(it.blockNumber, it.blockSequence) }
+        val groupedByBlock = sortedHouses.groupBy { Pair(it.blockNumber.trim().uppercase(), it.blockSequence.trim().uppercase()) }
         
         groupedByBlock.keys.sortedWith(compareBy({ it.first.padStart(10, '0') }, { it.second.padStart(10, '0') })).forEach { key ->
             val (bNum, bSeq) = key
@@ -43,7 +43,7 @@ class GetRGBlocksUseCase @Inject constructor() {
                 val dayHousesForBlock = housesByDate[date] ?: emptyList()
                 
                 // 1. Group by agent and find their earliest work in this specific block/day
-                val agentFirstTouch = dayHousesForBlock.groupBy { it.agentName }
+                val agentFirstTouch = dayHousesForBlock.groupBy { it.agentName.uppercase() }
                     .mapValues { (_, houses) -> houses.minOf { it.createdAt } }
                 
                 // 2. Sort agents by who started THIS block first
@@ -51,7 +51,7 @@ class GetRGBlocksUseCase @Inject constructor() {
                 
                 // 3. Complete all of the first agent's houses before moving to the next
                 val dayHouses = dayHousesForBlock.sortedWith(compareBy(
-                    { sortedAgents.indexOf(it.agentName) },
+                    { sortedAgents.indexOf(it.agentName.uppercase()) },
                     { it.listOrder }
                 ))
                 
@@ -90,7 +90,7 @@ class GetRGBlocksUseCase @Inject constructor() {
                      conclusionDate = null,
                      houses = currentSegmentHouses.toList()
                  ))
-            }
+             }
         }
         
         // Filter by the selected Year
@@ -98,7 +98,13 @@ class GetRGBlocksUseCase @Inject constructor() {
         else {
             segments.filter { seg ->
                 val dateToCheck = seg.conclusionDate ?: seg.endDate
-                dateToCheck.endsWith(selectedYear)
+                try {
+                    val cal = Calendar.getInstance()
+                    dateFormatter.parse(dateToCheck)?.let { cal.time = it }
+                    cal.get(Calendar.YEAR).toString() == selectedYear
+                } catch (e: Exception) {
+                    dateToCheck.endsWith(selectedYear)
+                }
             }
         }
     }

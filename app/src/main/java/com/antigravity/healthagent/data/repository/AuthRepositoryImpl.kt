@@ -464,8 +464,26 @@ class AuthRepositoryImpl @Inject constructor(
         // Proactive ID Recovery: Link any orphaned local data to this real UID
         if (isAuthorized) {
             try {
-                houseDao.updateAgentUidForAll(user.agentName ?: "", user.email ?: "", user.uid)
-                activityDao.updateAgentUidForAll(user.agentName ?: "", user.email ?: "", user.uid)
+                val emailPrefix = user.email?.substringBefore("@")?.uppercase() ?: ""
+                val properName = user.standardName
+                
+                // 1. House Migration
+                val orphanHouses = houseDao.getOrphanHouses(user.email ?: "", emailPrefix, user.uid, properName)
+                orphanHouses.forEach { house ->
+                    val hasClash = houseDao.checkClash(
+                        user.uid, properName, house.data, house.blockNumber, house.blockSequence, 
+                        house.streetName, house.number, house.sequence, house.complement, house.bairro, house.visitSegment
+                    ) > 0
+                    
+                    if (hasClash) {
+                        houseDao.deleteHouseById(house.id)
+                    } else {
+                        houseDao.updateHouseIdentity(house.id, user.uid, properName)
+                    }
+                }
+
+                // 2. Activity Migration (bulk is still okay as it handles conflicts internally)
+                activityDao.updateAgentUidForAll(properName, user.email ?: "", emailPrefix, user.uid)
             } catch (e: Exception) {
                 android.util.Log.e("AuthRepository", "Proactive migration failed", e)
             }
@@ -628,9 +646,26 @@ class AuthRepositoryImpl @Inject constructor(
 
         // 3. Perform Local Migration (Very Important for offline visibility)
         try {
-            // We use both name and email to find local records (placeholders) and link to targetUid
-            houseDao.updateAgentUidForAll(preAgentName ?: "", email, targetUid)
-            activityDao.updateAgentUidForAll(preAgentName ?: "", email, targetUid)
+            val emailPrefix = email.substringBefore("@").uppercase()
+            val properName = preAgentName?.trim()?.uppercase() ?: ""
+
+            // 1. House Migration
+            val orphanHouses = houseDao.getOrphanHouses(email, emailPrefix, targetUid, properName)
+            orphanHouses.forEach { house ->
+                val hasClash = houseDao.checkClash(
+                    targetUid, properName, house.data, house.blockNumber, house.blockSequence, 
+                    house.streetName, house.number, house.sequence, house.complement, house.bairro, house.visitSegment
+                ) > 0
+                
+                if (hasClash) {
+                    houseDao.deleteHouseById(house.id)
+                } else {
+                    houseDao.updateHouseIdentity(house.id, targetUid, properName)
+                }
+            }
+
+            // 2. Activity Migration
+            activityDao.updateAgentUidForAll(properName, email, emailPrefix, targetUid)
         } catch (e: Exception) {
             android.util.Log.e("AuthRepository", "Local migration failed", e)
         }

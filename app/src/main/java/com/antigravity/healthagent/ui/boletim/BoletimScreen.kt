@@ -464,7 +464,7 @@ fun BoletimScreen(
                                     checkHistoryAndProceed(summary.date) {
                                         scope.launch {
                                             try {
-                                                val houses = viewModel.getHousesForDate(summary.date)
+                                                val houses = viewModel.getHousesForDate(summary.date, summary.agentName)
                                                 val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                                     com.antigravity.healthagent.utils.BoletimPdfGenerator.generatePdf(
                                                         context,
@@ -509,7 +509,7 @@ fun BoletimScreen(
                                         scope.launch {
                                             try {
                                                 val shareName = if (summary.agentName.isNotBlank()) summary.agentName else uiState.agentName
-                                                val houses = viewModel.getHousesForDate(summary.date)
+                                                val houses = viewModel.getHousesForDate(summary.date, summary.agentName)
                                                 shareToWhatsApp(context, shareName, summary.date, houses)
                                             } catch (e: Exception) {
                                                 Toast.makeText(context, "Erro ao compartilhar.", Toast.LENGTH_SHORT).show()

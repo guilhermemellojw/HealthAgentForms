@@ -15,17 +15,29 @@ class HouseManagementUseCase @Inject constructor(
 
     suspend fun insertHouse(house: House, allHouses: List<House>) {
         val sanitized = sanitizeHouse(house)
-        val withNewHouse = (allHouses + sanitized).sortedBy { it.listOrder }
+        val dayHouses = allHouses.filter { it.data == sanitized.data }
+        val withNewHouse = (dayHouses + sanitized).sortedBy { it.listOrder }
         val recalculated = recalculateVisitSegments(withNewHouse)
-        repository.updateHouses(recalculated) // updateHouses handles insert/replace via OnConflictStrategy
+        repository.updateHouses(recalculated)
         streetRepository.saveCustomStreet(sanitized.streetName, sanitized.bairro)
     }
 
     suspend fun updateHouse(house: House, allHouses: List<House>) {
         val sanitized = sanitizeHouse(house)
-        val updatedList = allHouses.map { if (it.id == house.id) sanitized else it }.sortedBy { it.listOrder }
-        val recalculated = recalculateVisitSegments(updatedList)
-        repository.updateHouses(recalculated)
+        val originalHouse = allHouses.find { it.id == house.id }
+        
+        val affectedDates = mutableSetOf(sanitized.data)
+        originalHouse?.let { affectedDates.add(it.data) }
+        
+        val housesToUpdate = allHouses.filter { it.data in affectedDates }.map {
+            if (it.id == house.id) sanitized else it
+        }
+        
+        val finalUpdated = housesToUpdate.groupBy { it.data }.flatMap { (date, dayHouses) ->
+            recalculateVisitSegments(dayHouses.sortedBy { it.listOrder })
+        }
+        
+        repository.updateHouses(finalUpdated)
         streetRepository.saveCustomStreet(sanitized.streetName, sanitized.bairro)
     }
 
@@ -35,8 +47,9 @@ class HouseManagementUseCase @Inject constructor(
     }
 
     suspend fun deleteHouse(house: House, allHouses: List<House>) {
+        val dayHouses = allHouses.filter { it.data == house.data }
         repository.deleteHouse(house)
-        val remaining = allHouses.filter { it.id != house.id }.sortedBy { it.listOrder }
+        val remaining = dayHouses.filter { it.id != house.id }.sortedBy { it.listOrder }
         val recalculated = recalculateVisitSegments(remaining)
         repository.updateHouses(recalculated)
     }

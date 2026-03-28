@@ -770,14 +770,14 @@ fun UnifiedProfileCard(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        profile.email ?: "Conta não vinculada",
+                        profile.agentName ?: "Sem nome de agente",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        profile.agentName ?: "Sem nome de agente",
+                        profile.email ?: "Conta não vinculada",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

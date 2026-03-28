@@ -46,6 +46,10 @@ data class AuthUser(
 ) {
     val isAdmin: Boolean get() = role == UserRole.ADMIN
     val isSupervisor: Boolean get() = role == UserRole.SUPERVISOR
+    val standardName: String get() = (agentName?.takeIf { it.isNotBlank() } 
+        ?: displayName?.takeIf { it.isNotBlank() } 
+        ?: email?.substringBefore("@")?.takeIf { it.isNotBlank() } 
+        ?: "AGENTE").uppercase()
 }
 
 data class AccessRequest(

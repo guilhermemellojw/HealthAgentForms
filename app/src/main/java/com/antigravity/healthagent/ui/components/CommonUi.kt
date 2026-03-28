@@ -664,10 +664,10 @@ fun UserIconMenu(
             DropdownMenuItem(
                 text = { 
                     Column {
-                        Text(user.displayName ?: "Usuário", fontWeight = FontWeight.Bold)
+                        Text(user.standardName, fontWeight = FontWeight.Bold)
                         Text(user.email ?: "", style = MaterialTheme.typography.bodySmall)
-                        if (!user.agentName.isNullOrBlank()) {
-                            Text("Agente: ${user.agentName}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        if (!user.agentName.isNullOrBlank() && user.displayName != null && user.agentName != user.displayName) {
+                            Text("Perfil Google: ${user.displayName}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 },

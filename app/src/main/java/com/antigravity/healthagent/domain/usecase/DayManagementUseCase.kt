@@ -53,7 +53,7 @@ class DayManagementUseCase @Inject constructor(
         return true
     }
 
-    suspend fun getNextBusinessDay(date: String, agentName: String): String {
+    suspend fun getNextBusinessDay(date: String, agentName: String, agentUid: String? = null): String {
         return try {
             val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
             val cal = Calendar.getInstance()
@@ -73,7 +73,7 @@ class DayManagementUseCase @Inject constructor(
                 
                 // Check if this day has a non-NORMAL status
                 val nextDateStr = sdf.format(cal.time)
-                val activity = repository.getDayActivity(nextDateStr, agentName.uppercase())
+                val activity = repository.getDayActivity(nextDateStr, agentName.uppercase(), agentUid)
                 val status = activity?.status ?: "NORMAL"
                 
                 // If status is NORMAL or blank, this is a valid work day

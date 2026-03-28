@@ -259,7 +259,10 @@ fun HomeScreen(
             kotlinx.coroutines.delay(100)
             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
         }
-        GoalReachedOverlay(onDismiss = { viewModel.advanceToNextDay() })
+        GoalReachedOverlay(
+            onDismiss = { viewModel.dismissGoalReached() },
+            onNextDay = { viewModel.advanceToNextDay() }
+        )
     }
 
     val showClosingAudit by viewModel.showClosingAudit.collectAsState()
@@ -659,7 +662,7 @@ fun HomeScreen(
                         } else {
                             if (isGoalReached && !uiState.isManualUnlock) {
                                 viewModel.startDayClosingFlow()
-                            } else if (viewModel.validateCurrentDay(showDialog = true)) {
+                            } else if (viewModel.validateCurrentDay(showDialog = true, strict = false)) {
                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                                 lastAddRequestTime = System.currentTimeMillis()
                                 viewModel.addNewHouse()

@@ -15,7 +15,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun GoalReachedOverlay(onDismiss: () -> Unit) {
+fun GoalReachedOverlay(
+    onDismiss: () -> Unit,
+    onNextDay: () -> Unit
+) {
     // Confetti State
     val particles = remember {
         List(50) {
@@ -126,11 +129,20 @@ fun GoalReachedOverlay(onDismiss: () -> Unit) {
                     )
                     
                     Button(
-                        onClick = onDismiss,
+                        onClick = onNextDay,
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
-                        Text("Continuar", fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("PRÓXIMO DIA DE TRABALHO", fontWeight = FontWeight.ExtraBold)
+                    }
+
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("PERMANECER NESTE DIA", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }

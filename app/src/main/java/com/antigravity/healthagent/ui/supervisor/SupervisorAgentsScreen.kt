@@ -168,11 +168,19 @@ fun SupervisorAgentCard(agent: AgentData) {
                 Spacer(modifier = Modifier.width(16.dp))
                 
                 Column(modifier = Modifier.weight(1f)) {
+                    val displayName = agent.agentName?.takeIf { it.isNotBlank() } ?: agent.email.ifBlank { "Sem Email" }
                     Text(
-                        text = agent.email.ifBlank { "Sem Email" },
+                        text = displayName,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
+                    if (agent.agentName?.isNotBlank() == true) {
+                        Text(
+                            text = agent.email,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Text(
                         text = "Sinc: $lastSync",
                         style = MaterialTheme.typography.bodySmall,

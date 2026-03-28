@@ -6,8 +6,8 @@ import com.antigravity.healthagent.data.local.model.TombstoneType
 
 @Dao
 interface TombstoneDao {
-    @Query("SELECT * FROM tombstones")
-    suspend fun getAllTombstones(): List<Tombstone>
+    @Query("SELECT * FROM tombstones WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
+    suspend fun getAllTombstones(agentName: String, agentUid: String): List<Tombstone>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTombstone(tombstone: Tombstone)

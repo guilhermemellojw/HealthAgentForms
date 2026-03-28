@@ -24,7 +24,7 @@ class HouseRepositoryImpl @Inject constructor(
 
     private suspend fun ensureDayNotLocked(date: String, agentName: String, agentUid: String? = "") {
         val activity = dayActivityDao.getDayActivity(date, agentName.uppercase(), agentUid ?: "")
-        if (activity?.isClosed == true) {
+        if (activity?.isClosed == true && !activity.isManualUnlock) {
             throw IllegalStateException("Este dia ($date) está bloqueado para edições (Auditoria Concluída).")
         }
     }
@@ -71,7 +71,7 @@ class HouseRepositoryImpl @Inject constructor(
                 val oldKey = existing.generateNaturalKey()
                 val newKey = house.generateNaturalKey()
                 if (oldKey != newKey) {
-                    tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = oldKey))
+                    tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = oldKey, agentName = existing.agentName, agentUid = existing.agentUid))
                 }
             }
             houseDao.updateHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
@@ -95,11 +95,11 @@ class HouseRepositoryImpl @Inject constructor(
                     val oldKey = existing.generateNaturalKey()
                     val newKey = house.generateNaturalKey()
                     if (oldKey != newKey) {
-                        tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = oldKey))
+                        tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = oldKey, agentName = existing.agentName, agentUid = existing.agentUid))
                     }
                 }
             }
-            houseDao.updateAll(houses.map { it.copy(isSynced = false, lastUpdated = System.currentTimeMillis()) })
+            houseDao.upsertHouses(houses.map { it.copy(isSynced = false, lastUpdated = System.currentTimeMillis()) })
         }
         syncScheduler.scheduleSync()
     }
@@ -111,7 +111,7 @@ class HouseRepositoryImpl @Inject constructor(
         
         database.withTransaction {
             val houses = houseDao.getHousesByDateAndAgent(oldDate, agentName.uppercase(), finalUid)
-            val tombstones = houses.map { Tombstone(type = TombstoneType.HOUSE, naturalKey = it.generateNaturalKey()) }
+            val tombstones = houses.map { Tombstone(type = TombstoneType.HOUSE, naturalKey = it.generateNaturalKey(), agentName = it.agentName, agentUid = it.agentUid) }
             tombstoneDao.insertTombstones(tombstones)
             
             houseDao.updateHousesDate(oldDate, newDate, agentName, finalUid)
@@ -123,7 +123,7 @@ class HouseRepositoryImpl @Inject constructor(
         ensureDayNotLocked(house.data, house.agentName, house.agentUid)
         database.withTransaction {
             houseDao.deleteHouse(house)
-            tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = house.generateNaturalKey()))
+            tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = house.generateNaturalKey(), agentName = house.agentName, agentUid = house.agentUid))
         }
         syncScheduler.scheduleSync()
     }
@@ -237,10 +237,10 @@ class HouseRepositoryImpl @Inject constructor(
         database.withTransaction {
             // 1. Get all houses for this date to record tombstones
             val housesToDelete = houseDao.getHousesByDateAndAgent(date, upperName, finalUid)
-            val houseTombstones = housesToDelete.map { Tombstone(type = TombstoneType.HOUSE, naturalKey = it.generateNaturalKey()) }
+            val houseTombstones = housesToDelete.map { Tombstone(type = TombstoneType.HOUSE, naturalKey = it.generateNaturalKey(), agentName = it.agentName, agentUid = it.agentUid) }
             
             // 2. Record activity tombstone
-            val activityTombstone = Tombstone(type = TombstoneType.ACTIVITY, naturalKey = "$date|$upperName")
+            val activityTombstone = Tombstone(type = TombstoneType.ACTIVITY, naturalKey = "$date|$upperName", agentName = upperName, agentUid = finalUid)
             
             // 3. Perform Deletions
             dayActivityDao.deleteDayActivity(date, upperName, finalUid)
@@ -262,9 +262,9 @@ class HouseRepositoryImpl @Inject constructor(
         database.withTransaction {
             // 1. Get all houses and activities for these dates to record tombstones
             val housesToDelete = houseDao.getHousesByAgentAndDates(upperName, finalUid, dates)
-            val houseTombstones = housesToDelete.map { Tombstone(type = TombstoneType.HOUSE, naturalKey = it.generateNaturalKey()) }
+            val houseTombstones = housesToDelete.map { Tombstone(type = TombstoneType.HOUSE, naturalKey = it.generateNaturalKey(), agentName = it.agentName, agentUid = it.agentUid) }
             
-            val activityTombstones = dates.map { Tombstone(type = TombstoneType.ACTIVITY, naturalKey = "$it|$upperName") }
+            val activityTombstones = dates.map { Tombstone(type = TombstoneType.ACTIVITY, naturalKey = "$it|$upperName", agentName = upperName, agentUid = finalUid) }
             
             // 2. Perform Deletions
             dayActivityDao.deleteByAgentAndDates(upperName, finalUid, dates)
@@ -315,12 +315,42 @@ class HouseRepositoryImpl @Inject constructor(
         if (targetUid.isBlank()) return
         database.withTransaction {
             try {
-                // 1. Standardize Houses UID
-                houseDao.updateAgentUidForAll(agentName, email, targetUid)
+                // 0. If current name is email prefix and we have a better name, migrate local records
+                val emailPrefix = email.substringBefore("@").uppercase()
+                val properName = agentName.trim().uppercase().ifBlank { emailPrefix }
+                if (properName.isNotBlank() && properName != emailPrefix) {
+                    houseDao.updateAgentNameForAll(emailPrefix, properName, targetUid)
+                    dayActivityDao.updateAgentNameForAll(emailPrefix, properName, targetUid)
+                }
+
+                // 1. Standardize Houses (Clash-aware migration)
+                val orphanHouses = houseDao.getOrphanHouses(email, emailPrefix, targetUid, properName)
+                orphanHouses.forEach { house ->
+                    val hasClash = houseDao.checkClash(
+                        targetUid, properName, house.data, house.blockNumber, house.blockSequence, 
+                        house.streetName, house.number, house.sequence, house.complement, house.bairro, house.visitSegment
+                    ) > 0
+                    
+                    // If the house is "clashing" but it's the SAME house (just being renamed),
+                    // hasClash will be 1 (counting itself) if it ALREADY matches the target values.
+                    // But here we filtered by agentName != properName, so it won't count itself.
+                    // If hasClash > 0, it means a DUPLICATE already exists with the proper name.
+                    
+                    if (hasClash) {
+                        houseDao.deleteHouseById(house.id)
+                    } else {
+                        houseDao.updateHouseIdentity(house.id, targetUid, properName)
+                    }
+                }
                 
                 // 2. Smarter DayActivity Migration
                 val allActivities = getAllDayActivitiesSnapshot().filter { 
-                    it.agentUid == "" && (it.agentName.equals(agentName, true) || it.agentName.equals(email, true))
+                    (it.agentUid == "" || it.agentUid == targetUid) && 
+                    it.agentName != agentName && (
+                        it.agentName.equals(agentName, true) || 
+                        it.agentName.equals(email, true) || 
+                        it.agentName.equals(emailPrefix, true)
+                    )
                 }
                 
                 allActivities.forEach { local ->
@@ -336,15 +366,18 @@ class HouseRepositoryImpl @Inject constructor(
                                            (localIsMeaningful == conflictIsMeaningful && local.lastUpdated > conflict.lastUpdated)
 
                         if (shouldKeepLocal) {
-                            deleteDayActivity(conflict.date, conflict.agentName, conflict.agentUid)
-                            updateDayActivity(local.copy(agentUid = targetUid))
+                            // The conflict record will be overwritten by the next insert 
+                            // because it matches the target Primary Key (date, agentName, targetUid)
+                            insertDayActivity(local.copy(agentUid = targetUid, agentName = agentName))
+                            // Now delete the old orphaned record
+                            deleteDayActivity(local.date, local.agentName, local.agentUid)
                         } else {
-                            // Obsolete local record
+                            // Obsolete local record: just delete it
                             deleteDayActivity(local.date, local.agentName, local.agentUid)
                         }
                     } else {
-                        // Safe to update
-                        updateDayActivity(local.copy(agentUid = targetUid))
+                        // NO CONFLICT: Create the NEW record and delete the OLD one
+                        insertDayActivity(local.copy(agentUid = targetUid, agentName = agentName))
                         deleteDayActivity(local.date, local.agentName, local.agentUid)
                     }
                 }

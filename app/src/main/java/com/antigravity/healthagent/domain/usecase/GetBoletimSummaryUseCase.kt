@@ -13,8 +13,10 @@ class GetBoletimSummaryUseCase @Inject constructor() {
         allHouses: List<House>,
         activities: List<DayActivity>
     ): List<BoletimSummary> {
-        return allHouses.groupBy { it.data }.map { (date, dayHouses) ->
-            val activity = activities.find { it.date == date }
+        // Group by Date AND Agent to prevent data mixing (Bug Hunt #6)
+        return allHouses.groupBy { Triple(it.data, it.agentName.uppercase(), it.agentUid) }.map { (groupKey, dayHouses) ->
+            val (date, agentName, agentUid) = groupKey
+            val activity = activities.find { it.date == date && it.agentName.uppercase() == agentName && it.agentUid == agentUid }
             val dayHousesSorted = dayHouses.sortedBy { it.listOrder }
             
             val blockMap = dayHousesSorted.groupBy { 

@@ -235,8 +235,16 @@ class HomeViewModel @Inject constructor(
         }
         
         // Persist for background processes
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             settingsManager.setRemoteAgentUid(agent?.uid)
+            if (agent != null) {
+                try {
+                    val name = agent.agentName?.takeIf { it.isNotBlank() } ?: agent.email.substringBefore("@")
+                    repository.migrateLocalData(name, agent.email, agent.uid)
+                } catch (e: Exception) {
+                    android.util.Log.e("HomeViewModel", "Error migrating remote agent local data", e)
+                }
+            }
         }
     }
 
@@ -296,7 +304,7 @@ class HomeViewModel @Inject constructor(
         val effectiveUid = remoteUid ?: currentUid
         Triple(date, name, effectiveUid)
     }.flatMapLatest { (date, name, uid) ->
-        repository.getDayActivityFlow(date, name, uid).map { it?.isClosed == true }
+        repository.getDayActivityFlow(date, name, uid).map { it?.isClosed == true && it?.isManualUnlock != true }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val isWorkdayManualUnlock: StateFlow<Boolean> = combine(_data, _agentName, _remoteAgentUid, _currentUserUid) { date, name, remoteUid, currentUid ->
@@ -338,7 +346,8 @@ class HomeViewModel @Inject constructor(
         Triple(dates, agent, effectiveUid) 
     }.flatMapLatest { (dates, agent, uid) ->
         val activitiesFlow = repository.getDayActivities(dates, agent, uid)
-        combine(houses, activitiesFlow) { all: List<House>, activities: List<DayActivity> ->
+        // Use allHousesFlow instead of 'houses' to ensure strict agent filtering for Admins
+        combine(allHousesFlow, activitiesFlow) { all: List<House>, activities: List<DayActivity> ->
             dates.map { date ->
                 val dayHouses = all.filter { it.data == date }
                 val activity = activities.find { it.date == date }
@@ -350,7 +359,7 @@ class HomeViewModel @Inject constructor(
     .flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val weeklySummaryTotals: StateFlow<WeeklySummaryTotals> = combine(houses, currentWeekDates) { list, dates ->
+    val weeklySummaryTotals: StateFlow<WeeklySummaryTotals> = combine(allHousesFlow, currentWeekDates) { list, dates ->
         val weekHouses = list.filter { dates.contains(it.data) }
         WeeklySummaryTotals(
             totalHouses = weekHouses.count { it.situation == Situation.NONE },
@@ -388,8 +397,9 @@ class HomeViewModel @Inject constructor(
     val customActivities: StateFlow<Set<String>> = settingsManager.customActivities
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
-    val availableYears: StateFlow<List<String>> = allHousesFlow.map { all ->
-        all.mapNotNull { 
+    val availableYears: StateFlow<List<String>> = combine(allHousesFlow, _agentName) { all, name ->
+        if (name == "Admin" || name == "Supervisor") emptyList()
+        else all.mapNotNull { 
             try { 
                 val d = dateFormatter.parse(it.data)
                 if(d != null) {
@@ -400,8 +410,15 @@ class HomeViewModel @Inject constructor(
         }.distinct().sortedDescending()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(Calendar.getInstance().get(Calendar.YEAR).toString()))
 
-    val rgBlocks: StateFlow<List<BlockSegment>> = combine(globalHousesFlow, _selectedRgBairro, _rgYear) { h, b, y ->
-        getRGBlocksUseCase(h, b, y)
+    val rgBlocks: StateFlow<List<BlockSegment>> = combine(allHousesFlow, _selectedRgBairro, _rgYear, _agentName) { h, b, y, name ->
+        // If the current identity is "Admin" or "Supervisor", it means no specific remote agent is being 
+        // viewed in a scoped manner. To prevent a "messed up" composite view of multiple agents' 
+        // sequences, we return empty until a specific agent is selected.
+        val filtered = if (name == "Admin" || name == "Supervisor") {
+             emptyList()
+        } else h
+
+        getRGBlocksUseCase(filtered, b, y)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val selectedRgBlock: StateFlow<String> = _selectedRgBlock.asStateFlow()
@@ -422,13 +439,13 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    val rgBairros: StateFlow<List<String>> = combine(globalHousesFlow, _rgYear) { all, year ->
-        filterByYear(all, year)
+    val rgBairros: StateFlow<List<String>> = combine(allHousesFlow, _rgYear, _agentName) { all, year, name ->
+        if (name == "Admin" || name == "Supervisor") emptyList()
+        else filterByYear(all, year)
             .map { it.bairro.trim().formatStreetName() }
             .distinct()
             .sorted()
-    }.flowOn(Dispatchers.Default)
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         viewModelScope.launch {
@@ -673,8 +690,8 @@ class HomeViewModel @Inject constructor(
 
 
     // --- Actions ---
-    fun validateCurrentDay(showDialog: Boolean): Boolean {
-        val result = houseValidationUseCase.validateCurrentDay(_data.value, houses.value, strict = true)
+    fun validateCurrentDay(showDialog: Boolean, strict: Boolean = true): Boolean {
+        val result = houseValidationUseCase.validateCurrentDay(_data.value, houses.value, strict = strict)
         _uiState.update { it.copy(validationErrorHouseIds = result.errorHouseIds) }
         _validationErrorDetails.value = result.errorDetails
         _isDuplicateIds.value = result.errorDetails.filter { it.isDuplicate }.map { it.houseId }.toSet()
@@ -777,16 +794,16 @@ class HomeViewModel @Inject constructor(
                 }
                 
                 if (allHouses.isNotEmpty()) {
-                    val lastWorkDayHouse = allHouses.maxByOrNull { house ->
-                        try {
-                            dateFormatter.parse(house.data)?.time ?: 0L
-                        } catch (e: Exception) {
-                            0L
-                        }
-                    }
-                    if (lastWorkDayHouse != null) {
-                        _data.value = lastWorkDayHouse.data
-                        _agentName.value = lastWorkDayHouse.agentName
+                    val todayStr = dateFormatter.format(Date())
+                    val hasTodayHouses = allHouses.any { it.data == todayStr }
+                    
+                    if (hasTodayHouses) {
+                        _data.value = todayStr
+                    } else {
+                        // Prefer Today if it's a fresh day, 
+                        // unless the last work day was VERY recent (e.g. today or yesterday)
+                        // This prevents sticking on a closed previous day on app restart.
+                        _data.value = todayStr
                     }
                 }
             } catch (e: Exception) {
@@ -845,7 +862,7 @@ class HomeViewModel @Inject constructor(
         // Keep agentName and currentUserUid synced with AuthUser or RemoteAgent
         viewModelScope.launch {
             combine(authRepository.currentUserAsync, _remoteAgent) { user, remote ->
-                val name = remote ?: user?.agentName?.takeIf { it.isNotBlank() } ?: user?.email?.takeIf { it.isNotBlank() } ?: "AGENTE"
+                val name = remote ?: user?.standardName ?: "AGENTE"
                 Pair(name, user)
             }.collect { (name, user) ->
                 val current = _agentName.value
@@ -864,11 +881,16 @@ class HomeViewModel @Inject constructor(
                     _agentName.value = name
                 }
                 
-                // Keep currentUserUid updated
+                // Keep currentUserUid updated and trigger migration ONLY for the actual authenticated user
                 user?.uid?.let { uid ->
-                    if (_currentUserUid.value != uid) {
+                    val uidChanged = _currentUserUid.value != uid
+                    if (uidChanged) {
                         _currentUserUid.value = uid
-                        // Migrate local data to the new UID safely in background
+                    }
+                    
+                    // Only trigger migration if it's the LOGGED-IN user's identity being updated
+                    // We check if remote is null to be sure we are not in Admin view mode
+                    if (remote == null && (uidChanged || shouldUpdate)) {
                         viewModelScope.launch(Dispatchers.IO) {
                             try {
                                 repository.migrateLocalData(name, user.email ?: "", uid)
@@ -1026,7 +1048,7 @@ class HomeViewModel @Inject constructor(
         return AuditSummary(
             date = date,
             totalWorked = dayHouses.count { it.situation == Situation.NONE },
-            totalTreated = dayHouses.count { (it.a1+it.a2+it.b+it.c+it.d1+it.d2+it.e+it.eliminados) > 0 || it.larvicida > 0.0 },
+            totalTreated = dayHouses.count { (it.a1+it.a2+it.b+it.c+it.d1+it.d2+it.e+it.eliminados) > 0 || it.larvicida > 0.0 || it.comFoco },
             totalClosed = dayHouses.count { it.situation == Situation.F },
             totalRefused = dayHouses.count { it.situation == Situation.REC },
             totalAbsent = dayHouses.count { it.situation == Situation.A },
@@ -1043,7 +1065,9 @@ class HomeViewModel @Inject constructor(
             try {
                 dayManagementUseCase.closeDay(audit.date, _agentName.value, _remoteAgentUid.value)
                 _showClosingAudit.value = null
-                _showGoalReached.value = true
+                if (audit.totalWorked >= maxOpenHouses.value && maxOpenHouses.value > 0) {
+                    _showGoalReached.value = true
+                }
                 
                 // Trigger immediate background sync
                 val context = com.antigravity.healthagent.context.getContext() // Assuming this helper exists or use DI
@@ -1058,7 +1082,7 @@ class HomeViewModel @Inject constructor(
     fun advanceToNextDay() {
         viewModelScope.launch {
             try {
-                val next = dayManagementUseCase.getNextBusinessDay(_data.value, _agentName.value)
+                val next = dayManagementUseCase.getNextBusinessDay(_data.value, _agentName.value, _remoteAgentUid.value ?: _currentUserUid.value)
                 if (next.isNotBlank()) {
                     _data.value = next
                     soundManager.playPop()
@@ -1121,13 +1145,18 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 // Pre-check for open limit inside the safe scope
-                val currentOpen = houses.value.count { it.data == _data.value && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+                val currentOpen = houses.value.count { it.data == _data.value && it.situation == Situation.NONE }
                 val isUnlocked = isWorkdayManualUnlock.value
                 val isAdmin = _isAdmin.value
                 
                 if (currentOpen >= maxOpenHouses.value && maxOpenHouses.value > 0 && !isUnlocked && !isAdmin) {
                     soundManager.playWarning()
                     _situationLimitConfirmation.value = House(data = _data.value) // DUMMY to trigger dialog
+                    return@launch
+                }
+
+                // CHECK: Relax validation for addition to prevent silent blocking of new work
+                if (!validateCurrentDay(showDialog = true, strict = false)) {
                     return@launch
                 }
 
@@ -1226,7 +1255,7 @@ class HomeViewModel @Inject constructor(
         val originalIsWorked = original != null && (original.situation == Situation.NONE || original.situation == Situation.EMPTY)
 
         if (houseIsWorked && !originalIsWorked) {
-            val openCount = houses.value.count { it.data == _data.value && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+            val openCount = houses.value.count { it.data == _data.value && it.situation == Situation.NONE }
             val isUnlocked = isWorkdayManualUnlock.value
             val isAdmin = _isAdmin.value
             
@@ -1245,13 +1274,21 @@ class HomeViewModel @Inject constructor(
     private fun performUpdateHouse(house: House) {
         viewModelScope.launch {
             try {
-                val result = houseManagementUseCase.updateHouseWithContext(house, houses.value)
+                // CRITICAL: Enforce current session identity to prevent "bypasses" of standardized naming
+                val currentName = _agentName.value
+                val currentUid = _remoteAgentUid.value ?: _currentUserUid.value
+                val houseWithIdentity = house.copy(agentName = currentName, agentUid = currentUid)
+                
+                val result = houseManagementUseCase.updateHouseWithContext(houseWithIdentity, houses.value)
                 if (result.localizationChanged) {
                     _bairro.value = result.updatedHouse.bairro
                     _currentBlock.value = result.updatedHouse.blockNumber
                     _currentBlockSequence.value = result.updatedHouse.blockSequence
                     _currentStreet.value = result.updatedHouse.streetName
-                    houseManagementUseCase.updateHouses(result.subsequentHouses + result.updatedHouse)
+                    
+                    // Also ensure subsequent houses get the current session identity if they are being updated
+                    val subsequentWithIdentity = result.subsequentHouses.map { it.copy(agentName = currentName, agentUid = currentUid) }
+                    houseManagementUseCase.updateHouses(subsequentWithIdentity + result.updatedHouse)
                 } else {
                     houseManagementUseCase.updateHouse(result.updatedHouse, houses.value)
                 }
@@ -1262,6 +1299,8 @@ class HomeViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error updating house", e)
+                _uiEvent.value = "Falha ao atualizar imóvel: ${e.message}"
+                soundManager.playWarning()
             }
         }
     }
@@ -1323,7 +1362,13 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun performMoveHouse(house: House, newDate: String) {
-        viewModelScope.launch { repository.updateHouse(house.copy(data = newDate)) }
+        viewModelScope.launch { 
+            repository.updateHouse(house.copy(
+                data = newDate,
+                agentName = _agentName.value,
+                agentUid = _remoteAgentUid.value ?: _currentUserUid.value
+            )) 
+        }
     }
 
     fun moveHousesToDate(oldDate: String, newDate: String) {
@@ -1577,9 +1622,12 @@ class HomeViewModel @Inject constructor(
             clearOldPdfs(context, "Semanal_")
             val summary = weeklySummary.value
             val weekDates = summary.map { it.date }
-            val allHouses = houses.value
+            // Important: Use allHousesFlow (filtered) not 'houses' (possibly global) 
+            // and filter by the current identity to be 100% sure.
+            val currentAgent = _agentName.value
+            val filteredHouses = houses.value.filter { it.agentName.uppercase() == currentAgent.uppercase() }
             val activities = summary.associate { it.date to it.status }
-            SemanalPdfGenerator.generatePdf(context, weekDates, allHouses, activities, agentName.value)
+            SemanalPdfGenerator.generatePdf(context, weekDates, filteredHouses, activities, currentAgent)
         }
     }
 
@@ -1588,18 +1636,16 @@ class HomeViewModel @Inject constructor(
             clearOldPdfs(context, "Produção_")
             clearOldPdfs(context, "Boletim_")
             val dates = currentWeekDates.value
-            val allHouses = houses.value
-            
-            // Filter houses for the current week
-            val weeklyHouses = allHouses.filter { dates.contains(it.data) }
+            val currentAgent = _agentName.value
+            val filteredHouses = houses.value.filter { it.agentName.uppercase() == currentAgent.uppercase() && dates.contains(it.data) }
             
             // Group by Date for the generator
-            val weeklyData = weeklyHouses.groupBy { it.data }
+            val weeklyData = filteredHouses.groupBy { it.data }
 
             // Get activities for the week
             val activities = weeklySummary.value.associate { it.date to it.status }
             
-            BoletimPdfGenerator.generateWeeklyBatchPdf(context, weeklyData, agentName.value, activities, dates)
+            BoletimPdfGenerator.generateWeeklyBatchPdf(context, weeklyData, currentAgent, activities, dates)
         }
     }
 
@@ -1611,8 +1657,9 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun getHousesForDate(date: String): List<House> {
-        return houses.value.filter { it.data == date }
+    fun getHousesForDate(date: String, agentName: String? = null): List<House> {
+        val targetName = agentName ?: _agentName.value
+        return houses.value.filter { it.data == date && it.agentName.uppercase() == targetName.uppercase() }
     }
 
     fun deleteProduction(date: String) {
@@ -1685,7 +1732,7 @@ class HomeViewModel @Inject constructor(
     }
     fun dismissIntegrityDialog() { _integrityDialogMessage.value = null }
     fun dismissClosingAudit() { _showClosingAudit.value = null }
-    fun dismissGoalReached() { _showGoalReached.value = false; advanceToNextDay() }
+    fun dismissGoalReached() { _showGoalReached.value = false }
     fun navigateToErroneousDay(d: String) { 
         viewModelScope.launch {
             val activity = dayManagementUseCase.getDayActivity(d, _agentName.value)
