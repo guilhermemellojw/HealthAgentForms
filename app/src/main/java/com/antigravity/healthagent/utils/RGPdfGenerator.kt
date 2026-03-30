@@ -56,7 +56,7 @@ object RGPdfGenerator {
             val endIndex = minOf(startIndex + housesPerPage, houses.size)
             val pageHouses = houses.subList(startIndex, endIndex)
 
-            drawPage(context, canvas, paint, pageHouses, safeBairro, block, municipio, supervisor, gerente, i + 1)
+            drawPage(context, canvas, paint, pageHouses, safeBairro, block, municipio, supervisor, gerente, i + 1, totalPages)
             pdfDocument.finishPage(page)
         }
 
@@ -84,7 +84,8 @@ object RGPdfGenerator {
         municipio: String,
         supervisor: String,
         gerente: String,
-        pageNumber: Int
+        pageNumber: Int,
+        totalPages: Int
     ) {
         // --- Paints ---
         val textPaint = Paint().apply {
@@ -230,7 +231,7 @@ object RGPdfGenerator {
         // Folha 1 Position
         // Draw centered at fixed Y relative to headerBottom
         val folhaY = headerBottom // Start exactly after visual elements
-        drawCenteredText(canvas, textPaint, "FOLHA $pageNumber", MARGIN, folhaY, PAGE_WIDTH - 2 * MARGIN, 10f)
+        drawCenteredText(canvas, textPaint, "FOLHA $pageNumber/$totalPages", MARGIN, folhaY, PAGE_WIDTH - 2 * MARGIN, 10f)
         
         // Next grid starts with a small gap from Folha 1
         cursorY = folhaY + 12f // 10f height + 2f padding

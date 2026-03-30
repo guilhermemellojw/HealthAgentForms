@@ -136,6 +136,7 @@ fun HomeScreen(
         MultiDayErrorDialog(
             daysWithErrors = daysWithErrors,
             onNavigateToDay = { viewModel.navigateToErroneousDay(it) },
+            onDismiss = { viewModel.dismissMultiDayErrorDialog() },
             isEasyMode = uiState.isEasyMode
         )
     }
@@ -279,7 +280,11 @@ fun HomeScreen(
     val situationLimitHouse by viewModel.situationLimitConfirmation.collectAsState()
     if (situationLimitHouse != null) {
         SituationLimitDialog(
+            house = situationLimitHouse,
             onDismiss = { viewModel.dismissSituationLimitConfirmation() },
+            onHouseClick = { id -> viewModel.onHouseClick(id) },
+            onUnlockClick = { viewModel.toggleDayLock() },
+            showUnlockOption = !uiState.isSupervisor,
             isEasyMode = uiState.isEasyMode
         )
     }
@@ -418,7 +423,9 @@ fun HomeScreen(
             title = { Text("Resumo do Dia") },
             text = {
                 Column {
-                    Text("Total Imóveis: ${uiState.dashboardTotals.totalHouses}")
+                    Text("Total Visitas: ${uiState.dashboardTotals.totalHouses}", fontWeight = FontWeight.Bold)
+                    Text("Abertos: ${uiState.dashboardTotals.worked}", color = MaterialTheme.colorScheme.primary)
+                    Text("Vazios: ${uiState.dashboardTotals.vacant}")
                     Divider(modifier = Modifier.padding(vertical = 8.dp))
                     Text("A1: ${uiState.dashboardTotals.a1} | A2: ${uiState.dashboardTotals.a2}")
                     Text("B: ${uiState.dashboardTotals.b} | C: ${uiState.dashboardTotals.c}")
@@ -430,7 +437,23 @@ fun HomeScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { isDashboardOpen = false }) { Text("Fechar") }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    if (!uiState.isDayClosed && !uiState.isSupervisor) {
+                        TextButton(
+                            onClick = { 
+                                isDashboardOpen = false
+                                viewModel.startDayClosingFlow()
+                            },
+                            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF00C853)) // Green
+                        ) { 
+                            Text("FECHAR PRODUÇÃO", fontWeight = FontWeight.Bold) 
+                        }
+                    }
+                    TextButton(onClick = { isDashboardOpen = false }) { Text("FECHAR") }
+                }
             }
         )
     }
@@ -633,7 +656,7 @@ fun HomeScreen(
                 }
                 
                 val fabOnClick: () -> Unit = {
-                    if (hasErrors) {
+                    if (isGoalReached && hasErrors) {
                         val firstErrorId = uiState.validationErrorHouseIds.firstOrNull()
                         if (firstErrorId != null) {
                             val indexInUi = uiHouses.indexOfFirst { it.house.id == firstErrorId }
@@ -644,35 +667,32 @@ fun HomeScreen(
                                 }
                             }
                         }
+                    } else if (isGoalReached && !uiState.isManualUnlock) {
+                        viewModel.startDayClosingFlow()
                     } else {
                         val isHeaderValid = uiState.municipality.isNotBlank() &&
-                                uiState.neighborhood.isNotBlank() &&
-                                uiState.zone.isNotBlank() &&
-                                uiState.cycle.isNotBlank() &&
-                                uiState.type > 0 &&
-                                uiState.activity > 0
+                                uiState.neighborhood.isNotBlank()
+                                // Removed zone, cycle, type, activity check from mandatory block 
+                                // to avoid preventing addition when user is in a hurry.
+                                // These are caught during audit/save anyway if needed.
 
                         val skipHeaderCheck = uiState.houses.isEmpty()
 
-                        if (!isHeaderValid && !skipHeaderCheck) {
+                        if (!isHeaderValid && !skipHeaderCheck && !uiState.isEasyMode) {
                             scope.launch {
                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                snackbarHostState.showSnackbar("Preencha todos os campos do cabeçalho")
+                                snackbarHostState.showSnackbar("Preencha ao menos o Município e Bairro")
                             }
                         } else {
-                            if (isGoalReached && !uiState.isManualUnlock) {
-                                viewModel.startDayClosingFlow()
-                            } else if (viewModel.validateCurrentDay(showDialog = true, strict = false)) {
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                lastAddRequestTime = System.currentTimeMillis()
-                                viewModel.addNewHouse()
-                            }
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            lastAddRequestTime = System.currentTimeMillis()
+                            viewModel.addNewHouse()
                         }
                     }
                 }
 
                 val fabText = when {
-                    hasErrors -> "CORRIGIR ERROS"
+                    isGoalReached && hasErrors -> "CORRIGIR ERROS"
                     isGoalReached && !uiState.isManualUnlock -> "FECHAR PRODUÇÃO"
                     else -> "ADICIONAR"
                 }
@@ -754,12 +774,12 @@ fun HomeScreen(
             Column(modifier = Modifier.fillMaxSize()) {
                 // Item 1: Minimalist Progress Line
                 if (!isSearchActive && !isReorderMode) {
-                    val productionCount = uiState.dashboardTotals.totalHouses
-                    val progress = (productionCount.toFloat() / (if (maxOpenHouses > 0) maxOpenHouses else 25).toFloat()).coerceIn(0f, 1f)
-                    val isGoalReached = productionCount >= maxOpenHouses && maxOpenHouses > 0
+                    val workedCount = uiState.dashboardTotals.worked
+                    val progress = (workedCount.toFloat() / (if (maxOpenHouses > 0) maxOpenHouses else 25).toFloat()).coerceIn(0f, 1f)
+                    val isGoalReached = workedCount >= maxOpenHouses && maxOpenHouses > 0
                     
                     ProductionProgressBar(
-                        current = productionCount,
+                        current = workedCount,
                         total = if (maxOpenHouses > 0) maxOpenHouses else 25,
                         isEasyMode = uiState.isEasyMode,
                         focusCount = uiState.dashboardTotals.totalFocos,

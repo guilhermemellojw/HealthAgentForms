@@ -4,6 +4,7 @@ import com.antigravity.healthagent.data.local.StreetData
 import com.antigravity.healthagent.data.local.dao.CustomStreetDao
 import com.antigravity.healthagent.data.local.dao.HouseDao
 import com.antigravity.healthagent.data.local.model.CustomStreet
+import com.antigravity.healthagent.utils.formatStreetName
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -39,7 +40,7 @@ class StreetRepository @Inject constructor(
             }
 
             (StreetData.BOM_JARDIM_STREETS + historicalStreets + userCustomStreets)
-                .map { it.uppercase().trim() }
+                .map { it.trim().formatStreetName() }
                 .filter { it.isNotBlank() }
                 .distinct()
                 .sorted()
@@ -48,9 +49,10 @@ class StreetRepository @Inject constructor(
 
     suspend fun saveCustomStreet(name: String, bairro: String) {
         if (name.isBlank() || bairro.isBlank()) return
-        val formattedName = name.uppercase().trim()
+        val formattedName = name.trim().formatStreetName()
+        val formattedBairro = bairro.trim().uppercase()
         if (StreetData.BOM_JARDIM_STREETS.contains(formattedName)) return
         
-        customStreetDao.insertCustomStreet(CustomStreet(formattedName, bairro))
+        customStreetDao.insertCustomStreet(CustomStreet(formattedName, formattedBairro))
     }
 }

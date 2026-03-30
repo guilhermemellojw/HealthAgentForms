@@ -70,6 +70,9 @@ interface DayActivityDao {
     @Query("UPDATE day_activities SET agentName = :newName WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:oldName))")
     suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String)
 
+    @Query("SELECT * FROM day_activities WHERE agentUid = '' OR agentUid IS NULL")
+    suspend fun getAllOrphanActivities(): List<DayActivity>
+
     @Query("UPDATE day_activities SET agentUid = :targetUid WHERE agentUid = '' AND (UPPER(agentName) = UPPER(:agentName) OR UPPER(agentName) = UPPER(:email) OR UPPER(agentName) = UPPER(:emailPrefix))")
     suspend fun updateAgentUidForAll(agentName: String, email: String, emailPrefix: String, targetUid: String)
 }

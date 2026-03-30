@@ -163,7 +163,7 @@ class HouseManagementUseCase @Inject constructor(
             sequence = normalizedSequence,
             complement = normalizedComplement,
             municipio = house.municipio.trim().uppercase(),
-            bairro = house.bairro.trim().formatStreetName(),
+            bairro = house.bairro.trim().uppercase(),
             agentName = house.agentName.trim().uppercase(),
             categoria = house.categoria.trim().uppercase(),
             zona = house.zona.trim().uppercase(),
@@ -325,11 +325,11 @@ class HouseManagementUseCase @Inject constructor(
         }
     }
 
-    suspend fun migrateBairrosToTitleCase() {
+    suspend fun migrateBairrosToUppercase() {
         val allHouses = repository.getAllHousesSnapshot()
-        val toUpdate = allHouses.filter { it.bairro != it.bairro.formatStreetName() }
+        val toUpdate = allHouses.filter { it.bairro != it.bairro.trim().uppercase() }
         if (toUpdate.isNotEmpty()) {
-            val updated = toUpdate.map { it.copy(bairro = it.bairro.formatStreetName()) }
+            val updated = toUpdate.map { it.copy(bairro = it.bairro.trim().uppercase()) }
             repository.updateHouses(updated)
         }
     }

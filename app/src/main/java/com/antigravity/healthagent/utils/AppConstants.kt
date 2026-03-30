@@ -2,38 +2,38 @@ package com.antigravity.healthagent.utils
 
 object AppConstants {
     val BAIRROS = listOf(
-        "Alto São José I",
-        "Alto São José II",
-        "Alves",
-        "Banquete",
-        "Barra Alegre",
-        "Bem-te-vi",
-        "Campo Belo",
-        "Centro",
-        "Jardim Boa Esperança",
-        "Jardim Ornelas",
-        "Novo Mundo",
-        "Santo Antônio",
-        "São José",
-        "São Miguel",
-        "Veloso",
-        "Vivendas Marcia",
-        "Bela Vista",
-        "Jardim Ouro Verde",
+        "ALTO SÃO JOSÉ I",
+        "ALTO SÃO JOSÉ II",
+        "ALVES",
+        "BANQUETE",
+        "BARRA ALEGRE",
+        "BEM-TE-VI",
+        "CAMPO BELO",
+        "CENTRO",
+        "JARDIM BOA ESPERANÇA",
+        "JARDIM ORNELAS",
+        "NOVO MUNDO",
+        "SANTO ANTÔNIO",
+        "SÃO JOSÉ",
+        "SÃO MIGUEL",
+        "VELOSO",
+        "VIVENDAS MARCIA",
+        "BELA VISTA",
+        "JARDIM OURO VERDE"
     ).sorted()
 
     val AGENT_NAMES = listOf(
-        "Beatriz Monteiro",
-        "Edimar",
-        "Flávio Caldeira",
-        "Guilherme Mello",
-        "Ianê Alves",
-        "Luiz Carlos Junior",
-        "Rômulo Grativol",
-        "Synara Gaspar",
-        "Tiago Madureira",
-        "Ubiratan",
-        "Vinícius Chaves"
+        "BEATRIZ MONTEIRO",
+        "EDIMAR",
+        "FLÁVIO CALDEIRA",
+        "GUILHERME MELLO",
+        "IANÊ ALVES",
+        "LUIZ CARLOS JUNIOR",
+        "RÔMULO GRATIVOL",
+        "SYNARA GASPAR",
+        "TIAGO MADUREIRA",
+        "UBIRATAN",
+        "VINÍCIUS CHAVES"
     ).sorted()
 
     val TIPO_OPTIONS = listOf(

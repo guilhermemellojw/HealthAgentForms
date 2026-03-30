@@ -31,6 +31,7 @@ class CleanupHistoricalDataUseCaseTest {
             )
         }
         override suspend fun getAllHousesSnapshot(): List<House> = emptyList()
+        override fun getAllHousesSnapshotFlow(): Flow<List<House>> = flowOf(emptyList())
         override suspend fun insertHouse(house: House) {}
         override suspend fun updateHouse(house: House) {}
         override suspend fun updateHouses(houses: List<House>) {}
@@ -40,6 +41,7 @@ class CleanupHistoricalDataUseCaseTest {
         override fun getDayActivities(dates: List<String>, agentName: String, agentUid: String?): Flow<List<DayActivity>> = flowOf(emptyList())
         override fun getDayActivityFlow(date: String, agentName: String, agentUid: String?): Flow<DayActivity?> = flowOf(null)
         override suspend fun updateDayActivity(dayActivity: DayActivity) {}
+        override suspend fun deleteDayActivity(date: String, agentName: String, agentUid: String?) {}
         override suspend fun <T> runInTransaction(block: suspend () -> T): T = block()
         override suspend fun getDayActivity(date: String, agentName: String, agentUid: String?): DayActivity? = null
         override suspend fun getAllDayActivitiesOnce(agentName: String, agentUid: String): List<DayActivity> {
@@ -59,12 +61,13 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun closeAllDays(agentName: String, agentUid: String?) {}
         override suspend fun clearAllData() {}
         override suspend fun migrateLocalData(agentName: String, email: String, targetUid: String) {}
+        override suspend fun deduplicateAgentData(agentName: String, agentUid: String) {}
     }
 
     private val mockSyncRepository = object : SyncRepository {
         override suspend fun pushLocalDataToCloud(houses: List<House>, activities: List<DayActivity>, targetUid: String?, shouldReplace: Boolean): Result<Unit> = Result.success(Unit)
         override suspend fun fetchAllAgentsData(): Result<List<AgentData>> = Result.success(emptyList())
-        override suspend fun pullCloudDataToLocal(targetUid: String?): Result<Unit> = Result.success(Unit)
+        override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> = Result.success(Unit)
         override suspend fun createAgent(email: String, agentName: String?): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAgent(uid: String): Result<Unit> = Result.success(Unit)
         override suspend fun fetchAgentNames(): Result<List<String>> = Result.success(emptyList())
@@ -80,7 +83,7 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun deleteAgentHouse(agentUid: String, houseId: String): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAgentActivity(agentUid: String, activityDate: String): Result<Unit> = Result.success(Unit)
         override suspend fun recordHouseDeletion(house: House): Result<Unit> = Result.success(Unit)
-        override suspend fun recordActivityDeletion(date: String, agentName: String): Result<Unit> = Result.success(Unit)
+        override suspend fun recordActivityDeletion(date: String, agentName: String, agentUid: String): Result<Unit> = Result.success(Unit)
         override suspend fun recordBulkDeletions(houseKeys: List<String>, activityDates: List<String>, targetUid: String?): Result<Unit> {
             bulkDeletionsCalled = true
             return Result.success(Unit)

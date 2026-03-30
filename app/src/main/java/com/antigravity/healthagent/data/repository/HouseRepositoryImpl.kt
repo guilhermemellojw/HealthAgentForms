@@ -323,67 +323,57 @@ class HouseRepositoryImpl @Inject constructor(
                     dayActivityDao.updateAgentNameForAll(emailPrefix, properName, targetUid)
                 }
 
-                // 1. Standardize Houses (Clash-aware migration)
-                val orphanHouses = houseDao.getOrphanHouses(email, emailPrefix, targetUid, properName)
-                orphanHouses.forEach { house ->
-                    val hasClash = houseDao.checkClash(
-                        targetUid, properName, house.data, house.blockNumber, house.blockSequence, 
-                        house.streetName, house.number, house.sequence, house.complement, house.bairro, house.visitSegment
-                    ) > 0
-                    
-                    // If the house is "clashing" but it's the SAME house (just being renamed),
-                    // hasClash will be 1 (counting itself) if it ALREADY matches the target values.
-                    // But here we filtered by agentName != properName, so it won't count itself.
-                    // If hasClash > 0, it means a DUPLICATE already exists with the proper name.
-                    
-                    if (hasClash) {
-                        houseDao.deleteHouseById(house.id)
-                    } else {
-                        houseDao.updateHouseIdentity(house.id, targetUid, properName)
+                // 1. Standardize Houses (Lenient/Aggressive migration)
+                val allOrphans = houseDao.getAllOrphanHouses()
+                allOrphans.forEach { house ->
+                    val isPossibleMatch = house.agentName.isBlank() || 
+                        house.agentName.equals("AGENTE", true) ||
+                        house.agentName.equals(agentName, true) ||
+                        house.agentName.equals(email, true) ||
+                        house.agentName.equals(emailPrefix, true)
+
+                    if (isPossibleMatch) {
+                        val hasClash = houseDao.checkClash(
+                            targetUid, properName, house.data, house.blockNumber, house.blockSequence, 
+                            house.streetName, house.number, house.sequence, house.complement, house.bairro, house.visitSegment
+                        ) > 0
+                        
+                        if (hasClash) {
+                            houseDao.deleteHouseById(house.id)
+                        } else {
+                            houseDao.updateHouseIdentity(house.id, targetUid, properName)
+                        }
                     }
                 }
-                
-                // 2. Smarter DayActivity Migration
-                val allActivities = getAllDayActivitiesSnapshot().filter { 
-                    (it.agentUid == "" || it.agentUid == targetUid) && 
-                    it.agentName != agentName && (
-                        it.agentName.equals(agentName, true) || 
-                        it.agentName.equals(email, true) || 
-                        it.agentName.equals(emailPrefix, true)
-                    )
-                }
-                
-                allActivities.forEach { local ->
-                    val conflict = getDayActivity(local.date, agentName, targetUid)
-                    if (conflict != null) {
-                        // Conflict resolution: 
-                        // Keep local if it has a specific status AND cloud is default/empty
-                        // OR keep whoever is newer (lastUpdated)
-                        val localIsMeaningful = local.status != "NORMAL" && local.status.isNotBlank()
-                        val conflictIsMeaningful = conflict.status != "NORMAL" && conflict.status.isNotBlank()
-                        
-                        val shouldKeepLocal = (localIsMeaningful && !conflictIsMeaningful) || 
-                                           (localIsMeaningful == conflictIsMeaningful && local.lastUpdated > conflict.lastUpdated)
 
-                        if (shouldKeepLocal) {
-                            // The conflict record will be overwritten by the next insert 
-                            // because it matches the target Primary Key (date, agentName, targetUid)
-                            insertDayActivity(local.copy(agentUid = targetUid, agentName = agentName))
-                            // Now delete the old orphaned record
-                            deleteDayActivity(local.date, local.agentName, local.agentUid)
+                // 2. Smarter DayActivity Migration
+                val orphanActivities = dayActivityDao.getAllOrphanActivities()
+                orphanActivities.forEach { local ->
+                    val isPossibleMatch = local.agentName.isBlank() || 
+                        local.agentName.equals("AGENTE", true) ||
+                        local.agentName.equals(agentName, true) ||
+                        local.agentName.equals(email, true) ||
+                        local.agentName.equals(emailPrefix, true)
+
+                    if (isPossibleMatch) {
+                        val conflict = getDayActivity(local.date, agentName, targetUid)
+                        if (conflict != null) {
+                            // Conflict resolution: Keep local if it has a specific status AND cloud is default/empty
+                            if (local.status != "NORMAL" && (conflict.status == "NORMAL" || conflict.status.isBlank())) {
+                                dayActivityDao.deleteDayActivity(conflict.date, conflict.agentName, conflict.agentUid)
+                                dayActivityDao.insertDayActivity(local.copy(agentName = properName, agentUid = targetUid))
+                            } else {
+                                // Prefer incoming cloud data for conflict (already in DB)
+                                dayActivityDao.deleteDayActivity(local.date, local.agentName, local.agentUid)
+                            }
                         } else {
-                            // Obsolete local record: just delete it
-                            deleteDayActivity(local.date, local.agentName, local.agentUid)
+                            dayActivityDao.insertDayActivity(local.copy(agentName = properName, agentUid = targetUid))
                         }
-                    } else {
-                        // NO CONFLICT: Create the NEW record and delete the OLD one
-                        insertDayActivity(local.copy(agentUid = targetUid, agentName = agentName))
-                        deleteDayActivity(local.date, local.agentName, local.agentUid)
                     }
                 }
                 
                 // 3. Final Deduplication Pass
-                deduplicateAgentData(agentName, targetUid)
+                deduplicateAgentData(properName, targetUid)
             } catch (e: Exception) {
                 android.util.Log.e("HouseRepository", "Error during migration", e)
             }

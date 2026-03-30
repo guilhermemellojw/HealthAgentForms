@@ -333,7 +333,7 @@ fun BoletimScreen(
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-            itemsIndexed(uiState.boletimList, key = { _, summary -> summary.date }) { index, summary ->
+            itemsIndexed(uiState.boletimList, key = { _, summary -> "${summary.date}|${summary.agentName}" }) { index, summary ->
                 PremiumCard(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { viewModel.navigateToDate(summary.date) },
@@ -380,7 +380,7 @@ fun BoletimScreen(
                                      Column(modifier = Modifier.weight(1f)) {
                                          Row(verticalAlignment = Alignment.CenterVertically) {
                                              Text(
-                                                 text = block.bairro.formatStreetName(),
+                                                 text = block.bairro.uppercase(),
                                                  style = MaterialTheme.typography.titleSmall,
                                                  fontWeight = FontWeight.Bold,
                                                  color = MaterialTheme.colorScheme.onSurface
@@ -578,6 +578,16 @@ fun BoletimScreen(
                                         }
                                     )
                                     Divider()
+                                    // Force Full Sync (Admin/Correction tool)
+                                    DropdownMenuItem(
+                                        text = { Text("Recarregar Tudo (Sync)", color = MaterialTheme.colorScheme.primary) },
+                                        leadingIcon = { Icon(Icons.Default.SwapHoriz, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                                        onClick = {
+                                            showMenu = false
+                                            viewModel.forceFullSync()
+                                            scope.launch { snackbarHostState.showSnackbar("Sincronização total iniciada...") }
+                                        }
+                                    )
                                     // Delete
                                     DropdownMenuItem(
                                         text = { Text("Excluir", color = MaterialTheme.colorScheme.error) },
@@ -660,15 +670,30 @@ private fun shareToWhatsApp(
 
     // Format WhatsApp message
     val sb = StringBuilder()
-    sb.append("📊 *Relatório Diário - $date*\n\n")
-    sb.append("👤 *Agente:* $agentName\n")
+    sb.append("📊 *Relatório Diário - $date*\n")
+    sb.append("👤 *Agente:* ${agentName.uppercase()}\n\n")
 
-    sb.append("\n🏡 *Trabalhados:* $trabalhados")
-    sb.append("\n🚪 *Fechados:* $fechados")
-    sb.append("\n💧 *Tratados:* $tratados")
-    sb.append("\n🦟 *Com Foco:* $comFoco")
-    sb.append("\n🚫 *Recusados:* $recusados")
-    sb.append("\n🏚️ *Abandonados:* $abandonados")
+    sb.append("*RESUMO:*\n")
+    sb.append("🏡 Trabalhados: $trabalhados\n")
+    sb.append("🚪 Fechados: $fechados\n")
+    sb.append("💧 Tratados: $tratados\n")
+    sb.append("🦟 Com Foco: $comFoco\n")
+    sb.append("🚫 Recusados: $recusados\n")
+    sb.append("🏚️ Abandonados: $abandonados\n\n")
+
+    sb.append("*OBSERVAÇÕES:*")
+    
+    houses.forEach { house ->
+        val seqText = if (house.sequence > 0) " Seq ${house.sequence}" else ""
+        val compText = if (house.complement > 0) " Comp ${house.complement}" else ""
+        val numText = if (house.number.isNotBlank()) " Nº ${house.number}" else " S/N"
+        
+        sb.append("\n• ${house.streetName.uppercase()}$numText$seqText$compText, ${house.propertyType.code}, Q ${house.blockNumber}, ${house.bairro.uppercase()}")
+        
+        if (house.observation.isNotBlank()) {
+            sb.append("\n  _Obs: ${house.observation}_")
+        }
+    }
 
     val message = sb.toString().trim()
 

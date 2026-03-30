@@ -179,7 +179,7 @@ object SemanalPdfGenerator {
         cursorY += logoH + 25f
 
         // Metadata Header
-        val uniqueWeekBairros = allHouses.filter { weekDates.contains(it.data) }.map { it.bairro.trim().formatStreetName() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }
+        val uniqueWeekBairros = allHouses.filter { weekDates.contains(it.data) }.map { it.bairro.trim().uppercase() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }
         val bairro = uniqueWeekBairros.joinToString(" / ")
         val firstHouse = allHouses.find { h -> weekDates.contains(h.data) }
         val categoria = firstHouse?.categoria ?: "BRR"

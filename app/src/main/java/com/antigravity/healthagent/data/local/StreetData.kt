@@ -1,5 +1,7 @@
 package com.antigravity.healthagent.data.local
 
+import com.antigravity.healthagent.utils.formatStreetName
+
 object StreetData {
     val BOM_JARDIM_STREETS = listOf(
         // --- Centro & Sede ---
@@ -161,5 +163,5 @@ object StreetData {
         "RUA JOÃO EUGÊNIO ERTHAL",
         "RUA JOÃO FIGUEIRA DE BARROS",
         "RUA JOÃO FREITAS MARTINS"
-    ).map { it.uppercase() }.distinct().sorted()
+    ).map { it.formatStreetName() }.distinct().sorted()
 }

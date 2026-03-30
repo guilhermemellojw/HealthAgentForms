@@ -49,8 +49,8 @@ fun ContextDialog(
             ) {
                 CompactDropdown(
                     label = "Bairro",
-                    currentValue = bairro.formatStreetName(),
-                    options = AppConstants.BAIRROS.map { it.formatStreetName() },
+                    currentValue = bairro.uppercase(),
+                    options = AppConstants.BAIRROS,
                     onOptionSelected = { bairro = it },
                     modifier = Modifier.fillMaxWidth(),
                     isEasyMode = isEasyMode

@@ -115,7 +115,7 @@ fun HomeHeader(
                             },
                             label = "Município",
                             modifier = Modifier.weight(1.2f),
-                            enabled = false
+                            enabled = !isDayClosed && (municipio.isBlank())
                         )
                         Row(
                             verticalAlignment = Alignment.CenterVertically,

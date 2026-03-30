@@ -86,11 +86,11 @@ class BackupManager @Inject constructor() {
                 return when (firstChar) {
                     '{' -> {
                         val type = object : TypeToken<BackupData>() {}.type
-                        val backupData: BackupData = gson.fromJson(reader, type)
+                        val backupData: BackupData? = gson.fromJson(reader, type)
                         
                         // Sanitize with null safety (JSON might have missing fields)
-                        val rawHouses = backupData.houses ?: emptyList()
-                        val rawActivities = backupData.dayActivities ?: emptyList()
+                        val rawHouses = backupData?.houses ?: emptyList()
+                        val rawActivities = backupData?.dayActivities ?: emptyList()
                         
                         val sanitizedHouses = sanitizeHouses(rawHouses)
                         val sanitizedActivities = sanitizeActivities(rawActivities)

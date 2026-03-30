@@ -9,9 +9,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.InputStreamReader
-import java.io.PushbackReader
-import java.io.ByteArrayInputStream
 
 class BackupManagerTest {
 
@@ -50,8 +47,8 @@ class BackupManagerTest {
         val backupData = parseNew(json)
         val house = backupData.houses[0]
         assertEquals("", house.number) // "0" should be sanitized to ""
-        assertEquals(null, house.sequence) // 0 should be null
-        assertEquals(null, house.complement) // 0 should be null
+        assertEquals(0, house.sequence) // 0 should be 0 (non-nullable)
+        assertEquals(0, house.complement) // 0 should be 0 (non-nullable)
         assertTrue(backupData.dayActivities.isEmpty())
     }
 
@@ -77,9 +74,9 @@ class BackupManagerTest {
 
     private fun parseNew(json: String): BackupData {
         val type = object : TypeToken<BackupData>() {}.type
-        val backupData: BackupData = gson.fromJson(json, type)
-        val rawHouses = backupData.houses ?: emptyList()
-        val rawActivities = backupData.dayActivities ?: emptyList()
+        val backupData: BackupData? = gson.fromJson(json, type)
+        val rawHouses = backupData?.houses ?: emptyList()
+        val rawActivities = backupData?.dayActivities ?: emptyList()
         return BackupData(sanitizeHouses(rawHouses), sanitizeActivities(rawActivities))
     }
 
@@ -93,8 +90,8 @@ class BackupManagerTest {
                 blockSequence = house.blockSequence.trim(),
                 streetName = house.streetName.trim(),
                 number = if (house.number.trim() == "0") "" else house.number.trim(),
-                sequence = if (house.sequence == 0) null else house.sequence,
-                complement = if (house.complement == 0) null else house.complement,
+                sequence = house.sequence,
+                complement = house.complement,
                 data = house.data.trim()
             )
         }

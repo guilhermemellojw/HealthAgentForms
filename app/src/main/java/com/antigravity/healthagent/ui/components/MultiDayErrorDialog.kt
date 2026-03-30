@@ -18,10 +18,11 @@ import com.antigravity.healthagent.ui.home.DayErrorSummary
 fun MultiDayErrorDialog(
     daysWithErrors: List<DayErrorSummary>,
     onNavigateToDay: (String) -> Unit,
+    onDismiss: () -> Unit,
     isEasyMode: Boolean = false
 ) {
     AlertDialog(
-        onDismissRequest = { /* Persistent: Must fix errors */ },
+        onDismissRequest = onDismiss,
         title = { 
             Text(
                 "Ação Necessária: Pendências de Dados", 
@@ -36,6 +37,13 @@ fun MultiDayErrorDialog(
                     "Você deve corrigir os dados incompletos nos dias abaixo antes de continuar:",
                     style = if (isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
                 )
+                if (daysWithErrors.isEmpty()) {
+                    Text(
+                        "(Nenhuma pendência encontrada. Você pode fechar este aviso.)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 LazyColumn(
                     modifier = Modifier.heightIn(max = if (isEasyMode) 320.dp else 240.dp),
                     verticalArrangement = Arrangement.spacedBy(if (isEasyMode) 12.dp else 4.dp)
@@ -62,7 +70,11 @@ fun MultiDayErrorDialog(
                 }
             }
         },
-        confirmButton = {},
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("FECHAR", fontWeight = FontWeight.Bold)
+            }
+        },
         icon = { 
             Icon(
                 Icons.Default.Info, 

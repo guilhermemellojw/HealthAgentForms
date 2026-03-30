@@ -173,11 +173,11 @@ object BoletimPdfGenerator {
         val houseChunks = mutableListOf<List<House>>()
         
         if (sortedHouses.isNotEmpty()) {
-            var currentBairro = sortedHouses.first().bairro.trim().formatStreetName()
+            var currentBairro = sortedHouses.first().bairro.trim().uppercase()
             var currentGroup = mutableListOf<House>()
             
             for (house in sortedHouses) {
-                val houseBairro = house.bairro.trim().formatStreetName()
+                val houseBairro = house.bairro.trim().uppercase()
                 val messageChanged = !houseBairro.equals(currentBairro, ignoreCase = true)
                 val groupFull = currentGroup.size >= 20
                 
@@ -203,7 +203,7 @@ object BoletimPdfGenerator {
         // Block key: blockNumber|blockSequence|bairro
         val blockToLastIndex = mutableMapOf<String, Int>()
         allHouses.forEachIndexed { index, h ->
-            val key = "${h.blockNumber}|${h.blockSequence}|${h.bairro.trim().formatStreetName()}"
+            val key = "${h.blockNumber}|${h.blockSequence}|${h.bairro.trim().uppercase()}"
             blockToLastIndex[key] = index
         }
 
@@ -216,7 +216,7 @@ object BoletimPdfGenerator {
             val blockHousesInChunk = chunk.filter { it.blockNumber == bNum && it.blockSequence == bSeq }
             val hasManual = blockHousesInChunk.any { it.quarteiraoConcluido }
             
-            val key = "$bNum|$bSeq|${currentBairro.trim().formatStreetName()}"
+            val key = "$bNum|$bSeq|${currentBairro.trim().uppercase()}"
             val lastIndexInFull = blockToLastIndex[key] ?: -1
             
             // Auto-concluded if the LAST house of this block in the WHOLE list is in this chunk
@@ -1025,7 +1025,7 @@ object BoletimPdfGenerator {
         val pendF = chunkHouses.count { it.situation == Situation.F }
         val pendR = chunkHouses.count { it.situation == Situation.REC }
         val pendA = chunkHouses.count { it.situation == Situation.A }
-        val pendV = chunkHouses.count { it.situation == Situation.EMPTY }
+        val pendV = chunkHouses.count { it.situation == Situation.V }
         val t3Vals = listOf(pendF, pendR, pendA, pendV)
         
         val colW3 = 40f

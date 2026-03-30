@@ -351,8 +351,8 @@ class HomeViewModel @Inject constructor(
             dates.map { date ->
                 val dayHouses = all.filter { it.data == date }
                 val activity = activities.find { it.date == date }
-                val openHousesCount = dayHouses.count { it.situation == Situation.NONE }
-                DaySummary(date, openHousesCount, activity?.status ?: "")
+                val visitedHousesCount = dayHouses.count { it.situation != Situation.EMPTY }
+                DaySummary(date, visitedHousesCount, activity?.status ?: "")
             }
         }
     }
@@ -362,12 +362,13 @@ class HomeViewModel @Inject constructor(
     val weeklySummaryTotals: StateFlow<WeeklySummaryTotals> = combine(allHousesFlow, currentWeekDates) { list, dates ->
         val weekHouses = list.filter { dates.contains(it.data) }
         WeeklySummaryTotals(
-            totalHouses = weekHouses.count { it.situation == Situation.NONE },
+            totalHouses = weekHouses.count { it.situation != Situation.EMPTY },
             totalTratados = weekHouses.count { house ->
                 house.a1 > 0 || house.a2 > 0 || house.b > 0 || house.c > 0 ||
                 house.d1 > 0 || house.d2 > 0 || house.e > 0 || house.eliminados > 0 || house.larvicida > 0
             },
             totalFoci = weekHouses.count { it.comFoco },
+            totalWorked = weekHouses.count { it.situation == Situation.NONE },
             totalFechados = weekHouses.count { it.situation == Situation.F },
             totalRecusados = weekHouses.count { it.situation == Situation.REC },
             totalAbsent = weekHouses.count { it.situation == Situation.A },
@@ -442,7 +443,7 @@ class HomeViewModel @Inject constructor(
     val rgBairros: StateFlow<List<String>> = combine(allHousesFlow, _rgYear, _agentName) { all, year, name ->
         if (name == "Admin" || name == "Supervisor") emptyList()
         else filterByYear(all, year)
-            .map { it.bairro.trim().formatStreetName() }
+            .map { it.bairro.trim().uppercase() }
             .distinct()
             .sorted()
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -614,7 +615,8 @@ class HomeViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val pendingHousesCount: StateFlow<Int> = filteredHouses.map { list ->
-        list.count { it.situation == Situation.NONE }
+        // Pending are those that were visited but NOT successfully worked (excluding Vacant which is a final state)
+        list.count { it.situation == Situation.F || it.situation == Situation.REC || it.situation == Situation.A }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     val strictPendingHousesCount: StateFlow<Int> = filteredHouses.map { list ->
@@ -628,14 +630,19 @@ class HomeViewModel @Inject constructor(
     val dashboardTotals: StateFlow<DashboardTotals> = combine(houses, _data) { list, date ->
         val dayHouses = list.filter { it.data == date }
         DashboardTotals(
-            totalHouses = dayHouses.count { it.situation == Situation.NONE },
+            totalHouses = dayHouses.count { it.situation != Situation.EMPTY },
             a1 = dayHouses.sumOf { it.a1 }, a2 = dayHouses.sumOf { it.a2 },
             b = dayHouses.sumOf { it.b }, c = dayHouses.sumOf { it.c },
             d1 = dayHouses.sumOf { it.d1 }, d2 = dayHouses.sumOf { it.d2 },
             e = dayHouses.sumOf { it.e }, eliminados = dayHouses.sumOf { it.eliminados },
             larvicida = dayHouses.sumOf { it.larvicida },
             totalFocos = dayHouses.count { it.comFoco },
-            totalRegisteredHouses = dayHouses.size
+            totalRegisteredHouses = dayHouses.size,
+            worked = dayHouses.count { it.situation == Situation.NONE },
+            recused = dayHouses.count { it.situation == Situation.REC },
+            absent = dayHouses.count { it.situation == Situation.A },
+            closed = dayHouses.count { it.situation == Situation.F },
+            vacant = dayHouses.count { it.situation == Situation.V }
         )
     }.flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardTotals())
@@ -731,7 +738,7 @@ class HomeViewModel @Inject constructor(
             delay(1000) // Small delay to let initial UI state flows settle
             try {
                 houseManagementUseCase.migrateStreetNamesToFormat()
-                houseManagementUseCase.migrateBairrosToTitleCase()
+                houseManagementUseCase.migrateBairrosToUppercase()
                 houseManagementUseCase.migrateDateFormats()
                 syncRepository.performDataCleanup()
             } catch (e: Exception) {
@@ -789,8 +796,18 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 // Check directly from repo to avoid StateFlow initial value race conditions
+                // Try from current values (might be empty) then from cachedUser
+                var name: String = _agentName.value
+                var uid: String = _remoteAgentUid.value ?: _currentUserUid.value
+                
+                if (name.isBlank()) {
+                    val cached = settingsManager.cachedUser.first()
+                    name = cached?.agentName ?: ""
+                    uid = cached?.uid ?: ""
+                }
+
                 val allHouses = withContext(Dispatchers.IO) {
-                    repository.getAllHousesOnce(_agentName.value, _remoteAgentUid.value ?: _currentUserUid.value)
+                    repository.getAllHousesOnce(name, uid)
                 }
                 
                 if (allHouses.isNotEmpty()) {
@@ -800,14 +817,27 @@ class HomeViewModel @Inject constructor(
                     if (hasTodayHouses) {
                         _data.value = todayStr
                     } else {
-                        // Prefer Today if it's a fresh day, 
-                        // unless the last work day was VERY recent (e.g. today or yesterday)
-                        // This prevents sticking on a closed previous day on app restart.
-                        _data.value = todayStr
+                        // Prefer most recent work day if today is empty
+                        // BUG FIX: Parse dates before comparing to avoid lexicographical errors with DD-MM-YYYY
+                        val lastDate = allHouses.mapNotNull { 
+                            try { dateFormatter.parse(it.data) } catch (e: Exception) { null } 
+                        }.maxOrNull()?.let { dateFormatter.format(it) } ?: todayStr
+                        _data.value = lastDate
                     }
+                } else {
+                    // Default to today if no houses found
+                    _data.value = dateFormatter.format(Date())
+                }
+
+                // BUG FIX: Trigger local data migration on cold start to claim any newly synchronized or legacy orphan data
+                if (name.isNotBlank() && uid.isNotBlank()) {
+                    val currentUser = settingsManager.cachedUser.first()
+                    val email = currentUser?.email ?: ""
+                    repository.migrateLocalData(name, email, uid)
                 }
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error in initial date fetch", e)
+                _data.value = dateFormatter.format(Date())
             }
         }
 
@@ -859,12 +889,24 @@ class HomeViewModel @Inject constructor(
             }
         }
 
-        // Keep agentName and currentUserUid synced with AuthUser or RemoteAgent
+        // 1. Initialize from Cache for immediate offline support
+        viewModelScope.launch {
+            settingsManager.cachedUser.first()?.let { cached ->
+                if (_agentName.value.isBlank()) {
+                    _agentName.value = cached.agentName ?: ""
+                }
+                if (_currentUserUid.value.isBlank()) {
+                    _currentUserUid.value = cached.uid
+                }
+            }
+        }
+
+        // 2. Keep agentName and currentUserUid synced with AuthUser or RemoteAgent
         viewModelScope.launch {
             combine(authRepository.currentUserAsync, _remoteAgent) { user, remote ->
                 val name = remote ?: user?.standardName ?: "AGENTE"
-                Pair(name, user)
-            }.collect { (name, user) ->
+                Triple(name, user, remote)
+            }.collect { (name, user, remote) ->
                 val current = _agentName.value
                 val newIsEmail = name.contains("@")
                 val currentIsEmail = current.contains("@")
@@ -957,9 +999,9 @@ class HomeViewModel @Inject constructor(
 
     fun startDayClosingFlow() {
         viewModelScope.launch {
-            val workedCount = houses.value.filter { it.data == _data.value && it.situation == Situation.NONE }.size
+            val workedCount = houses.value.count { it.data == _data.value && it.situation == Situation.NONE }
             if (workedCount < maxOpenHouses.value) {
-                _uiEvent.value = "Meta não atingida! (Trabalhados: $workedCount / ${maxOpenHouses.value})"
+                _uiEvent.value = "Meta de Abertos não atingida! (Abertos: $workedCount / ${maxOpenHouses.value})"
                 return@launch
             }
 
@@ -1145,18 +1187,17 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 // Pre-check for open limit inside the safe scope
-                val currentOpen = houses.value.count { it.data == _data.value && it.situation == Situation.NONE }
+                // Safety Limit: Allow up to 150 houses per day or 3x the Daily Goal, whichever is higher.
+                // This prevents accidental over-add but doesn't block legitimate heavy work.
+                val currentTotal = houses.value.count { it.data == _data.value }
+                val safetyLimit = (maxOpenHouses.value * 3).coerceAtLeast(150)
                 val isUnlocked = isWorkdayManualUnlock.value
                 val isAdmin = _isAdmin.value
                 
-                if (currentOpen >= maxOpenHouses.value && maxOpenHouses.value > 0 && !isUnlocked && !isAdmin) {
+                if (currentTotal >= safetyLimit && !isUnlocked && !isAdmin) {
                     soundManager.playWarning()
-                    _situationLimitConfirmation.value = House(data = _data.value) // DUMMY to trigger dialog
-                    return@launch
-                }
-
-                // CHECK: Relax validation for addition to prevent silent blocking of new work
-                if (!validateCurrentDay(showDialog = true, strict = false)) {
+                    _situationLimitConfirmation.value = House(data = _data.value)
+                    isAddingHouse = false
                     return@launch
                 }
 
@@ -1204,16 +1245,30 @@ class HomeViewModel @Inject constructor(
                 val maxOrder = houses.value.maxOfOrNull { it.listOrder } ?: 0L
                 val currentDayHouses = houses.value.filter { it.data == _data.value }.sortedBy { it.listOrder }
                 val lastHouse = currentDayHouses.lastOrNull()
-                val newStreet = initialStreet.trim().uppercase()
-                val newSegment = if (lastHouse == null) 0 
-                                 else if (newStreet == lastHouse.streetName.uppercase()) lastHouse.visitSegment 
-                                 else lastHouse.visitSegment + 1
+                val newStreet = initialStreet.trim().formatStreetName()
 
-                val houseToInsert = House(
+                // VisitSegment Stabilization: Align perfectly with HouseManagementUseCase.recalculateVisitSegments
+                // to prevent "shifting" which causes Natural Key collisions during bulk update.
+                val dayHouses = currentDayHouses.sortedBy { it.listOrder }
+                var predictedSegment = 0
+                var lastStreetName = ""
+                dayHouses.forEach { h ->
+                    val s = h.streetName.trim().uppercase()
+                    if (lastStreetName.isNotEmpty() && s != lastStreetName) {
+                        predictedSegment++
+                    }
+                    lastStreetName = s
+                }
+                // If the new house starts a new street segment or continues the last one:
+                if (lastStreetName.isNotEmpty() && newStreet.uppercase() != lastStreetName) {
+                    predictedSegment++
+                }
+
+                var houseToInsert = House(
                     id = 0,
                     blockNumber = initialBlock.trim().uppercase(),
                     blockSequence = initialBlockSeq.trim().uppercase(),
-                    streetName = initialStreet.trim().uppercase(),
+                    streetName = initialStreet.trim().formatStreetName(),
                     number = prediction.number.trim().uppercase(),
                     sequence = prediction.sequence,
                     complement = prediction.complement,
@@ -1222,13 +1277,37 @@ class HomeViewModel @Inject constructor(
                     tipo = _tipo.value,
                     ciclo = _ciclo.value,
                     municipio = _municipio.value.trim().uppercase(),
-                    bairro = _bairro.value.trim().formatStreetName(),
+                    bairro = _bairro.value.trim().uppercase(),
                     agentName = _agentName.value.trim().uppercase(),
-                    agentUid = _remoteAgentUid.value ?: _currentUserUid.value, // Added agentUid inheritance
+                    agentUid = _remoteAgentUid.value ?: _currentUserUid.value,
                     data = _data.value,
-                    visitSegment = newSegment,
+                    visitSegment = predictedSegment,
                     listOrder = maxOrder + 1
                 )
+
+                // Exhaustive Clash Detection: Check ALL fields in the unique index to prevent REPLACE-deletions
+                var finalSequence = houseToInsert.sequence
+                var finalComplement = houseToInsert.complement
+                
+                while (houses.value.any { 
+                    it.data == houseToInsert.data && 
+                    it.agentUid == houseToInsert.agentUid &&
+                    it.agentName.equals(houseToInsert.agentName, ignoreCase = true) &&
+                    it.blockNumber.equals(houseToInsert.blockNumber, ignoreCase = true) &&
+                    it.blockSequence.equals(houseToInsert.blockSequence, ignoreCase = true) &&
+                    it.streetName.equals(houseToInsert.streetName, ignoreCase = true) &&
+                    it.number.equals(houseToInsert.number, ignoreCase = true) && 
+                    it.sequence == finalSequence &&
+                    it.complement == finalComplement &&
+                    it.bairro.equals(houseToInsert.bairro, ignoreCase = true) &&
+                    it.visitSegment == houseToInsert.visitSegment
+                }) {
+                    finalSequence++
+                }
+                
+                if (finalSequence != houseToInsert.sequence) {
+                    houseToInsert = houseToInsert.copy(sequence = finalSequence)
+                }
 
                 houseManagementUseCase.insertHouse(houseToInsert, houses.value)
                 soundManager.playPop()
@@ -1255,16 +1334,32 @@ class HomeViewModel @Inject constructor(
         val originalIsWorked = original != null && (original.situation == Situation.NONE || original.situation == Situation.EMPTY)
 
         if (houseIsWorked && !originalIsWorked) {
-            val openCount = houses.value.count { it.data == _data.value && it.situation == Situation.NONE }
+            val workedCount = houses.value.count { it.data == _data.value && it.situation == Situation.NONE }
             val isUnlocked = isWorkdayManualUnlock.value
             val isAdmin = _isAdmin.value
             
-            if (openCount >= maxOpenHouses.value && maxOpenHouses.value > 0 && !isUnlocked && !isAdmin) {
+            if (workedCount >= maxOpenHouses.value && maxOpenHouses.value > 0 && !isUnlocked && !isAdmin) {
                 soundManager.playWarning()
                 _situationLimitConfirmation.value = house
                 return
             }
         }
+
+        // --- MERGE PREVENTION ---
+        // Calculate the natural key of the prospective update to check for clashes with OTHER houses.
+        // This prevents the "Merging" bug where SQLite REPLACE deletes the collided-with record.
+        val potentialKey = house.generateNaturalKey()
+        val clash = houses.value.find { 
+            it.id != house.id && 
+            it.generateNaturalKey() == potentialKey 
+        }
+
+        if (clash != null) {
+            soundManager.playWarning()
+            _uiEvent.value = "Conflito: Este endereço já existe (Imóvel #${clash.id}). Edição bloqueada para evitar mesclagem."
+            return
+        }
+
         performUpdateHouse(house)
         
         // Unified delayed validation (3s)
@@ -1352,8 +1447,8 @@ class HomeViewModel @Inject constructor(
     }
 
     fun moveHouseToDate(house: House, newDate: String) {
-        val existingOpen = houses.value.count { it.data == newDate && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
-        if (existingOpen >= maxOpenHouses.value && maxOpenHouses.value > 0 && (house.situation == Situation.NONE || house.situation == Situation.EMPTY)) {
+        val existingWorked = houses.value.count { it.data == newDate && it.situation == Situation.NONE }
+        if (existingWorked >= maxOpenHouses.value && maxOpenHouses.value > 0 && house.situation == Situation.NONE) {
             soundManager.playWarning()
             _uiEvent.value = "Impossível mover: Meta Diária do dia de destino atingida!"
             return
@@ -1417,7 +1512,7 @@ class HomeViewModel @Inject constructor(
     fun updateBairro(b: String) { _bairro.value = b.uppercase() }
     fun updateAgentName(n: String) { _agentName.value = n.uppercase() }
     fun updateContext(b: String, s: String, st: String) {
-        _currentBlock.value = b.uppercase(); _currentBlockSequence.value = s.uppercase(); _currentStreet.value = st.uppercase()
+        _currentBlock.value = b.trim().uppercase(); _currentBlockSequence.value = s.trim().uppercase(); _currentStreet.value = st.trim().formatStreetName()
     }
     fun updateHeader(m: String, b: String, c: String, z: String, t: Int, d: String, ci: String, a: Int) {
         _municipio.value = m.uppercase()
@@ -2200,6 +2295,12 @@ class HomeViewModel @Inject constructor(
         return status == "NORMAL" || status.isBlank()
     }
 
+    fun forceFullSync() {
+        viewModelScope.launch {
+            syncDataUseCase.pullData(force = true)
+        }
+    }
+
     fun triggerImmediateSync() {
         try {
             val context = com.antigravity.healthagent.context.getContext()
@@ -2221,14 +2322,19 @@ class HomeViewModel @Inject constructor(
 
     private fun calculateDashboardTotals(dayHouses: List<House>): DashboardTotals {
         return DashboardTotals(
-            totalHouses = dayHouses.count { it.situation == Situation.NONE },
+            totalHouses = dayHouses.count { it.situation != Situation.EMPTY },
             a1 = dayHouses.sumOf { it.a1 }, a2 = dayHouses.sumOf { it.a2 },
             b = dayHouses.sumOf { it.b }, c = dayHouses.sumOf { it.c },
             d1 = dayHouses.sumOf { it.d1 }, d2 = dayHouses.sumOf { it.d2 },
             e = dayHouses.sumOf { it.e }, eliminados = dayHouses.sumOf { it.eliminados },
             larvicida = dayHouses.sumOf { it.larvicida },
             totalFocos = dayHouses.count { it.comFoco },
-            totalRegisteredHouses = dayHouses.size
+            totalRegisteredHouses = dayHouses.size,
+            worked = dayHouses.count { it.situation == Situation.NONE },
+            recused = dayHouses.count { it.situation == Situation.REC },
+            absent = dayHouses.count { it.situation == Situation.A },
+            closed = dayHouses.count { it.situation == Situation.F },
+            vacant = dayHouses.count { it.situation == Situation.V }
         )
     }
 

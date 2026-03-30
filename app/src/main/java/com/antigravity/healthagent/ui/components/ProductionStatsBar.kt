@@ -34,7 +34,11 @@ fun ProductionStatsBar(
             val primaryColor = MaterialTheme.colorScheme.primary
             val dividerColor = if (isSolarMode) MaterialTheme.colorScheme.outline.copy(alpha = 0.2f) else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f)
 
-            StatItem(label = "VISITAS", value = totals.totalRegisteredHouses.toString(), color = primaryColor, isEasyMode = isEasyMode)
+            StatItem(label = "ABERTOS", value = totals.worked.toString(), color = primaryColor, isEasyMode = isEasyMode)
+            
+            VerticalDivider(modifier = Modifier.height(28.dp).padding(horizontal = 4.dp), thickness = 1.dp, color = dividerColor)
+            
+            StatItem(label = "VISITAS", value = totals.totalHouses.toString(), color = primaryColor, isEasyMode = isEasyMode)
             
             VerticalDivider(modifier = Modifier.height(28.dp).padding(horizontal = 4.dp), thickness = 1.dp, color = dividerColor)
             

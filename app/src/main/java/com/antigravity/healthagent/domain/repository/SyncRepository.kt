@@ -24,7 +24,7 @@ interface SyncRepository {
     /**
      * Pulls data from Firestore and replaces the local Room database content.
      */
-    suspend fun pullCloudDataToLocal(targetUid: String? = null): Result<Unit>
+    suspend fun pullCloudDataToLocal(targetUid: String? = null, force: Boolean = false): Result<Unit>
 
     /**
      * Pre-creates an agent entry in the cloud.

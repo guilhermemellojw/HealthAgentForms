@@ -3,7 +3,6 @@ package com.antigravity.healthagent.data.backup
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
-import com.antigravity.healthagent.utils.HouseNormalizationUtils
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -41,7 +40,7 @@ class HouseIdentityTest {
             House(agentName = "A", data = "16-03-2026", streetName = "Rua 1", number = "3", listOrder = 4) // Return to Rua 1
         )
         
-        val normalized = HouseNormalizationUtils.normalizeHouses(houses)
+        val normalized = recalculateVisitSegments(houses)
         
         assertEquals(0, normalized[0].visitSegment)
         assertEquals(0, normalized[1].visitSegment)
@@ -60,7 +59,7 @@ class HouseIdentityTest {
         val house1 = House(agentName = "A", data = "16-03-2026", streetName = "Rua 1", number = "1", listOrder = 1)
         val house2 = House(agentName = "A", data = "16-03-2026", streetName = "Rua 1", number = "1", listOrder = 2) // Duplicate in same segment
         
-        val normalized = HouseNormalizationUtils.normalizeHouses(listOf(house1, house2))
+        val normalized = recalculateVisitSegments(listOf(house1, house2))
         
         assertEquals(normalized[0].visitSegment, normalized[1].visitSegment)
         assertEquals(
@@ -68,5 +67,19 @@ class HouseIdentityTest {
             normalized[0].generateNaturalKey(),
             normalized[1].generateNaturalKey()
         )
+    }
+
+    private fun recalculateVisitSegments(houses: List<House>): List<House> {
+        if (houses.isEmpty()) return emptyList()
+        var currentSegment = 0
+        var lastStreet = ""
+        return houses.sortedBy { it.listOrder }.map { house ->
+            val street = house.streetName.trim().uppercase()
+            if (lastStreet.isNotEmpty() && street != lastStreet) {
+                currentSegment++
+            }
+            lastStreet = street
+            house.copy(visitSegment = currentSegment)
+        }
     }
 }

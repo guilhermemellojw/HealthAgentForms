@@ -106,6 +106,9 @@ interface HouseDao {
     """)
     suspend fun getOrphanHouses(email: String, emailPrefix: String, targetUid: String, properName: String): List<House>
 
+    @Query("SELECT * FROM houses WHERE agentUid = '' OR agentUid IS NULL")
+    suspend fun getAllOrphanHouses(): List<House>
+
     @Query("""
         SELECT COUNT(*) FROM houses 
         WHERE agentUid = :uid AND UPPER(agentName) = UPPER(:name) AND data = :date 
