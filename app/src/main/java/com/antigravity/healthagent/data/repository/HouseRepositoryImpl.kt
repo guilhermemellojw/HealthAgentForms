@@ -59,7 +59,11 @@ class HouseRepositoryImpl @Inject constructor(
 
     override suspend fun insertHouse(house: House) {
         ensureDayNotLocked(house.data, house.agentName, house.agentUid)
-        houseDao.insertHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
+        database.withTransaction {
+            // CRITICAL: Cleanup any stale local tombstone for this same house key
+            tombstoneDao.deleteByNaturalKey(house.generateNaturalKey(), house.agentName, house.agentUid)
+            houseDao.insertHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
+        }
         syncScheduler.scheduleSync()
     }
 
@@ -73,6 +77,8 @@ class HouseRepositoryImpl @Inject constructor(
                 if (oldKey != newKey) {
                     tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = oldKey, agentName = existing.agentName, agentUid = existing.agentUid))
                 }
+                // Also ensures NO tombstone exists for the NEW key (re-added or restored)
+                tombstoneDao.deleteByNaturalKey(newKey, house.agentName, house.agentUid)
             }
             houseDao.updateHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
         }
@@ -97,6 +103,8 @@ class HouseRepositoryImpl @Inject constructor(
                     if (oldKey != newKey) {
                         tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = oldKey, agentName = existing.agentName, agentUid = existing.agentUid))
                     }
+                    // Also clear any tombstone for the new key
+                    tombstoneDao.deleteByNaturalKey(newKey, house.agentName, house.agentUid)
                 }
             }
             houseDao.upsertHouses(houses.map { it.copy(isSynced = false, lastUpdated = System.currentTimeMillis()) })
@@ -142,11 +150,17 @@ class HouseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun updateDayActivity(dayActivity: DayActivity) {
-        dayActivityDao.insertDayActivity(dayActivity.copy(
-            agentName = dayActivity.agentName.uppercase(),
-            isSynced = false, 
-            lastUpdated = System.currentTimeMillis()
-        ))
+        val upperName = dayActivity.agentName.uppercase()
+        database.withTransaction {
+            // Tombstone cleanup for re-opened/re-added activities
+            tombstoneDao.deleteByNaturalKey("${dayActivity.date}|${upperName}", upperName, dayActivity.agentUid)
+            
+            dayActivityDao.insertDayActivity(dayActivity.copy(
+                agentName = upperName,
+                isSynced = false, 
+                lastUpdated = System.currentTimeMillis()
+            ))
+        }
         syncScheduler.scheduleSync()
     }
     

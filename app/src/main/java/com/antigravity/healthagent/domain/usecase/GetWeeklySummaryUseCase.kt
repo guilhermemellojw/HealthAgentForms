@@ -16,7 +16,8 @@ class GetWeeklySummaryUseCase @Inject constructor() {
             val dayHouses = allHouses.filter { it.data == date }
             val activity = activities.find { it.date == date }
             val visitedCount = dayHouses.count { it.situation != Situation.EMPTY }
-            DaySummary(date, visitedCount, activity?.status ?: "")
+            val inspectedCount = dayHouses.count { it.situation == Situation.NONE }
+            DaySummary(date, visitedCount, inspectedCount, activity?.status ?: "")
         }
     }
 }

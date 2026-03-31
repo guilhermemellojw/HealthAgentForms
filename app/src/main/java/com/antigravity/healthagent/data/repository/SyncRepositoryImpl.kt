@@ -146,12 +146,26 @@ class SyncRepositoryImpl @Inject constructor(
                     
                     operations.add(userDocRef.collection("houses").document(officialHouse.generateNaturalKey()) to houseData)
                 }
+                
+                // CRITICAL recovery: If we are pushing a house, ensure its natural key is NOT in the deleted_house_ids array anymore.
+                // This prevents re-added houses from being immediately deleted by stale cloud tombstones on other devices (or on re-pull).
+                if (!shouldReplace) {
+                    val pushedKeys = housesToPush.map { it.generateNaturalKey() }.distinct()
+                    operations.add(userDocRef to mapOf("deleted_house_ids" to com.google.firebase.firestore.FieldValue.arrayRemove(*pushedKeys.toTypedArray())))
+                }
             }
 
             // Activities
-            activitiesToPush.forEach { activity ->
-                val activityData = activity.copy(agentName = officialAgentName, agentUid = uid).toFirestoreMap()
-                operations.add(userDocRef.collection("day_activities").document(activity.date.replace("/", "-")) to activityData)
+            if (activitiesToPush.isNotEmpty()) {
+                activitiesToPush.forEach { activity ->
+                    val activityData = activity.copy(agentName = officialAgentName, agentUid = uid).toFirestoreMap()
+                    operations.add(userDocRef.collection("day_activities").document(activity.date.replace("/", "-")) to activityData)
+                }
+                
+                if (!shouldReplace) {
+                    val pushedDates = activitiesToPush.map { it.date.replace("/", "-") }.distinct()
+                    operations.add(userDocRef to mapOf("deleted_activity_dates" to com.google.firebase.firestore.FieldValue.arrayRemove(*pushedDates.toTypedArray())))
+                }
             }
 
             // Deletions (Tombstones)
@@ -168,8 +182,12 @@ class SyncRepositoryImpl @Inject constructor(
             }
 
             // Metadata update including cloud-side tombstones
-            if (cloudDeletedHouses.isNotEmpty()) metadata["deleted_house_ids"] = com.google.firebase.firestore.FieldValue.arrayUnion(*cloudDeletedHouses.toTypedArray())
-            if (cloudDeletedActivities.isNotEmpty()) metadata["deleted_activity_dates"] = com.google.firebase.firestore.FieldValue.arrayUnion(*cloudDeletedActivities.toTypedArray())
+            if (cloudDeletedHouses.isNotEmpty()) {
+                 operations.add(userDocRef to mapOf("deleted_house_ids" to com.google.firebase.firestore.FieldValue.arrayUnion(*cloudDeletedHouses.toTypedArray())))
+            }
+            if (cloudDeletedActivities.isNotEmpty()) {
+                 operations.add(userDocRef to mapOf("deleted_activity_dates" to com.google.firebase.firestore.FieldValue.arrayUnion(*cloudDeletedActivities.toTypedArray())))
+            }
             operations.add(0, userDocRef to metadata)
 
             // Commit in Batches
@@ -398,13 +416,18 @@ class SyncRepositoryImpl @Inject constructor(
             val housesToDelete = allLocalHouses.filter { house ->
                 val key = house.generateNaturalKey()
                 val dateKey = "${house.data}|${house.agentName.uppercase()}"
-                key in cloudDeletedHouses && dateKey !in lockedKeys
+                
+                // BUG FIX: Only delete local houses if they are already marked as synced. 
+                // If isSynced=false, it means the local state is newer/different from the cloud's awareness of it, 
+                // or it's a re-added house. We should never delete unsynced/new local houses via cloud tombstones.
+                key in cloudDeletedHouses && house.isSynced && dateKey !in lockedKeys
             }
 
             val allLocalActivities = dayActivityDao.getAllDayActivities(finalAgentName, uid)
             val activitiesToDelete = allLocalActivities.filter { activity ->
                 val dateKey = "${activity.date}|${activity.agentName.uppercase()}"
-                dateKey in cloudDeletedActivities && dateKey !in lockedKeys
+                // Consistency check: also guard activity deletions with isSynced
+                dateKey in cloudDeletedActivities && activity.isSynced && dateKey !in lockedKeys
             }
 
             // 4. Reconciliation

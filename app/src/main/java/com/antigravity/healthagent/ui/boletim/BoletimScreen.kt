@@ -681,16 +681,15 @@ private fun shareToWhatsApp(
     sb.append("🚫 Recusados: $recusados\n")
     sb.append("🏚️ Abandonados: $abandonados\n\n")
 
-    sb.append("*OBSERVAÇÕES:*")
-    
-    houses.forEach { house ->
-        val seqText = if (house.sequence > 0) " Seq ${house.sequence}" else ""
-        val compText = if (house.complement > 0) " Comp ${house.complement}" else ""
-        val numText = if (house.number.isNotBlank()) " Nº ${house.number}" else " S/N"
-        
-        sb.append("\n• ${house.streetName.uppercase()}$numText$seqText$compText, ${house.propertyType.code}, Q ${house.blockNumber}, ${house.bairro.uppercase()}")
-        
-        if (house.observation.isNotBlank()) {
+    val housesWithObs = houses.filter { it.observation.isNotBlank() }
+    if (housesWithObs.isNotEmpty()) {
+        sb.append("*OBSERVAÇÕES:*")
+        housesWithObs.forEach { house ->
+            val seqText = if (house.sequence > 0) " Seq ${house.sequence}" else ""
+            val compText = if (house.complement > 0) " Comp ${house.complement}" else ""
+            val numText = if (house.number.isNotBlank()) " Nº ${house.number}" else " S/N"
+            
+            sb.append("\n• ${house.streetName.uppercase()}$numText$seqText$compText, ${house.propertyType.code}, Q ${house.blockNumber}, ${house.bairro.uppercase()}")
             sb.append("\n  _Obs: ${house.observation}_")
         }
     }

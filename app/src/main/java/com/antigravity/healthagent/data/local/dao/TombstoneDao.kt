@@ -18,6 +18,9 @@ interface TombstoneDao {
     @Query("DELETE FROM tombstones WHERE id IN (:ids)")
     suspend fun deleteTombstones(ids: List<Int>)
 
+    @Query("DELETE FROM tombstones WHERE naturalKey = :key AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    suspend fun deleteByNaturalKey(key: String, agentName: String, agentUid: String)
+
     @Query("DELETE FROM tombstones")
     suspend fun deleteAll()
 }

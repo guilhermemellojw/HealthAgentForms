@@ -248,7 +248,7 @@ fun SemanalScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceEvenly
                             ) {
-                                CompactStatItem("TRABALHADOS", uiState.weeklySummaryTotals.totalHouses.toString(), Icons.Default.Home, isEasyMode = uiState.isEasyMode)
+                                CompactStatItem("ABERTOS", uiState.weeklySummaryTotals.totalWorked.toString(), Icons.Default.Home, isEasyMode = uiState.isEasyMode)
                                 CompactStatItem("TRATADOS", uiState.weeklySummaryTotals.totalTratados.toString(), Icons.Default.WaterDrop, isEasyMode = uiState.isEasyMode)
                                 CompactStatItem("COM FOCO", uiState.weeklySummaryTotals.totalFoci.toString(), Icons.Default.Warning, color = if (uiState.weeklySummaryTotals.totalFoci > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, isEasyMode = uiState.isEasyMode)
                                 CompactStatItem("FECHADOS", uiState.weeklySummaryTotals.totalFechados.toString(), Icons.Default.DoorFront, isEasyMode = uiState.isEasyMode)
@@ -480,7 +480,7 @@ fun WeeklyDayRow(
                         fontWeight = FontWeight.Black
                     )
                     Text(
-                        day.totalHouses.toString(), 
+                        day.totalWorked.toString(), 
                         style = MaterialTheme.typography.titleMedium, 
                         fontWeight = FontWeight.Black, 
                         color = MaterialTheme.colorScheme.primary,

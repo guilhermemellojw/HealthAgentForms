@@ -352,7 +352,8 @@ class HomeViewModel @Inject constructor(
                 val dayHouses = all.filter { it.data == date }
                 val activity = activities.find { it.date == date }
                 val visitedHousesCount = dayHouses.count { it.situation != Situation.EMPTY }
-                DaySummary(date, visitedHousesCount, activity?.status ?: "")
+                val inspectedHousesCount = dayHouses.count { it.situation == Situation.NONE }
+                DaySummary(date, visitedHousesCount, inspectedHousesCount, activity?.status ?: "")
             }
         }
     }

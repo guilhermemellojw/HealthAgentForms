@@ -57,7 +57,8 @@ data class DashboardTotals(
 
 data class DaySummary(
     val date: String,
-    val totalHouses: Int,
+    val totalHouses: Int, // Total Visited
+    val totalWorked: Int, // Total Inspected (Abertos)
     val status: String
 )
 
