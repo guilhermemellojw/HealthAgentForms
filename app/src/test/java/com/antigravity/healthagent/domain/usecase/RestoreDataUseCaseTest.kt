@@ -7,6 +7,7 @@ import com.antigravity.healthagent.data.backup.BackupManager
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.domain.repository.AuthRepository
+import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import io.mockk.*
 import kotlinx.coroutines.runBlocking
@@ -24,43 +25,49 @@ class RestoreDataUseCaseTest {
     private val useCase = RestoreDataUseCase(syncRepository, authRepository, backupManager)
 
     @Test
-    fun `invoke should preserve agent names from backup houses and activities`() = runBlocking {
+    fun `invoke should use agent name from auth repository when available`() = runBlocking {
         // Arrange
         val targetUid = "target-uid"
+        val mockUser = AuthUser(
+            uid = targetUid,
+            email = "agent@test.com",
+            displayName = "Agent Tester",
+            photoUrl = null,
+            agentName = "AGENT MASTER"
+        )
         val houses = listOf(
-            House(agentName = "AGENT A", createdAt = 1000, data = "15-03-2026"),
-            House(agentName = "", createdAt = 2000, data = "15-03-2026")
+            House(agentName = "OLD NAME", data = "15-03-2026"),
         )
         val activities = listOf(
-            DayActivity(date = "15-03-2026", agentName = "AGENT A"),
-            DayActivity(date = "15-03-2026", agentName = "AGENT B")
+            DayActivity(date = "15-03-2026", agentName = "OLD NAME"),
         )
         val backupData = BackupData(houses = houses, dayActivities = activities)
 
-        every { authRepository.getCurrentUserUid() } returns targetUid
-        coEvery { authRepository.fetchAllUsers() } returns Result.success(emptyList()) // Fixed: coEvery for suspend
+        every { authRepository.getCurrentUserUid() } returns "current-uid"
+        coEvery { authRepository.fetchAllUsers() } returns Result.success(listOf(mockUser))
         every { backupManager.importData(any(), any()) } returns backupData
 
         val houseSlot = slot<List<House>>()
         val activitySlot = slot<List<DayActivity>>()
 
         // Act
-        useCase(context, targetUid, uri)
+        useCase(
+            context = context,
+            targetUid = targetUid,
+            fileUri = uri
+        )
 
         // Assert
         coVerify { 
-            syncRepository.restoreLocalData(
-                agentName = any(),
+            syncRepository.pushLocalDataToCloud(
                 houses = capture(houseSlot),
                 activities = capture(activitySlot),
-                agentUid = targetUid
+                targetUid = targetUid,
+                shouldReplace = true
             )
         }
 
-        assertEquals("House 0 agentName mismatch", "AGENT A", houseSlot.captured[0].agentName)
-        assertEquals("House 1 agentName mismatch", "RESTORADO", houseSlot.captured[1].agentName)
-        
-        assertEquals("Activity 0 agentName mismatch", "AGENT A", activitySlot.captured[0].agentName)
-        assertEquals("Activity 1 agentName mismatch", "AGENT B", activitySlot.captured[1].agentName)
+        assertEquals("House agentName should be normalized from AuthRepository", "AGENT MASTER", houseSlot.captured[0].agentName)
+        assertEquals("Activity agentName should be normalized from AuthRepository", "AGENT MASTER", activitySlot.captured[0].agentName)
     }
 }

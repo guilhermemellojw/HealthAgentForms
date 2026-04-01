@@ -67,12 +67,12 @@ class CleanupHistoricalDataUseCase @Inject constructor(
                 }
 
                 if (localHousesToRemove.isNotEmpty() || localActivitiesToRemove.isNotEmpty()) {
-                    // 1. Delete Daily Activities (and record tombstones)
-                    val activityDatesToDelete = localActivitiesToRemove.map { it.date }
-                    if (activityDatesToDelete.isNotEmpty()) {
-                        houseRepository.deleteByAgentAndDates(agentName, activityDatesToDelete, agentUid)
+                    // 1. Collect all impacted dates to ensure Houses AND Activities are removed
+                    val datesToDelete = (localHousesToRemove.map { it.data } + localActivitiesToRemove.map { it.date }).distinct()
+                    
+                    if (datesToDelete.isNotEmpty()) {
+                        houseRepository.deleteByAgentAndDates(agentName, datesToDelete, agentUid)
                     }
-
                 }
             }
 

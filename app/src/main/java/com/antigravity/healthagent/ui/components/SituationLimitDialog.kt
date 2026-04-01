@@ -30,7 +30,7 @@ fun SituationLimitDialog(
         },
         text = { 
             Text(
-                "O limite diário de imóveis trabalhados (Meta Diária) foi atingido.\n\nPara adicionar mais imóveis ou alterar situações para 'Trabalhado', você deve primeiro concluir o dia atual ou ajustar a meta nas configurações.",
+                "O limite diário de imóveis abertos (Meta Diária) foi atingido.\n\nPara adicionar mais imóveis ou alterar situações para 'Aberto', você deve primeiro concluir o dia atual ou ajustar a meta nas configurações.",
                 style = if (isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
             ) 
         },

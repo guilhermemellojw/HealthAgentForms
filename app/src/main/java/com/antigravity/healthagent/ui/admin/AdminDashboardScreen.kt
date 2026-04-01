@@ -7,11 +7,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,8 +27,7 @@ import com.antigravity.healthagent.domain.repository.AccessRequest
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.DayActivity
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.*
 import androidx.compose.ui.graphics.Color
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
@@ -37,6 +38,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.*
+import androidx.compose.ui.draw.scale
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 
 // --- Helper Components ---
 
@@ -156,7 +160,7 @@ fun AdminSettingsTab(viewModel: AdminViewModel) {
         }
 
         // --- Section 2: Atividades Padrão ---
-        SettingsSectionHeader(title = "Atividades Padrão", icon = Icons.Default.PlaylistAddCheck)
+        SettingsSectionHeader(title = "Atividades Padrão", icon = Icons.AutoMirrored.Filled.PlaylistAddCheck)
         PremiumCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(
@@ -305,7 +309,7 @@ fun AdminSettingsTab(viewModel: AdminViewModel) {
             dismissButton = { TextButton(onClick = { showAddActivityDialog = false }) { Text("Cancelar") } }
         )
     }
-}
+    }
 
 @Composable
 fun SettingsSectionHeader(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
@@ -334,8 +338,8 @@ fun AdminDashboardScreen(
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddProfileDialog by remember { mutableStateOf(false) }
-    var showAddNameMetadataDialog by remember { mutableStateOf(false) }
     var selectedUidForRestore by remember { mutableStateOf<String?>(null) }
+    var isSmartRestore by remember { mutableStateOf(false) }
     
     var showConfirmDialog by remember { mutableStateOf(false) }
     var confirmTitle by remember { mutableStateOf("") }
@@ -350,7 +354,6 @@ fun AdminDashboardScreen(
     var deleteCloudDataWithUser by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val tabs = listOf("Gestão", "Config.")
 
@@ -358,7 +361,16 @@ fun AdminDashboardScreen(
         uri?.let {
             val targetUid = selectedUidForRestore
             if (targetUid != null) {
-                confirmTitle = "Confirmar Restauração"; confirmMessage = "Deseja restaurar dados?"; onConfirmAction = { viewModel.restoreAgentBackup(context, targetUid, it) }; showConfirmDialog = true; selectedUidForRestore = null
+                confirmTitle = if (isSmartRestore) "Restaurar Dia" else "Confirmar Restauração"
+                confirmMessage = if (isSmartRestore) 
+                    "Deseja realizar a importação inteligente deste dia? Se houver conflito, ele será movido para o próximo dia disponível." 
+                    else "Deseja restaurar todos os dados do backup?"
+                
+                onConfirmAction = { 
+                    viewModel.restoreAgentBackup(context, targetUid, uri, autoShift = isSmartRestore)
+                }
+                showConfirmDialog = true
+                selectedUidForRestore = null
             }
         }
     }
@@ -369,7 +381,7 @@ fun AdminDashboardScreen(
     Scaffold(
         topBar = { GlassTopAppBar(
             title = { Text("Painel do Administrador", fontWeight = FontWeight.Black) }, 
-            navigationIcon = { IconButton(onClick = onNavigateBack) { Icon(Icons.Default.ArrowBack, null) } }, 
+            navigationIcon = { IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) } }, 
             user = user,
             onLogout = onLogout,
             onSwitchAccount = onSwitchAccount,
@@ -434,7 +446,7 @@ fun AdminDashboardScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 IconButton(onClick = { showMasterList = !showMasterList }) {
-                                    Icon(if (showMasterList) Icons.Default.Badge else Icons.Default.ListAlt, null, tint = if (showMasterList) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                                    Icon(if (showMasterList) Icons.Default.Badge else Icons.AutoMirrored.Filled.ListAlt, null, tint = if (showMasterList) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                                 }
                             }
                             
@@ -470,9 +482,6 @@ fun AdminDashboardScreen(
                             }
 
                             // 4. Unified Profiles List
-                            // Fallback to Box/CircularProgressIndicator if PullToRefreshBox is unresolved
-                            val isRefreshing = uiState is AdminUiState.Loading
-                            
                             Box(modifier = Modifier.weight(1f)) {
                                 Column(modifier = Modifier.fillMaxSize()) {
                                     if (isRefreshing) {
@@ -498,10 +507,17 @@ fun AdminDashboardScreen(
                                                         deleteCloudDataWithUser = false
                                                         showDeleteUserDialog = true
                                                     },
-                                                    onRestore = { selectedUidForRestore = profile.uid ?: profile.agentData?.uid; filePickerLauncher.launch("application/json") },
+                                                    onRestore = { 
+                                                        selectedUidForRestore = profile.uid ?: profile.agentData?.uid
+                                                        isSmartRestore = false
+                                                        filePickerLauncher.launch("application/json") 
+                                                    },
+                                                    onRestoreDay = { uid -> 
+                                                        selectedUidForRestore = uid ?: profile.agentData?.uid
+                                                        isSmartRestore = true
+                                                        filePickerLauncher.launch("application/json")
+                                                    },
                                                     onEditAgent = { viewModel.selectAgentForEdit(profile.agentData); onNavigateBack() },
-                                                    onDeleteHouse = { uid, id -> confirmTitle = "Excluir Imóvel"; confirmMessage = "Deseja excluir este registro de imóvel da nuvem?"; onConfirmAction = { viewModel.deleteAgentHouse(uid, id) }; showConfirmDialog = true },
-                                                    onDeleteActivity = { uid, date -> confirmTitle = "Excluir Atividade"; confirmMessage = "Deseja excluir este registro de atividade ($date) da nuvem?"; onConfirmAction = { viewModel.deleteAgentActivity(uid, date) }; showConfirmDialog = true },
                                                     onClearSyncError = { profile.uid?.let { viewModel.clearSyncError(it) } },
                                                     onMigrateData = {
                                                         val authUser = users.find { it.uid == profile.uid }
@@ -518,6 +534,7 @@ fun AdminDashboardScreen(
                         }
                     } else if (selectedTab == 1) {
                         AdminSettingsTab(viewModel)
+                    }
                     }
                 }
             }
@@ -592,7 +609,6 @@ fun AdminDashboardScreen(
         )
     }
 }
-}
 
 @Composable
 fun AccessRequestCard(
@@ -637,16 +653,38 @@ fun ApprovalDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Vincular conta ${request.email} a um nome da lista mestra:")
-                Box {
-                    OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-                        Text(selectedName ?: "Selecionar Nome (Opcional)")
-                        Spacer(modifier = Modifier.weight(1f))
-                        Icon(Icons.Default.ArrowDropDown, null)
-                    }
-                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                        DropdownMenuItem(text = { Text("Nenhum") }, onClick = { selectedName = null; expanded = false })
-                        agentNamesList.forEach { name ->
-                            DropdownMenuItem(text = { Text(name) }, onClick = { selectedName = name; expanded = false })
+                Column {
+                    OutlinedTextField(
+                        value = selectedName ?: "",
+                        onValueChange = { selectedName = it; expanded = true },
+                        label = { Text("Nome do Agente (da Lista Mestra)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        trailingIcon = { 
+                            IconButton(onClick = { expanded = !expanded }) {
+                                Icon(Icons.Default.ArrowDropDown, null)
+                            }
+                        }
+                    )
+                    
+                    DropdownMenu(
+                        expanded = expanded && agentNamesList.isNotEmpty(),
+                        onDismissRequest = { expanded = false },
+                        properties = PopupProperties(focusable = false),
+                        modifier = Modifier.fillMaxWidth(0.8f)
+                    ) {
+                        val filteredNames = agentNamesList.filter { 
+                            it.contains(selectedName ?: "", ignoreCase = true) 
+                        }.take(5)
+
+                        filteredNames.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = { 
+                                    selectedName = name
+                                    expanded = false 
+                                }
+                            )
                         }
                     }
                 }
@@ -664,7 +702,7 @@ fun AddProfileDialog(
     onConfirm: (String?, String?, UserRole, Boolean) -> Unit
 ) {
     var email by remember { mutableStateOf("") }
-    var agentName by remember { mutableStateOf<String?>(null) }
+    var nameInput by remember { mutableStateOf("") }
     var role by remember { mutableStateOf(UserRole.AGENT) }
     var authorized by remember { mutableStateOf(true) }
     var expandedName by remember { mutableStateOf(false) }
@@ -683,18 +721,54 @@ fun AddProfileDialog(
                     shape = RoundedCornerShape(12.dp)
                 )
 
-                Box {
-                    OutlinedButton(onClick = { expandedName = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-                        Text(agentName ?: "Vincular a Nome da Lista Mestra (Opcional)")
-                        Spacer(modifier = Modifier.weight(1f))
-                        Icon(Icons.Default.ArrowDropDown, null)
-                    }
-                    DropdownMenu(expanded = expandedName, onDismissRequest = { expandedName = false }) {
-                        agentNamesList.forEach { name ->
-                            DropdownMenuItem(text = { Text(name) }, onClick = { agentName = name; expandedName = false })
+                Column {
+                    OutlinedTextField(
+                        value = nameInput,
+                        onValueChange = { nameInput = it; expandedName = true },
+                        label = { Text("Nome Completo do Agente (Lista Mestra)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        trailingIcon = { 
+                            IconButton(onClick = { expandedName = !expandedName }) {
+                                Icon(Icons.Default.ArrowDropDown, null)
+                            }
                         }
-                        DropdownMenuItem(text = { Text("Nenhum / Novo") }, onClick = { agentName = null; expandedName = false })
+                    )
+                    
+                    DropdownMenu(
+                        expanded = expandedName && agentNamesList.isNotEmpty(),
+                        onDismissRequest = { expandedName = false },
+                        properties = PopupProperties(focusable = false),
+                        modifier = Modifier.fillMaxWidth(0.8f)
+                    ) {
+                        val filteredNames = agentNamesList.filter { 
+                            it.contains(nameInput, ignoreCase = true) 
+                        }.take(5)
+
+                        filteredNames.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = { 
+                                    nameInput = name
+                                    expandedName = false 
+                                }
+                            )
+                        }
+                        
+                        if (nameInput.isNotBlank() && !agentNamesList.contains(nameInput)) {
+                            DropdownMenuItem(
+                                text = { Text("Adicionar como novo: \"$nameInput\"") },
+                                onClick = { expandedName = false }
+                            )
+                        }
                     }
+                    
+                    Text(
+                        "O nome deve preferencialmente corresponder ao da lista oficial.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                    )
                 }
 
                 Box {
@@ -704,7 +778,7 @@ fun AddProfileDialog(
                         Icon(Icons.Default.ArrowDropDown, null)
                     }
                     DropdownMenu(expanded = expandedRole, onDismissRequest = { expandedRole = false }) {
-                        UserRole.values().forEach { r ->
+                        UserRole.entries.forEach { r ->
                             DropdownMenuItem(text = { Text(r.name) }, onClick = { role = r; expandedRole = false })
                         }
                     }
@@ -718,7 +792,12 @@ fun AddProfileDialog(
         },
         confirmButton = {
             Button(onClick = { 
-                onConfirm(email.takeIf { it.isNotBlank() }, agentName, role, authorized) 
+                onConfirm(
+                    email.takeIf { it.isNotBlank() }, 
+                    nameInput.takeIf { it.isNotBlank() }, 
+                    role, 
+                    authorized
+                ) 
             }) { Text("Criar") }
         },
         dismissButton = {
@@ -737,15 +816,13 @@ fun UnifiedProfileCard(
     onUpdateName: (String?) -> Unit,
     onDelete: () -> Unit,
     onRestore: () -> Unit,
+    onRestoreDay: (String?) -> Unit,
     onEditAgent: () -> Unit,
-    onDeleteHouse: (String, String) -> Unit,
-    onDeleteActivity: (String, String) -> Unit,
     onClearSyncError: () -> Unit,
     onMigrateData: () -> Unit
 ) {
     var expandedRole by remember { mutableStateOf(false) }
-    var expandedName by remember { mutableStateOf(false) }
-    var showGranular by remember { mutableStateOf(false) }
+    var showEditNameDialog by remember { mutableStateOf(false) }
 
     PremiumCard(
         modifier = Modifier.fillMaxWidth(),
@@ -753,239 +830,283 @@ fun UnifiedProfileCard(
                         else MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header: User Info
+            // Header: Identity & Authorization
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    shape = CircleShape,
-                    color = (if (profile.isPreRegistered) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary).copy(alpha = 0.1f),
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        if (profile.isPreRegistered) Icons.Default.Portrait else Icons.Default.Person,
-                        null,
-                        modifier = Modifier.padding(8.dp),
-                        tint = if (profile.isPreRegistered) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
-                    )
+                Box(contentAlignment = Alignment.BottomEnd) {
+                    Surface(
+                        shape = CircleShape,
+                        color = (if (profile.isPreRegistered) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary).copy(alpha = 0.1f),
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            if (profile.isPreRegistered) Icons.Default.Portrait else Icons.Default.Person,
+                            null,
+                            modifier = Modifier.padding(10.dp),
+                            tint = if (profile.isPreRegistered) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    // Status Dot
+                    Surface(
+                        shape = CircleShape,
+                        color = if (profile.isAuthorized) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(12.dp).border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                    ) {}
                 }
-                Spacer(modifier = Modifier.width(12.dp))
+                
+                Spacer(modifier = Modifier.width(16.dp))
+                
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        profile.agentName ?: "Sem nome de agente",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
+                        profile.agentName ?: "SEM NOME VINCULADO",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         profile.email ?: "Conta não vinculada",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 }
+
                 if (profile.uid != null) {
-                    Switch(checked = profile.isAuthorized, onCheckedChange = onAuthorize)
+                    Column(horizontalAlignment = Alignment.End) {
+                        Switch(
+                            checked = profile.isAuthorized, 
+                            onCheckedChange = onAuthorize,
+                            modifier = Modifier.scale(0.8f)
+                        )
+                        Text(
+                            if (profile.isAuthorized) "ATIVO" else "BLOQUEADO",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (profile.isAuthorized) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error
+                        )
+                    }
                 } else {
-                    TextButton(onClick = onDelete, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
-                        Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Excluir", style = MaterialTheme.typography.labelSmall)
+                    IconButton(onClick = onDelete) {
+                        Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Info & Quick Stats Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Role Badge
+                    Box {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                            shape = RoundedCornerShape(6.dp),
+                            onClick = { expandedRole = true }
+                        ) {
+                            Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AdminPanelSettings, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(4.dp))
+                                Text(profile.role.name, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        DropdownMenu(expanded = expandedRole, onDismissRequest = { expandedRole = false }) {
+                            UserRole.entries.forEach { role ->
+                                DropdownMenuItem(
+                                    text = { Text(role.name) },
+                                    onClick = { onRoleChange(role); expandedRole = false }
+                                )
+                            }
+                        }
+                    }
+                    
+                    if (profile.isPreRegistered) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text("PRÉ-REGISTRO", modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // Quick Stats
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    QuickStat(Icons.Default.HomeWork, profile.agentData?.houses?.size ?: 0, "Imóveis")
+                    QuickStat(Icons.AutoMirrored.Filled.EventNote, profile.agentData?.activities?.size ?: 0, "Ativid.")
+                }
+            }
+
+            if (profile.agentData?.lastSyncError != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Erro de sincronização pendente", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                        IconButton(onClick = onClearSyncError, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
+                        }
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Badges & Status
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (profile.uid != null) {
-                    Box {
-                        AssistChip(
-                            onClick = { expandedRole = true },
-                            label = { Text(profile.role.name) },
-                            leadingIcon = { Icon(Icons.Default.AdminPanelSettings, null, modifier = Modifier.size(16.dp)) }
-                        )
-                        DropdownMenu(expanded = expandedRole, onDismissRequest = { expandedRole = false }) {
-                            UserRole.values().forEach { role ->
-                                DropdownMenuItem(text = { Text(role.name) }, onClick = { onRoleChange(role); expandedRole = false })
-                            }
-                        }
-                    }
-                }
-                
-                if (profile.isPreRegistered) {
-                    SuggestionChip(
-                        onClick = { },
-                        label = { Text("Pré-registrado") },
-                        colors = SuggestionChipDefaults.suggestionChipColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-                    )
-                }
-
-                if (profile.agentData?.lastSyncError != null) {
-                    Badge(containerColor = MaterialTheme.colorScheme.error) {
-                        Text("ERRO SYNC", color = Color.White, modifier = Modifier.padding(4.dp))
-                    }
-                    IconButton(onClick = onClearSyncError) {
-                        Icon(Icons.Default.Refresh, "Limpar Erro", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Actions
-            androidx.compose.foundation.layout.FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                if (profile.uid != null) {
-                    Box {
-                        OutlinedButton(
-                            onClick = { expandedName = true },
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Icon(Icons.Default.DriveFileRenameOutline, null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Vincular", style = MaterialTheme.typography.labelSmall)
-                        }
-                        DropdownMenu(expanded = expandedName, onDismissRequest = { expandedName = false }) {
-                            agentNamesList.forEach { name ->
-                                DropdownMenuItem(text = { Text(name) }, onClick = { onUpdateName(name); expandedName = false })
-                            }
-                            DropdownMenuItem(text = { Text("Limpar Vínculo") }, onClick = { onUpdateName(null); expandedName = false })
-                        }
-                    }
-                }
-
-                OutlinedButton(
-                    onClick = onRestore,
-                    contentPadding = PaddingValues(horizontal = 8.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(32.dp)
+            // Actions Section
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Management Row
+                Text("GERENCIAMENTO", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.SettingsBackupRestore, null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Restaurar", style = MaterialTheme.typography.labelSmall)
-                }
-
-                if (profile.agentData != null) {
-                    OutlinedButton(
-                        onClick = onEditAgent,
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.height(32.dp)
-                    ) {
-                        Icon(Icons.Default.BarChart, null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Ver Dados", style = MaterialTheme.typography.labelSmall)
+                    if (profile.uid != null) {
+                        ActionButton(Icons.Default.DriveFileRenameOutline, "Vincular", onClick = { showEditNameDialog = true })
                     }
-
-                    OutlinedButton(
-                        onClick = { showGranular = !showGranular },
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.height(32.dp)
-                    ) {
-                        Icon(if (showGranular) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(if (showGranular) "Ocultar" else "Detalhes", style = MaterialTheme.typography.labelSmall)
+                    if (profile.uid != null && profile.agentData == null) {
+                        Button(
+                            onClick = onMigrateData,
+                            modifier = Modifier.height(32.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Default.MergeType, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("MIGRAR DADOS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    if (profile.uid != null) {
+                        ActionButton(Icons.Default.DeleteForever, "Excluir", tint = MaterialTheme.colorScheme.error, onClick = onDelete)
                     }
                 }
 
-                if (profile.uid != null && profile.agentData == null) {
-                    Button(
-                        onClick = onMigrateData,
-                        modifier = Modifier.height(32.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Default.MoveToInbox, null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Migrar", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-
-                if (profile.uid != null) {
-                    IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.DeleteForever, "Excluir", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
+                              Text("DADOS E PRODUÇÃO", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ActionButton(Icons.Default.SettingsBackupRestore, "Restauração Completa", onClick = onRestore)
+                    ActionButton(Icons.Default.PostAdd, "Restaurar Dia", onClick = { onRestoreDay(profile.uid) })
+                    
+                    if (profile.agentData != null) {
+                        ActionButton(Icons.Default.QueryStats, "Analisar Produção", onClick = onEditAgent)
                     }
                 }
             }
 
-            // Expanded Granular Data Section
-            AnimatedVisibility(visible = showGranular && profile.agentData != null) {
-                Spacer(modifier = Modifier.height(16.dp))
-                profile.agentData?.let { data ->
-                    GranularDataSection(
-                        agentUid = profile.uid ?: data.uid,
-                        houses = data.houses,
-                        activities = data.activities,
-                        onDeleteHouse = onDeleteHouse,
-                        onDeleteActivity = onDeleteActivity,
-                        onClearSyncError = onClearSyncError
-                    )
-                }
+            if (showEditNameDialog) {
+                var nameInput by remember { mutableStateOf(profile.agentName ?: "") }
+                var expanded by remember { mutableStateOf(false) }
+
+                AlertDialog(
+                    onDismissRequest = { showEditNameDialog = false },
+                    title = { Text("Vincular Nome ao Perfil") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("Defina o nome da lista mestra para este usuário (${profile.email}):", style = MaterialTheme.typography.bodySmall)
+                            
+                            Column {
+                                OutlinedTextField(
+                                    value = nameInput,
+                                    onValueChange = { nameInput = it; expanded = true },
+                                    label = { Text("Nome do Agente") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    trailingIcon = { 
+                                        IconButton(onClick = { expanded = !expanded }) {
+                                            Icon(Icons.Default.ArrowDropDown, null)
+                                        }
+                                    }
+                                )
+                                
+                                DropdownMenu(
+                                    expanded = expanded && agentNamesList.isNotEmpty(),
+                                    onDismissRequest = { expanded = false },
+                                    properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+                                    modifier = Modifier.fillMaxWidth(0.8f)
+                                ) {
+                                    val filteredNames = agentNamesList.filter { 
+                                        it.contains(nameInput, ignoreCase = true) 
+                                    }.take(5)
+
+                                    filteredNames.forEach { name ->
+                                        DropdownMenuItem(
+                                            text = { Text(name) },
+                                            onClick = { 
+                                                nameInput = name
+                                                expanded = false 
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                            
+                            TextButton(onClick = { nameInput = ""; onUpdateName(null); showEditNameDialog = false }) {
+                                Text("Limpar Vínculo Existente", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = { onUpdateName(nameInput.takeIf { it.isNotBlank() }); showEditNameDialog = false }) {
+                            Text("Confirmar")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showEditNameDialog = false }) {
+                            Text("Cancelar")
+                        }
+                    }
+                )
             }
         }
     }
 }
 
+
 @Composable
-fun GranularDataSection(
-    agentUid: String,
-    houses: List<House>,
-    activities: List<DayActivity>,
-    onDeleteHouse: (String, String) -> Unit,
-    onDeleteActivity: (String, String) -> Unit,
-    onClearSyncError: () -> Unit
+private fun QuickStat(icon: androidx.compose.ui.graphics.vector.ImageVector, count: Int, label: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        shape = RoundedCornerShape(6.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        ) {
+            Icon(icon, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(4.dp))
+            Text("$count $label", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+@Composable
+private fun ActionButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector, 
+    label: String, 
+    tint: Color = MaterialTheme.colorScheme.primary,
+    onClick: () -> Unit
 ) {
-    var showHouses by remember { mutableStateOf(false) }
-    var showActivities by remember { mutableStateOf(false) }
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Controle de Jornada", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        
-        OutlinedButton(onClick = { showHouses = !showHouses }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.HomeWork, null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Imóveis (${houses.size})", style = MaterialTheme.typography.labelSmall)
-                Spacer(modifier = Modifier.weight(1f))
-                Icon(if (showHouses) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
-            }
-        }
-
-        AnimatedVisibility(visible = showHouses) {
-            Surface(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                if (houses.isEmpty()) {
-                    Box(modifier = Modifier.padding(16.dp), contentAlignment = Alignment.Center) {
-                        Text("Nenhum imóvel", style = MaterialTheme.typography.labelSmall)
-                    }
-                } else {
-                    Column(modifier = Modifier.padding(8.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        activities.forEach { activity ->
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(4.dp)) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Data: ${activity.date}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                    Text("Status: ${activity.status}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                TextButton(onClick = { onDeleteActivity(agentUid, activity.date) }) {
-                                    Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Excluir", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                                }
-                            }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                        }
-                    }
-                }
-            }
-        }
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.height(32.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, tint.copy(alpha = 0.3f))
+    ) {
+        Icon(icon, null, modifier = Modifier.size(16.dp), tint = tint)
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = tint)
     }
 }

@@ -421,9 +421,13 @@ class AdminViewModel @Inject constructor(
         restoreAgentBackup(context, myUid, uri)
     }
 
-    fun restoreAgentBackup(context: Context, agentUid: String, uri: Uri) {
+    fun restoreAgentBackup(context: Context, agentUid: String, uri: Uri, targetDate: String? = null, autoShift: Boolean = false) {
         viewModelScope.launch {
-            val result = restoreDataUseCase(context, agentUid, uri)
+            val agents = if (uiState.value is AdminUiState.Success) (uiState.value as AdminUiState.Success).agents else emptyList()
+            val agent = agents.find { it.uid == agentUid }
+            val existingDates = agent?.activities?.map { it.date.replace("/", "-") } ?: emptyList()
+
+            val result = restoreDataUseCase(context, agentUid, uri, targetDate, existingDates, isSingleDayImport = autoShift)
             if (result.isSuccess) {
                 _uiEvent.emit("Backup restaurado com sucesso para o agente")
                 loadAgentsData()

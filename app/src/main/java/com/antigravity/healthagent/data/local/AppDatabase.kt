@@ -11,7 +11,7 @@ import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.CustomStreet
 import com.antigravity.healthagent.data.local.model.Tombstone
 
-@Database(entities = [House::class, DayActivity::class, CustomStreet::class, Tombstone::class], version = 26, exportSchema = false)
+@Database(entities = [House::class, DayActivity::class, CustomStreet::class, Tombstone::class], version = 27, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun houseDao(): HouseDao
@@ -20,6 +20,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun tombstoneDao(): com.antigravity.healthagent.data.local.dao.TombstoneDao
 
     companion object {
+        val MIGRATION_26_27 = object : androidx.room.migration.Migration(26, 27) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                performFullNuclearRebuild(database)
+            }
+        }
+
         val MIGRATION_25_26 = object : androidx.room.migration.Migration(25, 26) {
             override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
                 performFullNuclearRebuild(database)
@@ -215,6 +221,12 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("""
                     CREATE UNIQUE INDEX IF NOT EXISTS `index_houses_agentUid_agentName_data_blockNumber_blockSequence_streetName_number_sequence_complement_bairro_visitSegment` 
                     ON `houses` (`agentUid`, `agentName`, `data`, `blockNumber`, `blockSequence`, `streetName`, `number`, `sequence`, `complement`, `bairro`, `visitSegment`)
+                """)
+                
+                database.execSQL("DROP INDEX IF EXISTS `index_houses_data_agentUid` ")
+                database.execSQL("""
+                    CREATE INDEX IF NOT EXISTS `index_houses_data_agentUid` 
+                    ON `houses` (`data`, `agentUid`)
                 """)
 
                 // 3. Rebuild day_activities

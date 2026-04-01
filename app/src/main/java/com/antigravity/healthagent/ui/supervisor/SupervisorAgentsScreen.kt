@@ -24,6 +24,8 @@ import com.antigravity.healthagent.ui.components.MeshGradient
 import com.antigravity.healthagent.ui.components.PremiumCard
 import java.text.SimpleDateFormat
 import java.util.*
+import android.content.Context
+import android.net.Uri
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,7 +126,7 @@ fun SupervisorAgentsScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         items(agents) { agent ->
-                            SupervisorAgentCard(agent = agent)
+                            SupervisorAgentCard(agent = agent, viewModel = viewModel)
                         }
                     }
                 }
@@ -135,8 +137,9 @@ fun SupervisorAgentsScreen(
 }
 
 @Composable
-fun SupervisorAgentCard(agent: AgentData) {
+fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel) {
     var expanded by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
     val lastSync = remember(agent.lastSyncTime) {
         if (agent.lastSyncTime > 0) {
             SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(agent.lastSyncTime))
@@ -202,24 +205,87 @@ fun SupervisorAgentCard(agent: AgentData) {
                     
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        AgentStatItem(label = "IMÓVEIS", value = agent.houses.size.toString())
-                        AgentStatItem(
-                            label = "FOCOS", 
-                            value = agent.houses.count { it.comFoco }.toString(),
-                            color = if (agent.houses.any { it.comFoco }) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            AgentStatItem(label = "IMÓVEIS", value = agent.houses.size.toString())
+                            AgentStatItem(
+                                label = "FOCOS", 
+                                value = agent.houses.count { it.comFoco }.toString(),
+                                color = if (agent.houses.any { it.comFoco }) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Full Restoration Button
+                        val filePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+                            androidx.activity.result.contract.ActivityResultContracts.GetContent()
+                        ) { uri ->
+                            uri?.let { viewModel.restoreAgentData(context, agent.uid, it) }
+                        }
+
+                        TextButton(
+                            onClick = { filePicker.launch("application/json") },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Default.CloudUpload, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("RESTAURAR TUDO", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        }
                     }
                     
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     
                     Text(
-                        text = "Total de dias registrados: ${agent.activities.size}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Medium
+                        text = "ÚLTIMAS PRODUÇÕES",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Black
                     )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val sortedActivities = remember(agent.activities) {
+                        agent.activities.sortedByDescending { it.date }.take(5)
+                    }
+
+                    if (sortedActivities.isEmpty()) {
+                        Text("Nenhuma produção registrada", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        sortedActivities.forEach { activity ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    activity.date,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                val dayFilePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+                                    androidx.activity.result.contract.ActivityResultContracts.GetContent()
+                                ) { uri ->
+                                    uri?.let { viewModel.restoreAgentData(context, agent.uid, it, activity.date) }
+                                }
+
+                                IconButton(
+                                    onClick = { dayFilePicker.launch("application/json") },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Restore, 
+                                        contentDescription = "Restaurar Produção Única",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

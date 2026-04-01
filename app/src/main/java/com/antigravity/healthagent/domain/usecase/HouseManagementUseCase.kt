@@ -79,14 +79,23 @@ class HouseManagementUseCase @Inject constructor(
             allHouses.map { h ->
                 if (h.id == house.id) {
                     sanitized
-                } else if (h.data == sanitized.data && h.listOrder > sanitized.listOrder) {
-                    // Propagate location change to subsequent houses for the SAME day
-                    h.copy(
-                        bairro = sanitized.bairro,
-                        blockNumber = sanitized.blockNumber,
-                        blockSequence = sanitized.blockSequence,
-                        streetName = sanitized.streetName
-                    )
+                } else if (h.data == sanitized.data && h.listOrder > sanitized.listOrder && originalHouse != null) {
+                    // Propagate location change ONLY IF the subsequent house has the exact same ORIGINAL address
+                    val matchesOriginal = h.bairro.equals(originalHouse.bairro, ignoreCase = true) &&
+                                        h.blockNumber.equals(originalHouse.blockNumber, ignoreCase = true) &&
+                                        h.blockSequence.equals(originalHouse.blockSequence, ignoreCase = true) &&
+                                        h.streetName.equals(originalHouse.streetName, ignoreCase = true)
+                    
+                    if (matchesOriginal) {
+                        h.copy(
+                            bairro = sanitized.bairro,
+                            blockNumber = sanitized.blockNumber,
+                            blockSequence = sanitized.blockSequence,
+                            streetName = sanitized.streetName
+                        )
+                    } else {
+                        h
+                    }
                 } else {
                     h
                 }
@@ -237,35 +246,41 @@ class HouseManagementUseCase @Inject constructor(
         last: House
     ): HousePrediction {
         if (contextHouses.size < 2) {
+             // When jumping to a new number or starting a street, reset sequence and complement
              val nextNum = try {
                 (last.number.toInt() + 1).toString()
             } catch (e: Exception) { "" }
-            return HousePrediction(nextNum, last.sequence, last.complement, last.propertyType, Situation.NONE)
+            return HousePrediction(nextNum, 0, 0, last.propertyType, Situation.NONE)
         }
 
-        // Find the house immediately preceding 'last' in this context
-        // We can't just take size-2 because 'last' might not be the last in the list (though usually is)
         val lastIndex = contextHouses.indexOfFirst { it.id == last.id }
         if (lastIndex < 1) {
-             // Fallback if last is the first one found
+             // Fallback if last is the first one found or not found
              val nextNum = try {
                 (last.number.toInt() + 1).toString()
             } catch (e: Exception) { "" }
-            return HousePrediction(nextNum, last.sequence, last.complement, last.propertyType, Situation.NONE)
+            return HousePrediction(nextNum, 0, 0, last.propertyType, Situation.NONE)
         }
         
         val preLast = contextHouses[lastIndex - 1]
 
         // Number prediction
-        val nextNumber = try {
+        val lastIsNumeric = last.number.toIntOrNull() != null
+        val preLastIsNumeric = preLast.number.toIntOrNull() != null
+        
+        val nextNumber = if (lastIsNumeric && preLastIsNumeric) {
             val lastNum = last.number.toInt()
             val preLastNum = preLast.number.toInt()
-            val diff = lastNum - preLastNum
-            (lastNum + diff).toString()
-        } catch (e: Exception) {
-            try {
-                (last.number.toInt() + 1).toString()
-            } catch (e2: Exception) { last.number }
+            if (lastNum == preLastNum) {
+                // If numbers are the same, keep them the same (likely working on sequences/complements)
+                last.number
+            } else {
+                val diff = lastNum - preLastNum
+                (lastNum + diff).toString()
+            }
+        } else {
+            // Fallback for non-numeric or single numeric
+            if (lastIsNumeric) (last.number.toInt() + 1).toString() else last.number
         }
 
         // Sequence prediction
@@ -273,22 +288,26 @@ class HouseManagementUseCase @Inject constructor(
             val lastSeq = last.sequence
             val preLastSeq = preLast.sequence
             val diff = lastSeq - preLastSeq
-            val next = lastSeq + diff
-            if (next >= 0) next else 0
+            
+            // If complements were changing, don't increment sequence
+            if (last.complement != preLast.complement) {
+                lastSeq
+            } else {
+                val next = lastSeq + (if (diff == 0 && last.complement == 0) 1 else diff)
+                if (next >= 0) next else 0
+            }
         } else {
-            // If numbers are different, see if sequence was constant
-            if (last.sequence == preLast.sequence) last.sequence else 0
+            // Number changed -> Reset sequence
+            0
         }
         
         // Complement Prediction
         val nextComplement = if (last.number == preLast.number) {
-             // Same number logic
              if (last.sequence == preLast.sequence) {
                  // Same Number AND Sequence -> Predict Complement
                  val lastCompl = last.complement
                  val preLastCompl = preLast.complement
                  val diff = lastCompl - preLastCompl
-                 // If diff is 0 (e.g. repeated manually), assume +1, else follow diff
                  val effectiveDiff = if (diff == 0) 1 else diff
                  val next = lastCompl + effectiveDiff
                  if (next >= 0) next else 0
@@ -297,7 +316,7 @@ class HouseManagementUseCase @Inject constructor(
                  0
              }
         } else {
-             // Number changed -> Reset.
+             // Number changed -> Reset complement
              0
         }
 

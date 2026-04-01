@@ -91,7 +91,7 @@ class HouseManagementUseCaseTest {
 
     private val dummySyncRepository = object : com.antigravity.healthagent.domain.repository.SyncRepository {
         override suspend fun pushLocalDataToCloud(houses: List<House>, activities: List<DayActivity>, targetUid: String?, shouldReplace: Boolean): Result<Unit> = Result.success(Unit)
-        override suspend fun fetchAllAgentsData(): Result<List<com.antigravity.healthagent.domain.repository.AgentData>> = Result.success(emptyList())
+        override suspend fun fetchAllAgentsData(sinceTimestamp: Long): Result<List<com.antigravity.healthagent.domain.repository.AgentData>> = Result.success(emptyList())
         override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> = Result.success(Unit)
         override suspend fun createAgent(email: String, agentName: String?): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAgent(uid: String): Result<Unit> = Result.success(Unit)

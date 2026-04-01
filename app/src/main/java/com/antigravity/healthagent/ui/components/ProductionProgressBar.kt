@@ -84,7 +84,7 @@ fun ProductionProgressBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (isGoalReached) "META ALCANÇADA! 🎉" else "VISITAS REGISTRADAS",
+                    text = if (isGoalReached) "META ALCANÇADA! 🎉" else "IMÓVEIS ABERTOS",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (isGoalReached) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                     fontWeight = FontWeight.Black,

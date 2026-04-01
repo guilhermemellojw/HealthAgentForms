@@ -19,7 +19,7 @@ interface SyncRepository {
     /**
      * For Admin users to view all data submitted by all agents.
      */
-    suspend fun fetchAllAgentsData(): Result<List<AgentData>>
+    suspend fun fetchAllAgentsData(sinceTimestamp: Long = 0L): Result<List<AgentData>>
 
     /**
      * Pulls data from Firestore and replaces the local Room database content.

@@ -105,16 +105,22 @@ class KmlManager @Inject constructor() {
             val builder = factory.newDocumentBuilder()
             val document = builder.parse(inputStream)
             
-            var rootNode: Node = document.documentElement
-            if (rootNode.localName == "kml") {
+            var rootNode: Node? = document.documentElement
+            if (rootNode == null) return Result.failure(Exception("KML sem elemento raiz"))
+
+            if (rootNode.localName == "kml" || rootNode.nodeName == "kml" || rootNode.nodeName.endsWith(":kml")) {
                 val kids = rootNode.childNodes
                 for(i in 0 until kids.length) {
                     val k = kids.item(i)
-                    if (k.nodeType == Node.ELEMENT_NODE && (k.localName == "Document" || k.localName == "Folder")) {
+                    if (k.nodeType == Node.ELEMENT_NODE && (k.localName == "Document" || k.localName == "Folder" || k.nodeName == "Document" || k.nodeName == "Folder")) {
                         rootNode = k
                         break
                     }
                 }
+            }
+            
+            if (rootNode?.nodeType != Node.ELEMENT_NODE) {
+                return Result.failure(Exception("Elemento KML Document ou Folder não encontrado"))
             }
             
             // 1. Parse Global Styles & StyleMaps

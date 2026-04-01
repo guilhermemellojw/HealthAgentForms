@@ -10,7 +10,8 @@ import androidx.room.Index
         Index(
             value = ["agentUid", "agentName", "data", "blockNumber", "blockSequence", "streetName", "number", "sequence", "complement", "bairro", "visitSegment"],
             unique = true
-        )
+        ),
+        Index(value = ["data", "agentUid"])
     ]
 )
 data class House(

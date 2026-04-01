@@ -267,10 +267,12 @@ class SyncRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun fetchAllAgentsData(): Result<List<AgentData>> {
+    override suspend fun fetchAllAgentsData(sinceTimestamp: Long): Result<List<AgentData>> {
         return try {
             val agentsSnapshot = firestore.collection("agents").get().await()
             val allAgents = mutableListOf<AgentData>()
+            
+            val timestampThreshold = com.google.firebase.Timestamp(sinceTimestamp / 1000, ((sinceTimestamp % 1000) * 1000000).toInt())
 
             for (agentDoc in agentsSnapshot.documents) {
                 var email = agentDoc.getString("email") ?: ""
@@ -286,10 +288,20 @@ class SyncRepositoryImpl @Inject constructor(
                     } catch(e: Exception) { "Unknown" }
                 }
 
-                val housesSnapshot = agentDoc.reference.collection("houses").get().await()
+                val housesQuery = if (sinceTimestamp > 0) {
+                    agentDoc.reference.collection("houses").whereGreaterThanOrEqualTo("lastUpdated", timestampThreshold)
+                } else {
+                    agentDoc.reference.collection("houses")
+                }
+                val housesSnapshot = housesQuery.get().await()
                 val houses = housesSnapshot.documents.mapNotNull { it.toHouseSafe(uid) }
 
-                val activitiesSnapshot = agentDoc.reference.collection("day_activities").get().await()
+                val activitiesQuery = if (sinceTimestamp > 0) {
+                    agentDoc.reference.collection("day_activities").whereGreaterThanOrEqualTo("lastUpdated", timestampThreshold)
+                } else {
+                    agentDoc.reference.collection("day_activities")
+                }
+                val activitiesSnapshot = activitiesQuery.get().await()
                 val activities = activitiesSnapshot.documents.mapNotNull { it.toDayActivitySafe(uid) }
 
                 // IMPROVEMENT: If agentName is missing in the main doc, recover it from the data
@@ -706,13 +718,18 @@ class SyncRepositoryImpl @Inject constructor(
                 houseDao.upsertHouses(housesToUpsert)
                 dayActivityDao.upsertDayActivities(normalizedActivities)
                 
-                // Cleanup ghosts
+                // Cleanup ghosts ONLY for the dates being restored
+                val restoredDates = (housesToUpsert.map { it.data.replace("/", "-") } + normalizedActivities.map { it.date.replace("/", "-") }).toSet()
+                
                 for ((key, matches) in localHouseGroups) {
-                    if (matches.isNotEmpty()) {
-                        val keptId = housesToUpsert.find { it.generateNaturalKey() == key }?.id
-                        for (house in matches) {
-                            if (house.id != keptId && house.id != 0) {
-                                houseDao.deleteHouse(house)
+                    val houseDate = matches.firstOrNull()?.data?.replace("/", "-") ?: continue
+                    if (houseDate in restoredDates) {
+                        if (matches.isNotEmpty()) {
+                            val keptId = housesToUpsert.find { it.generateNaturalKey() == key }?.id
+                            for (house in matches) {
+                                if (house.id != keptId && house.id != 0) {
+                                    houseDao.deleteHouse(house)
+                                }
                             }
                         }
                     }
@@ -1074,7 +1091,7 @@ class SyncRepositoryImpl @Inject constructor(
 
             // CRITICAL: Enforce the standardized agentName and Uid from the session/profile
             // Also ensure Municipality and Bairro are not blank to prevent future deadlocks
-            val finalAgentName = if (agentName.isNotBlank()) agentName else (house.agentName.ifBlank { "" })
+            val finalAgentName = (if (agentName.isNotBlank()) agentName else (house.agentName.ifBlank { "" })).trim().uppercase()
             val finalMunicipio = if (house.municipio.isBlank()) "BOM JARDIM" else house.municipio
             val finalBairro = if (house.bairro.isBlank()) "" else house.bairro
             
@@ -1110,7 +1127,7 @@ class SyncRepositoryImpl @Inject constructor(
             val isManualUnlock = this.getBoolean("isManualUnlock") ?: activity.isManualUnlock
 
             // CRITICAL: Enforce the standardized agentName and Uid from the session/profile
-            val finalAgentName = if (agentName.isNotBlank()) agentName else (activity.agentName.ifBlank { "" })
+            val finalAgentName = (if (agentName.isNotBlank()) agentName else (activity.agentName.ifBlank { "" })).trim().uppercase()
             activity.copy(
                 isClosed = isClosed,
                 isManualUnlock = isManualUnlock,

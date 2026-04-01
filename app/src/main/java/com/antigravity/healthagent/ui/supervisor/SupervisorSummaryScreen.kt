@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -42,6 +43,28 @@ fun SupervisorSummaryScreen(
     var selectedStatLabel by remember { mutableStateOf<String?>(null) }
     var selectedStatDetails by remember { mutableStateOf<List<StatDetail>>(emptyList()) }
     var showStatDialog by remember { mutableStateOf(false) }
+    
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val uiEvent by viewModel.uiEvent.collectAsState()
+    var targetAgentUid by remember { mutableStateOf<String?>(null) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val importDataLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { 
+            targetAgentUid?.let { uid ->
+                viewModel.restoreAgentData(context, uid, it)
+            }
+        }
+    }
+
+    LaunchedEffect(uiEvent) {
+        uiEvent?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearUiEvent()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -68,6 +91,7 @@ fun SupervisorSummaryScreen(
                 onOpenSettings = onOpenSettings
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = Color.Transparent
     ) { paddingValues ->
         val pullToRefreshState = rememberPullToRefreshState()
@@ -117,7 +141,7 @@ fun SupervisorSummaryScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         FilledIconButton(onClick = { viewModel.previousWeek() }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Anterior")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Anterior")
                         }
                         
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -135,7 +159,7 @@ fun SupervisorSummaryScreen(
                         }
                         
                         FilledIconButton(onClick = { viewModel.nextWeek() }) {
-                            Icon(Icons.Default.ArrowForward, contentDescription = "Próximo")
+                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Próximo")
                         }
                     }
                 }
@@ -163,12 +187,24 @@ fun SupervisorSummaryScreen(
                             ) {
                                 StatItem(
                                     label = "TRABALHADOS",
-                                    value = summary.totalHouses.toString(),
+                                    value = summary.totalWorked.toString(),
                                     icon = Icons.Default.Home,
                                     modifier = Modifier.weight(1f),
                                     onClick = {
                                         selectedStatLabel = "TRABALHADOS"
                                         selectedStatDetails = summary.housesDetails
+                                        showStatDialog = true
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                StatItem(
+                                    label = "VISITAS",
+                                    value = summary.totalVisits.toString(),
+                                    icon = Icons.AutoMirrored.Filled.DirectionsWalk,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        selectedStatLabel = "VISITAS"
+                                        selectedStatDetails = summary.visitsDetails
                                         showStatDialog = true
                                     }
                                 )
@@ -275,14 +311,18 @@ fun SupervisorSummaryScreen(
                 StatDetailsDialog(
                     onDismissRequest = { showStatDialog = false },
                     label = selectedStatLabel!!,
-                    details = selectedStatDetails
+                    details = selectedStatDetails,
+                    onImportClick = { uid ->
+                        targetAgentUid = uid
+                        importDataLauncher.launch("application/json")
+                    }
                 )
             }
         }
     }
 }
-
 }
+
 @Composable
 fun StatItem(
     label: String,
@@ -327,9 +367,10 @@ fun StatItem(
 fun StatDetailsDialog(
     onDismissRequest: () -> Unit,
     label: String,
-    details: List<StatDetail>
+    details: List<StatDetail>,
+    onImportClick: (String) -> Unit = {}
 ) {
-    AlertDialog(
+    BasicAlertDialog(
         onDismissRequest = onDismissRequest,
         modifier = Modifier.fillMaxWidth(0.9f)
     ) {
@@ -414,18 +455,32 @@ fun StatDetailsDialog(
                                     )
                                 }
                                 
-                                Surface(
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.padding(start = 12.dp)
-                                ) {
-                                    Text(
-                                        text = detail.count.toString(),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Black,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                                    )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = { onImportClick(detail.agentUid) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.CloudUpload, 
+                                            contentDescription = "Importar JSON",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.padding(start = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = detail.count.toString(),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Black,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                        )
+                                    }
                                 }
                             }
                         }

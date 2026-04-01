@@ -14,8 +14,14 @@ import javax.inject.Inject
 @HiltViewModel
 class SupervisorViewModel @Inject constructor(
     private val syncRepository: SyncRepository,
-    private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository
+    private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository,
+    private val restoreDataUseCase: com.antigravity.healthagent.domain.usecase.RestoreDataUseCase
 ) : ViewModel() {
+
+    private val _uiEvent = MutableStateFlow<String?>(null)
+    val uiEvent: StateFlow<String?> = _uiEvent.asStateFlow()
+
+    fun clearUiEvent() { _uiEvent.value = null }
 
     private val _agents = MutableStateFlow<List<AgentData>>(emptyList())
     val agents: StateFlow<List<AgentData>> = _agents.asStateFlow()
@@ -51,13 +57,36 @@ class SupervisorViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
-            val result = syncRepository.fetchAllAgentsData()
+            val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
+            val result = syncRepository.fetchAllAgentsData(thirtyDaysAgo)
             if (result.isSuccess) {
                 _agents.value = result.getOrNull() ?: emptyList()
             } else {
                 _errorMessage.value = result.exceptionOrNull()?.message ?: "Erro desconhecido ao carregar dados"
             }
             _isLoading.value = false
+        }
+    }
+
+    fun restoreAgentData(context: android.content.Context, agentUid: String, fileUri: android.net.Uri, targetDate: String? = null) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val agent = _agents.value.find { it.uid == agentUid }
+                val existingDates = agent?.activities?.map { it.date.replace("/", "-") } ?: emptyList()
+                
+                val result = restoreDataUseCase(context, agentUid, fileUri, targetDate, existingDates)
+                if (result.isSuccess) {
+                    _uiEvent.value = "Dados restaurados com sucesso para o agente selecionado!"
+                    refreshData() // Reload summary to reflect changes
+                } else {
+                    _uiEvent.value = "Falha na restauração: ${result.exceptionOrNull()?.message}"
+                }
+            } catch (e: Exception) {
+                _uiEvent.value = "Erro durante restauração: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 
@@ -104,8 +133,10 @@ class SupervisorViewModel @Inject constructor(
             SimpleDateFormat("dd-MM-yyyy", Locale.US).format(cal.time)
         }
 
-        var totalHouses = 0
+        var totalWorked = 0
+        var totalVisits = 0
         val housesDetails = mutableListOf<StatDetail>()
+        val visitsDetails = mutableListOf<StatDetail>()
         var totalFoci = 0
         val fociDetails = mutableListOf<StatDetail>()
         var totalTratados = 0
@@ -126,50 +157,60 @@ class SupervisorViewModel @Inject constructor(
                 
                 val weekHouses = agent.houses.filter { it.data in weekDates }
                 
+                // VISITAS (Total non-empty)
+                val visitCount = weekHouses.size
+                if (visitCount > 0) {
+                    totalVisits += visitCount
+                    visitsDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, visitCount))
+                }
+
+                // ABERTOS / TRABALHADOS (NONE situation)
                 val workedCount = weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE }
                 if (workedCount > 0) {
-                    totalHouses += workedCount
-                    housesDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, workedCount))
+                    totalWorked += workedCount
+                    housesDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, workedCount))
                 }
                 
                 val fociCount = weekHouses.count { it.comFoco }
                 if (fociCount > 0) {
                     totalFoci += fociCount
-                    fociDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, fociCount))
+                    fociDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, fociCount))
                 }
                 
                 val treatedCount = weekHouses.count { house ->
-                    house.a1 > 0 || house.a2 > 0 || house.b > 0 || house.c > 0 ||
-                    house.d1 > 0 || house.d2 > 0 || house.e > 0 || house.eliminados > 0
+                    (house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e + house.eliminados) > 0 ||
+                    house.larvicida > 0.0 || house.comFoco
                 }
                 if (treatedCount > 0) {
                     totalTratados += treatedCount
-                    tratadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, treatedCount))
+                    tratadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, treatedCount))
                 }
 
                 val closedCount = weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }
                 if (closedCount > 0) {
                     totalFechados += closedCount
-                    fechadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, closedCount))
+                    fechadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, closedCount))
                 }
 
                 val abandonedCount = weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
                 if (abandonedCount > 0) {
                     totalAbandonados += abandonedCount
-                    abandonadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, abandonedCount))
+                    abandonadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, abandonedCount))
                 }
 
                 val recusedCount = weekHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }
                 if (recusedCount > 0) {
                     totalRecusados += recusedCount
-                    recusadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, recusedCount))
+                    recusadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, recusedCount))
                 }
             }
         }
 
         return AggregateSummary(
-            totalHouses = totalHouses,
+            totalWorked = totalWorked,
             housesDetails = housesDetails.sortedByDescending { it.count },
+            totalVisits = totalVisits,
+            visitsDetails = visitsDetails.sortedByDescending { it.count },
             totalFoci = totalFoci,
             fociDetails = fociDetails.sortedByDescending { it.count },
             totalTratados = totalTratados,
@@ -189,12 +230,15 @@ class SupervisorViewModel @Inject constructor(
 data class StatDetail(
     val agentName: String,
     val agentEmail: String,
+    val agentUid: String,
     val count: Int
 )
 
 data class AggregateSummary(
-    val totalHouses: Int = 0,
+    val totalWorked: Int = 0, // Abertos
     val housesDetails: List<StatDetail> = emptyList(),
+    val totalVisits: Int = 0, // Visitas
+    val visitsDetails: List<StatDetail> = emptyList(),
     val totalFoci: Int = 0,
     val fociDetails: List<StatDetail> = emptyList(),
     val totalTratados: Int = 0,

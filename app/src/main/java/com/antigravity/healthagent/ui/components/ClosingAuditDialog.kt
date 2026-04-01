@@ -66,7 +66,7 @@ fun ClosingAuditDialog(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    AuditItem("Trabalhados", "${audit.totalWorked}", isEasyMode)
+                    AuditItem("Abertos", "${audit.totalWorked}", isEasyMode)
                     if (audit.totalTreated > 0) AuditItem("Tratados", "${audit.totalTreated}", isEasyMode)
                     if (audit.totalClosed > 0) AuditItem("Fechados (F)", "${audit.totalClosed}", isEasyMode)
                     if (audit.totalRefused > 0) AuditItem("Recusados (REC)", "${audit.totalRefused}", isEasyMode)

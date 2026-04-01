@@ -33,7 +33,7 @@ class SyncScheduler @Inject constructor(
 
         workManager.enqueueUniqueWork(
             "ImmediateDataSync",
-            ExistingWorkPolicy.REPLACE,
+            ExistingWorkPolicy.KEEP,
             syncRequest
         )
     }

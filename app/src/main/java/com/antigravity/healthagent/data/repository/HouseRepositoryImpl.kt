@@ -233,11 +233,16 @@ class HouseRepositoryImpl @Inject constructor(
             houseDao.upsertHouses(housesToUpsert)
             dayActivityDao.upsertDayActivities(normalizedActivities)
             
-            // Cleanup ghosts
+            // Cleanup ghosts ONLY for the dates being restored
+            val restoredDates = (housesToUpsert.map { it.data.replace("/", "-") } + normalizedActivities.map { it.date.replace("/", "-") }).toSet()
+
             for ((key, matches) in localHouseGroups) {
-                if (matches.isNotEmpty()) {
-                    val keptId = housesToUpsert.find { it.generateNaturalKey() == key }?.id
-                    matches.forEach { house -> if (house.id != keptId && house.id != 0) houseDao.deleteHouse(house) }
+                val houseDate = matches.firstOrNull()?.data?.replace("/", "-") ?: continue
+                if (houseDate in restoredDates) {
+                    if (matches.isNotEmpty()) {
+                        val keptId = housesToUpsert.find { it.generateNaturalKey() == key }?.id
+                        matches.forEach { house -> if (house.id != keptId && house.id != 0) houseDao.deleteHouse(house) }
+                    }
                 }
             }
         }

@@ -168,6 +168,9 @@ class HomeViewModel @Inject constructor(
     private val _duplicateHouseConfirmation = MutableStateFlow<House?>(null)
     val duplicateHouseConfirmation: StateFlow<House?> = _duplicateHouseConfirmation.asStateFlow()
 
+    private val _pendingUpdateDrafts = MutableStateFlow<Map<Int, House>>(emptyMap())
+    private var clashDialogJob: kotlinx.coroutines.Job? = null
+
     private val _backupConfirmation = MutableStateFlow<BackupConfirmation?>(null)
     val backupConfirmation: StateFlow<BackupConfirmation?> = _backupConfirmation.asStateFlow()
 
@@ -607,8 +610,9 @@ class HomeViewModel @Inject constructor(
 
     // --- Computed State ---
 
-    val filteredHouses: StateFlow<List<House>> = combine(houses, _searchQuery, _data) { list, query, date ->
-        list.filter { it.data == date && (query.isBlank() || it.streetName.contains(query, ignoreCase = true) || it.blockNumber.contains(query, ignoreCase = true)) }
+    val filteredHouses: StateFlow<List<House>> = combine(houses, _pendingUpdateDrafts, _searchQuery, _data) { dbList, drafts, query, date ->
+        val mergedList = dbList.map { house -> drafts[house.id] ?: house }
+        mergedList.filter { it.data == date && (query.isBlank() || it.streetName.contains(query, ignoreCase = true) || it.blockNumber.contains(query, ignoreCase = true)) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val filteredHousesUiState: StateFlow<List<HouseUiState>> = combine(filteredHouses, _isDuplicateIds) { list, dups ->
@@ -1290,6 +1294,7 @@ class HomeViewModel @Inject constructor(
                 var finalSequence = houseToInsert.sequence
                 var finalComplement = houseToInsert.complement
                 
+                // Smarter Auto-Increment: If numbers match, prefer incrementing COMPLEMENT
                 while (houses.value.any { 
                     it.data == houseToInsert.data && 
                     it.agentUid == houseToInsert.agentUid &&
@@ -1303,11 +1308,15 @@ class HomeViewModel @Inject constructor(
                     it.bairro.equals(houseToInsert.bairro, ignoreCase = true) &&
                     it.visitSegment == houseToInsert.visitSegment
                 }) {
-                    finalSequence++
+                    if (houseToInsert.complement > 0 || houseToInsert.number.isNotBlank()) {
+                        finalComplement++
+                    } else {
+                        finalSequence++
+                    }
                 }
                 
-                if (finalSequence != houseToInsert.sequence) {
-                    houseToInsert = houseToInsert.copy(sequence = finalSequence)
+                if (finalSequence != houseToInsert.sequence || finalComplement != houseToInsert.complement) {
+                    houseToInsert = houseToInsert.copy(sequence = finalSequence, complement = finalComplement)
                 }
 
                 houseManagementUseCase.insertHouse(houseToInsert, houses.value)
@@ -1330,7 +1339,6 @@ class HomeViewModel @Inject constructor(
         val original = houses.value.find { it.id == house.id }
 
         // Limit Enforcement: Only block if CHANGING to worked and meta was reached.
-        // This allows fixing typo's/errors on already "surpassed" days.
         val houseIsWorked = (house.situation == Situation.NONE || house.situation == Situation.EMPTY)
         val originalIsWorked = original != null && (original.situation == Situation.NONE || original.situation == Situation.EMPTY)
 
@@ -1346,25 +1354,61 @@ class HomeViewModel @Inject constructor(
             }
         }
 
-        // --- MERGE PREVENTION ---
-        // Calculate the natural key of the prospective update to check for clashes with OTHER houses.
-        // This prevents the "Merging" bug where SQLite REPLACE deletes the collided-with record.
-        val potentialKey = house.generateNaturalKey()
-        val clash = houses.value.find { 
-            it.id != house.id && 
-            it.generateNaturalKey() == potentialKey 
+        // --- MERGE PREVENTION (DUPLICATE NATURAL KEY) ---
+        // Check if this update would clash with ANOTHER house
+        val currentHouses = houses.value
+        val clashingHouse = currentHouses.find { 
+                it.id != house.id && 
+                it.data == house.data && 
+                it.agentUid == (house.agentUid ?: _currentUserUid.value) &&
+                it.blockNumber.equals(house.blockNumber, ignoreCase = true) &&
+                it.blockSequence.equals(house.blockSequence, ignoreCase = true) &&
+                it.streetName.equals(house.streetName, ignoreCase = true) &&
+                it.number.equals(house.number, ignoreCase = true) &&
+                it.sequence == house.sequence &&
+                it.complement == house.complement
         }
 
-        if (clash != null) {
-            soundManager.playWarning()
-            _uiEvent.value = "Conflito: Este endereço já existe (Imóvel #${clash.id}). Edição bloqueada para evitar mesclagem."
-            return
+        if (clashingHouse != null) {
+            // DUPLICATE DETECTED: Don't save to DB yet to avoid silent REPLACE merge.
+            // Instead, keep it as a "draft" in memory so the user sees their change.
+            _pendingUpdateDrafts.value = _pendingUpdateDrafts.value + (house.id to house)
+            
+            // Start/Reset the 2.5-second delay job for the confirmation dialog
+            clashDialogJob?.cancel()
+            clashDialogJob = viewModelScope.launch {
+                delay(2500)
+                _duplicateHouseConfirmation.value = house
+            }
+        } else {
+            // NO DUPLICATE: Save normally and clear any drafts/jobs for this house
+            clashDialogJob?.cancel()
+            _pendingUpdateDrafts.value = _pendingUpdateDrafts.value - house.id
+            
+            performUpdateHouse(house)
         }
-
-        performUpdateHouse(house)
         
         // Unified delayed validation (3s)
         triggerDelayedValidation()
+    }
+
+    fun confirmDuplicateMerge() {
+        _duplicateHouseConfirmation.value?.let { house ->
+            clashDialogJob?.cancel()
+            _pendingUpdateDrafts.value = _pendingUpdateDrafts.value - house.id
+            performUpdateHouse(house)
+            _duplicateHouseConfirmation.value = null
+        }
+    }
+
+    fun dismissDuplicateConfirmation() {
+        _duplicateHouseConfirmation.value?.let { house ->
+            clashDialogJob?.cancel()
+            _pendingUpdateDrafts.value = _pendingUpdateDrafts.value - house.id
+            _duplicateHouseConfirmation.value = null
+            // Trigger a re-validation to clear error states if necessary
+            validateCurrentDay(showDialog = false)
+        }
     }
 
     private fun performUpdateHouse(house: House) {

@@ -480,6 +480,42 @@ fun HomeScreen(
         )
     }
 
+    val duplicateHouseConfirmation by viewModel.duplicateHouseConfirmation.collectAsState()
+    if (duplicateHouseConfirmation != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissDuplicateConfirmation() },
+            title = { 
+                Text(
+                    "Endereço Duplicado",
+                    fontWeight = FontWeight.ExtraBold,
+                    style = MaterialTheme.typography.titleLarge
+                ) 
+            },
+            text = { 
+                Text(
+                    "Este endereço já existe na lista. Se confirmar, os dados deste imóvel serão mesclados com o imóvel existente.\n\nDeseja realizar a mesclagem?",
+                    style = MaterialTheme.typography.bodyMedium
+                ) 
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.confirmDuplicateMerge() },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Sim, Mesclar", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { viewModel.dismissDuplicateConfirmation() }
+                ) {
+                    Text("Cancelar", fontWeight = FontWeight.Bold)
+                }
+            },
+            shape = RoundedCornerShape(24.dp)
+        )
+    }
+
     val strictPendingHousesCount = uiState.strictPendingCount
 
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())

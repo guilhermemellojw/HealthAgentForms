@@ -406,7 +406,7 @@ fun BoletimScreen(
                                          // Inline Stats per Block
                                          Row(verticalAlignment = Alignment.CenterVertically) {
                                              Text(
-                                                 text = "Abertos: ${block.totalHouses}",
+                                                 text = "Trabalhados: ${block.totalHouses}",
                                                  style = MaterialTheme.typography.labelMedium,
                                                  color = MaterialTheme.colorScheme.primary,
                                                  fontWeight = FontWeight.Bold
@@ -660,8 +660,8 @@ private fun shareToWhatsApp(
     // Calculate statistics
     val trabalhados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE }
     val tratados = houses.count {
-        it.a1 > 0 || it.a2 > 0 || it.b > 0 || it.c > 0 ||
-        it.d1 > 0 || it.d2 > 0 || it.e > 0 || it.eliminados > 0
+        (it.a1 + it.a2 + it.b + it.c + it.d1 + it.d2 + it.e + it.eliminados) > 0 || 
+        it.larvicida > 0.0 || it.comFoco
     }
     val fechados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }
     val recusados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }
@@ -679,18 +679,36 @@ private fun shareToWhatsApp(
     sb.append("💧 Tratados: $tratados\n")
     sb.append("🦟 Com Foco: $comFoco\n")
     sb.append("🚫 Recusados: $recusados\n")
-    sb.append("🏚️ Abandonados: $abandonados\n\n")
+    sb.append("🏚️ Abandonados: $abandonados\n")
 
     val housesWithObs = houses.filter { it.observation.isNotBlank() }
     if (housesWithObs.isNotEmpty()) {
-        sb.append("*OBSERVAÇÕES:*")
-        housesWithObs.forEach { house ->
-            val seqText = if (house.sequence > 0) " Seq ${house.sequence}" else ""
-            val compText = if (house.complement > 0) " Comp ${house.complement}" else ""
-            val numText = if (house.number.isNotBlank()) " Nº ${house.number}" else " S/N"
+        sb.append("\n*OBSERVAÇÕES:*\n")
+        
+        val prepositions = setOf("da", "de", "do", "das", "dos", "e", "em", "a", "o", "com")
+        
+        housesWithObs.forEachIndexed { index, house ->
+            val trimmedObs = house.observation.trim()
+            val streetTitleCase = house.streetName.lowercase().split(" ").mapIndexed { i, word ->
+                if (i > 0 && prepositions.contains(word)) word else word.replaceFirstChar { it.uppercase() }
+            }.joinToString(" ")
             
-            sb.append("\n• ${house.streetName.uppercase()}$numText$seqText$compText, ${house.propertyType.code}, Q ${house.blockNumber}, ${house.bairro.uppercase()}")
-            sb.append("\n  _Obs: ${house.observation}_")
+            val numText = if (house.number.isNotBlank()) "nº ${house.number.lowercase()}" else "s/n"
+            val seqText = if (house.sequence > 0) ", seq. ${house.sequence}" else ""
+            val compText = if (house.complement > 0) ", comp. ${house.complement}" else ""
+            
+            val typeFull = when (house.propertyType.code.uppercase()) {
+                "R" -> "residência"
+                "C" -> "comércio"
+                "TB" -> "terreno baldio"
+                "PE" -> "ponto estratégico"
+                else -> house.propertyType.code.lowercase()
+            }
+            
+            val blockLabel = if (house.blockSequence.isNotBlank()) "${house.blockNumber}/${house.blockSequence}" else house.blockNumber
+            
+            sb.append("_*(${index + 1}) \"$trimmedObs\"*_\n")
+            sb.append("[Rua $streetTitleCase, $numText$seqText$compText, $typeFull, quart. $blockLabel, ${house.bairro.uppercase()}]\n\n")
         }
     }
 

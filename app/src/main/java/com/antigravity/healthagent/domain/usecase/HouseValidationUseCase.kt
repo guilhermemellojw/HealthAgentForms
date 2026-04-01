@@ -29,20 +29,24 @@ class HouseValidationUseCase @Inject constructor() {
         val errorDetails = mutableListOf<ErrorDetail>()
         val errorHouseIds = mutableSetOf<Int>()
 
-        // 1. Duplicate Validation (Address ONLY, ignore Segment)
+        // 1. Duplicate Validation (Bairro + Address, ignore Segment)
         val duplicateGroups = currentHouses.groupBy { house ->
-            "${house.streetName.trim().uppercase()}_${house.number.trim().uppercase()}_${house.sequence}_${house.complement}"
+            "${house.bairro.trim().uppercase()}_${house.streetName.trim().uppercase()}_${house.number.trim().uppercase()}_${house.sequence}_${house.complement}"
         }.filter { it.value.size > 1 }
 
         duplicateGroups.forEach { (_, houses) ->
             houses.forEach { house ->
                 errorHouseIds.add(house.id)
-                val location = if (house.number.isNotBlank()) "Nº ${house.number}" else "Seq. ${house.sequence}"
+                val location = if (house.number.isNotBlank()) {
+                    "Nº ${house.number}${if (house.complement > 0) ", C. ${house.complement}" else ""}"
+                } else {
+                    "Seq. ${house.sequence}${if (house.complement > 0) ", C. ${house.complement}" else ""}"
+                }
                 errorDetails.add(ErrorDetail(
                     houseId = house.id,
                     streetName = house.streetName,
                     location = location,
-                    description = "Imóvel Duplicado nesta visita",
+                    description = "Endereço Duplicado neste Bairro (Número/Sequência e Complemento)",
                     isDuplicate = true
                 ))
             }
@@ -68,7 +72,11 @@ class HouseValidationUseCase @Inject constructor() {
                 if (house.situation != Situation.NONE && hasTreatment) missingFields.add("Tratamento Indevido")
                 if (house.larvicida > 0.0 && totalDeposits == 0) missingFields.add("Larvicida sem Depósitos")
                 
-                val location = if (house.number.isNotBlank()) "Nº ${house.number}" else "Seq. ${house.sequence}"
+                val location = if (house.number.isNotBlank()) {
+                    "Nº ${house.number}${if (house.complement > 0) ", C. ${house.complement}" else ""}"
+                } else {
+                    "Seq. ${house.sequence}${if (house.complement > 0) ", C. ${house.complement}" else ""}"
+                }
                 errorDetails.add(ErrorDetail(
                     houseId = house.id,
                     streetName = house.streetName,

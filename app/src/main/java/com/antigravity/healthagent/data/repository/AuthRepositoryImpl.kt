@@ -776,7 +776,7 @@ class AuthRepositoryImpl @Inject constructor(
                 "uid" to uid,
                 "email" to email,
                 "displayName" to displayName,
-                "requestedName" to requestedName,
+                "requestedName" to requestedName?.trim()?.uppercase(),
                 "timestamp" to System.currentTimeMillis(),
                 "status" to "PENDING"
             )
@@ -818,7 +818,7 @@ class AuthRepositoryImpl @Inject constructor(
                 val finalAgentName = agentName?.takeIf { it.isNotBlank() } 
                     ?: doc.getString("requestedName")?.takeIf { it.isNotBlank() }
                 
-                if (finalAgentName != null) updates["agentName"] = finalAgentName
+                if (finalAgentName != null) updates["agentName"] = finalAgentName.trim().uppercase()
                 batch.update(userRef, updates)
                 
                 // If they have a pre-registration, migrate it now using Admin permissions
