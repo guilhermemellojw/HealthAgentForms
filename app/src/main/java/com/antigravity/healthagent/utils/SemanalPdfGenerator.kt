@@ -385,11 +385,11 @@ object SemanalPdfGenerator {
             val dayHouses = housesByDate[date] ?: return@forEach
             
             // 1. Identify all unique blocks worked on this day
-            val dayBlocks = dayHouses.map { Triple(it.blockNumber, it.blockSequence, it.bairro.trim().formatStreetName()) }.distinct()
+            val dayBlocks = dayHouses.map { Triple(it.blockNumber, it.blockSequence, it.bairro.trim().uppercase()) }.distinct()
             
             // 2. Pre-sort day houses by listOrder once
             val dayHousesSorted = dayHouses.sortedBy { it.listOrder }
-            val housesByBlock = dayHouses.groupBy { "${it.blockNumber}|${it.blockSequence}|${it.bairro.trim().formatStreetName()}" }
+            val housesByBlock = dayHouses.groupBy { "${it.blockNumber}|${it.blockSequence}|${it.bairro.trim().uppercase()}" }
 
             dayBlocks.forEach { (bNum, bSeq, bairro) ->
                 val blockKey = "$bNum|$bSeq|$bairro"
@@ -526,7 +526,7 @@ object SemanalPdfGenerator {
                     val concludedBairrosToday = dayHouses.filter { h -> 
                         val matchId = if (h.blockSequence.isNotBlank()) "${h.blockNumber}/${h.blockSequence}" else h.blockNumber
                         dayCompletedBlocks.contains(matchId)
-                    }.map { it.bairro.trim().formatStreetName() }.distinct().sorted()
+                    }.map { it.bairro.trim().uppercase() }.distinct().sorted()
 
                     if (concludedBairrosToday.isNotEmpty()) {
                         val labelPaint = Paint(textPaint).apply { textSize = 7f }

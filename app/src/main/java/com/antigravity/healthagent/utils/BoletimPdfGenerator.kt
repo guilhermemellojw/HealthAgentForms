@@ -338,7 +338,7 @@ object BoletimPdfGenerator {
         // Data from last house of the chunk (most recent context for this page)
         val lastHouse = houses.lastOrNull() 
         val municipio = lastHouse?.municipio ?: "Bom Jardim"
-        val bairro = lastHouse?.bairro?.trim()?.formatStreetName() ?: ""
+        val bairro = lastHouse?.bairro?.trim()?.uppercase() ?: ""
         val categoria = lastHouse?.categoria ?: "BRR"
         val zona = lastHouse?.zona ?: "URB"
         val tipo = lastHouse?.tipo?.toString() ?: "2"

@@ -47,7 +47,7 @@ object RGPdfGenerator {
         val housesPerPage = 52
         val totalPages = if (houses.isEmpty()) 1 else (houses.size + housesPerPage - 1) / housesPerPage
 
-        val safeBairro = bairro.trim().formatStreetName()
+        val safeBairro = bairro.trim().uppercase()
 
         for (i in 0 until totalPages) {
             val page = pdfDocument.startPage(pageInfo)
