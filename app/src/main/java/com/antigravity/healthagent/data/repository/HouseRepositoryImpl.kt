@@ -57,14 +57,15 @@ class HouseRepositoryImpl @Inject constructor(
         return houseDao.getAllHousesSnapshotFlow()
     }
 
-    override suspend fun insertHouse(house: House) {
+    override suspend fun insertHouse(house: House): Long {
         ensureDayNotLocked(house.data, house.agentName, house.agentUid)
-        database.withTransaction {
+        val id = database.withTransaction {
             // CRITICAL: Cleanup any stale local tombstone for this same house key
             tombstoneDao.deleteByNaturalKey(house.generateNaturalKey(), house.agentName, house.agentUid)
             houseDao.insertHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
         }
         syncScheduler.scheduleSync()
+        return id
     }
 
     override suspend fun updateHouse(house: House) {

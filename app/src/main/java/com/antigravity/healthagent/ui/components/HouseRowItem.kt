@@ -254,10 +254,10 @@ fun HouseRowItem(
                                     Spacer(Modifier.width(4.dp))
                                 }
                                 Text(
-                                    text = formattedStreet,
+                                    text = houseState.formattedStreet,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = if (isMissingStreet) FontWeight.Bold else FontWeight.Black,
-                                    color = if (highlightErrors && isMissingStreet) MaterialTheme.colorScheme.error
+                                    color = if (highlightErrors && (isMissingStreet || houseState.invalidFields.isEmpty() && houseState.treatmentShortSummary.isEmpty() && houseState.errorLabels.contains("DUPLICADO"))) MaterialTheme.colorScheme.error
                                             else MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.5f),
                                     maxLines = 1,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis

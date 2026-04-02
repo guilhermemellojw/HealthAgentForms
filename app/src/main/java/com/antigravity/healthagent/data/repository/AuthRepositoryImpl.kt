@@ -255,15 +255,32 @@ class AuthRepositoryImpl @Inject constructor(
 
         // 2. Combined Network Check: Try to refresh user status and fetch doc in one go
         // Use a single timeout for EVERYTHING network-related to avoid sequential delays
+        // 2. Combined Network Check: Try to refresh user status independently
+        // We use a single timeout but separate checks to handle partial failures
         val userStatus = withTimeoutOrNull(2500) {
             try {
-                // Parallel-ish check (await blocks sequentially but within one timeout)
+                // Determine online status via Firebase Auth reload (permission-independent)
                 firebaseUser.reload().await()
-                val doc = firestore.collection("users").document(uid).get(Source.SERVER).await()
-                val isAdminInColl = firestore.collection("admins").document(uid).get().await().exists()
+                
+                // Attempt to fetch user document (might fail if rules are strict)
+                val doc = try {
+                    firestore.collection("users").document(uid).get(Source.SERVER).await()
+                } catch (e: Exception) {
+                    android.util.Log.w("AuthRepository", "Failed to fetch user doc: ${e.message}")
+                    null
+                }
+
+                // Attempt to check admin status (likely to fail with PERMISSION_DENIED for non-admins)
+                val isAdminInColl = try {
+                    firestore.collection("admins").document(uid).get().await().exists()
+                } catch (e: Exception) {
+                    android.util.Log.w("AuthRepository", "Admin check bypassed/restricted: ${e.message}")
+                    false
+                }
+                
                 Triple(true, doc, isAdminInColl)
             } catch (e: Exception) { 
-                android.util.Log.w("AuthRepository", "Online check failed: ${e.message}")
+                android.util.Log.e("AuthRepository", "Online check failed entirely: ${e.message}")
                 null 
             }
         }
@@ -285,75 +302,38 @@ class AuthRepositoryImpl @Inject constructor(
             return getAdminFallback(firebaseUser, uid, email)
         }
 
-        // 5. Migration / Sync check: If user doc is new OR not authorized, check for pre-registered data
+        // 5. Migration Check: If user doc is new OR not authorized, check for invitations
         // Only perform migration checks if ONLINE to avoid hanging the offline flow
         if (isOnline && (userDoc == null || !userDoc.exists() || !(userDoc.getBoolean("isAuthorized") ?: false))) {
             try {
                 // Use a predictable document ID for pre-registration based on email
                 val preDocId = "pre_${email.replace(".", "_").replace("@", "_")}"
+                android.util.Log.i("AuthRepository", "Checking for pre-registration invitations: $preDocId")
                 
-                var migratedIsAuthorized = userDoc?.getBoolean("isAuthorized") ?: false
-                var migratedRole = try { UserRole.valueOf(userDoc?.getString("role") ?: "AGENT") } catch(e:Exception){ UserRole.AGENT }
-                var migratedAgentName = userDoc?.getString("agentName")?.takeIf { it.isNotBlank() }
-                var migratedCreatedAt = userDoc?.getLong("createdAt") ?: System.currentTimeMillis()
-                
-                var migrationFound = false
-
-                // 1. Check direct 'users' pre-registration doc
+                // Fetch the invited profile if it exists
                 val preUserDoc = withTimeoutOrNull(3000) { firestore.collection("users").document(preDocId).get().await() }
+                
                 if (preUserDoc != null && preUserDoc.exists()) {
-                    android.util.Log.i("AuthRepository", "Found pre-registered user profile: $preDocId")
-                    migratedRole = try { UserRole.valueOf(preUserDoc.getString("role") ?: "AGENT") } catch(e:Exception){ UserRole.AGENT }
-                    migratedIsAuthorized = preUserDoc.getBoolean("isAuthorized") ?: migratedIsAuthorized
-                    if (migratedAgentName == null) migratedAgentName = preUserDoc.getString("agentName")?.takeIf { it.isNotBlank() }
-                    migratedCreatedAt = preUserDoc.getLong("createdAt") ?: migratedCreatedAt
+                    android.util.Log.i("AuthRepository", "INVITATION FOUND: Pre-registered user profile for $email")
                     
-                    migrationFound = true
-                    // Delete old doc
-                    firestore.collection("users").document(preDocId).delete()
-                }
-
-                // 2. Check direct 'agents' pre-registration doc (from restoration)
-                val hasPreAgent = withTimeoutOrNull(3000) { firestore.collection("agents").document(preDocId).get().await().exists() }
-                if (hasPreAgent == true) {
-                    android.util.Log.i("AuthRepository", "Found pre-registered agent data: $preDocId")
+                    // CRITICAL: Perform phase 1 migration (Authorization) immediately
+                    val migrationResult = migratePreRegistration(email, uid)
                     
-                    // If they have restored data, they are authorized!
-                    migratedIsAuthorized = true
-                    migrationFound = true
-                    
-                    // Migrate atomically using the helper
-                    migratePreRegistration(email, uid)
-                    
-                    // After migration, try to get the new document
-                    val newAgentDoc = firestore.collection("agents").document(uid).get().await()
-                    if (newAgentDoc.exists()) {
-                         migratedAgentName = newAgentDoc.getString("agentName")
+                    if (migrationResult.isSuccess) {
+                        // After success, re-fetch the now-migrated user document
+                         userDoc = withTimeoutOrNull(2000) { firestore.collection("users").document(uid).get().await() }
+                    }
+                } else {
+                    // 2. Check direct 'agents' pre-registration doc (from legacy restoration)
+                    val preAgentDoc = withTimeoutOrNull(3000) { firestore.collection("agents").document(preDocId).get().await() }
+                    if (preAgentDoc != null && preAgentDoc.exists()) {
+                        android.util.Log.i("AuthRepository", "LEGACY DATA FOUND: Pre-registered agent data for $email")
+                        migratePreRegistration(email, uid)
+                        userDoc = withTimeoutOrNull(2000) { firestore.collection("users").document(uid).get().await() }
                     }
                 }
-
-                // 3. Apply migration if something was found
-                if (migrationFound) {
-                    val isAdmin = firestore.collection("admins").document(uid).get().await().exists()
-                    val finalRole = if (isAdmin) UserRole.ADMIN else migratedRole
-                    val finalIsAuthorized = if (isAdmin) true else migratedIsAuthorized
-
-                    val newUser = mapOf(
-                        "email" to email,
-                        "displayName" to firebaseUser.displayName,
-                        "role" to finalRole.name,
-                        "isAuthorized" to finalIsAuthorized,
-                        "agentName" to migratedAgentName,
-                        "createdAt" to migratedCreatedAt,
-                        "updatedAt" to System.currentTimeMillis(),
-                        "isPreRegistered" to false
-                    )
-                    
-                    firestore.collection("users").document(uid).set(newUser, com.google.firebase.firestore.SetOptions.merge()).await()
-                    userDoc = firestore.collection("users").document(uid).get().await()
-                }
             } catch (e: Exception) {
-                android.util.Log.e("AuthRepository", "Non-blocking migration error: ${e.message}")
+                android.util.Log.w("AuthRepository", "Migration attempt bypassed: ${e.message}")
             }
         }
 
@@ -771,19 +751,26 @@ class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun requestAccess(uid: String, email: String, displayName: String?, requestedName: String?): Result<Unit> {
         return try {
+            val normalizedName = requestedName?.trim()?.uppercase()
             val request = mapOf(
                 "id" to uid,
                 "uid" to uid,
-                "email" to email,
+                "email" to email.trim().lowercase(),
                 "displayName" to displayName,
-                "requestedName" to requestedName?.trim()?.uppercase(),
+                "requestedName" to normalizedName,
                 "timestamp" to System.currentTimeMillis(),
                 "status" to "PENDING"
             )
             firestore.collection("access_requests").document(uid).set(request).await()
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.failure(e)
+            android.util.Log.e("AuthRepository", "Access request failed for $email", e)
+            val message = if (e.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true) {
+                "Permissão negada pelo servidor. Verifique se as regras do Firestore permitem solicitações de acesso ou contate um administrador diretamente."
+            } else {
+                e.message ?: "Erro ao enviar solicitação"
+            }
+            Result.failure(Exception(message))
         }
     }
 

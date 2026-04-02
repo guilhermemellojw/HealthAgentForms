@@ -37,7 +37,7 @@ interface HouseDao {
     suspend fun getHouseById(id: Long): House?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertHouse(house: House)
+    suspend fun insertHouse(house: House): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(houses: List<House>)

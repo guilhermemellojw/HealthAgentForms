@@ -13,13 +13,16 @@ class HouseManagementUseCase @Inject constructor(
     private val streetRepository: StreetRepository
 ) {
 
-    suspend fun insertHouse(house: House, allHouses: List<House>) {
+    suspend fun insertHouse(house: House, allHouses: List<House>): Long {
         val sanitized = sanitizeHouse(house)
+        val id = repository.insertHouse(sanitized)
+        
         val dayHouses = allHouses.filter { it.data == sanitized.data }
-        val withNewHouse = (dayHouses + sanitized).sortedBy { it.listOrder }
+        val withNewHouse = (dayHouses + sanitized.copy(id = id.toInt())).sortedBy { it.listOrder }
         val recalculated = recalculateVisitSegments(withNewHouse)
         repository.updateHouses(recalculated)
         streetRepository.saveCustomStreet(sanitized.streetName, sanitized.bairro)
+        return id
     }
 
     suspend fun updateHouse(house: House, allHouses: List<House>) {
@@ -198,10 +201,12 @@ class HouseManagementUseCase @Inject constructor(
         streetName: String
     ): HousePrediction {
         // Filter by date AND context (Block/Street)
+        // CRITICAL: Filter out incomplete houses (blank numbers) to ensure reliable prediction bounds
         val currentHouses = houses.filter { 
             it.data == currentDate && 
             it.blockNumber.equals(blockNumber, ignoreCase = true) &&
-            it.streetName.equals(streetName, ignoreCase = true)
+            it.streetName.equals(streetName, ignoreCase = true) &&
+            it.number.isNotBlank()
         }.sortedBy { it.listOrder }
 
         if (currentHouses.isEmpty()) {
@@ -233,9 +238,11 @@ class HouseManagementUseCase @Inject constructor(
         referenceHouse: House
     ): HousePrediction {
         // Find other houses in the same context (Block/Street) as the reference house
+        // Filter out incomplete ones to avoid "empty" baseline predictions
         val contextHouses = allHouses.filter {
             it.blockNumber.equals(referenceHouse.blockNumber, ignoreCase = true) &&
-            it.streetName.equals(referenceHouse.streetName, ignoreCase = true)
+            it.streetName.equals(referenceHouse.streetName, ignoreCase = true) &&
+            it.number.isNotBlank()
         }.sortedBy { it.listOrder } // Ensure global order
 
         return calculatePrediction(contextHouses, referenceHouse)
@@ -245,94 +252,65 @@ class HouseManagementUseCase @Inject constructor(
         contextHouses: List<House>,
         last: House
     ): HousePrediction {
-        if (contextHouses.size < 2) {
-             // When jumping to a new number or starting a street, reset sequence and complement
-             val nextNum = try {
-                (last.number.toInt() + 1).toString()
-            } catch (e: Exception) { "" }
-            return HousePrediction(nextNum, 0, 0, last.propertyType, Situation.NONE)
-        }
+        val lastNum = last.number.filter { it.isDigit() }.toIntOrNull() ?: 0
 
-        val lastIndex = contextHouses.indexOfFirst { it.id == last.id }
-        if (lastIndex < 1) {
-             // Fallback if last is the first one found or not found
-             val nextNum = try {
-                (last.number.toInt() + 1).toString()
-            } catch (e: Exception) { "" }
-            return HousePrediction(nextNum, 0, 0, last.propertyType, Situation.NONE)
-        }
+        // CRITICAL: Use listOrder + data for identity matching instead of object equality.
+        // Data class equality (lastIndexOf) is fragile because of the 'lastUpdated' timestamp.
+        val lastIndexInContext = contextHouses.indexOfFirst { it.listOrder == last.listOrder && it.data == last.data }
         
-        val preLast = contextHouses[lastIndex - 1]
-
-        // Number prediction
-        val lastIsNumeric = last.number.toIntOrNull() != null
-        val preLastIsNumeric = preLast.number.toIntOrNull() != null
-        
-        val nextNumber = if (lastIsNumeric && preLastIsNumeric) {
-            val lastNum = last.number.toInt()
-            val preLastNum = preLast.number.toInt()
-            if (lastNum == preLastNum) {
-                // If numbers are the same, keep them the same (likely working on sequences/complements)
-                last.number
-            } else {
-                val diff = lastNum - preLastNum
-                (lastNum + diff).toString()
-            }
-        } else {
-            // Fallback for non-numeric or single numeric
-            if (lastIsNumeric) (last.number.toInt() + 1).toString() else last.number
-        }
-
-        // Sequence prediction
-        val nextSequence = if (last.number == preLast.number) {
-            val lastSeq = last.sequence
-            val preLastSeq = preLast.sequence
-            val diff = lastSeq - preLastSeq
-            
-            // If complements were changing, don't increment sequence
-            if (last.complement != preLast.complement) {
-                lastSeq
-            } else {
-                val next = lastSeq + (if (diff == 0 && last.complement == 0) 1 else diff)
-                if (next >= 0) next else 0
-            }
-        } else {
-            // Number changed -> Reset sequence
-            0
-        }
-        
-        // Complement Prediction
-        val nextComplement = if (last.number == preLast.number) {
-             if (last.sequence == preLast.sequence) {
-                 // Same Number AND Sequence -> Predict Complement
-                 val lastCompl = last.complement
-                 val preLastCompl = preLast.complement
-                 val diff = lastCompl - preLastCompl
-                 val effectiveDiff = if (diff == 0) 1 else diff
-                 val next = lastCompl + effectiveDiff
-                 if (next >= 0) next else 0
-             } else {
-                 // Sequence number changed -> Reset complement (starts at 0)
-                 0
+        // Fallback or Single House case (no previous data to establish a trend)
+        // Also triggers if 'last' is not in 'contextHouses' or is at index 0
+        if (contextHouses.size < 2 || lastIndexInContext < 1) {
+             return when {
+                 last.complement > 0 -> {
+                     HousePrediction(last.number, last.sequence, last.complement + 1, last.propertyType, Situation.NONE)
+                 }
+                 last.sequence > 0 -> {
+                     HousePrediction(last.number, last.sequence + 1, 0, last.propertyType, Situation.NONE)
+                 }
+                 lastNum > 0 -> {
+                     HousePrediction((lastNum + 1).toString(), 0, 0, last.propertyType, Situation.NONE)
+                 }
+                 else -> HousePrediction(last.number, 0, 0, last.propertyType, Situation.NONE)
              }
-        } else {
-             // Number changed -> Reset complement
-             0
         }
 
-        // PropertyType prediction
-        val nextPropertyType = if (last.propertyType == preLast.propertyType) last.propertyType else last.propertyType
+        val preLast = contextHouses[lastIndexInContext - 1]
+        val preLastNum = preLast.number.filter { it.isDigit() }.toIntOrNull() ?: 0
+        
+        // Priority 1: House Number Trend
+        if (last.number != preLast.number) {
+            val nextNumber = if (lastNum > 0 && preLastNum > 0) {
+                val diff = lastNum - preLastNum
+                val predicted = lastNum + diff
+                // Support both increasing and decreasing trends, provided they stay >= 1
+                // Default to +1 if the trend calculation becomes non-positive or stagnant
+                if (predicted >= 1 && predicted != lastNum) {
+                    predicted.toString()
+                } else {
+                    (lastNum + 1).toString()
+                }
+            } else {
+                // Non-numeric jump fallback
+                if (lastNum > 0) (lastNum + 1).toString() else last.number
+            }
+            return HousePrediction(nextNumber, 0, 0, last.propertyType, Situation.NONE)
+        }
 
-        // Situation prediction -> Always NONE for new
-        val nextSituation = Situation.NONE
+        // Priority 2: Sequence Increment (ALWAYS +1 for sub-units)
+        // If we are already in a sequence (sequence > 0) OR if the last two houses are the SAME number
+        // but have different sequences.
+        if (last.sequence != preLast.sequence || last.sequence > 0) {
+             return HousePrediction(last.number, last.sequence + 1, 0, last.propertyType, Situation.NONE)
+        }
 
-        return HousePrediction(
-            number = nextNumber,
-            sequence = nextSequence,
-            complement = nextComplement,
-            propertyType = nextPropertyType,
-            situation = nextSituation
-        )
+        // Priority 3: Complement Increment (ALWAYS +1 for sub-units)
+        if (last.complement != preLast.complement || last.complement > 0) {
+            return HousePrediction(last.number, last.sequence, last.complement + 1, last.propertyType, Situation.NONE)
+        }
+
+        // Fallback: If everything else is identical, start a sequence
+        return HousePrediction(last.number, last.sequence + 1, 0, last.propertyType, Situation.NONE)
     }
 
     suspend fun migrateStreetNamesToFormat() {

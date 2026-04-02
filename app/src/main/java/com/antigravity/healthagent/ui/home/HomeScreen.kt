@@ -637,7 +637,7 @@ fun HomeScreen(
         },
 
         floatingActionButton = {
-            if (!isReorderMode && (!uiState.isDayClosed || uiState.isAdmin) && !uiState.isSupervisor) {
+            if (!isReorderMode && !uiState.isSupervisor) {
                 // Scroll Logic for FAB
                 val isScrollingUp = remember {
                     derivedStateOf {
@@ -680,19 +680,26 @@ fun HomeScreen(
                 val hasErrors = strictPendingHousesCount > 0
                 
                 val fabColor = when {
+                    uiState.isDayClosed && !uiState.isAdmin -> MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
                     hasErrors -> MaterialTheme.colorScheme.errorContainer
                     isGoalReached && !uiState.isManualUnlock -> Color(0xFF00C853) // Emerald Green 700
                     uiState.isManualUnlock -> Color(0xFFFF9800) // Orange/Amber for manual override
                     else -> MaterialTheme.colorScheme.primary
                 }
                 val fabContentColor = when {
+                    uiState.isDayClosed && !uiState.isAdmin -> Color.White
                     hasErrors -> MaterialTheme.colorScheme.onErrorContainer
                     uiState.isManualUnlock -> Color.White
                     else -> MaterialTheme.colorScheme.onPrimary
                 }
                 
                 val fabOnClick: () -> Unit = {
-                    if (isGoalReached && hasErrors) {
+                    if (uiState.isDayClosed && !uiState.isAdmin) {
+                        // Just show a message or open dashboard
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Este dia já foi fechado.")
+                        }
+                    } else if (isGoalReached && hasErrors) {
                         val firstErrorId = uiState.validationErrorHouseIds.firstOrNull()
                         if (firstErrorId != null) {
                             val indexInUi = uiHouses.indexOfFirst { it.house.id == firstErrorId }
@@ -728,12 +735,14 @@ fun HomeScreen(
                 }
 
                 val fabText = when {
-                    isGoalReached && hasErrors -> "CORRIGIR ERROS"
+                    uiState.isDayClosed && !uiState.isAdmin -> "DIA FECHADO"
+                    hasErrors -> "CORRIGIR ERROS"
                     isGoalReached && !uiState.isManualUnlock -> "FECHAR PRODUÇÃO"
                     else -> "ADICIONAR"
                 }
                 
                 val fabIcon = when {
+                    uiState.isDayClosed && !uiState.isAdmin -> Icons.Default.Lock
                     hasErrors -> Icons.Default.Warning
                     isGoalReached && !uiState.isManualUnlock -> Icons.Default.Check
                     else -> Icons.Default.Add

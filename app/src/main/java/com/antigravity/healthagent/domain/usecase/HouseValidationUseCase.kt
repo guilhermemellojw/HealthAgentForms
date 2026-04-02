@@ -31,22 +31,24 @@ class HouseValidationUseCase @Inject constructor() {
 
         // 1. Duplicate Validation (Bairro + Address, ignore Segment)
         val duplicateGroups = currentHouses.groupBy { house ->
-            "${house.bairro.trim().uppercase()}_${house.streetName.trim().uppercase()}_${house.number.trim().uppercase()}_${house.sequence}_${house.complement}"
+            "${house.bairro.trim().uppercase()}_${house.blockNumber.trim().uppercase()}_${house.blockSequence.trim().uppercase()}_${house.streetName.trim().uppercase()}_${house.number.trim().uppercase()}_${house.sequence}_${house.complement}"
         }.filter { it.value.size > 1 }
 
         duplicateGroups.forEach { (_, houses) ->
             houses.forEach { house ->
                 errorHouseIds.add(house.id)
-                val location = if (house.number.isNotBlank()) {
-                    "Nº ${house.number}${if (house.complement > 0) ", C. ${house.complement}" else ""}"
-                } else {
-                    "Seq. ${house.sequence}${if (house.complement > 0) ", C. ${house.complement}" else ""}"
-                }
+                val parts = mutableListOf<String>()
+                if (house.number.isNotBlank()) parts.add("Nº ${house.number}")
+                if (house.sequence > 0) parts.add("Seq. ${house.sequence}")
+                if (house.complement > 0) parts.add("Comp. ${house.complement}")
+                
+                val location = parts.joinToString(" - ").ifBlank { "Sem Identificação" }
+
                 errorDetails.add(ErrorDetail(
                     houseId = house.id,
                     streetName = house.streetName,
                     location = location,
-                    description = "Endereço Duplicado neste Bairro (Número/Sequência e Complemento)",
+                    description = "Endereço Duplicado (Tudo igual: Nº, Seq e Comp)",
                     isDuplicate = true
                 ))
             }
@@ -72,11 +74,12 @@ class HouseValidationUseCase @Inject constructor() {
                 if (house.situation != Situation.NONE && hasTreatment) missingFields.add("Tratamento Indevido")
                 if (house.larvicida > 0.0 && totalDeposits == 0) missingFields.add("Larvicida sem Depósitos")
                 
-                val location = if (house.number.isNotBlank()) {
-                    "Nº ${house.number}${if (house.complement > 0) ", C. ${house.complement}" else ""}"
-                } else {
-                    "Seq. ${house.sequence}${if (house.complement > 0) ", C. ${house.complement}" else ""}"
-                }
+                val parts = mutableListOf<String>()
+                if (house.number.isNotBlank()) parts.add("Nº ${house.number}")
+                if (house.sequence > 0) parts.add("Seq. ${house.sequence}")
+                if (house.complement > 0) parts.add("Comp. ${house.complement}")
+                val location = parts.joinToString(" - ").ifBlank { "Sem Identificação" }
+
                 errorDetails.add(ErrorDetail(
                     houseId = house.id,
                     streetName = house.streetName,

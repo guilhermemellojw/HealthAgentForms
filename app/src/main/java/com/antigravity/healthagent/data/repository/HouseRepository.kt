@@ -12,7 +12,7 @@ interface HouseRepository {
     suspend fun getAllHousesOnce(agentName: String, agentUid: String): List<House> // Snapshot for isolated backup
     suspend fun getAllHousesSnapshot(): List<House> // Full snapshot for auto-backup
     fun getAllHousesSnapshotFlow(): Flow<List<House>>
-    suspend fun insertHouse(house: House)
+    suspend fun insertHouse(house: House): Long
     suspend fun updateHouse(house: House)
     suspend fun updateHouses(houses: List<House>)
     suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String? = null)

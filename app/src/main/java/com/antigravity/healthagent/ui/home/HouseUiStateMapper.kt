@@ -5,22 +5,31 @@ import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
 import com.antigravity.healthagent.utils.formatStreetName
 
 object HouseUiStateMapper {
-    fun map(house: House, houseValidationUseCase: HouseValidationUseCase, isDuplicate: Boolean = false): HouseUiState {
+    fun map(
+        house: House, 
+        houseValidationUseCase: HouseValidationUseCase, 
+        isDuplicate: Boolean = false,
+        isRecentlyEdited: Boolean = false
+    ): HouseUiState {
         val invalidFields = houseValidationUseCase.getInvalidFields(house, strict = true).toSet()
         val errorLabels = mutableListOf<String>()
-        if (isDuplicate) errorLabels.add("DUPLICADO")
         
-        invalidFields.forEach { key ->
-            when(key) {
-                "number" -> errorLabels.add("SEM Nº")
-                "propertyType" -> errorLabels.add("SEM TIPO")
-                "situation" -> errorLabels.add("SEM SITUAÇÃO")
-                "agentName" -> errorLabels.add("SEM AGENTE")
-                "bairro" -> errorLabels.add("SEM BAIRRO")
-                "streetName" -> errorLabels.add("SEM RUA")
-                "blockNumber" -> errorLabels.add("SEM QUART.")
-                "situation_treatment" -> errorLabels.add("TRAT. INDEVIDO")
-                "larvicide_inspection" -> errorLabels.add("LARV. SEM DEP.")
+        // Only show errors if NOT recently edited (Silent Window)
+        if (!isRecentlyEdited) {
+            if (isDuplicate) errorLabels.add("DUPLICADO")
+            
+            invalidFields.forEach { key ->
+                when(key) {
+                    "number" -> errorLabels.add("SEM Nº")
+                    "propertyType" -> errorLabels.add("SEM TIPO")
+                    "situation" -> errorLabels.add("SEM SITUAÇÃO")
+                    "agentName" -> errorLabels.add("SEM AGENTE")
+                    "bairro" -> errorLabels.add("SEM BAIRRO")
+                    "streetName" -> errorLabels.add("SEM RUA")
+                    "blockNumber" -> errorLabels.add("SEM QUART.")
+                    "situation_treatment" -> errorLabels.add("TRAT. INDEVIDO")
+                    "larvicide_inspection" -> errorLabels.add("LARV. SEM DEP.")
+                }
             }
         }
 
@@ -40,16 +49,23 @@ object HouseUiStateMapper {
         // Resilience: Ensure house has a fallback agentName if missing during mapping
         val displayHouse = if (house.agentName.isBlank()) house.copy(agentName = "NÃO ATRIBUÍDO") else house
         
+        val idParts = mutableListOf<String>()
+        if (house.number.isNotBlank()) idParts.add(house.number)
+        if (house.sequence > 0) idParts.add("S${house.sequence}")
+        if (house.complement > 0) idParts.add("C${house.complement}")
+        val fullIdDisplay = idParts.joinToString("-").ifBlank { "S/N" }
+
         return HouseUiState(
             house = displayHouse,
-            invalidFields = invalidFields,
-            highlightErrors = invalidFields.isNotEmpty() || isDuplicate,
+            invalidFields = if (isRecentlyEdited) emptySet() else invalidFields,
+            highlightErrors = !isRecentlyEdited && (invalidFields.isNotEmpty() || isDuplicate),
             isTreated = treatmentParts.isNotEmpty() || house.comFoco,
             blockDisplay = if (house.blockSequence.isNotBlank()) "${house.blockNumber} / ${house.blockSequence}" else house.blockNumber,
             formattedStreet = formattedStreet,
             treatmentShortSummary = treatmentParts.joinToString(" | "),
             observation = displayHouse.observation,
-            isDuplicate = isDuplicate,
+            isRecentlyEdited = isRecentlyEdited,
+            fullIdDisplay = fullIdDisplay,
             errorLabels = errorLabels
         )
     }

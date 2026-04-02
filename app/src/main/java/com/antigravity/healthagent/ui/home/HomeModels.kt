@@ -90,7 +90,8 @@ data class HouseUiState(
     val formattedStreet: String,
     val treatmentShortSummary: String,
     val observation: String = "",
-    val isDuplicate: Boolean = false,
+    val isRecentlyEdited: Boolean = false,
+    val fullIdDisplay: String = "",
     val errorLabels: List<String> = emptyList()
 )
 

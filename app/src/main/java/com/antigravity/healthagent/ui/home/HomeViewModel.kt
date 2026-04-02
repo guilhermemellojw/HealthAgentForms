@@ -169,7 +169,11 @@ class HomeViewModel @Inject constructor(
     val duplicateHouseConfirmation: StateFlow<House?> = _duplicateHouseConfirmation.asStateFlow()
 
     private val _pendingUpdateDrafts = MutableStateFlow<Map<Int, House>>(emptyMap())
-    private var clashDialogJob: kotlinx.coroutines.Job? = null
+    private val _housesInFlight = MutableStateFlow<List<House>>(emptyList())
+    private val _recentlyEditedHouseIds = MutableStateFlow<Map<Int, Long>>(emptyMap())
+    private val recentlyEditedHouseIds: StateFlow<Set<Int>> = _recentlyEditedHouseIds.map { it.keys }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    private val clashDialogJobs = mutableMapOf<Int, kotlinx.coroutines.Job>()
 
     private val _backupConfirmation = MutableStateFlow<BackupConfirmation?>(null)
     val backupConfirmation: StateFlow<BackupConfirmation?> = _backupConfirmation.asStateFlow()
@@ -317,8 +321,21 @@ class HomeViewModel @Inject constructor(
         repository.getDayActivityFlow(date, name, uid).map { it?.isManualUnlock == true }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    val houses: StateFlow<List<House>> = allHousesFlow
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    // --- CENTRALIZED TRUTH (UNIFIED STATE) ---
+    // Centralized 'latestHouses' flow that combines:
+    // 1. Database records (allHousesFlow)
+    // 2. Pending typing (Active Drafts)
+    // 3. Newly added houses not yet in DB (In-Flight)
+    val latestHouses: StateFlow<List<House>> = combine(
+        allHousesFlow, 
+        _pendingUpdateDrafts, 
+        _housesInFlight
+    ) { dbHouses, drafts, inFlights ->
+        val mergedList = (dbHouses.map { drafts[it.id] ?: it } + inFlights).sortedBy { it.listOrder }
+        mergedList
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val houses: StateFlow<List<House>> = latestHouses
 
     // --- Semanal State ---
     val currentWeekDates: StateFlow<List<String>> = _currentWeekStart.map { start ->
@@ -457,9 +474,86 @@ class HomeViewModel @Inject constructor(
             loadDynamicConfig()
         }
 
+        viewModelScope.launch {
+            _data.collect { 
+                // Clear error states immediately on date change to prevent "ghost" highlights
+                _validationErrorHouseIds.value = emptySet()
+                _validationErrorDetails.value = emptyList()
+                _isDuplicateIds.value = emptySet()
+                _integrityDialogMessage.value = null // Aggressively clear any stuck dialog
+            }
+        }
+
+        // AUTO-MERGE OBSERVER: Automatically commit "Red" drafts when their collision is resolved in the DB.
+        // It also prunes "In-Flight" and "Draft" records that have successfully synced to the database.
+        viewModelScope.launch {
+            houses.collect { currentHouses ->
+                _pendingUpdateDrafts.update { currentDrafts ->
+                    if (currentDrafts.isEmpty()) return@update currentDrafts
+                    val resolvedIds = mutableListOf<Int>()
+                    
+                    currentDrafts.forEach { (id, draft) ->
+                        // 1. Check for persistent collisions
+                        val stillClashes = currentHouses.any { 
+                            it.id != draft.id && 
+                            it.data == draft.data && 
+                            it.agentUid == draft.agentUid &&
+                            it.agentName.equals(draft.agentName, ignoreCase = true) &&
+                            it.blockNumber.equals(draft.blockNumber, ignoreCase = true) &&
+                            it.blockSequence.equals(draft.blockSequence, ignoreCase = true) &&
+                            it.streetName.equals(draft.streetName, ignoreCase = true) &&
+                            it.number.equals(draft.number, ignoreCase = true) &&
+                            it.sequence == draft.sequence &&
+                            it.complement == draft.complement &&
+                            it.bairro.equals(draft.bairro, ignoreCase = true) &&
+                            it.visitSegment == draft.visitSegment
+                        }
+                        
+                        // 2. Check for Perfect Sync (ignoring fragile 'lastUpdated' timestamp)
+                        val dbMatch = currentHouses.find { it.id == id }
+                        val isDraftSynced = dbMatch != null && 
+                            dbMatch.number == draft.number && 
+                            dbMatch.sequence == draft.sequence && 
+                            dbMatch.complement == draft.complement &&
+                            dbMatch.propertyType == draft.propertyType &&
+                            dbMatch.situation == draft.situation &&
+                            dbMatch.streetName == draft.streetName &&
+                            dbMatch.blockNumber == draft.blockNumber
+                        
+                        if (!stillClashes || isDraftSynced) {
+                            resolvedIds.add(id)
+                            if (!isDraftSynced) {
+                                // If it no longer clashes but isn't in DB yet, commit it now
+                                performUpdateHouse(draft)
+                            }
+                        }
+                    }
+                    
+                    if (resolvedIds.isNotEmpty()) currentDrafts - resolvedIds else currentDrafts
+                }
+                
+                // Cleanup 'In-Flight' houses (ID 0) that have now been assigned a real ID in the DB
+                _housesInFlight.update { inFlights ->
+                    if (inFlights.isEmpty()) return@update inFlights
+                    inFlights.filter { inFlight ->
+                        // Match by natural identity + content to ensure it's fully persisted
+                        !currentHouses.any { db -> 
+                            db.listOrder == inFlight.listOrder && 
+                            db.data == inFlight.data &&
+                            db.number == inFlight.number &&
+                            db.sequence == inFlight.sequence &&
+                            db.complement == inFlight.complement
+                        }
+                    }
+                }
+                
+                delay(300) // Stability debounce
+            }
+        }
+
         // UI state reducer
         combine(
-            houses, _data, _agentName, _searchQuery, _isSupervisor, 
+            latestHouses, _data, _agentName, _searchQuery, _isSupervisor, 
             _municipio, _bairro, _categoria, _zona, _ciclo, _tipo, _atividade,
             _selectedRgBairro, _rgYear, _currentWeekStart, allHousesFlow,
             _currentBlock, _currentBlockSequence, _currentStreet, isAppModeSelected,
@@ -467,7 +561,7 @@ class HomeViewModel @Inject constructor(
             weekRangeText, customActivities, settingsManager.easyMode, settingsManager.solarMode,
             settingsManager.maxOpenHouses, rgBlocks, weeklySummary, boletimList,
             bairrosList, rgBairros, _syncStatus, weeklySummaryTotals, isDayClosed, isWorkdayManualUnlock,
-            weeklyObservations, _backupConfirmation, _isAdmin
+            weeklyObservations, _backupConfirmation, _isAdmin, _recentlyEditedHouseIds
         ) { args ->
             val h = args[0] as List<House>
             val d = args[1] as String
@@ -478,9 +572,32 @@ class HomeViewModel @Inject constructor(
             val rgY = args[13] as String
             val weekStart = args[14] as Calendar
             val allH = args[15] as List<House>
+            val recentlyEdited = args[41] as Map<Int, Long>
             
             val dayHouses = h.filter { it.data == d }
             val totals = calculateDashboardTotals(dayHouses)
+            
+            // Map houses with duplicate detection and silent-window flags
+            val mappedDayHouses = dayHouses.filter { it.streetName.contains(q, true) || it.number.contains(q, true) }.map { house ->
+                val isDuplicate = dayHouses.any { other -> 
+                    other.id != house.id && 
+                    other.listOrder != house.listOrder && // Avoid self-collision for drafts
+                    other.streetName.equals(house.streetName, ignoreCase = true) &&
+                    other.number.equals(house.number, ignoreCase = true) &&
+                    other.sequence == house.sequence &&
+                    other.complement == house.complement
+                }
+                
+                // For in-flight houses (id 0), check if any are recently edited using ID 0
+                val isRecentlyEdited = recentlyEdited.containsKey(house.id)
+                
+                HouseUiStateMapper.map(
+                    house = house,
+                    houseValidationUseCase = houseValidationUseCase,
+                    isDuplicate = isDuplicate,
+                    isRecentlyEdited = isRecentlyEdited
+                )
+            }
             
             // Weekly dates
             val weekDates = mutableListOf<String>()
@@ -495,7 +612,7 @@ class HomeViewModel @Inject constructor(
                 val errorsCount = dayHouses.count { !houseValidationUseCase.isHouseValid(it, strict = true) }
 
                 current.copy(
-                    houses = dayHouses.filter { it.streetName.contains(q, true) || it.number.contains(q, true) }.map { HouseUiStateMapper.map(it, houseValidationUseCase) },
+                    houses = mappedDayHouses,
                     dashboardTotals = totals,
                     data = d,
                     agentName = name,
@@ -615,8 +732,8 @@ class HomeViewModel @Inject constructor(
         mergedList.filter { it.data == date && (query.isBlank() || it.streetName.contains(query, ignoreCase = true) || it.blockNumber.contains(query, ignoreCase = true)) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val filteredHousesUiState: StateFlow<List<HouseUiState>> = combine(filteredHouses, _isDuplicateIds) { list, dups ->
-        list.map { HouseUiStateMapper.map(it, houseValidationUseCase, dups.contains(it.id)) }
+    val filteredHousesUiState: StateFlow<List<HouseUiState>> = combine(filteredHouses, _isDuplicateIds, recentlyEditedHouseIds) { list, dups, editing ->
+        list.map { HouseUiStateMapper.map(it, houseValidationUseCase, dups.contains(it.id), editing.contains(it.id)) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val pendingHousesCount: StateFlow<Int> = filteredHouses.map { list ->
@@ -703,15 +820,17 @@ class HomeViewModel @Inject constructor(
 
     // --- Actions ---
     fun validateCurrentDay(showDialog: Boolean, strict: Boolean = true): Boolean {
-        val result = houseValidationUseCase.validateCurrentDay(_data.value, houses.value, strict = strict)
-        _uiState.update { it.copy(validationErrorHouseIds = result.errorHouseIds) }
+        // Ensure we validate using the merged state (DB + Drafts)
+        val latestHouses = houses.value.map { _pendingUpdateDrafts.value[it.id] ?: it }
+        val result = houseValidationUseCase.validateCurrentDay(_data.value, latestHouses, strict = strict)
+        _validationErrorHouseIds.value = result.errorHouseIds
         _validationErrorDetails.value = result.errorDetails
         _isDuplicateIds.value = result.errorDetails.filter { it.isDuplicate }.map { it.houseId }.toSet()
         
         if (!result.isValid) {
             if (showDialog) {
-                // We'll use a specific dialog for detailed errors, but for generic snackbar:
-                _uiEvent.value = result.dialogMessage
+                // Trigger the full ValidationErrorsDialog with details
+                _integrityDialogMessage.value = result.dialogMessage
                 soundManager.playWarning()
             }
             return false
@@ -1004,6 +1123,15 @@ class HomeViewModel @Inject constructor(
 
     fun startDayClosingFlow() {
         viewModelScope.launch {
+            // CRITICAL: DRAFT CHECK - Defer duplicate confirmation to this point
+            if (_pendingUpdateDrafts.value.isNotEmpty()) {
+                val firstClash = _pendingUpdateDrafts.value.values.first()
+                _duplicateHouseConfirmation.value = firstClash
+                _uiEvent.value = "Resolva os conflitos (em vermelho) antes de fechar o dia."
+                soundManager.playWarning()
+                return@launch
+            }
+
             val workedCount = houses.value.count { it.data == _data.value && it.situation == Situation.NONE }
             if (workedCount < maxOpenHouses.value) {
                 _uiEvent.value = "Meta de Abertos não atingida! (Abertos: $workedCount / ${maxOpenHouses.value})"
@@ -1018,6 +1146,11 @@ class HomeViewModel @Inject constructor(
     }
 
     fun syncDataToCloud() {
+        if (_pendingUpdateDrafts.value.isNotEmpty()) {
+            _uiEvent.value = "Resolva os conflitos (em vermelho) antes de sincronizar!"
+            soundManager.playWarning()
+            return
+        }
         if (_isSyncing.value) return
         _isSyncing.value = true
         _syncStatus.value = SyncStatus(SyncStage.STARTING, 0.1f, "Iniciando sincronização...")
@@ -1189,6 +1322,10 @@ class HomeViewModel @Inject constructor(
         isAddingHouse = true
         lastAddClickTime = currentTime
 
+        // Immediately mark '0' as recently edited to suppress error labels 
+        // for the in-flight card while it's being inserted.
+        markAsRecentlyEdited(0)
+
         viewModelScope.launch {
             try {
                 // Pre-check for open limit inside the safe scope
@@ -1206,8 +1343,14 @@ class HomeViewModel @Inject constructor(
                     return@launch
                 }
 
-                // Check if the day is empty (no houses at all for this date)
-                val isDayEmpty = houses.value.none { it.data == _data.value }
+                // CRITICAL: Synchronously merge DB + Drafts + InFlights to ensure 
+                // the prediction uses the absolute latest typing, even if the Flow hasn't emitted yet.
+                val dbHouses = allHousesFlow.value
+                val drafts = _pendingUpdateDrafts.value
+                val inFlights = _housesInFlight.value
+                
+                val latestHouses = (dbHouses.map { drafts[it.id] ?: it } + inFlights)
+                val isDayEmpty = latestHouses.none { it.data == _data.value }
                 var prediction: HouseManagementUseCase.HousePrediction
                 var initialBlock = _currentBlock.value
                 var initialStreet = _currentStreet.value
@@ -1215,7 +1358,7 @@ class HomeViewModel @Inject constructor(
                 
                 if (isDayEmpty) {
                     // Find the absolute last house globally (presumably from previous workdays)
-                    val lastGlobalHouse = houses.value.maxByOrNull { it.listOrder }
+                    val lastGlobalHouse = latestHouses.maxByOrNull { it.listOrder }
                     
                     if (lastGlobalHouse != null) {
                         // Inherit Context
@@ -1232,23 +1375,23 @@ class HomeViewModel @Inject constructor(
                         _agentName.value = lastGlobalHouse.agentName
                         
                         // Predict based on history
-                        prediction = houseManagementUseCase.predictBasedOnHistory(houses.value, lastGlobalHouse)
+                        prediction = houseManagementUseCase.predictBasedOnHistory(latestHouses, lastGlobalHouse)
                     } else {
                         // No history at all, just blank prediction
                         prediction = HouseManagementUseCase.HousePrediction("", 0, 0, com.antigravity.healthagent.data.local.model.PropertyType.EMPTY, Situation.NONE)
                     }
                 } else {
-                    // Standard intra-day prediction
+                    // Standard intra-day prediction using merged state
                     prediction = houseManagementUseCase.predictNextHouseValues(
-                        houses.value, 
+                        latestHouses, 
                         _data.value,
                         _currentBlock.value,
                         _currentStreet.value
                     )
                 }
 
-                val maxOrder = houses.value.maxOfOrNull { it.listOrder } ?: 0L
-                val currentDayHouses = houses.value.filter { it.data == _data.value }.sortedBy { it.listOrder }
+                val maxOrder = latestHouses.maxOfOrNull { it.listOrder } ?: 0L
+                val currentDayHouses = latestHouses.filter { it.data == _data.value }.sortedBy { it.listOrder }
                 val lastHouse = currentDayHouses.lastOrNull()
                 val newStreet = initialStreet.trim().formatStreetName()
 
@@ -1295,7 +1438,9 @@ class HomeViewModel @Inject constructor(
                 var finalComplement = houseToInsert.complement
                 
                 // Smarter Auto-Increment: If numbers match, prefer incrementing COMPLEMENT
-                while (houses.value.any { 
+                // CRITICAL: We check against 'latestHouses' (DB + Drafts) here to ensure 
+                // the new house skip-increments over even unsaved duplicates.
+                while (latestHouses.any { 
                     it.data == houseToInsert.data && 
                     it.agentUid == houseToInsert.agentUid &&
                     it.agentName.equals(houseToInsert.agentName, ignoreCase = true) &&
@@ -1319,9 +1464,40 @@ class HomeViewModel @Inject constructor(
                     houseToInsert = houseToInsert.copy(sequence = finalSequence, complement = finalComplement)
                 }
 
-                houseManagementUseCase.insertHouse(houseToInsert, houses.value)
+                // Add to In-Flight temporarily to prevent duplicate prediction in rapid-fire clicks
+                _housesInFlight.update { it + houseToInsert }
+                
+                val newId = houseManagementUseCase.insertHouse(houseToInsert, latestHouses)
+                
+                // CRITICAL BUG FIX (Race Condition): 
+                // Any edits made to the 'in-flight' house card while 'insertHouse' was suspending (Saving)
+                // must be synced back to the database, otherwise they are lost when the in-flight list is cleared.
+                val finalInFlightState = _housesInFlight.value.find { 
+                    it.listOrder == houseToInsert.listOrder && it.data == houseToInsert.data 
+                }
+                
+                if (finalInFlightState != null && 
+                    (finalInFlightState.number != houseToInsert.number || 
+                     finalInFlightState.sequence != houseToInsert.sequence || 
+                     finalInFlightState.complement != houseToInsert.complement)) {
+                     
+                     houseManagementUseCase.updateHouse(
+                        finalInFlightState.copy(id = newId.toInt()), 
+                        latestHouses
+                    )
+                }
+                
+                // Once inserted and synced, remove from In-Flight (Room Flow will pick it up)
+                _housesInFlight.update { list -> 
+                    list.filter { it.listOrder != houseToInsert.listOrder || it.data != houseToInsert.data } 
+                }
+                
                 soundManager.playPop()
                 
+                // Silent window for the newly added house to allow the agent to fill it 
+                // without premature error highlights or dialogs.
+                markAsRecentlyEdited(newId.toInt())
+
                 // Unified delayed validation (3s)
                 triggerDelayedValidation()
             } catch (e: Exception) {
@@ -1354,6 +1530,17 @@ class HomeViewModel @Inject constructor(
             }
         }
 
+        // --- IN-FLIGHT HANDLING (ID 0) ---
+        // If the house is still 'in-flight' (unsaved), skip DB persistence and only update the draft state.
+        if (house.id == 0) {
+            _housesInFlight.update { list ->
+                list.map {
+                    if (it.listOrder == house.listOrder) house else it
+                }
+            }
+            return
+        }
+
         // --- MERGE PREVENTION (DUPLICATE NATURAL KEY) ---
         // Check if this update would clash with ANOTHER house
         val currentHouses = houses.value
@@ -1361,49 +1548,68 @@ class HomeViewModel @Inject constructor(
                 it.id != house.id && 
                 it.data == house.data && 
                 it.agentUid == (house.agentUid ?: _currentUserUid.value) &&
+                it.agentName.equals(house.agentName, ignoreCase = true) &&
                 it.blockNumber.equals(house.blockNumber, ignoreCase = true) &&
                 it.blockSequence.equals(house.blockSequence, ignoreCase = true) &&
                 it.streetName.equals(house.streetName, ignoreCase = true) &&
                 it.number.equals(house.number, ignoreCase = true) &&
                 it.sequence == house.sequence &&
-                it.complement == house.complement
+                it.complement == house.complement &&
+                it.bairro.equals(house.bairro, ignoreCase = true) &&
+                it.visitSegment == house.visitSegment
         }
 
+        // UNIFIED PERSISTENCE (Flicker-Free): Always keep latest typing in Drafts
+        _pendingUpdateDrafts.update { it + (house.id to house) }
+        
         if (clashingHouse != null) {
-            // DUPLICATE DETECTED: Don't save to DB yet to avoid silent REPLACE merge.
-            // Instead, keep it as a "draft" in memory so the user sees their change.
-            _pendingUpdateDrafts.value = _pendingUpdateDrafts.value + (house.id to house)
+            // DUPLICATE DETECTED: Still keep as a "draft" in memory.
+            // But deferred confirmation dialog until Close Day or Sync per user request.
             
-            // Start/Reset the 2.5-second delay job for the confirmation dialog
-            clashDialogJob?.cancel()
-            clashDialogJob = viewModelScope.launch {
-                delay(2500)
-                _duplicateHouseConfirmation.value = house
-            }
+            // Cancel any old timer for this house, but don't start a new one
+            clashDialogJobs[house.id]?.cancel()
+            clashDialogJobs.remove(house.id)
         } else {
-            // NO DUPLICATE: Save normally and clear any drafts/jobs for this house
-            clashDialogJob?.cancel()
-            _pendingUpdateDrafts.value = _pendingUpdateDrafts.value - house.id
+            // NO DUPLICATE: Save normally. 
+            // Draft will be automatically cleared by the 'houses' collector in init when the DB update is confirmed.
+            clashDialogJobs[house.id]?.cancel()
+            clashDialogJobs.remove(house.id)
             
             performUpdateHouse(house)
         }
         
+        // Mark as recently edited to suppress annoying "Missing data" labels during the typing settle time
+        markAsRecentlyEdited(house.id)
+
         // Unified delayed validation (3s)
         triggerDelayedValidation()
     }
 
     fun confirmDuplicateMerge() {
         _duplicateHouseConfirmation.value?.let { house ->
-            clashDialogJob?.cancel()
+            clashDialogJobs[house.id]?.cancel()
+            clashDialogJobs.remove(house.id)
             _pendingUpdateDrafts.value = _pendingUpdateDrafts.value - house.id
             performUpdateHouse(house)
             _duplicateHouseConfirmation.value = null
         }
     }
 
+    private fun markAsRecentlyEdited(houseId: Int) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            _recentlyEditedHouseIds.update { it + (houseId to now) }
+            delay(2500) // Silent window duration
+            _recentlyEditedHouseIds.update { current ->
+                if (current[houseId] == now) current - houseId else current
+            }
+        }
+    }
+
     fun dismissDuplicateConfirmation() {
         _duplicateHouseConfirmation.value?.let { house ->
-            clashDialogJob?.cancel()
+            clashDialogJobs[house.id]?.cancel()
+            clashDialogJobs.remove(house.id)
             _pendingUpdateDrafts.value = _pendingUpdateDrafts.value - house.id
             _duplicateHouseConfirmation.value = null
             // Trigger a re-validation to clear error states if necessary
@@ -1419,7 +1625,12 @@ class HomeViewModel @Inject constructor(
                 val currentUid = _remoteAgentUid.value ?: _currentUserUid.value
                 val houseWithIdentity = house.copy(agentName = currentName, agentUid = currentUid)
                 
-                val result = houseManagementUseCase.updateHouseWithContext(houseWithIdentity, houses.value)
+                // Determine context from DB + current Drafts for the day
+                val latestHouses = houses.value.map { _pendingUpdateDrafts.value[it.id] ?: it }
+                
+                // Use UseCase for context-aware updates (segment recalculation)
+                val result = houseManagementUseCase.updateHouseWithContext(houseWithIdentity, latestHouses)
+                
                 if (result.localizationChanged) {
                     _bairro.value = result.updatedHouse.bairro
                     _currentBlock.value = result.updatedHouse.blockNumber
@@ -1449,6 +1660,8 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 recentlyDeletedHouse = house
+                // Immediately clear from drafts to prevent "Ghost" house in UI
+                _pendingUpdateDrafts.update { it - house.id }
                 houseManagementUseCase.deleteHouse(house, houses.value)
                 soundManager.playPop()
             } catch (e: Exception) {
@@ -1459,9 +1672,31 @@ class HomeViewModel @Inject constructor(
 
     private var recentlyDeletedHouse: House? = null
     fun restoreDeletedHouse() {
-        recentlyDeletedHouse?.let {
+        recentlyDeletedHouse?.let { house ->
             viewModelScope.launch { 
-                houseManagementUseCase.insertHouse(it.copy(id = 0), houses.value)
+                // CRITICAL: Check for new collisions that might have happened while it was "deleted"
+                val latestHouses = houses.value.map { _pendingUpdateDrafts.value[it.id] ?: it }
+                val clashing = latestHouses.find { 
+                    it.data == house.data && 
+                    it.agentUid == house.agentUid &&
+                    it.blockNumber.equals(house.blockNumber, ignoreCase = true) &&
+                    it.blockSequence.equals(house.blockSequence, ignoreCase = true) &&
+                    it.streetName.equals(house.streetName, ignoreCase = true) &&
+                    it.number.equals(house.number, ignoreCase = true) &&
+                    it.sequence == house.sequence &&
+                    it.complement == house.complement &&
+                    it.bairro.equals(house.bairro, ignoreCase = true) &&
+                    it.visitSegment == house.visitSegment
+                }
+
+                if (clashing != null) {
+                    // Restore as a "Red" draft if a locker exists now
+                    _pendingUpdateDrafts.update { it + (house.id to house.copy(id = house.id)) }
+                    _uiEvent.value = "Imóvel restaurado com conflito detectado."
+                } else {
+                    houseManagementUseCase.insertHouse(house.copy(id = 0), houses.value)
+                }
+                
                 recentlyDeletedHouse = null 
                 soundManager.playPop()
             }
@@ -1503,11 +1738,50 @@ class HomeViewModel @Inject constructor(
 
     private fun performMoveHouse(house: House, newDate: String) {
         viewModelScope.launch { 
-            repository.updateHouse(house.copy(
+            val updatedHouse = house.copy(
                 data = newDate,
                 agentName = _agentName.value,
                 agentUid = _remoteAgentUid.value ?: _currentUserUid.value
-            )) 
+            )
+
+            // --- CLASH PREVENTION (Moving) ---
+            // Check if moving this house would clash with an EXISTING house on the target date.
+            // We check against both DB and Drafts on that target date.
+            val latestHouses = houses.value.map { _pendingUpdateDrafts.value[it.id] ?: it }
+            val clashingHouse = latestHouses.find { 
+                it.id != updatedHouse.id && 
+                it.data == updatedHouse.data && 
+                it.agentUid == updatedHouse.agentUid &&
+                it.agentName.equals(updatedHouse.agentName, ignoreCase = true) &&
+                it.blockNumber.equals(updatedHouse.blockNumber, ignoreCase = true) &&
+                it.blockSequence.equals(updatedHouse.blockSequence, ignoreCase = true) &&
+                it.streetName.equals(updatedHouse.streetName, ignoreCase = true) &&
+                it.number.equals(updatedHouse.number, ignoreCase = true) &&
+                it.sequence == updatedHouse.sequence &&
+                it.complement == updatedHouse.complement &&
+                it.bairro.equals(updatedHouse.bairro, ignoreCase = true) &&
+                it.visitSegment == updatedHouse.visitSegment
+            }
+
+            if (clashingHouse != null) {
+                // MOVE CLASH: Defer resolution by holding in drafts
+                _pendingUpdateDrafts.update { it + (updatedHouse.id to updatedHouse) }
+                _uiEvent.value = "Conflito detectado no destino! Resolva em vermelho."
+                soundManager.playWarning()
+                // Trigger transition to the target date so the user can see the red clash
+                _data.value = newDate
+            } else {
+                // NO CLASH: Safe to move in database
+                repository.updateHouse(updatedHouse) 
+                
+                // Clear any draft from the original date to prevent ghosts
+                _pendingUpdateDrafts.update { it - updatedHouse.id }
+                
+                _uiEvent.value = "Imóvel movido com sucesso para $newDate"
+                soundManager.playPop()
+                // Transition to see the result
+                _data.value = newDate
+            }
         }
     }
 
@@ -1883,7 +2157,7 @@ class HomeViewModel @Inject constructor(
             _showMultiDayErrorDialog.value = false
             // Allow UI to update to the new date before validating
             delay(300)
-            validateCurrentDay(showDialog = true)
+            validateCurrentDay(showDialog = false) // Silence navigation dialog per user request
         }
     }
     fun dismissMultiDayErrorDialog() { _showMultiDayErrorDialog.value = false }
