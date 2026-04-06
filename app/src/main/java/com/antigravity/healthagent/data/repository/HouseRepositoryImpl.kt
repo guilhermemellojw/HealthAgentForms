@@ -227,7 +227,9 @@ class HouseRepositoryImpl @Inject constructor(
                     id = existingId,
                     agentName = agentName.uppercase(),
                     agentUid = finalUid,
-                    data = restoredHouse.data.replace("/", "-")
+                    data = restoredHouse.data.replace("/", "-"),
+                    isSynced = false, // Force re-sync after restoration
+                    lastUpdated = System.currentTimeMillis()
                 ))
             }
 
@@ -314,7 +316,15 @@ class HouseRepositoryImpl @Inject constructor(
             dates.forEach { date ->
                 val activity = dayActivityDao.getDayActivity(date, upperName, finalUid)
                 if (activity == null) {
-                    dayActivityDao.insertDayActivity(DayActivity(date = date, status = "NORMAL", isClosed = true, agentName = upperName, agentUid = finalUid, isSynced = false))
+                    dayActivityDao.insertDayActivity(DayActivity(
+                        date = date, 
+                        status = "NORMAL", 
+                        isClosed = true, 
+                        agentName = upperName, 
+                        agentUid = finalUid, 
+                        isSynced = false,
+                        lastUpdated = System.currentTimeMillis()
+                    ))
                 } else if (!activity.isClosed) {
                     dayActivityDao.insertDayActivity(activity.copy(isClosed = true, agentName = upperName, agentUid = finalUid, isSynced = false, lastUpdated = System.currentTimeMillis()))
                 }

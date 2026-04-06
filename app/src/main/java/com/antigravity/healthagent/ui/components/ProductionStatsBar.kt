@@ -27,12 +27,18 @@ fun ProductionStatsBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = verticalPadding),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+                .padding(horizontal = 4.dp, vertical = verticalPadding)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(if (isEasyMode) 12.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val primaryColor = MaterialTheme.colorScheme.primary
             val dividerColor = if (isSolarMode) MaterialTheme.colorScheme.outline.copy(alpha = 0.2f) else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f)
+
+            // New "Visitas" (Total Houses) stat as requested
+            StatItem(label = "VISITAS", value = totals.totalRegisteredHouses.toString(), color = primaryColor, isEasyMode = isEasyMode)
+            
+            VerticalDivider(modifier = Modifier.height(28.dp).padding(horizontal = 4.dp), thickness = 1.dp, color = dividerColor)
 
             StatItem(label = "A1", value = totals.a1.toString(), color = primaryColor, isEasyMode = isEasyMode)
             StatItem(label = "A2", value = totals.a2.toString(), color = primaryColor, isEasyMode = isEasyMode)

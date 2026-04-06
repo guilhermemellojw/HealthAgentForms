@@ -765,11 +765,9 @@ object BoletimPdfGenerator {
         repeat(3) { drawCell(canvas, linePaint, textPaint, "", totX, cursorY, cwAmostraSingle, totalRowH); totX += cwAmostraSingle }
         drawCell(canvas, linePaint, textPaint, "", totX, cursorY, cwInsp, totalRowH); totX += cwInsp
         
-        // Imov Trat Sum (Match HomeViewModel logic)
-        val totalTreated = houses.count { 
-            (it.a1 + it.a2 + it.b + it.c + it.d1 + it.d2 + it.e + it.eliminados) > 0 || it.larvicida > 0.0 || it.comFoco
-        }
-        drawCell(canvas, linePaint, boldPaint, totalTreated.toString(), totX, cursorY, cwImovTrat, totalRowH); totX += cwImovTrat
+        // Imov Trabalhados Sum (Match HomeViewModel logic: Situation.NONE)
+        val totalWorked = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE }
+        drawCell(canvas, linePaint, boldPaint, totalWorked.toString(), totX, cursorY, cwImovTrat, totalRowH); totX += cwImovTrat
 
         // Larv 1 Gramas Sum
         drawCell(canvas, linePaint, boldPaint, houses.sumOf { it.larvicida }.toString(), totX, cursorY, cwLarvItem, totalRowH); totX += cwLarvItem
@@ -1002,7 +1000,7 @@ object BoletimPdfGenerator {
         // Table 2: Nº de Imóveis
         val t2Labels = listOf("Trat. Focal", "Trat. Perifocal", "Inspecionados")
         val tratFocal = chunkHouses.count { it.larvicida > 0 }
-        val inspec = chunkHouses.count { it.situation == Situation.NONE || it.situation == Situation.REC }
+        val inspec = chunkHouses.count { it.situation == Situation.NONE }
         val t2Vals = listOf(tratFocal.toString(), "—", inspec.toString())
         
         val colW2 = 60f

@@ -1126,15 +1126,20 @@ class SyncRepositoryImpl @Inject constructor(
             val isClosed = this.getBoolean("isClosed") ?: activity.isClosed
             val isManualUnlock = this.getBoolean("isManualUnlock") ?: activity.isManualUnlock
 
+            // CRITICAL: Explicit Status Mapping to avoid serialization gaps
+            val finalStatus = this.getString("status") ?: activity.status
+
             // CRITICAL: Enforce the standardized agentName and Uid from the session/profile
             val finalAgentName = (if (agentName.isNotBlank()) agentName else (activity.agentName.ifBlank { "" })).trim().uppercase()
             activity.copy(
+                status = finalStatus,
                 isClosed = isClosed,
                 isManualUnlock = isManualUnlock,
                 lastUpdated = lastUpdated, 
                 agentUid = uid, 
                 agentName = finalAgentName
             )
+
         } catch (e: Exception) {
             android.util.Log.e("SyncRepository", "toDayActivitySafe: Error mapping ${this.id}", e)
             null

@@ -68,7 +68,6 @@ class HomeViewModel @Inject constructor(
     val agentName: StateFlow<String> = _agentName.asStateFlow()
     
     private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     private val _selectedRgBairro = MutableStateFlow("")
     private val _rgYear = MutableStateFlow(Calendar.getInstance().get(Calendar.YEAR).toString())
@@ -93,13 +92,8 @@ class HomeViewModel @Inject constructor(
     }
 
     private val _currentBlock = MutableStateFlow("")
-    val currentBlock: StateFlow<String> = _currentBlock.asStateFlow()
-
     private val _currentBlockSequence = MutableStateFlow("")
-    val currentBlockSequence: StateFlow<String> = _currentBlockSequence.asStateFlow()
-
     private val _currentStreet = MutableStateFlow("")
-    val currentStreet: StateFlow<String> = _currentStreet.asStateFlow()
 
     private val _agentNames = MutableStateFlow<List<String>>(emptyList())
 
@@ -113,10 +107,7 @@ class HomeViewModel @Inject constructor(
 
     private val _remoteAgent = MutableStateFlow<String?>(null)
     private var _localAgentNameBackup: String? = null
-    val remoteAgent: StateFlow<String?> = _remoteAgent.asStateFlow()
-
     private val _remoteAgentUid = MutableStateFlow<String?>(null)
-    val remoteAgentUid: StateFlow<String?> = _remoteAgentUid.asStateFlow()
 
     private val _uiEvent = MutableStateFlow<String?>(null)
     val uiEvent: StateFlow<String?> = _uiEvent.asStateFlow()
@@ -128,7 +119,9 @@ class HomeViewModel @Inject constructor(
     val showGoalReached: StateFlow<Boolean> = _showGoalReached.asStateFlow()
 
     private val _validationErrorHouseIds = MutableStateFlow<Set<Int>>(emptySet())
-    val validationErrorHouseIds: StateFlow<Set<Int>> = _validationErrorHouseIds.asStateFlow()
+    private val _isDuplicateIds = MutableStateFlow<Set<Int>>(emptySet())
+    private val _syncStatus = MutableStateFlow(SyncStatus())
+    private val _backupConfirmation = MutableStateFlow<BackupConfirmation?>(null)
 
     private val _showClosingAudit = MutableStateFlow<AuditSummary?>(null)
     val showClosingAudit: StateFlow<AuditSummary?> = _showClosingAudit.asStateFlow()
@@ -145,9 +138,6 @@ class HomeViewModel @Inject constructor(
     private val _scrollToHouseId = MutableStateFlow<Int?>(null)
     val scrollToHouseId: StateFlow<Int?> = _scrollToHouseId.asStateFlow()
 
-    private val _isDuplicateIds = MutableStateFlow<Set<Int>>(emptySet())
-    val isDuplicateIds: StateFlow<Set<Int>> = _isDuplicateIds.asStateFlow()
-
     private var validationJob: kotlinx.coroutines.Job? = null
 
     private val _situationLimitConfirmation = MutableStateFlow<House?>(null)
@@ -158,9 +148,6 @@ class HomeViewModel @Inject constructor(
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
-
-    private val _syncStatus = MutableStateFlow(SyncStatus())
-    val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
 
     private val _moveConfirmationData = MutableStateFlow<Pair<House, String>?>(null)
     val moveConfirmationData: StateFlow<Pair<House, String>?> = _moveConfirmationData.asStateFlow()
@@ -174,9 +161,6 @@ class HomeViewModel @Inject constructor(
     private val recentlyEditedHouseIds: StateFlow<Set<Int>> = _recentlyEditedHouseIds.map { it.keys }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
     private val clashDialogJobs = mutableMapOf<Int, kotlinx.coroutines.Job>()
-
-    private val _backupConfirmation = MutableStateFlow<BackupConfirmation?>(null)
-    val backupConfirmation: StateFlow<BackupConfirmation?> = _backupConfirmation.asStateFlow()
 
     // --- State Injections ---
     val easyMode: StateFlow<Boolean> = settingsManager.easyMode
@@ -297,11 +281,12 @@ class HomeViewModel @Inject constructor(
     private val allHousesFlow = combine(_agentName, _remoteAgentUid, _currentUserUid) { name, remoteUid, currentUid -> 
         Triple(name, remoteUid, currentUid) 
     }.distinctUntilChanged()
-    .flowOn(Dispatchers.Default)
     .flatMapLatest { (name, remoteUid, currentUid) -> 
         val effectiveUid = remoteUid ?: currentUid
         repository.getAllHouses(name, effectiveUid) 
     }
+    .flowOn(Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Global list for RG view (all agents)
     private val globalHousesFlow = repository.getAllHousesSnapshotFlow()
@@ -469,11 +454,9 @@ class HomeViewModel @Inject constructor(
             .sorted()
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    init {
-        viewModelScope.launch {
-            loadDynamicConfig()
-        }
 
+    init {
+        // Validation observer: Clear errors immediately on date change
         viewModelScope.launch {
             _data.collect { 
                 // Clear error states immediately on date change to prevent "ghost" highlights
@@ -546,12 +529,11 @@ class HomeViewModel @Inject constructor(
                         }
                     }
                 }
-                
-                delay(300) // Stability debounce
             }
         }
 
         // UI state reducer
+        @Suppress("UNCHECKED_CAST")
         combine(
             latestHouses, _data, _agentName, _searchQuery, _isSupervisor, 
             _municipio, _bairro, _categoria, _zona, _ciclo, _tipo, _atividade,
@@ -749,25 +731,6 @@ class HomeViewModel @Inject constructor(
         return houseValidationUseCase.getInvalidFields(house, strict = true).toSet()
     }
 
-    val dashboardTotals: StateFlow<DashboardTotals> = combine(houses, _data) { list, date ->
-        val dayHouses = list.filter { it.data == date }
-        DashboardTotals(
-            totalHouses = dayHouses.count { it.situation != Situation.EMPTY },
-            a1 = dayHouses.sumOf { it.a1 }, a2 = dayHouses.sumOf { it.a2 },
-            b = dayHouses.sumOf { it.b }, c = dayHouses.sumOf { it.c },
-            d1 = dayHouses.sumOf { it.d1 }, d2 = dayHouses.sumOf { it.d2 },
-            e = dayHouses.sumOf { it.e }, eliminados = dayHouses.sumOf { it.eliminados },
-            larvicida = dayHouses.sumOf { it.larvicida },
-            totalFocos = dayHouses.count { it.comFoco },
-            totalRegisteredHouses = dayHouses.size,
-            worked = dayHouses.count { it.situation == Situation.NONE },
-            recused = dayHouses.count { it.situation == Situation.REC },
-            absent = dayHouses.count { it.situation == Situation.A },
-            closed = dayHouses.count { it.situation == Situation.F },
-            vacant = dayHouses.count { it.situation == Situation.V }
-        )
-    }.flowOn(Dispatchers.Default)
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardTotals())
 
     val daysWithErrors: StateFlow<List<DayErrorSummary>> = houses.map { all ->
         try {
@@ -792,18 +755,6 @@ class HomeViewModel @Inject constructor(
 
 
 
-    fun calculateRGBlocks(houses: List<House>, bairro: String, year: String): List<BlockSegment> {
-        return getRGBlocksUseCase(houses, bairro, year)
-    }
-
-    // --- RG State ---
-    val rgYear: StateFlow<String> = _rgYear.asStateFlow()
-
-    // Semester filter removed as per user request
-    // private val _rgSemester = MutableStateFlow(if (Calendar.getInstance().get(Calendar.MONTH) < 6) 1 else 2)
-    // val rgSemester: StateFlow<Int> = _rgSemester.asStateFlow()
-
-    val selectedRgBairro: StateFlow<String> = _selectedRgBairro.asStateFlow()
 
 
 
@@ -981,15 +932,23 @@ class HomeViewModel @Inject constructor(
                 }
             }.collectLatest { lastHouse ->
                 if (lastHouse != null) {
-                    _bairro.value = lastHouse.bairro
-                    _currentBlock.value = lastHouse.blockNumber
-                    _currentBlockSequence.value = lastHouse.blockSequence
-                    _currentStreet.value = lastHouse.streetName
-                    _municipio.value = lastHouse.municipio
+                    // --- CONTEXT GUARD ---
+                    // Don't auto-update context from a draft that has an identity conflict (Red Draft).
+                    // This prevents "flickering" or incorrect context inheritance while user is resolving duplicates.
+                    val isClashingDraft = _pendingUpdateDrafts.value.containsKey(lastHouse.id) && 
+                        _isDuplicateIds.value.contains(lastHouse.id)
                     
-                    // ONLY update agentName if it's currently empty, to avoid loops
-                    if (_agentName.value.isBlank()) {
-                        _agentName.value = lastHouse.agentName
+                    if (!isClashingDraft) {
+                        _bairro.value = lastHouse.bairro
+                        _currentBlock.value = lastHouse.blockNumber
+                        _currentBlockSequence.value = lastHouse.blockSequence
+                        _currentStreet.value = lastHouse.streetName
+                        _municipio.value = lastHouse.municipio
+                        
+                        // ONLY update agentName if it's currently empty, to avoid loops
+                        if (_agentName.value.isBlank()) {
+                            _agentName.value = lastHouse.agentName
+                        }
                     }
                 }
                 // Clear validation highlights when switching days
@@ -1328,15 +1287,23 @@ class HomeViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                // Pre-check for open limit inside the safe scope
-                // Safety Limit: Allow up to 150 houses per day or 3x the Daily Goal, whichever is higher.
-                // This prevents accidental over-add but doesn't block legitimate heavy work.
-                val currentTotal = houses.value.count { it.data == _data.value }
-                val safetyLimit = (maxOpenHouses.value * 3).coerceAtLeast(150)
+                // LOCK ENFORCEMENT: Block ANY additions to closed days unless Admin or Manual Override (isUnlocked)
                 val isUnlocked = isWorkdayManualUnlock.value
                 val isAdmin = _isAdmin.value
                 
+                if (uiState.value.isDayClosed && !isUnlocked && !isAdmin) {
+                    _uiEvent.value = "Este dia de trabalho está FECHADO e não permite edições."
+                    soundManager.playWarning()
+                    isAddingHouse = false
+                    return@launch
+                }
+
+                // Pre-check for open limit inside the safe scope
+                val currentTotal = houses.value.count { it.data == _data.value }
+                val safetyLimit = (maxOpenHouses.value * 3).coerceAtLeast(150)
+                
                 if (currentTotal >= safetyLimit && !isUnlocked && !isAdmin) {
+
                     soundManager.playWarning()
                     _situationLimitConfirmation.value = House(data = _data.value)
                     isAddingHouse = false
@@ -1349,7 +1316,7 @@ class HomeViewModel @Inject constructor(
                 val drafts = _pendingUpdateDrafts.value
                 val inFlights = _housesInFlight.value
                 
-                val latestHouses = (dbHouses.map { drafts[it.id] ?: it } + inFlights)
+                val latestHouses: List<House> = (dbHouses.map { drafts[it.id] ?: it } + inFlights)
                 val isDayEmpty = latestHouses.none { it.data == _data.value }
                 var prediction: HouseManagementUseCase.HousePrediction
                 var initialBlock = _currentBlock.value
@@ -1398,6 +1365,24 @@ class HomeViewModel @Inject constructor(
                 // VisitSegment Stabilization: Align perfectly with HouseManagementUseCase.recalculateVisitSegments
                 // to prevent "shifting" which causes Natural Key collisions during bulk update.
                 val dayHouses = currentDayHouses.sortedBy { it.listOrder }
+                // --- ACTION BLOCKER ---
+                // DEFERRED VALIDATION: Block new additions if there are unresolved conflicts in the current block/street.
+                // CRITICAL: Perform a synchronous validation pass first to catch ANY "in-flight" or "un-debounced" typing 
+                // that might have created a new conflict since the last auto-validation.
+                validateCurrentDay(showDialog = false, strict = true) 
+                
+                val clashingDraftIds = _isDuplicateIds.value
+                val hasClashes = clashingDraftIds.isNotEmpty()
+                
+                if (hasClashes) {
+                    _uiEvent.value = "Resolva os conflitos (em vermelho) antes de adicionar um novo imóvel."
+                    soundManager.playWarning()
+                    // Pull focus to the first clashing house
+                    onHouseClick(clashingDraftIds.first())
+                    isAddingHouse = false
+                    return@launch
+                }
+
                 var predictedSegment = 0
                 var lastStreetName = ""
                 dayHouses.forEach { h ->
@@ -1471,7 +1456,13 @@ class HomeViewModel @Inject constructor(
                 
                 // CRITICAL BUG FIX (Race Condition): 
                 // Any edits made to the 'in-flight' house card while 'insertHouse' was suspending (Saving)
-                // must be synced back to the database, otherwise they are lost when the in-flight list is cleared.
+                // must be synced back into the DB, otherwise they are lost when the in-flight list is cleared.
+                // We RE-CALCULATE latestHouses here to include the physical DB content + any remaining in-flights.
+                val dbHousesAfter = allHousesFlow.value
+                val currentDrafts = _pendingUpdateDrafts.value
+                val currentInFlights = _housesInFlight.value
+                val refreshedLatestHouses = (dbHousesAfter.map { currentDrafts[it.id] ?: it } + currentInFlights)
+
                 val finalInFlightState = _housesInFlight.value.find { 
                     it.listOrder == houseToInsert.listOrder && it.data == houseToInsert.data 
                 }
@@ -1483,9 +1474,10 @@ class HomeViewModel @Inject constructor(
                      
                      houseManagementUseCase.updateHouse(
                         finalInFlightState.copy(id = newId.toInt()), 
-                        latestHouses
+                        refreshedLatestHouses
                     )
                 }
+
                 
                 // Once inserted and synced, remove from In-Flight (Room Flow will pick it up)
                 _housesInFlight.update { list -> 
@@ -1512,7 +1504,17 @@ class HomeViewModel @Inject constructor(
     }
 
     fun updateHouse(house: House) {
+        // LOCK ENFORCEMENT
+        val isUnlocked = isWorkdayManualUnlock.value
+        val isAdmin = _isAdmin.value
+        if (uiState.value.isDayClosed && !isUnlocked && !isAdmin && house.id != 0) {
+            _uiEvent.value = "Este dia está FECHADO. Desbloqueie para editar."
+            soundManager.playWarning()
+            return
+        }
+
         val original = houses.value.find { it.id == house.id }
+
 
         // Limit Enforcement: Only block if CHANGING to worked and meta was reached.
         val houseIsWorked = (house.situation == Situation.NONE || house.situation == Situation.EMPTY)
@@ -1563,10 +1565,9 @@ class HomeViewModel @Inject constructor(
         _pendingUpdateDrafts.update { it + (house.id to house) }
         
         if (clashingHouse != null) {
-            // DUPLICATE DETECTED: Still keep as a "draft" in memory.
+            // DUPLICATE DETECTED: Still keep as a \"draft\" in memory.
             // But deferred confirmation dialog until Close Day or Sync per user request.
-            
-            // Cancel any old timer for this house, but don't start a new one
+            // We NO LONGER call performUpdateHouse here, which prevents the DB from triggering REPLACE.
             clashDialogJobs[house.id]?.cancel()
             clashDialogJobs.remove(house.id)
         } else {
@@ -1657,8 +1658,18 @@ class HomeViewModel @Inject constructor(
     }
 
     fun deleteHouse(house: House) {
+        // LOCK ENFORCEMENT
+        val isUnlocked = isWorkdayManualUnlock.value
+        val isAdmin = _isAdmin.value
+        if (uiState.value.isDayClosed && !isUnlocked && !isAdmin) {
+            _uiEvent.value = "Este dia está FECHADO. Desbloqueie para deletar."
+            soundManager.playWarning()
+            return
+        }
+
         viewModelScope.launch {
             try {
+
                 recentlyDeletedHouse = house
                 // Immediately clear from drafts to prevent "Ghost" house in UI
                 _pendingUpdateDrafts.update { it - house.id }
@@ -1672,6 +1683,15 @@ class HomeViewModel @Inject constructor(
 
     private var recentlyDeletedHouse: House? = null
     fun restoreDeletedHouse() {
+        // LOCK ENFORCEMENT
+        val isUnlocked = isWorkdayManualUnlock.value
+        val isAdmin = _isAdmin.value
+        if (uiState.value.isDayClosed && !isUnlocked && !isAdmin) {
+            _uiEvent.value = "Este dia está FECHADO. Desbloqueie para restaurar."
+            soundManager.playWarning()
+            return
+        }
+
         recentlyDeletedHouse?.let { house ->
             viewModelScope.launch { 
                 // CRITICAL: Check for new collisions that might have happened while it was "deleted"
@@ -1712,7 +1732,17 @@ class HomeViewModel @Inject constructor(
     }
 
     fun moveHouse(house: House, moveUp: Boolean) {
+        // LOCK ENFORCEMENT
+        val isUnlocked = isWorkdayManualUnlock.value
+        val isAdmin = _isAdmin.value
+        if (uiState.value.isDayClosed && !isUnlocked && !isAdmin) {
+            _uiEvent.value = "Este dia está FECHADO. Desbloqueie para ordenar."
+            soundManager.playWarning()
+            return
+        }
+        
         viewModelScope.launch {
+
             val list = filteredHouses.value.toMutableList()
             val index = list.indexOfFirst { it.id == house.id }
             if (index != -1) {
@@ -1727,7 +1757,19 @@ class HomeViewModel @Inject constructor(
     }
 
     fun moveHouseToDate(house: House, newDate: String) {
+        // LOCK ENFORCEMENT (Source and Destination)
+        val isUnlocked = isWorkdayManualUnlock.value
+        val isAdmin = _isAdmin.value
+        
+        // We know current day is closed if uiState.value.isDayClosed is true
+        if (uiState.value.isDayClosed && !isUnlocked && !isAdmin) {
+             _uiEvent.value = "O dia de ORIGEM está FECHADO. Desbloqueie primeiro."
+             soundManager.playWarning()
+             return
+        }
+
         val existingWorked = houses.value.count { it.data == newDate && it.situation == Situation.NONE }
+
         if (existingWorked >= maxOpenHouses.value && maxOpenHouses.value > 0 && house.situation == Situation.NONE) {
             soundManager.playWarning()
             _uiEvent.value = "Impossível mover: Meta Diária do dia de destino atingida!"
@@ -2498,7 +2540,10 @@ class HomeViewModel @Inject constructor(
 
             // Multi-tenant safe re-assignment to targetAgent
             val targetUid = _remoteAgentUid.value ?: _currentUserUid.value
-            backupData.houses.forEach { house ->
+            val targetDate = _data.value // RESTRICTION: Only import for current selected date
+
+            // 1. Process Houses (Date Filtered)
+            backupData.houses.filter { it.data == targetDate }.forEach { house ->
                 val sanitizedHouse = house.copy(id = 0, agentName = targetAgent, agentUid = targetUid)
                 val key = sanitizedHouse.generateNaturalKey()
                 
@@ -2509,9 +2554,9 @@ class HomeViewModel @Inject constructor(
                     skippedCount++
                 }
             }
-
-            // Also assign activities unconditionally
-            backupData.dayActivities.forEach { 
+            
+            // 2. Process Activities (Date Filtered)
+            backupData.dayActivities.filter { it.date == targetDate }.forEach { 
                 repository.updateDayActivity(it.copy(agentName = targetAgent, agentUid = targetUid)) 
             }
             

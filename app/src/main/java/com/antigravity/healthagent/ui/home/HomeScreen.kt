@@ -312,8 +312,18 @@ fun HomeScreen(
 
     LaunchedEffect(uiState.houses) {
         if (draggingHouse == null) {
-            uiHouses.clear()
-            uiHouses.addAll(uiState.houses)
+            // Stability: Prevent showing empty state by reconciling instead of clearing.
+            val target = uiState.houses
+            if (uiHouses.size != target.size) {
+                uiHouses.clear()
+                uiHouses.addAll(target)
+            } else {
+                for (i in uiHouses.indices) {
+                    if (uiHouses[i] != target[i]) {
+                        uiHouses[i] = target[i]
+                    }
+                }
+            }
         }
     }
 

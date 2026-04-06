@@ -56,7 +56,20 @@ object RGPdfGenerator {
             val endIndex = minOf(startIndex + housesPerPage, houses.size)
             val pageHouses = houses.subList(startIndex, endIndex)
 
-            drawPage(context, canvas, paint, pageHouses, safeBairro, block, municipio, supervisor, gerente, i + 1, totalPages)
+            drawPage(
+                context = context,
+                canvas = canvas,
+                paint = paint,
+                pageHouses = pageHouses,
+                allHouses = houses, // Pass all houses for cumulative totals
+                bairro = safeBairro,
+                block = block,
+                municipio = municipio,
+                supervisor = supervisor,
+                gerente = gerente,
+                pageNumber = i + 1,
+                totalPages = totalPages
+            )
             pdfDocument.finishPage(page)
         }
 
@@ -78,7 +91,8 @@ object RGPdfGenerator {
         context: Context,
         canvas: Canvas,
         paint: Paint,
-        houses: List<House>,
+        pageHouses: List<House>,
+        allHouses: List<House>, // New parameter for global context
         bairro: String,
         block: String,
         municipio: String,
@@ -306,8 +320,8 @@ object RGPdfGenerator {
         
         // Split houses into left and right
         val maxRows = 26
-        val housesLeft = houses.take(minOf(houses.size, maxRows))
-        val housesRight = if (houses.size > maxRows) houses.drop(maxRows) else emptyList()
+        val housesLeft = pageHouses.take(minOf(pageHouses.size, maxRows))
+        val housesRight = if (pageHouses.size > maxRows) pageHouses.drop(maxRows) else emptyList()
         
         // Draw Left List
         for (house in housesLeft) {
@@ -339,153 +353,104 @@ object RGPdfGenerator {
              rightListY += itemHeight
         }
 
-        // --- Footer (Totals) ---
-        // Located below the lists.
-        val footerY = cursorY + listHeaderHeight + (maxRows * itemHeight) + 10
-        
-        // Calculate Totals
-        // Totals - ONLY count Situation.NONE (Worked) for these categories
-        val totalResidencial = houses.count { it.propertyType == PropertyType.R && it.situation == Situation.NONE }
-        val totalComercial = houses.count { it.propertyType == PropertyType.C && it.situation == Situation.NONE }
-        val totalTerreno = houses.count { it.propertyType == PropertyType.TB && it.situation == Situation.NONE }
-        val totalPonto = houses.count { it.propertyType == PropertyType.PE && it.situation == Situation.NONE }
-        val totalOutros = houses.count { it.propertyType == PropertyType.O && it.situation == Situation.NONE }
-        val totalPendentes = houses.count { it.situation != Situation.NONE && it.situation != Situation.EMPTY } 
-        // "Pendentes" in the image usually refers to closed/refused, so 'recuperado' or 'fechado'. 
-        // Actually looking at the image, "Pendencia" column has things like "F".
-        // The stats table has "Pendentes". Let's assume it means non-worked houses?
-        
-        val totalGeral = houses.size
-        
-        // Footer box
-        // | Residencial   | R  | [Count] | Ponto Estratégico | PE | [Count] |
-        // | Comercial     | C  | [Count] | Outros            | O  | [Count] |
-        // | Terreno Baldio| TB | [Count] | Total Geral       |    | [Total] |
-        // | Pendentes     | P  | [Count] |                   |    |         |
-        
-        val gap = 0f
-        val totalTableWidth = PAGE_WIDTH - 2 * MARGIN
-        val blockWidth = (totalTableWidth - gap) / 2
-        
-        val fw2 = 35f // Code width
-        val fw3 = 80f // Value width
-        val fw1 = blockWidth - fw2 - fw3 // Label width
+        // --- Footer (Totals & Signatures) ---
+        // ONLY drawn on the last page of the report
+        if (pageNumber == totalPages) {
+            val footerY = cursorY + listHeaderHeight + (maxRows * itemHeight) + 10
+            
+            // Calculate Totals CUMULATIVELY for all houses in the block
+            val totalResidencial = allHouses.count { it.propertyType == PropertyType.R && it.situation == Situation.NONE }
+            val totalComercial = allHouses.count { it.propertyType == PropertyType.C && it.situation == Situation.NONE }
+            val totalTerreno = allHouses.count { it.propertyType == PropertyType.TB && it.situation == Situation.NONE }
+            val totalPonto = allHouses.count { it.propertyType == PropertyType.PE && it.situation == Situation.NONE }
+            val totalOutros = allHouses.count { it.propertyType == PropertyType.O && it.situation == Situation.NONE }
+            val totalPendentes = allHouses.count { it.situation != Situation.NONE && it.situation != Situation.EMPTY } 
+            val totalGeral = allHouses.size
+            
+            val gap = 0f
+            val totalTableWidth = PAGE_WIDTH - 2 * MARGIN
+            val blockWidth = (totalTableWidth - gap) / 2
+            
+            val fw2 = 35f // Code width
+            val fw3 = 80f // Value width
+            val fw1 = blockWidth - fw2 - fw3 // Label width
+            val midX = MARGIN + blockWidth + gap
+            
+            // Header "FECHAMENTO"
+            val fh = 15f
+            drawRect(canvas, linePaint, MARGIN, footerY, PAGE_WIDTH - 2*MARGIN, fh)
+            drawCenteredText(canvas, boldPaint, "FECHAMENTO", MARGIN, footerY, PAGE_WIDTH - 2*MARGIN, fh)
+            
+            var fy = footerY + fh
+            
+            // Row 1
+            drawFooterCell(canvas, linePaint, textPaint, "Residencial", "R", totalResidencial.toString(), MARGIN, fy, fw1, fw2, fw3, fh)
+            drawFooterCell(canvas, linePaint, textPaint, "Ponto Estratégico", "PE", totalPonto.toString(), midX, fy, fw1, fw2, fw3, fh)
+            
+            fy += fh
+            // Row 2
+            drawFooterCell(canvas, linePaint, textPaint, "Comercial", "C", totalComercial.toString(), MARGIN, fy, fw1, fw2, fw3, fh)
+            drawFooterCell(canvas, linePaint, textPaint, "Outros", "O", totalOutros.toString(), midX, fy, fw1, fw2, fw3, fh)
+            
+            fy += fh
+            // Row 3
+            drawFooterCell(canvas, linePaint, textPaint, "Terreno Baldio", "TB", totalTerreno.toString(), MARGIN, fy, fw1, fw2, fw3, fh)
+            drawRect(canvas, linePaint, midX, fy, fw1 + fw2, fh)
+            drawTextInRect(canvas, textPaint, "Total Geral", midX, fy, fw1 + fw2, fh, alignLeft = true)
+            drawRect(canvas, linePaint, midX+fw1+fw2, fy, fw3, fh)
+            drawCenteredText(canvas, boldPaint, totalGeral.toString(), midX+fw1+fw2, fy, fw3, fh)
+            
+            fy += fh
+            // Row 4
+            drawRect(canvas, linePaint, MARGIN, fy, fw1, fh); drawTextInRect(canvas, textPaint, "Pendentes", MARGIN, fy, fw1, fh, alignLeft=true)
+            drawRect(canvas, linePaint, MARGIN+fw1, fy, fw2, fh); drawCenteredText(canvas, textPaint, "P", MARGIN+fw1, fy, fw2, fh)
+            val startValueX = MARGIN + fw1 + fw2
+            val fullValueWidth = PAGE_WIDTH - MARGIN - startValueX
+            drawRect(canvas, linePaint, startValueX, fy, fullValueWidth, fh)
+            drawCenteredText(canvas, textPaint, totalPendentes.toString(), startValueX, fy, fw3, fh)
 
-        val midX = MARGIN + blockWidth + gap
-        
-        // Header "FECHAMENTO"
-        val fh = 15f
-        drawRect(canvas, linePaint, MARGIN, footerY, PAGE_WIDTH - 2*MARGIN, fh)
-        drawCenteredText(canvas, boldPaint, "FECHAMENTO", MARGIN, footerY, PAGE_WIDTH - 2*MARGIN, fh)
-        
-        var fy = footerY + fh
-        
-        // Row 1
-        // Left: Residencial | R | Val
-        drawFooterCell(canvas, linePaint, textPaint, "Residencial", "R", totalResidencial.toString(), MARGIN, fy, fw1, fw2, fw3, fh)
-        // Right: Ponto Estratégico | PE | Val
-        drawFooterCell(canvas, linePaint, textPaint, "Ponto Estratégico", "PE", totalPonto.toString(), midX, fy, fw1, fw2, fw3, fh)
-        
-        fy += fh
-        // Row 2
-        drawFooterCell(canvas, linePaint, textPaint, "Comercial", "C", totalComercial.toString(), MARGIN, fy, fw1, fw2, fw3, fh)
-        drawFooterCell(canvas, linePaint, textPaint, "Outros", "O", totalOutros.toString(), midX, fy, fw1, fw2, fw3, fh)
-        
-        fy += fh
-        // Row 3
-        drawFooterCell(canvas, linePaint, textPaint, "Terreno Baldio", "TB", totalTerreno.toString(), MARGIN, fy, fw1, fw2, fw3, fh)
-        // Total Geral
-        // Image shows: | Total Geral | [Empty] | Value |
-        // Actually, looking closely at typical forms, "Total Geral" might span code.
-        // Let's make "Total Geral" label span (fw1 + fw2) and Value be (fw3).
-        
-        drawRect(canvas, linePaint, midX, fy, fw1 + fw2, fh)
-        drawTextInRect(canvas, textPaint, "Total Geral", midX, fy, fw1 + fw2, fh, alignLeft = true)
-        
-        // Draw Value
-        drawRect(canvas, linePaint, midX+fw1+fw2, fy, fw3, fh)
-        drawCenteredText(canvas, boldPaint, totalGeral.toString(), midX+fw1+fw2, fy, fw3, fh)
-        
-        fy += fh
-        // Row 4
-        // Row 4
-        // Custom drawing for Pendentes to extend the box but keep alignment
-        drawRect(canvas, linePaint, MARGIN, fy, fw1, fh); drawTextInRect(canvas, textPaint, "Pendentes", MARGIN, fy, fw1, fh, alignLeft=true)
-        drawRect(canvas, linePaint, MARGIN+fw1, fy, fw2, fh); drawCenteredText(canvas, textPaint, "P", MARGIN+fw1, fy, fw2, fh)
-        
-        // Value Cell: Width extends to end of page, but text is strictly aligned to fw3 to match "Terreno Baldio" column
-        val startValueX = MARGIN + fw1 + fw2
-        val endPageX = PAGE_WIDTH - MARGIN
-        val fullValueWidth = endPageX - startValueX
-        
-        drawRect(canvas, linePaint, startValueX, fy, fullValueWidth, fh)
-        drawCenteredText(canvas, textPaint, totalPendentes.toString(), startValueX, fy, fw3, fh)
+            fy += fh + 12
+            
+            // --- Signatures ---
+            // Collect all distinct agent names found in the block
+            val rawAgentName = allHouses
+                .mapNotNull { it.agentName }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .let {
+                    if (it.isNotEmpty()) it.joinToString(" / ").uppercase() else ""
+                }
+            
+            val sigH = 20f
+            val totalSigWidth = PAGE_WIDTH - 2 * MARGIN
+            val maxSigNameWidth = totalSigWidth - (textPaint.measureText("ASSINATURA:") + 15f)
+            val agentNameDisplay = rawAgentName.fitToWidth(textPaint, maxSigNameWidth)
+            val dateValue = allHouses.lastOrNull()?.data ?: ""
 
-        fy += fh + 10
-        
-        // Signatures
-        // | NOME: | [Agent Name] |
-        // | ASSINATURA: | [Agent Name] | DATA | [Date] |
-        
-        val lastHouse = houses.lastOrNull()
-        
-        // Collect all distinct agent names found in the list
-        val rawAgentName = houses
-            .mapNotNull { it.agentName }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .let {
-                if (it.isNotEmpty()) it.joinToString(" / ").uppercase() else ""
-            }
-        
-        val sigH = 20f
-        val totalSigWidth = PAGE_WIDTH - 2 * MARGIN
-        
-        // Truncate agent name if too long for signature box
-        val maxSigNameWidth = totalSigWidth - (textPaint.measureText("ASSINATURA:") + 15f)
-        val agentName = rawAgentName.fitToWidth(textPaint, maxSigNameWidth)
-
-        val dateValue = lastHouse?.data ?: ""
-
-        // --- Row 1: NOME ---
-        // Single column
-        drawRect(canvas, linePaint, MARGIN, fy, totalSigWidth, sigH)
-        
-        // Draw "NOME:"
-        val nomeLabel = "NOME:"
-        val nomeLabelWidth = textPaint.measureText(nomeLabel)
-        drawTextInRect(canvas, textPaint, nomeLabel, MARGIN, fy, nomeLabelWidth + 10, sigH, alignLeft = true)
-        
-        // Draw Name right next to it
-        drawTextInRect(canvas, textPaint, agentName, MARGIN + nomeLabelWidth + 5f, fy, totalSigWidth - nomeLabelWidth - 5f, sigH, alignLeft = true)
-        
-        fy += sigH
-        
-        // --- Row 2: ASSINATURA | DATA ---
-        // Split: Signature gets prominent space, Date gets enough space.
-        // Approx 75% | 25%
-        val dateColWidth = totalSigWidth * 0.25f
-        val sigColWidth = totalSigWidth - dateColWidth
-        
-        // Cell 1: Assinatura
-        drawRect(canvas, linePaint, MARGIN, fy, sigColWidth, sigH)
-        val sigLabel = "ASSINATURA:"
-        val sigLabelWidth = textPaint.measureText(sigLabel)
-        drawTextInRect(canvas, textPaint, sigLabel, MARGIN, fy, sigLabelWidth + 10, sigH, alignLeft = true)
-        drawTextInRect(canvas, textPaint, agentName, MARGIN + sigLabelWidth + 5f, fy, sigColWidth - sigLabelWidth - 5f, sigH, alignLeft = true)
-        
-        // Cell 2: Data
-        val dataX = MARGIN + sigColWidth
-        drawRect(canvas, linePaint, dataX, fy, dateColWidth, sigH)
-        val dataLabel = "DATA" // Note: "DATA" usually no colon in sample or simple "DATA"
-        // User request: "label: DATA"
-        val dataLabelWidth = textPaint.measureText(dataLabel)
-        drawTextInRect(canvas, textPaint, dataLabel, dataX, fy, dataLabelWidth + 10, sigH, alignLeft = true)
-        
-        // Draw Date value
-        // User said "right next to it"
-        // Just leave a small gap
-        drawTextInRect(canvas, textPaint, dateValue, dataX + dataLabelWidth + 15f, fy, dateColWidth - dataLabelWidth - 15f, sigH, alignLeft = true)
+            // Row 1: NOME
+            drawRect(canvas, linePaint, MARGIN, fy, totalSigWidth, sigH)
+            val nomeLabel = "NOME:"
+            val nomeLabelWidth = textPaint.measureText(nomeLabel)
+            drawTextInRect(canvas, textPaint, nomeLabel, MARGIN, fy, nomeLabelWidth + 10, sigH, alignLeft = true)
+            drawTextInRect(canvas, textPaint, agentNameDisplay, MARGIN + nomeLabelWidth + 5f, fy, totalSigWidth - nomeLabelWidth - 5f, sigH, alignLeft = true)
+            
+            fy += sigH
+            
+            // Row 2: ASSINATURA | DATA
+            val dateColWidth = totalSigWidth * 0.25f
+            val sigColWidth = totalSigWidth - dateColWidth
+            drawRect(canvas, linePaint, MARGIN, fy, sigColWidth, sigH)
+            val sigLabel = "ASSINATURA:"
+            val sigLabelWidth = textPaint.measureText(sigLabel)
+            drawTextInRect(canvas, textPaint, sigLabel, MARGIN, fy, sigLabelWidth + 10, sigH, alignLeft = true)
+            
+            val dataX = MARGIN + sigColWidth
+            drawRect(canvas, linePaint, dataX, fy, dateColWidth, sigH)
+            val dataLabel = "DATA"
+            val dataLabelWidth = textPaint.measureText(dataLabel)
+            drawTextInRect(canvas, textPaint, dataLabel, dataX, fy, dataLabelWidth + 10, sigH, alignLeft = true)
+            drawTextInRect(canvas, textPaint, dateValue, dataX + dataLabelWidth + 15f, fy, dateColWidth - dataLabelWidth - 15f, sigH, alignLeft = true)
+        }
     }
     
     // --- Helper Functions ---

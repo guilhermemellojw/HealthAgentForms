@@ -681,36 +681,6 @@ private fun shareToWhatsApp(
     sb.append("🚫 Recusados: $recusados\n")
     sb.append("🏚️ Abandonados: $abandonados\n")
 
-    val housesWithObs = houses.filter { it.observation.isNotBlank() }
-    if (housesWithObs.isNotEmpty()) {
-        sb.append("\n*OBSERVAÇÕES:*\n")
-        
-        val prepositions = setOf("da", "de", "do", "das", "dos", "e", "em", "a", "o", "com")
-        
-        housesWithObs.forEachIndexed { index, house ->
-            val trimmedObs = house.observation.trim()
-            val streetTitleCase = house.streetName.lowercase().split(" ").mapIndexed { i, word ->
-                if (i > 0 && prepositions.contains(word)) word else word.replaceFirstChar { it.uppercase() }
-            }.joinToString(" ")
-            
-            val numText = if (house.number.isNotBlank()) "nº ${house.number.lowercase()}" else "s/n"
-            val seqText = if (house.sequence > 0) ", seq. ${house.sequence}" else ""
-            val compText = if (house.complement > 0) ", comp. ${house.complement}" else ""
-            
-            val typeFull = when (house.propertyType.code.uppercase()) {
-                "R" -> "residência"
-                "C" -> "comércio"
-                "TB" -> "terreno baldio"
-                "PE" -> "ponto estratégico"
-                else -> house.propertyType.code.lowercase()
-            }
-            
-            val blockLabel = if (house.blockSequence.isNotBlank()) "${house.blockNumber}/${house.blockSequence}" else house.blockNumber
-            
-            sb.append("_*(${index + 1}) \"$trimmedObs\"*_\n")
-            sb.append("[Rua $streetTitleCase, $numText$seqText$compText, $typeFull, quart. $blockLabel, ${house.bairro.uppercase()}]\n\n")
-        }
-    }
 
     val message = sb.toString().trim()
 

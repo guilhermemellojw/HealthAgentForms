@@ -322,8 +322,8 @@ object SemanalPdfGenerator {
         drawRectBox(canvas, tx, cursorY, colData, totalHeaderH, "Data", boldPaint, null)
         tx += colData
         
-        // Group Imóveis Tratados
-        drawRectBox(canvas, tx, cursorY, groupVisits, th1, "Imóveis Tratados", boldPaint, null)
+        // Group Imóveis Trabalhados
+        drawRectBox(canvas, tx, cursorY, groupVisits, th1, "Imóveis Trabalhados", boldPaint, null)
         var stx = tx
         drawVerticalTextInBox(canvas, textPaint, "Res", stx, cursorY + th1, colRes, th2); stx += colRes
         drawVerticalTextInBox(canvas, textPaint, "Com", stx, cursorY + th1, colCom, th2); stx += colCom
