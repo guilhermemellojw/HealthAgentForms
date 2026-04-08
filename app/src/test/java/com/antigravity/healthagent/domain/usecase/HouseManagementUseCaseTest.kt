@@ -26,7 +26,7 @@ class HouseManagementUseCaseTest {
         override suspend fun getAllHousesOnce(agentName: String, agentUid: String): List<House> = emptyList()
         override suspend fun getAllHousesSnapshot(): List<House> = emptyList()
         override fun getAllHousesSnapshotFlow(): Flow<List<House>> = flowOf(emptyList())
-        override suspend fun insertHouse(house: House) {}
+        override suspend fun insertHouse(house: House): Long = 0L
         override suspend fun updateHouse(house: House) {}
         override suspend fun updateHouses(houses: List<House>) {}
         override suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String?) {}
@@ -62,7 +62,7 @@ class HouseManagementUseCaseTest {
         override suspend fun markAsSynced(ids: List<Int>) {}
         override suspend fun getDistinctDates(agentName: String, agentUid: String): List<String> = emptyList()
         override suspend fun getHouseById(id: Long): House? = null
-        override suspend fun insertHouse(house: House) {}
+        override suspend fun insertHouse(house: House): Long = 0L
         override suspend fun insertAll(houses: List<House>) {}
         override suspend fun updateHouse(house: House) {}
         override suspend fun updateAll(houses: List<House>) {}

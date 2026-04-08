@@ -143,10 +143,15 @@ class HouseManagementUseCase @Inject constructor(
             allHouses.map { if (it.id == house.id) sanitized else it }
         }
 
-        // 3. Recalculate segments for the affected day
+        // 3. Recalculate segments ONLY if street name changed or specifically requested
+        // This prevents automatic sequence/segment shifts on every minor edit
         val dayToRecalculate = sanitized.data
         val affectedHouses = sequenceUpdated.filter { it.data == dayToRecalculate }.sortedBy { it.listOrder }
-        val recalculatedDay = recalculateVisitSegments(affectedHouses)
+        val recalculatedDay = if (localizationChanged) {
+            recalculateVisitSegments(affectedHouses)
+        } else {
+            affectedHouses
+        }
         
         // Find the specific updated house in the recalculated list
         val finalUpdatedHouse = recalculatedDay.find { it.id == house.id } ?: sanitized
@@ -197,9 +202,7 @@ class HouseManagementUseCase @Inject constructor(
             a1 = 0; a2 = 0; b = 0; c = 0; d1 = 0; d2 = 0; e = 0; elims = 0; larv = 0.0
         }
 
-        val normalizedNumber = house.number.trim().uppercase().let { 
-            if (it == "0") "" else it 
-        }
+        val normalizedNumber = house.number.trim().uppercase() // Don't clear "0" while editing
         val normalizedSequence = house.sequence
         val normalizedComplement = house.complement
 
@@ -244,7 +247,7 @@ class HouseManagementUseCase @Inject constructor(
             it.blockNumber.equals(blockNumber, ignoreCase = true) &&
             it.streetName.equals(streetName, ignoreCase = true) &&
             it.number.isNotBlank()
-        }.sortedBy { it.listOrder }
+        }.sortedWith(compareBy({ it.data }, { it.listOrder }))
 
         if (contextHouses.isEmpty()) {
             return HousePrediction("", 0, 0, PropertyType.EMPTY, Situation.NONE)
@@ -264,7 +267,7 @@ class HouseManagementUseCase @Inject constructor(
             it.blockNumber.equals(referenceHouse.blockNumber, ignoreCase = true) &&
             it.streetName.equals(referenceHouse.streetName, ignoreCase = true) &&
             it.number.isNotBlank()
-        }.sortedBy { it.listOrder } // Ensure global order
+        }.sortedWith(compareBy({ it.data }, { it.listOrder }))
 
         return calculatePrediction(contextHouses, referenceHouse)
     }

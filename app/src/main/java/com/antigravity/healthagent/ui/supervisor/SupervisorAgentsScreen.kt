@@ -110,12 +110,12 @@ fun SupervisorAgentsScreen(
                             imageVector = if (errorMessage != null) Icons.Default.Error else Icons.Default.GroupOff, 
                             contentDescription = null, 
                             modifier = Modifier.size(64.dp),
-                            tint = if (errorMessage != null) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                            tint = if (errorMessage != null) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.7f)
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
                             text = if (errorMessage != null) "Erro ao carregar dados." else "Nenhum agente encontrado.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = Color.White.copy(alpha = 0.75f)
                         )
                     }
                 } else {

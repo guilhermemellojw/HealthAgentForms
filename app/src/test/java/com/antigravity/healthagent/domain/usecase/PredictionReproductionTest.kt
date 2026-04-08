@@ -3,12 +3,19 @@ package com.antigravity.healthagent.domain.usecase
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.data.repository.StreetRepository
+import io.mockk.mockk
+
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class PredictionReproductionTest {
 
-    private val useCase = HouseManagementUseCase(mockk(), mockk())
+    private val useCase = HouseManagementUseCase(
+        repository = mockk<HouseRepository>(),
+        streetRepository = mockk<StreetRepository>()
+    )
 
     @Test
     fun reproduceUserCase() {
@@ -37,7 +44,5 @@ class PredictionReproductionTest {
         assertEquals(2, prediction.sequence)
     }
 
-    private fun mockk(): com.antigravity.healthagent.data.repository.HouseRepository {
-        return io.mockk.mockk()
-    }
+    // Removed local mockk helper in favor of direct io.mockk.mockk use
 }

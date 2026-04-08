@@ -21,12 +21,12 @@ fun ProductionStatsBar(
     isSolarMode: Boolean = false
 ) {
     Box(
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
     ) {
         val verticalPadding = if (isEasyMode) 10.dp else 6.dp
         Row(
             modifier = Modifier
-                .fillMaxWidth()
                 .padding(horizontal = 4.dp, vertical = verticalPadding)
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(if (isEasyMode) 12.dp else 8.dp),

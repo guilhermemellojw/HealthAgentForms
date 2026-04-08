@@ -22,7 +22,8 @@ class HouseRepositoryImpl @Inject constructor(
     private val syncScheduler: SyncScheduler
 ) : HouseRepository {
 
-    private suspend fun ensureDayNotLocked(date: String, agentName: String, agentUid: String? = "") {
+    private suspend fun ensureDayNotLocked(originalDate: String, agentName: String, agentUid: String? = "") {
+        val date = originalDate.replace("/", "-")
         val activity = dayActivityDao.getDayActivity(date, agentName.uppercase(), agentUid ?: "")
         if (activity?.isClosed == true && !activity.isManualUnlock) {
             throw IllegalStateException("Este dia ($date) está bloqueado para edições (Auditoria Concluída).")
@@ -60,6 +61,24 @@ class HouseRepositoryImpl @Inject constructor(
     override suspend fun insertHouse(house: House): Long {
         ensureDayNotLocked(house.data, house.agentName, house.agentUid)
         val id = database.withTransaction {
+            val clashCount = houseDao.checkNaturalKeyConflict(
+                excludeId = 0,
+                date = house.data,
+                agentName = house.agentName,
+                agentUid = house.agentUid,
+                blockNumber = house.blockNumber,
+                blockSequence = house.blockSequence,
+                streetName = house.streetName,
+                number = house.number,
+                sequence = house.sequence,
+                complement = house.complement,
+                bairro = house.bairro,
+                visitSegment = house.visitSegment
+            )
+            if (clashCount > 0) {
+                throw IllegalStateException("Este endereço (${house.streetName}, ${house.number}) já existe em outro registro.")
+            }
+
             // CRITICAL: Cleanup any stale local tombstone for this same house key
             tombstoneDao.deleteByNaturalKey(house.generateNaturalKey(), house.agentName, house.agentUid)
             houseDao.insertHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
@@ -71,6 +90,24 @@ class HouseRepositoryImpl @Inject constructor(
     override suspend fun updateHouse(house: House) {
         ensureDayNotLocked(house.data, house.agentName, house.agentUid)
         database.withTransaction {
+            val clashCount = houseDao.checkNaturalKeyConflict(
+                excludeId = house.id,
+                date = house.data,
+                agentName = house.agentName,
+                agentUid = house.agentUid,
+                blockNumber = house.blockNumber,
+                blockSequence = house.blockSequence,
+                streetName = house.streetName,
+                number = house.number,
+                sequence = house.sequence,
+                complement = house.complement,
+                bairro = house.bairro,
+                visitSegment = house.visitSegment
+            )
+            if (clashCount > 0) {
+                throw IllegalStateException("Alteração impedida: o endereço (${house.streetName}, ${house.number}) já pertence a outro registro. Use o botão de Mesclar se desejar unir os dados.")
+            }
+
             val existing = houseDao.getHouseById(house.id.toLong())
             if (existing != null) {
                 val oldKey = existing.generateNaturalKey()
@@ -97,6 +134,24 @@ class HouseRepositoryImpl @Inject constructor(
         
         database.withTransaction {
             houses.forEach { house ->
+                val clashCount = houseDao.checkNaturalKeyConflict(
+                    excludeId = house.id,
+                    date = house.data,
+                    agentName = house.agentName,
+                    agentUid = house.agentUid,
+                    blockNumber = house.blockNumber,
+                    blockSequence = house.blockSequence,
+                    streetName = house.streetName,
+                    number = house.number,
+                    sequence = house.sequence,
+                    complement = house.complement,
+                    bairro = house.bairro,
+                    visitSegment = house.visitSegment
+                )
+                if (clashCount > 0) {
+                    throw IllegalStateException("Erro ao atualizar lote: conflito de endereço para o imóvel ID ${house.id}.")
+                }
+
                 val existing = houseDao.getHouseById(house.id.toLong())
                 if (existing != null) {
                     val oldKey = existing.generateNaturalKey()
@@ -142,6 +197,10 @@ class HouseRepositoryImpl @Inject constructor(
         syncScheduler.scheduleSync()
     }
 
+    override suspend fun getHousesByDateAndAgent(date: String, agentName: String, agentUid: String): List<House> {
+        return houseDao.getHousesByDateAndAgent(date, agentName.uppercase(), agentUid)
+    }
+
     override fun getDayActivities(dates: List<String>, agentName: String, agentUid: String?): Flow<List<DayActivity>> {
         return dayActivityDao.getDayActivities(dates, agentName, agentUid ?: "")
     }
@@ -157,6 +216,7 @@ class HouseRepositoryImpl @Inject constructor(
             tombstoneDao.deleteByNaturalKey("${dayActivity.date}|${upperName}", upperName, dayActivity.agentUid)
             
             dayActivityDao.insertDayActivity(dayActivity.copy(
+                date = dayActivity.date.replace("/", "-"),
                 agentName = upperName,
                 isSynced = false, 
                 lastUpdated = System.currentTimeMillis()
@@ -252,7 +312,8 @@ class HouseRepositoryImpl @Inject constructor(
         syncScheduler.scheduleSync()
     }
 
-    override suspend fun deleteProduction(date: String, agentName: String, agentUid: String?) {
+    override suspend fun deleteProduction(originalDate: String, agentName: String, agentUid: String?) {
+        val date = originalDate.replace("/", "-")
         val finalUid = agentUid ?: ""
         ensureDayNotLocked(date, agentName, finalUid)
         val upperName = agentName.uppercase()
@@ -275,7 +336,8 @@ class HouseRepositoryImpl @Inject constructor(
         syncScheduler.scheduleSync()
     }
 
-    override suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>, agentUid: String?) {
+    override suspend fun deleteByAgentAndDates(agentName: String, originalDates: List<String>, agentUid: String?) {
+        val dates = originalDates.map { it.replace("/", "-") }
         val upperName = agentName.uppercase()
         val finalUid = agentUid ?: ""
         // Lock Check: Verify all dates
@@ -313,7 +375,8 @@ class HouseRepositoryImpl @Inject constructor(
             // 2. Ensure days with houses have a (closed) activity record
             val dates = houseDao.getDistinctDates(upperName, finalUid)
             
-            dates.forEach { date ->
+            dates.forEach { rawDate ->
+                val date = rawDate.replace("/", "-")
                 val activity = dayActivityDao.getDayActivity(date, upperName, finalUid)
                 if (activity == null) {
                     dayActivityDao.insertDayActivity(DayActivity(
@@ -326,7 +389,7 @@ class HouseRepositoryImpl @Inject constructor(
                         lastUpdated = System.currentTimeMillis()
                     ))
                 } else if (!activity.isClosed) {
-                    dayActivityDao.insertDayActivity(activity.copy(isClosed = true, agentName = upperName, agentUid = finalUid, isSynced = false, lastUpdated = System.currentTimeMillis()))
+                    dayActivityDao.insertDayActivity(activity.copy(date = date, isClosed = true, agentName = upperName, agentUid = finalUid, isSynced = false, lastUpdated = System.currentTimeMillis()))
                 }
             }
         }
@@ -436,6 +499,37 @@ class HouseRepositoryImpl @Inject constructor(
 
             if (toDelete.isNotEmpty()) {
                 toDelete.forEach { houseDao.deleteHouse(it) }
+            }
+        }
+    }
+
+    override suspend fun normalizeLocalDates() {
+        database.withTransaction {
+            val allHouses = houseDao.getAllHousesSnapshot()
+            val housesToUpdate = allHouses.filter { it.data.contains("/") }
+            if (housesToUpdate.isNotEmpty()) {
+                val updated = housesToUpdate.map { 
+                    it.copy(
+                        data = it.data.replace("/", "-"),
+                        isSynced = false,
+                        lastUpdated = System.currentTimeMillis()
+                    )
+                }
+                houseDao.upsertHouses(updated)
+            }
+
+            val allActivities = dayActivityDao.getAllDayActivitiesSnapshot()
+            val activitiesToMigrate = allActivities.filter { it.date.contains("/") }
+            if (activitiesToMigrate.isNotEmpty()) {
+                for (activity in activitiesToMigrate) {
+                    val newActivity = activity.copy(
+                        date = activity.date.replace("/", "-"),
+                        isSynced = false,
+                        lastUpdated = System.currentTimeMillis()
+                    )
+                    dayActivityDao.deleteDayActivity(activity.date, activity.agentName, activity.agentUid)
+                    dayActivityDao.insertDayActivity(newActivity)
+                }
             }
         }
     }

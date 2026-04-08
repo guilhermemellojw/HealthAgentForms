@@ -68,7 +68,7 @@ fun AdminSettingsTab(viewModel: AdminViewModel) {
             "Central de Configuração", 
             style = MaterialTheme.typography.headlineSmall, 
             fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.primary
+            color = Color.White
         )
 
         // --- Section 1: Jornada e Metas ---
@@ -314,9 +314,9 @@ fun AdminSettingsTab(viewModel: AdminViewModel) {
 @Composable
 fun SettingsSectionHeader(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(8.dp))
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
     }
 }
 
@@ -399,8 +399,27 @@ fun AdminDashboardScreen(
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             MeshGradient(modifier = Modifier.fillMaxSize())
             Column(modifier = Modifier.fillMaxSize()) {
-                TabRow(selectedTabIndex = selectedTab, containerColor = Color.Transparent) {
-                    tabs.forEachIndexed { index, title -> Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) }) }
+                TabRow(
+                    selectedTabIndex = selectedTab, 
+                    containerColor = Color.Transparent,
+                    contentColor = Color.White,
+                    divider = { HorizontalDivider(color = Color.White.copy(alpha = 0.12f)) }
+                ) {
+                    tabs.forEachIndexed { index, title -> 
+                        Tab(
+                            selected = selectedTab == index, 
+                            onClick = { selectedTab = index }, 
+                            text = { 
+                                Text(
+                                    title,
+                                    fontWeight = if (selectedTab == index) FontWeight.Black else FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleSmall
+                                ) 
+                            },
+                            selectedContentColor = Color.White,
+                            unselectedContentColor = Color.White.copy(alpha = 0.7f)
+                        ) 
+                    }
                 }
                 
                 val pullToRefreshState = rememberPullToRefreshState()
@@ -421,7 +440,7 @@ fun AdminDashboardScreen(
                             // 1. Access Requests (if any)
                             val accessRequests by viewModel.accessRequests.collectAsState()
                             if (accessRequests.isNotEmpty()) {
-                                Text("Solicitações de Acesso", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
+                                Text("Solicitações de Acesso", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp), color = Color.White)
                                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     items(accessRequests) { request ->
                                         AccessRequestCard(
@@ -446,7 +465,7 @@ fun AdminDashboardScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 IconButton(onClick = { showMasterList = !showMasterList }) {
-                                    Icon(if (showMasterList) Icons.Default.Badge else Icons.AutoMirrored.Filled.ListAlt, null, tint = if (showMasterList) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                                    Icon(if (showMasterList) Icons.Default.Badge else Icons.AutoMirrored.Filled.ListAlt, null, tint = if (showMasterList) Color.White else Color.White.copy(alpha = 0.7f))
                                 }
                             }
                             
@@ -489,7 +508,7 @@ fun AdminDashboardScreen(
                                     }
                                     if (unifiedProfiles.isEmpty()) {
                                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                            Text("Nenhum usuário encontrado.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("Nenhum usuário encontrado.", color = Color.White.copy(alpha = 0.75f))
                                         }
                                     } else {
                                         LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {

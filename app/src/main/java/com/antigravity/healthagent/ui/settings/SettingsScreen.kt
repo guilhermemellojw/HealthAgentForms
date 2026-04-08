@@ -592,8 +592,8 @@ fun SettingsScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         val pInfo = try { context.packageManager.getPackageInfo(context.packageName, 0) } catch (e: Exception) { null }
-                        Text("Eu ACE", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("Versão ${pInfo?.versionName ?: "1.0.0"}", style = MaterialTheme.typography.bodySmall)
+                        Text("Eu ACE", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.9f))
+                        Text("Versão ${pInfo?.versionName ?: "1.0.0"}", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.6f))
                     }
                 }
             }

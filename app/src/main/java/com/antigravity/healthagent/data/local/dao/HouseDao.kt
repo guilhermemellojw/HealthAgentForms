@@ -123,4 +123,34 @@ interface HouseDao {
 
     @Query("UPDATE houses SET agentUid = :uid, agentName = :name WHERE id = :id")
     suspend fun updateHouseIdentity(id: Int, uid: String, name: String)
+
+    @Query("""
+        SELECT COUNT(*) FROM houses 
+        WHERE id != :excludeId 
+        AND data = :date 
+        AND UPPER(agentName) = UPPER(:agentName) 
+        AND agentUid = :agentUid
+        AND UPPER(blockNumber) = UPPER(:blockNumber) 
+        AND UPPER(blockSequence) = UPPER(:blockSequence) 
+        AND UPPER(streetName) = UPPER(:streetName) 
+        AND UPPER(number) = UPPER(:number) 
+        AND sequence = :sequence 
+        AND complement = :complement
+        AND UPPER(bairro) = UPPER(:bairro)
+        AND visitSegment = :visitSegment
+    """)
+    suspend fun checkNaturalKeyConflict(
+        excludeId: Int,
+        date: String,
+        agentName: String,
+        agentUid: String,
+        blockNumber: String,
+        blockSequence: String,
+        streetName: String,
+        number: String,
+        sequence: Int,
+        complement: Int,
+        bairro: String,
+        visitSegment: Int
+    ): Int
 }

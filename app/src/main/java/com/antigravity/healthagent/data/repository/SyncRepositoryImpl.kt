@@ -402,10 +402,12 @@ class SyncRepositoryImpl @Inject constructor(
 
                 // Discovery of Deletions from Metadata Arrays (Correct way)
                 @Suppress("UNCHECKED_CAST")
-                val deletedHouses = agentDoc?.get("deleted_house_ids") as? List<String> ?: emptyList()
+                val deletedHouses = (agentDoc?.get("deleted_house_ids") as? List<String> ?: emptyList())
+                    .map { it.replace("/", "-") }
                 @Suppress("UNCHECKED_CAST")
-                val deletedActivities = agentDoc?.get("deleted_activity_dates") as? List<String> ?: emptyList()
-
+                val deletedActivities = (agentDoc?.get("deleted_activity_dates") as? List<String> ?: emptyList())
+                    .map { it.replace("/", "-") }
+                
                 cloudHouses.addAll(houses)
                 cloudDayActivities.addAll(activities)
                 cloudDeletedHouses.addAll(deletedHouses)
@@ -746,17 +748,22 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun fetchBairros(): Result<List<String>> {
         return try {
-            val snapshot = withTimeoutOrNull(1500) {
-                firestore.collection("metadata").document("bairros")
+            val snapshot = withTimeoutOrNull(2500) {
+                firestore.collection("metadata").document("locations")
                     .get().await()
             }
             
-            if (snapshot == null) {
+            if (snapshot == null || !snapshot.exists()) {
                 return Result.success(com.antigravity.healthagent.utils.AppConstants.BAIRROS)
             }
             
-            val bairros = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
-            Result.success(bairros.map { it.uppercase().trim() }.sorted())
+            val bairros = (snapshot.get("bairros") as? List<*>)?.filterIsInstance<String>()?.filter { it.isNotBlank() } ?: emptyList()
+            
+            if (bairros.isEmpty()) {
+                Result.success(com.antigravity.healthagent.utils.AppConstants.BAIRROS)
+            } else {
+                Result.success(bairros.map { it.uppercase().trim() }.sorted())
+            }
         } catch (e: Exception) {
             android.util.Log.w("SyncRepository", "fetchBairros offline fallback: ${e.message}")
             Result.success(com.antigravity.healthagent.utils.AppConstants.BAIRROS)
@@ -765,16 +772,19 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun addBairro(name: String): Result<Unit> {
         return try {
-            val normalizedName = name.trim()
+            val normalizedName = name.trim().uppercase()
             if (normalizedName.isBlank()) return Result.failure(Exception("Nome do bairro não pode ser vazio"))
             
             val docRef = firestore.collection("metadata").document("locations")
             val snapshot = docRef.get().await()
-            val current = (snapshot.get("bairros") as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
+            
+            // If the document doesn't exist or is empty, we SEED it with the current built-in list + the new one
+            val current = (snapshot.get("bairros") as? List<*>)?.filterIsInstance<String>()?.toMutableList() 
+                ?: com.antigravity.healthagent.utils.AppConstants.BAIRROS.toMutableList()
             
             if (!current.contains(normalizedName)) {
                 current.add(normalizedName)
-                docRef.set(mapOf("bairros" to current.sorted())).await()
+                docRef.set(mapOf("bairros" to current.map { it.uppercase().trim() }.sorted())).await()
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -786,10 +796,13 @@ class SyncRepositoryImpl @Inject constructor(
         return try {
             val docRef = firestore.collection("metadata").document("locations")
             val snapshot = docRef.get().await()
-            val current = (snapshot.get("bairros") as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
             
-            if (current.remove(name)) {
-                docRef.set(mapOf("bairros" to current.sorted())).await()
+            // If we are deleting from something that doesn't exist in cloud yet, we start from built-in list
+            val current = (snapshot.get("bairros") as? List<*>)?.filterIsInstance<String>()?.toMutableList()
+                ?: com.antigravity.healthagent.utils.AppConstants.BAIRROS.toMutableList()
+            
+            if (current.remove(name.trim().uppercase())) {
+                docRef.set(mapOf("bairros" to current.map { it.uppercase().trim() }.sorted())).await()
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -1098,6 +1111,7 @@ class SyncRepositoryImpl @Inject constructor(
             house.copy(
                 sequence = finalSequence,
                 complement = finalComplement,
+                data = house.data.replace("/", "-"),
                 createdAt = createdAt, 
                 lastUpdated = lastUpdated, 
                 agentUid = uid, 
@@ -1133,6 +1147,7 @@ class SyncRepositoryImpl @Inject constructor(
             val finalAgentName = (if (agentName.isNotBlank()) agentName else (activity.agentName.ifBlank { "" })).trim().uppercase()
             activity.copy(
                 status = finalStatus,
+                date = activity.date.replace("/", "-"),
                 isClosed = isClosed,
                 isManualUnlock = isManualUnlock,
                 lastUpdated = lastUpdated, 

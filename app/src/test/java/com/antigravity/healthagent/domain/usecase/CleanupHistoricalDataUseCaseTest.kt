@@ -32,7 +32,7 @@ class CleanupHistoricalDataUseCaseTest {
         }
         override suspend fun getAllHousesSnapshot(): List<House> = emptyList()
         override fun getAllHousesSnapshotFlow(): Flow<List<House>> = flowOf(emptyList())
-        override suspend fun insertHouse(house: House) {}
+        override suspend fun insertHouse(house: House): Long = 0L
         override suspend fun updateHouse(house: House) {}
         override suspend fun updateHouses(houses: List<House>) {}
         override suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String?) {}

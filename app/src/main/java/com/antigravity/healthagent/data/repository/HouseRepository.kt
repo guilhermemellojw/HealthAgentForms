@@ -18,6 +18,7 @@ interface HouseRepository {
     suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String? = null)
     suspend fun deleteHouse(house: House)
     suspend fun replaceAllHouses(houses: List<House>) // Restore
+    suspend fun getHousesByDateAndAgent(date: String, agentName: String, agentUid: String): List<House>
 
     // DayActivity (Weekly Status)
     fun getDayActivities(dates: List<String>, agentName: String, agentUid: String? = null): Flow<List<DayActivity>>
@@ -37,4 +38,5 @@ interface HouseRepository {
     suspend fun clearAllData()
     suspend fun migrateLocalData(agentName: String, email: String, targetUid: String)
     suspend fun deduplicateAgentData(agentName: String, agentUid: String)
+    suspend fun normalizeLocalDates()
 }

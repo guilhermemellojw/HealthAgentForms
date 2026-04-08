@@ -60,7 +60,8 @@ class HouseValidationUseCase @Inject constructor() {
             if (invalidFields.isNotEmpty()) {
                 errorHouseIds.add(house.id)
                 val missingFields = mutableListOf<String>()
-                if (house.number.isBlank() && house.sequence == 0) missingFields.add("Número/Sequência")
+                val isMissingNumAndSeq = house.number.isBlank() && house.sequence == 0
+                if (isMissingNumAndSeq) missingFields.add("Número/Sequência")
                 if (house.propertyType == PropertyType.EMPTY) missingFields.add("Tipo")
                 if (house.situation == Situation.EMPTY) missingFields.add("Situação")
                 if (house.agentName.isBlank()) missingFields.add("Agente")

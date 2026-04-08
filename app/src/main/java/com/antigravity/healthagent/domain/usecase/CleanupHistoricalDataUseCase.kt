@@ -43,7 +43,7 @@ class CleanupHistoricalDataUseCase @Inject constructor(
 
                     if (housesToRemove.isNotEmpty() || activitiesToRemove.isNotEmpty()) {
                         val houseKeys = housesToRemove.map { it.generateNaturalKey() }
-                        val activityTombstones = activitiesToRemove.map { "${it.date}|${it.agentName.uppercase()}" }
+                        val activityTombstones = activitiesToRemove.map { "${it.date.replace("/", "-")}|${it.agentName.uppercase()}" }
                         
                         // Delete from cloud and record tombstones for THIS agent
                         syncRepository.recordBulkDeletions(houseKeys, activityTombstones, agent.uid)

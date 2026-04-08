@@ -55,7 +55,7 @@ class HomeViewModel @Inject constructor(
 ) : ViewModel() {
 
     // --- State Definitions ---
-    private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+    private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
     private val displayDateFormatter: SimpleDateFormat get() = SimpleDateFormat("dd/MM", Locale.US)
     
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -467,17 +467,18 @@ class HomeViewModel @Inject constructor(
             }
         }
 
-        // AUTO-MERGE OBSERVER: Automatically commit "Red" drafts when their collision is resolved in the DB.
-        // It also prunes "In-Flight" and "Draft" records that have successfully synced to the database.
+        // PRUNE OBSERVER: Reconciles the Local State (Drafts/In-Flights) with the Source of Truth (Database).
         viewModelScope.launch {
-            houses.collect { currentHouses ->
+            // Observe the raw Database flow (allHousesFlow) instead of the merged 'houses' state
+            // to prevent the reconciliation logic from matching against its own local overlays.
+            allHousesFlow.collect { dbHouses ->
                 _pendingUpdateDrafts.update { currentDrafts ->
                     if (currentDrafts.isEmpty()) return@update currentDrafts
                     val resolvedIds = mutableListOf<Int>()
                     
                     currentDrafts.forEach { (id, draft) ->
-                        // 1. Check for persistent collisions
-                        val stillClashes = currentHouses.any { 
+                        // 1. Check for persistent collisions in the DB
+                        val stillClashes = dbHouses.any { 
                             it.id != draft.id && 
                             it.data == draft.data && 
                             it.agentUid == draft.agentUid &&
@@ -492,8 +493,9 @@ class HomeViewModel @Inject constructor(
                             it.visitSegment == draft.visitSegment
                         }
                         
-                        // 2. Check for Perfect Sync (ignoring fragile 'lastUpdated' timestamp)
-                        val dbMatch = currentHouses.find { it.id == id }
+                        // 2. Perfect Sync Check: Prune only if the DB record exactly matches ALL user-editable fields.
+                        // This prevents the UI from flickering back to old state during sync lag.
+                        val dbMatch = dbHouses.find { it.id == id }
                         val isDraftSynced = dbMatch != null && 
                             dbMatch.number == draft.number && 
                             dbMatch.sequence == draft.sequence && 
@@ -501,14 +503,24 @@ class HomeViewModel @Inject constructor(
                             dbMatch.propertyType == draft.propertyType &&
                             dbMatch.situation == draft.situation &&
                             dbMatch.streetName == draft.streetName &&
-                            dbMatch.blockNumber == draft.blockNumber
+                            dbMatch.blockNumber == draft.blockNumber &&
+                            dbMatch.blockSequence == draft.blockSequence &&
+                            dbMatch.bairro == draft.bairro &&
+                            dbMatch.observation == draft.observation &&
+                            dbMatch.a1 == draft.a1 && dbMatch.a2 == draft.a2 &&
+                            dbMatch.b == draft.b && dbMatch.c == draft.c &&
+                            dbMatch.d1 == draft.d1 && dbMatch.d2 == draft.d2 &&
+                            dbMatch.e == draft.e && dbMatch.eliminados == draft.eliminados &&
+                            dbMatch.larvicida == draft.larvicida && dbMatch.comFoco == draft.comFoco &&
+                            dbMatch.quarteiraoConcluido == draft.quarteiraoConcluido &&
+                            dbMatch.localidadeConcluida == draft.localidadeConcluida
                         
-                        if (!stillClashes || isDraftSynced) {
+                        // Prune if synced or if it no longer clashes and was manually confirmed (implicit).
+                        if (isDraftSynced) {
                             resolvedIds.add(id)
-                            if (!isDraftSynced) {
-                                // If it no longer clashes but isn't in DB yet, commit it now
-                                performUpdateHouse(draft)
-                            }
+                        } else if (!stillClashes) {
+                            // If it no longer clashes but isn't synced, we should eventually commit it.
+                            // But for safety, keep it as a draft until the USER or the background sync handles it.
                         }
                     }
                     
@@ -519,10 +531,12 @@ class HomeViewModel @Inject constructor(
                 _housesInFlight.update { inFlights ->
                     if (inFlights.isEmpty()) return@update inFlights
                     inFlights.filter { inFlight ->
-                        // Match by natural identity + content to ensure it's fully persisted
-                        !currentHouses.any { db -> 
+                        // Match by natural identity + content against the RAW database records.
+                        !dbHouses.any { db -> 
                             db.listOrder == inFlight.listOrder && 
                             db.data == inFlight.data &&
+                            db.blockNumber == inFlight.blockNumber &&
+                            db.streetName == inFlight.streetName &&
                             db.number == inFlight.number &&
                             db.sequence == inFlight.sequence &&
                             db.complement == inFlight.complement
@@ -533,7 +547,6 @@ class HomeViewModel @Inject constructor(
         }
 
         // UI state reducer
-        @Suppress("UNCHECKED_CAST")
         combine(
             latestHouses, _data, _agentName, _searchQuery, _isSupervisor, 
             _municipio, _bairro, _categoria, _zona, _ciclo, _tipo, _atividade,
@@ -785,8 +798,10 @@ class HomeViewModel @Inject constructor(
                 soundManager.playWarning()
             }
             return false
+        } else {
+            _integrityDialogMessage.value = null
+            return true
         }
-        return true
     }
 
     fun triggerDelayedValidation(delayMs: Long = 3000) {
@@ -815,6 +830,7 @@ class HomeViewModel @Inject constructor(
                 houseManagementUseCase.migrateStreetNamesToFormat()
                 houseManagementUseCase.migrateBairrosToUppercase()
                 houseManagementUseCase.migrateDateFormats()
+                repository.normalizeLocalDates()
                 syncRepository.performDataCleanup()
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error migrating data", e)
@@ -1507,9 +1523,9 @@ class HomeViewModel @Inject constructor(
         // LOCK ENFORCEMENT
         val isUnlocked = isWorkdayManualUnlock.value
         val isAdmin = _isAdmin.value
+        // Early lock check - If day is closed, we shouldn't even reach here from the UI usually (since fields are disabled)
+        // But for safety, we return early WITHOUT a noisy Snackbar during active typing
         if (uiState.value.isDayClosed && !isUnlocked && !isAdmin && house.id != 0) {
-            _uiEvent.value = "Este dia está FECHADO. Desbloqueie para editar."
-            soundManager.playWarning()
             return
         }
 
@@ -1564,10 +1580,11 @@ class HomeViewModel @Inject constructor(
         // UNIFIED PERSISTENCE (Flicker-Free): Always keep latest typing in Drafts
         _pendingUpdateDrafts.update { it + (house.id to house) }
         
+        // 2. Perform DB update ONLY if no clash with ANOTHER ID
         if (clashingHouse != null) {
-            // DUPLICATE DETECTED: Still keep as a \"draft\" in memory.
-            // But deferred confirmation dialog until Close Day or Sync per user request.
-            // We NO LONGER call performUpdateHouse here, which prevents the DB from triggering REPLACE.
+            // DUPLICATE DETECTED: Still keep as a "draft" in memory so the UI reflects the user's input.
+            // But skip DB update to prevent a REPLACE/Merge that would delete the other record.
+            android.util.Log.w("HomeViewModel", "Clash detected for house ${house.id} with ${clashingHouse.id}. Skipping DB update.")
             clashDialogJobs[house.id]?.cancel()
             clashDialogJobs.remove(house.id)
         } else {
@@ -1600,7 +1617,8 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             _recentlyEditedHouseIds.update { it + (houseId to now) }
-            delay(2500) // Silent window duration
+            // If the user continues editing, they should call this again which will refresh the timestamp
+            delay(4000) // Slightly longer window (4s) for better UX
             _recentlyEditedHouseIds.update { current ->
                 if (current[houseId] == now) current - houseId else current
             }
@@ -1813,8 +1831,13 @@ class HomeViewModel @Inject constructor(
                 // Trigger transition to the target date so the user can see the red clash
                 _data.value = newDate
             } else {
-                // NO CLASH: Safe to move in database
-                repository.updateHouse(updatedHouse) 
+                if (updatedHouse.id == 0) {
+                    _housesInFlight.update { inFlights ->
+                        inFlights.map { if (it.listOrder == house.listOrder) updatedHouse else it }
+                    }
+                } else {
+                    repository.updateHouse(updatedHouse.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
+                }
                 
                 // Clear any draft from the original date to prevent ghosts
                 _pendingUpdateDrafts.update { it - updatedHouse.id }
@@ -1829,8 +1852,67 @@ class HomeViewModel @Inject constructor(
 
     fun moveHousesToDate(oldDate: String, newDate: String) {
         viewModelScope.launch {
-            val housesToMove = houses.value.filter { it.data == oldDate }
-            repository.updateHouses(housesToMove.map { it.copy(data = newDate) })
+            try {
+                val currentAgent = _agentName.value
+                val currentUid = _remoteAgentUid.value ?: _currentUserUid.value
+                
+                // Normalize inputs for robust querying and state updates
+                val normalizedOldDate = oldDate.replace("/", "-")
+                val normalizedNewDate = newDate.replace("/", "-")
+                
+                repository.runInTransaction {
+                    // 1. Get all houses for the old date
+                    val housesToMove = repository.getHousesByDateAndAgent(normalizedOldDate, currentAgent, currentUid)
+                    
+                    if (housesToMove.isNotEmpty()) {
+                        // 2. Update houses with new date, unsynced flag and timestamp
+                        val updatedHouses = housesToMove.map { 
+                            it.copy(
+                                data = newDate,
+                                isSynced = false,
+                                lastUpdated = System.currentTimeMillis()
+                            ) 
+                        }
+                        repository.updateHouses(updatedHouses)
+                    }
+
+                    // 3. Migrate DayActivity (Status/Observations)
+                    val oldActivity = repository.getDayActivity(oldDate, currentAgent, currentUid)
+                    if (oldActivity != null) {
+                        // Check if an activity already exists for the new date
+                        val existingNewActivity = repository.getDayActivity(normalizedNewDate, currentAgent, currentUid)
+                        if (existingNewActivity == null) {
+                            // Safe to move the entire activity record
+                            repository.updateDayActivity(oldActivity.copy(date = normalizedNewDate))
+                            repository.deleteDayActivity(normalizedOldDate, currentAgent, currentUid)
+                        } else {
+                            // Merge if necessary
+                            repository.deleteDayActivity(normalizedOldDate, currentAgent, currentUid)
+                        }
+                    }
+                }
+                
+                // 4. Handle in-flight houses for that date
+                _housesInFlight.update { inFlights ->
+                    inFlights.map { 
+                        if (it.data.replace("/", "-") == normalizedOldDate && it.agentUid == currentUid) {
+                            it.copy(data = normalizedNewDate)
+                        } else it
+                    }
+                }
+
+                _uiEvent.value = "Produção movida com sucesso!"
+                soundManager.playPop()
+                
+                // If we are currently looking at the old date, follow the movement to the new date
+                if (_data.value.replace("/", "-") == normalizedOldDate) {
+                    _data.value = normalizedNewDate
+                }
+                
+            } catch (e: Exception) {
+                _uiEvent.value = "Erro ao mover produção: ${e.message}"
+                e.printStackTrace()
+            }
         }
     }
 
@@ -1933,16 +2015,20 @@ class HomeViewModel @Inject constructor(
     fun clearNavigationTab() {
         _navigationTab.value = null
     }
-    fun updateDayStatus(date: String, status: String) {
+    fun updateDayStatus(originalDate: String, status: String) {
+        val date = originalDate.replace("/", "-")
         viewModelScope.launch {
             try {
                 var wasWorkingChange: Pair<Boolean, Boolean>? = null
+                var rippleError: String? = null
                 
                 repository.runInTransaction {
                     val currentAgent = _agentName.value
                     val currentUid = _remoteAgentUid.value ?: _currentUserUid.value
+                    
+                    // Normalize all activity dates for lookup consistency
                     val allActivities = repository.getAllDayActivitiesOnce(currentAgent, currentUid)
-                        .associateBy { it.date }
+                        .associateBy { it.date.replace("/", "-") }
                     
                     val existing = allActivities[date]
                     val oldStatus = existing?.status ?: "NORMAL"
@@ -1956,19 +2042,20 @@ class HomeViewModel @Inject constructor(
                     }
                     
                     // Update the status first
-                    if (existing != null) {
+                    val updatedActivity = if (existing != null) {
                         if (existing.agentUid != currentUid) {
                             repository.deleteDayActivity(existing.date, existing.agentName, existing.agentUid)
                         }
-                        repository.updateDayActivity(existing.copy(status = status, agentUid = currentUid))
+                        existing.copy(date = date, status = status, agentUid = currentUid)
                     } else {
-                        repository.updateDayActivity(DayActivity(date = date, status = status, agentName = currentAgent, agentUid = currentUid))
+                        DayActivity(date = date, status = status, agentName = currentAgent, agentUid = currentUid)
                     }
+                    repository.updateDayActivity(updatedActivity)
 
                     if (wasWorking != isWorking) {
                         // Ripple Effect: Shift production dates
                         val updatedStatusMap = allActivities.toMutableMap()
-                        updatedStatusMap[date] = DayActivity(date, status, agentName = currentAgent, agentUid = currentUid)
+                        updatedStatusMap[date] = updatedActivity
                         
                         // Analyze all production for this agent/remote agent
                         val allAgentHouses = repository.getAllHousesOnce(currentAgent, currentUid)
@@ -1976,13 +2063,13 @@ class HomeViewModel @Inject constructor(
                         
                         // Analyze production at or after the changed date
                         val housesToShift = allAgentHouses.filter { 
-                            val houseDate = try { dateFormatter.parse(it.data) } catch (e: Exception) { null }
-                            houseDate != null && !houseDate.before(targetDateObj) && it.agentName.equals(currentAgent, ignoreCase = true)
+                            val houseDate = try { dateFormatter.parse(it.data.replace("/", "-")) } catch (e: Exception) { null }
+                            houseDate != null && !houseDate.before(targetDateObj)
                         }
                         
                         if (housesToShift.isNotEmpty()) {
                             val productionDates = housesToShift.map { it.data }.distinct()
-                            val productionDatesSet = productionDates.toSet()
+                            val productionDatesSet = productionDates.map { it.replace("/", "-") }.toSet()
                             val dateToOffset = mutableMapOf<String, Int>()
                             
                             // 1. Calculate offsets using old configuration
@@ -1990,7 +2077,7 @@ class HomeViewModel @Inject constructor(
                                 var offset = 0
                                 val cal = Calendar.getInstance()
                                 cal.time = targetDateObj
-                                val pDateObj = try { dateFormatter.parse(pDate) } catch (e: Exception) { null } ?: return@forEach
+                                val pDateObj = try { dateFormatter.parse(pDate.replace("/", "-")) } catch (e: Exception) { null } ?: return@forEach
                                 
                                 while (cal.time.before(pDateObj)) {
                                     val currentDateStr = dateFormatter.format(cal.time)
@@ -2026,43 +2113,53 @@ class HomeViewModel @Inject constructor(
                             val updatedHouses = housesToShift.mapNotNull { house ->
                                 val offset = dateToOffset[house.data]
                                 val newDate = offsetToNewDate[offset]
-                                if (newDate != null && newDate != house.data) {
-                                    house.copy(data = newDate)
+                                if (newDate != null && newDate != house.data.replace("/", "-")) {
+                                    house.copy(
+                                        data = newDate, 
+                                        isSynced = false, 
+                                        lastUpdated = System.currentTimeMillis()
+                                    )
                                 } else null
                             }
                             
                              if (updatedHouses.isNotEmpty()) {
-                                 repository.updateHouses(updatedHouses)
+                                 try {
+                                     repository.updateHouses(updatedHouses)
+                                 } catch (e: IllegalStateException) {
+                                     // Capture the error message to show to the user outside the transaction
+                                     rippleError = "Não foi possível mover a produção porque alguns dias futuros estão bloqueados (Auditoria Concluída)."
+                                     throw e // Still throw to roll back the status change for consistency
+                                 }
                              }
-                         }
-                     }
-                 }
-                 
-                 // Dynamic Date Navigation (Outside transaction block)
-                 wasWorkingChange?.let { (wasWorking, isWorking) ->
-                     if (!isWorking && date == _data.value) {
-                         // Current day is no longer working, find next one
-                         val next = dayManagementUseCase.getNextBusinessDay(date, _agentName.value)
-                         if (next.isNotBlank()) {
-                             _data.value = next
-                             soundManager.playPop()
-                         }
-                     } else if (isWorking) {
-                         // A day became working again. If it's earlier than current selection, move back to it
-                         val currentD = try { dateFormatter.parse(_data.value) } catch (e: Exception) { null }
-                         val newD = try { dateFormatter.parse(date) } catch (e: Exception) { null }
-                         if (newD != null && currentD != null && newD.before(currentD)) {
-                             _data.value = date
-                             soundManager.playPop()
-                         }
-                     }
-                 }
-                 
-                 // Sound feedback (Outside transaction)
-                 soundManager.playSuccess()
+                        }
+                    }
+                }
+                
+                // Success path
+                wasWorkingChange?.let { (wasWorking, isWorking) ->
+                    if (!isWorking && date == _data.value) {
+                        val next = dayManagementUseCase.getNextBusinessDay(date, _agentName.value)
+                        if (next.isNotBlank()) {
+                            _data.value = next
+                            soundManager.playPop()
+                        }
+                    } else if (isWorking) {
+                        val currentD = try { dateFormatter.parse(_data.value) } catch (e: Exception) { null }
+                        val newD = try { dateFormatter.parse(date) } catch (e: Exception) { null }
+                        if (newD != null && currentD != null && newD.before(currentD)) {
+                            _data.value = date
+                            soundManager.playPop()
+                        }
+                    }
+                }
+                soundManager.playSuccess()
+            } catch (e: IllegalStateException) {
+                android.util.Log.e("HomeViewModel", "Day locked during ripple: ${e.message}")
+                _uiEvent.value = "Erro: Alguns dias estão bloqueados para Auditoria."
+                soundManager.playWarning()
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error updating day status", e)
-                _uiEvent.value = "Erro ao atualizar status do dia: ${e.message}"
+                _uiEvent.value = "Erro ao atualizar status: ${e.message}"
                 soundManager.playWarning()
             }
         }

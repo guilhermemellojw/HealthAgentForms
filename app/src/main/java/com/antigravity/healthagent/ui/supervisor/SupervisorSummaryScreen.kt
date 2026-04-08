@@ -300,8 +300,8 @@ fun SupervisorSummaryScreen(
                 Text(
                     text = "Este resumo contempla todos os registros enviados pelos agentes para o período selecionado.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontWeight = FontWeight.Bold,
                     lineHeight = 16.sp,
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )

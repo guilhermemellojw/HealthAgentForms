@@ -68,14 +68,25 @@ data class House(
      * will break synchronization by changing the document ID in Firestore, leading to duplicates.
      */
     fun generateNaturalKey(): String {
+        // Firestore forbidden characters in IDs: . / .. __.*__
+        // We replace any non-alphanumeric separators (slash, dot, multiple spaces) with a single dash.
+        fun sanitize(text: String): String = text.trim()
+            .replace("/", "-")
+            .replace(".", "-")
+            .replace(Regex("\\s+"), " ")
+            .replace(Regex("-+"), "-")
+
         val normalizedDate = data.replace("/", "-")
-        val normalizedStreet = streetName.trim().replace(Regex("\\s+"), " ")
-        val normalizedBairro = bairro.trim().replace(Regex("\\s+"), " ")
-        val normalizedAgent = agentName.trim().replace(Regex("\\s+"), " ")
+        val normalizedStreet = sanitize(streetName)
+        val normalizedBairro = sanitize(bairro)
+        val normalizedAgent = sanitize(agentName)
+        val normalizedBlock = sanitize(blockNumber)
+        val normalizedBlockSeq = sanitize(blockSequence)
+        val normalizedNumber = sanitize(number)
         
         // Uniqueness is guaranteed by agentUid + normalizedAgent + date + address details + visitSegment.
         // We remove createdAt to ensure the key is stable even if the house object is recreated.
-        return "${agentUid}_${normalizedAgent}_${normalizedDate}_${blockNumber.trim()}_${blockSequence.trim()}_${normalizedStreet}_${number.trim()}_${sequence}_${complement}_${normalizedBairro}_${visitSegment}".uppercase()
+        return "${agentUid}_${normalizedAgent}_${normalizedDate}_${normalizedBlock}_${normalizedBlockSeq}_${normalizedStreet}_${normalizedNumber}_${sequence}_${complement}_${normalizedBairro}_${visitSegment}".uppercase()
     }
 
     fun toFirestoreMap(): Map<String, Any?> {

@@ -531,7 +531,6 @@ fun HomeScreen(
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             val titleText = if (isSearchActive) "Buscar Logradouro" 
@@ -745,14 +744,14 @@ fun HomeScreen(
                 }
 
                 val fabText = when {
-                    uiState.isDayClosed && !uiState.isAdmin -> "DIA FECHADO"
+                    uiState.isDayClosed -> "DIA FECHADO"
                     hasErrors -> "CORRIGIR ERROS"
                     isGoalReached && !uiState.isManualUnlock -> "FECHAR PRODUÇÃO"
                     else -> "ADICIONAR"
                 }
                 
                 val fabIcon = when {
-                    uiState.isDayClosed && !uiState.isAdmin -> Icons.Default.Lock
+                    uiState.isDayClosed -> Icons.Default.Lock
                     hasErrors -> Icons.Default.Warning
                     isGoalReached && !uiState.isManualUnlock -> Icons.Default.Check
                     else -> Icons.Default.Add
@@ -826,6 +825,24 @@ fun HomeScreen(
                 .fillMaxSize()
         ) {
             MeshGradient(modifier = Modifier.fillMaxSize())
+            
+            // Repositioned SnackbarHost to the TOP
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 16.dp) // Subtle gap below the TopAppBar
+                    .zIndex(10f), // Ensure it stays above other content
+                snackbar = { data ->
+                    Snackbar(
+                        snackbarData = data,
+                        containerColor = MaterialTheme.colorScheme.inverseSurface,
+                        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+            )
             Column(modifier = Modifier.fillMaxSize()) {
                 // Item 1: Minimalist Progress Line
                 if (!isSearchActive && !isReorderMode) {
