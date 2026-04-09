@@ -64,7 +64,7 @@ fun CompactInputBox(
     val targetBorderColor = when {
         isError -> MaterialTheme.colorScheme.error
         isFocusedInternal -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 0.7f else 0.3f)
+        else -> MaterialTheme.colorScheme.primary.copy(alpha = if (isEasyMode) 0.7f else if (enabled) 0.7f else 0.3f)
     }
     
     // Defer animations to only when focused or in error to save UI cycles during scroll
@@ -72,7 +72,7 @@ fun CompactInputBox(
         androidx.compose.animation.animateColorAsState(targetValue = targetBorderColor, label = "borderColor").value
     } else targetBorderColor
     
-    val targetBorderWidth = if (isFocusedInternal || (isEasyMode && isError)) 2.dp else if (isError) 1.5.dp else 1.dp
+    val targetBorderWidth = if (isFocusedInternal || (isEasyMode && isError)) 2.dp else if (isEasyMode) 1.5.dp else if (isError) 1.5.dp else 1.dp
     val animatedBorderWidth = if (isFocusedInternal || isError) {
         androidx.compose.animation.core.animateDpAsState(targetValue = targetBorderWidth, label = "borderWidth").value
     } else targetBorderWidth
@@ -112,32 +112,34 @@ fun CompactInputBox(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text(
-             text = label.uppercase(),
-             style = MaterialTheme.typography.labelSmall,
-             color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
-             fontSize = if (isEasyMode) 10.sp else 9.sp,
-             fontWeight = FontWeight.Black,
-             maxLines = 1,
-             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-        )
+        if (!isEasyMode) {
+            Text(
+                 text = label.uppercase(),
+                 style = MaterialTheme.typography.labelSmall,
+                 color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
+                 fontSize = 9.sp,
+                 fontWeight = FontWeight.Black,
+                 maxLines = 1,
+                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+        }
         // Clickable Box if onClick provided (e.g. for DatePicker)
         if (readOnly && onClick != null) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(if (isEasyMode) 40.dp else 28.dp)
+                    .height(if (isEasyMode) 64.dp else 40.dp)
                     .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
                 contentAlignment = Alignment.Center
             ) {
-                 Text(
-                    text = value,
+                Text(
+                    text = value.ifBlank { "—" },
                     style = TextStyle(
                         textAlign = TextAlign.Center, 
-                        fontSize = if (isEasyMode) 18.sp else 15.sp, 
-                        fontWeight = FontWeight.Bold
+                        fontSize = if (isEasyMode) 22.sp else 15.sp, 
+                        fontWeight = FontWeight.ExtraBold
                     ),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha)
+                    color = if (isEasyMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                 )
             }
         } else {
@@ -147,21 +149,57 @@ fun CompactInputBox(
                 enabled = enabled,
                 textStyle = TextStyle(
                     textAlign = TextAlign.Center,
-                    fontSize = if (isEasyMode) 18.sp else 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha)
+                    fontSize = if (isEasyMode) 22.sp else 15.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (isEasyMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                 ),
                 singleLine = true,
                 decorationBox = { innerTextField ->
-                    Box(contentAlignment = Alignment.Center) {
-                        innerTextField()
+                    if (isEasyMode) {
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(top = 2.dp, bottom = 2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = label.uppercase(),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                textAlign = TextAlign.Center,
+                                letterSpacing = 0.5.sp
+                            )
+                            
+                            Box(
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                innerTextField()
+                            }
+                        }
+                    } else {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (value.isEmpty()) {
+                                Text(
+                                    text = "—",
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                    style = TextStyle(
+                                        textAlign = TextAlign.Center,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                            }
+                            innerTextField()
+                        }
                     }
                 },
                 keyboardOptions = keyboardOptions,
                 readOnly = readOnly,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(if (isEasyMode) 40.dp else 28.dp)
+                    .height(if (isEasyMode) 64.dp else 28.dp)
                     .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
                     .onFocusChanged { 
                         isFocusedInternal = it.isFocused
@@ -187,8 +225,8 @@ fun CounterInput(
                 RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp)
             )
             .border(
-                width = if (isEasyMode && value > 0) 2.dp else 1.dp,
-                color = if (isEasyMode && value > 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                width = if (isEasyMode) 1.5.dp else 1.dp,
+                color = if (isEasyMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                 else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                 shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp)
             )
@@ -274,11 +312,11 @@ fun CompactDropdown(
     val targetBorderColor = when {
         isError -> MaterialTheme.colorScheme.error
         expanded -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 0.7f else 0.3f)
+        else -> MaterialTheme.colorScheme.primary.copy(alpha = if (isEasyMode) 0.7f else if (enabled) 0.7f else 0.3f)
     }
     val animatedBorderColor by androidx.compose.animation.animateColorAsState(targetValue = targetBorderColor, label = "ddBorderColor")
     
-    val targetBorderWidth = if (expanded || (isEasyMode && isError)) 2.dp else 1.dp
+    val targetBorderWidth = if (expanded || (isEasyMode && isError)) 2.dp else if (isEasyMode) 1.5.dp else 1.dp
     val animatedBorderWidth by androidx.compose.animation.core.animateDpAsState(targetValue = targetBorderWidth, label = "ddBorderWidth")
 
     val containerColor = if (isError) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f) 
@@ -318,45 +356,88 @@ fun CompactDropdown(
                 .padding(vertical = if (isEasyMode) 8.dp else 4.dp, horizontal = if (isEasyMode) 8.dp else 4.dp),
              horizontalAlignment = Alignment.CenterHorizontally
         ) {
+        if (!isEasyMode) {
              Text(
                  text = label.uppercase(),
                  style = MaterialTheme.typography.labelSmall,
                  color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
-                 fontSize = if (isEasyMode) 10.sp else 9.sp,
+                 fontSize = 9.sp,
                  fontWeight = FontWeight.Black,
                  maxLines = 1,
                  overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
              )
+        }
             
             // Value and Icon row
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(if (isEasyMode) 40.dp else 28.dp)
+                    .height(if (isEasyMode) 64.dp else 28.dp)
                     .then(if (enabled) Modifier.clickable { expanded = true } else Modifier),
                 contentAlignment = Alignment.Center
             ) {
-                Row(
-                   modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
-                   horizontalArrangement = Arrangement.Center,
-                   verticalAlignment = Alignment.CenterVertically
-                ) {
-                   Text(
-                       text = currentValue,
-                       color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
-                       fontSize = if (isEasyMode) 18.sp else 15.sp,
-                       fontWeight = FontWeight.Bold,
-                       modifier = Modifier.weight(1f),
-                       textAlign = TextAlign.Center,
-                       maxLines = 1,
-                       overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                   )
-                   Icon(
-                       imageVector = Icons.Default.ArrowDropDown,
-                       contentDescription = null,
-                       tint = MaterialTheme.colorScheme.primary.copy(alpha = contentAlpha),
-                       modifier = Modifier.size(if (isEasyMode) 24.dp else 20.dp)
-                   )
+                if (isEasyMode) {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(top = 2.dp, bottom = 2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = label.uppercase(),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            textAlign = TextAlign.Center,
+                            letterSpacing = 0.5.sp
+                        )
+                        
+                        Row(
+                           modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 4.dp),
+                           horizontalArrangement = Arrangement.Center,
+                           verticalAlignment = Alignment.CenterVertically
+                        ) {
+                           Text(
+                               text = currentValue,
+                               color = if (isEasyMode && currentValue != "-") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
+                               fontSize = 22.sp,
+                               fontWeight = FontWeight.ExtraBold,
+                               modifier = Modifier.weight(1f),
+                               textAlign = TextAlign.Center,
+                               maxLines = 1,
+                               overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                           )
+                           Icon(
+                               Icons.Default.ArrowDropDown,
+                               contentDescription = null,
+                               tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                               modifier = Modifier.size(20.dp)
+                           )
+                        }
+                    }
+                } else {
+                    Row(
+                       modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
+                       horizontalArrangement = Arrangement.Center,
+                       verticalAlignment = Alignment.CenterVertically
+                    ) {
+                       Text(
+                           text = currentValue,
+                           color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
+                           fontSize = 15.sp,
+                           fontWeight = FontWeight.Bold,
+                           modifier = Modifier.weight(1f),
+                           textAlign = TextAlign.Center,
+                           maxLines = 1,
+                           overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                       )
+                       Icon(
+                           Icons.Default.ArrowDropDown,
+                           contentDescription = null,
+                           tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                           modifier = Modifier.size(16.dp)
+                       )
+                    }
                 }
             }
         }
@@ -402,7 +483,7 @@ fun PremiumCard(
             containerColor = containerColor
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, if (isSolarMode) MaterialTheme.colorScheme.outline else Color.White.copy(alpha = 0.15f))
+        border = BorderStroke(1.dp, if (isSolarMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.15f))
     ) {
         Column(
             modifier = Modifier

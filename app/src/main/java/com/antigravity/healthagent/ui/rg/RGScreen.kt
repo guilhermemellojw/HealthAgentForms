@@ -259,7 +259,8 @@ fun RGScreen(
                             items(uiState.rgFilteredList, key = { it.id }) { house ->
                                 RGHouseRow(
                                     house = house,
-                                    isEasyMode = uiState.isEasyMode
+                                    isEasyMode = uiState.isEasyMode,
+                                    isSolarMode = uiState.isSolarMode
                                 )
                             }
                         }

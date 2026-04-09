@@ -335,6 +335,7 @@ fun AdminDashboardScreen(
     val agentNames by viewModel.agentNames.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val unifiedProfiles by viewModel.unifiedProfiles.collectAsState()
+    val isSolarMode by viewModel.solarMode.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddProfileDialog by remember { mutableStateOf(false) }
@@ -445,6 +446,7 @@ fun AdminDashboardScreen(
                                     items(accessRequests) { request ->
                                         AccessRequestCard(
                                             request = request,
+                                            isSolarMode = isSolarMode,
                                             onApprove = { showApprovalDialog = true; pendingRequest = request },
                                             onReject = { viewModel.rejectAccess(request.id) }
                                         )
@@ -471,7 +473,10 @@ fun AdminDashboardScreen(
                             
                             // 3. Master List Section
                             AnimatedVisibility(visible = showMasterList) {
-                                PremiumCard(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                                PremiumCard(
+                                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                    isSolarMode = isSolarMode
+                                ) {
                                     Column(modifier = Modifier.padding(12.dp)) {
                                         Text("Lista Mestra de Nomes", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -516,6 +521,7 @@ fun AdminDashboardScreen(
                                                 UnifiedProfileCard(
                                                     profile = profile,
                                                     agentNamesList = agentNames,
+                                                    isSolarMode = isSolarMode,
                                                     onAuthorize = { authorized -> viewModel.authorizeUser(profile.uid ?: "", authorized) },
                                                     onRoleChange = { role -> viewModel.changeUserRole(profile.uid ?: "", role) },
                                                     onUpdateName = { name ->
@@ -632,10 +638,14 @@ fun AdminDashboardScreen(
 @Composable
 fun AccessRequestCard(
     request: AccessRequest,
+    isSolarMode: Boolean = false,
     onApprove: () -> Unit,
     onReject: () -> Unit
 ) {
-    PremiumCard(modifier = Modifier.width(280.dp)) {
+    PremiumCard(
+        modifier = Modifier.width(280.dp),
+        isSolarMode = isSolarMode
+    ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), modifier = Modifier.size(32.dp)) {
@@ -830,6 +840,7 @@ fun AddProfileDialog(
 fun UnifiedProfileCard(
     profile: UnifiedProfile,
     agentNamesList: List<String>,
+    isSolarMode: Boolean = false,
     onAuthorize: (Boolean) -> Unit,
     onRoleChange: (UserRole) -> Unit,
     onUpdateName: (String?) -> Unit,
@@ -845,7 +856,9 @@ fun UnifiedProfileCard(
 
     PremiumCard(
         modifier = Modifier.fillMaxWidth(),
-        containerColor = if (profile.isPreRegistered) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) 
+        isSolarMode = isSolarMode,
+        containerColor = if (isSolarMode) MaterialTheme.colorScheme.surface 
+                        else if (profile.isPreRegistered) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) 
                         else MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {

@@ -12,7 +12,8 @@ import com.antigravity.healthagent.data.local.model.House
 @Composable
 fun RGHouseRow(
     house: House,
-    isEasyMode: Boolean = false
+    isEasyMode: Boolean = false,
+    isSolarMode: Boolean = false
 ) {
     val basicStyle = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium
     val paddingVertical = if (isEasyMode) 16.dp else 12.dp
@@ -49,7 +50,7 @@ fun RGHouseRow(
                 modifier = Modifier.width(numberWidth)
             )
             
-            RGSeparator(isEasyMode)
+            RGSeparator(isEasyMode, isSolarMode)
             
             // Sequence
             Text(
@@ -59,7 +60,7 @@ fun RGHouseRow(
                 modifier = Modifier.width(seqWidth)
             )
             
-            RGSeparator(isEasyMode)
+            RGSeparator(isEasyMode, isSolarMode)
             
             // Complement
             Text(
@@ -69,7 +70,7 @@ fun RGHouseRow(
                 modifier = Modifier.width(seqWidth)
             )
             
-            RGSeparator(isEasyMode)
+            RGSeparator(isEasyMode, isSolarMode)
             
             // Type
             Text(
@@ -79,7 +80,7 @@ fun RGHouseRow(
                 modifier = Modifier.width(typeWidth)
             )
             
-            RGSeparator(isEasyMode)
+            RGSeparator(isEasyMode, isSolarMode)
             
             // Situation
             Text(
@@ -89,16 +90,20 @@ fun RGHouseRow(
                 modifier = Modifier.width(typeWidth)
             )
         }
-        Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        Divider(
+            color = if (isSolarMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) 
+                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        )
     }
 }
 
 @Composable
-private fun RGSeparator(isEasyMode: Boolean = false) {
+private fun RGSeparator(isEasyMode: Boolean = false, isSolarMode: Boolean = false) {
     Text(
         text = "|",
         style = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+        color = if (isSolarMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) 
+                else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
         modifier = Modifier.padding(horizontal = if (isEasyMode) 6.dp else 4.dp)
     )
 }

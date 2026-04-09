@@ -41,8 +41,7 @@ class LoginViewModel @Inject constructor(
                     _authState.value = AuthState.Authenticated(user)
                     
                     // Trigger sync in the background
-                    @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
-                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    viewModelScope.launch {
                         try {
                             syncRepository.pullCloudDataToLocal()
                         } catch (e: Exception) {

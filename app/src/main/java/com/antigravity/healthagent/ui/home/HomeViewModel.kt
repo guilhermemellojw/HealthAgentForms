@@ -161,6 +161,7 @@ class HomeViewModel @Inject constructor(
     private val recentlyEditedHouseIds: StateFlow<Set<Int>> = _recentlyEditedHouseIds.map { it.keys }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
     private val clashDialogJobs = mutableMapOf<Int, kotlinx.coroutines.Job>()
+    private val houseUpdateJobs = mutableMapOf<Int, kotlinx.coroutines.Job>()
 
     // --- State Injections ---
     val easyMode: StateFlow<Boolean> = settingsManager.easyMode
@@ -494,9 +495,10 @@ class HomeViewModel @Inject constructor(
                         }
                         
                         // 2. Perfect Sync Check: Prune only if the DB record exactly matches ALL user-editable fields.
-                        // This prevents the UI from flickering back to old state during sync lag.
+                        // ADDITION: Check lastUpdated to ensure we don't prune ORPHANED drafts if the DB update hasn't arrived.
                         val dbMatch = dbHouses.find { it.id == id }
                         val isDraftSynced = dbMatch != null && 
+                            dbMatch.lastUpdated >= draft.lastUpdated && // STABILITY: Ensure DB is at least as new as draft
                             dbMatch.number == draft.number && 
                             dbMatch.sequence == draft.sequence && 
                             dbMatch.complement == draft.complement &&
@@ -518,9 +520,9 @@ class HomeViewModel @Inject constructor(
                         // Prune if synced or if it no longer clashes and was manually confirmed (implicit).
                         if (isDraftSynced) {
                             resolvedIds.add(id)
-                        } else if (!stillClashes) {
-                            // If it no longer clashes but isn't synced, we should eventually commit it.
-                            // But for safety, keep it as a draft until the USER or the background sync handles it.
+                        } else if (!stillClashes && dbMatch != null && dbMatch.lastUpdated >= draft.lastUpdated) {
+                            // If it no longer clashes and matches the DB timestamp, we can prune safely.
+                            resolvedIds.add(id)
                         }
                     }
                     
@@ -1365,11 +1367,12 @@ class HomeViewModel @Inject constructor(
                     }
                 } else {
                     // Standard intra-day prediction using merged state
+                    // Sanitize context inputs to ensure they match accurately against sanitized DB/Draft records
                     prediction = houseManagementUseCase.predictNextHouseValues(
                         latestHouses, 
                         _data.value,
-                        _currentBlock.value,
-                        _currentStreet.value
+                        _currentBlock.value.trim().uppercase(),
+                        _currentStreet.value.trim().formatStreetName()
                     )
                 }
 
@@ -1578,13 +1581,14 @@ class HomeViewModel @Inject constructor(
         }
 
         // UNIFIED PERSISTENCE (Flicker-Free): Always keep latest typing in Drafts
-        _pendingUpdateDrafts.update { it + (house.id to house) }
+        val updatedHouse = house.copy(lastUpdated = System.currentTimeMillis())
+        _pendingUpdateDrafts.update { it + (updatedHouse.id to updatedHouse) }
         
         // 2. Perform DB update ONLY if no clash with ANOTHER ID
         if (clashingHouse != null) {
             // DUPLICATE DETECTED: Still keep as a "draft" in memory so the UI reflects the user's input.
             // But skip DB update to prevent a REPLACE/Merge that would delete the other record.
-            android.util.Log.w("HomeViewModel", "Clash detected for house ${house.id} with ${clashingHouse.id}. Skipping DB update.")
+            android.util.Log.w("HomeViewModel", "Clash detected for house ${updatedHouse.id} with ${clashingHouse.id}. Skipping DB update.")
             clashDialogJobs[house.id]?.cancel()
             clashDialogJobs.remove(house.id)
         } else {
@@ -1593,14 +1597,39 @@ class HomeViewModel @Inject constructor(
             clashDialogJobs[house.id]?.cancel()
             clashDialogJobs.remove(house.id)
             
-            performUpdateHouse(house)
+            performUpdateHouseWithDebounce(updatedHouse, original)
         }
         
         // Mark as recently edited to suppress annoying "Missing data" labels during the typing settle time
-        markAsRecentlyEdited(house.id)
-
+        markAsRecentlyEdited(updatedHouse.id)
+        
         // Unified delayed validation (3s)
         triggerDelayedValidation()
+    }
+
+    private fun performUpdateHouseWithDebounce(house: House, baselineHouse: House? = null) {
+        // Cancel any pending update for THIS house to prevent "fighting" coroutines (pisca-pisca)
+        houseUpdateJobs[house.id]?.cancel()
+        
+        houseUpdateJobs[house.id] = viewModelScope.launch {
+            try {
+                // Determine if this is a "heavy" update (locality change) vs a "light" one (numbers/types)
+                val isHeavy = baselineHouse != null && (
+                    baselineHouse.streetName != house.streetName || 
+                    baselineHouse.blockNumber != house.blockNumber ||
+                    baselineHouse.bairro != house.bairro
+                )
+                
+                // Debounce delay: longer for locality changes to avoid segment recalculation spam
+                delay(if (isHeavy) 800L else 300L)
+                
+                performUpdateHouse(house, baselineHouse)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Normal cancellation, do nothing
+            } catch (e: Exception) {
+                android.util.Log.e("HomeViewModel", "Error in debounced update", e)
+            }
+        }
     }
 
     fun confirmDuplicateMerge() {
@@ -1636,10 +1665,10 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    private fun performUpdateHouse(house: House) {
+    private fun performUpdateHouse(house: House, baselineHouse: House? = null) {
         viewModelScope.launch {
             try {
-                // CRITICAL: Enforce current session identity to prevent "bypasses" of standardized naming
+                // ... (identity calculation)
                 val currentName = _agentName.value
                 val currentUid = _remoteAgentUid.value ?: _currentUserUid.value
                 val houseWithIdentity = house.copy(agentName = currentName, agentUid = currentUid)
@@ -1648,7 +1677,7 @@ class HomeViewModel @Inject constructor(
                 val latestHouses = houses.value.map { _pendingUpdateDrafts.value[it.id] ?: it }
                 
                 // Use UseCase for context-aware updates (segment recalculation)
-                val result = houseManagementUseCase.updateHouseWithContext(houseWithIdentity, latestHouses)
+                val result = houseManagementUseCase.updateHouseWithContext(houseWithIdentity, latestHouses, baselineHouse)
                 
                 if (result.localizationChanged) {
                     _bairro.value = result.updatedHouse.bairro
@@ -1760,8 +1789,8 @@ class HomeViewModel @Inject constructor(
         }
         
         viewModelScope.launch {
-
-            val list = filteredHouses.value.toMutableList()
+            val currentDate = _data.value
+            val list = houses.value.filter { it.data == currentDate }.toMutableList()
             val index = list.indexOfFirst { it.id == house.id }
             if (index != -1) {
                 if (moveUp && index > 0) {
@@ -1868,7 +1897,7 @@ class HomeViewModel @Inject constructor(
                         // 2. Update houses with new date, unsynced flag and timestamp
                         val updatedHouses = housesToMove.map { 
                             it.copy(
-                                data = newDate,
+                                data = normalizedNewDate,
                                 isSynced = false,
                                 lastUpdated = System.currentTimeMillis()
                             ) 
@@ -1876,19 +1905,19 @@ class HomeViewModel @Inject constructor(
                         repository.updateHouses(updatedHouses)
                     }
 
-                    // 3. Migrate DayActivity (Status/Observations)
-                    val oldActivity = repository.getDayActivity(oldDate, currentAgent, currentUid)
+                    // 3. Migrate DayActivity (Status/Observations) with Cloud Tombstones
+                    val oldActivity = repository.getDayActivity(normalizedOldDate, currentAgent, currentUid)
                     if (oldActivity != null) {
                         // Check if an activity already exists for the new date
                         val existingNewActivity = repository.getDayActivity(normalizedNewDate, currentAgent, currentUid)
                         if (existingNewActivity == null) {
-                            // Safe to move the entire activity record
+                            // Safe to move the status and observations to the new date
                             repository.updateDayActivity(oldActivity.copy(date = normalizedNewDate))
-                            repository.deleteDayActivity(normalizedOldDate, currentAgent, currentUid)
-                        } else {
-                            // Merge if necessary
-                            repository.deleteDayActivity(normalizedOldDate, currentAgent, currentUid)
                         }
+                        
+                        // CRITICAL: Use deleteProduction to ensure cloud tombstones are recorded
+                        // for the old date's activity metadata, preventing ghosts.
+                        repository.deleteProduction(normalizedOldDate, currentAgent, currentUid)
                     }
                 }
                 
@@ -2018,9 +2047,10 @@ class HomeViewModel @Inject constructor(
     fun updateDayStatus(originalDate: String, status: String) {
         val date = originalDate.replace("/", "-")
         viewModelScope.launch {
+            var rippleError: String? = null
+            _uiEvent.value = "Iniciando atualização de status..."
             try {
                 var wasWorkingChange: Pair<Boolean, Boolean>? = null
-                var rippleError: String? = null
                 
                 repository.runInTransaction {
                     val currentAgent = _agentName.value
@@ -2032,13 +2062,15 @@ class HomeViewModel @Inject constructor(
                     
                     val existing = allActivities[date]
                     val oldStatus = existing?.status ?: "NORMAL"
+                    _uiEvent.value = "Status atual: $oldStatus. Novo: $status"
                     
                     // Only trigger ripple if "Working Day" status changes
-                    val wasWorking = oldStatus == "NORMAL" || oldStatus.isBlank()
-                    val isWorking = status == "NORMAL" || status.isBlank()
+                    val wasWorking = (oldStatus.trim().uppercase() == "NORMAL") || oldStatus.isBlank()
+                    val isWorking = (status.trim().uppercase() == "NORMAL") || status.isBlank()
                     
                     if (wasWorking != isWorking) {
                         wasWorkingChange = wasWorking to isWorking
+                        _uiEvent.value = "Mudança de tipo de dia detectada (${if(wasWorking) "Trabalho" else "Folga"} -> ${if(isWorking) "Trabalho" else "Folga"})"
                     }
                     
                     // Update the status first
@@ -2057,15 +2089,23 @@ class HomeViewModel @Inject constructor(
                         val updatedStatusMap = allActivities.toMutableMap()
                         updatedStatusMap[date] = updatedActivity
                         
+                        _uiEvent.value = "Calculando efeito cascata (movimentação de imóveis)..."
                         // Analyze all production for this agent/remote agent
                         val allAgentHouses = repository.getAllHousesOnce(currentAgent, currentUid)
-                        val targetDateObj = try { dateFormatter.parse(date) } catch (e: Exception) { null } ?: return@runInTransaction
+                        val targetDateObj = try { dateFormatter.parse(date) } catch (e: Exception) { null } 
+                        
+                        if (targetDateObj == null) {
+                            _uiEvent.value = "Erro: Data $date inválida para cálculo."
+                            return@runInTransaction
+                        }
                         
                         // Analyze production at or after the changed date
                         val housesToShift = allAgentHouses.filter { 
                             val houseDate = try { dateFormatter.parse(it.data.replace("/", "-")) } catch (e: Exception) { null }
                             houseDate != null && !houseDate.before(targetDateObj)
                         }
+                        
+                        _uiEvent.value = "Casas identificadas para mover: ${housesToShift.size}"
                         
                         if (housesToShift.isNotEmpty()) {
                             val productionDates = housesToShift.map { it.data }.distinct()
@@ -2123,13 +2163,11 @@ class HomeViewModel @Inject constructor(
                             }
                             
                              if (updatedHouses.isNotEmpty()) {
-                                 try {
-                                     repository.updateHouses(updatedHouses)
-                                 } catch (e: IllegalStateException) {
-                                     // Capture the error message to show to the user outside the transaction
-                                     rippleError = "Não foi possível mover a produção porque alguns dias futuros estão bloqueados (Auditoria Concluída)."
-                                     throw e // Still throw to roll back the status change for consistency
-                                 }
+                                  _uiEvent.value = "Atualizando ${updatedHouses.size} imóveis..."
+                                  repository.updateHouses(updatedHouses)
+                                  _uiEvent.value = "Movimentação concluída com sucesso."
+                             } else if (housesToShift.isNotEmpty()) {
+                                 _uiEvent.value = "Nenhuma casa precisou mudar de data."
                              }
                         }
                     }
@@ -2152,10 +2190,15 @@ class HomeViewModel @Inject constructor(
                         }
                     }
                 }
-                soundManager.playSuccess()
+                if (rippleError != null) {
+                    _uiEvent.value = rippleError
+                    soundManager.playWarning()
+                } else {
+                    soundManager.playSuccess()
+                }
             } catch (e: IllegalStateException) {
                 android.util.Log.e("HomeViewModel", "Day locked during ripple: ${e.message}")
-                _uiEvent.value = "Erro: Alguns dias estão bloqueados para Auditoria."
+                _uiEvent.value = rippleError ?: "Erro: Alguns dias estão bloqueados para Auditoria."
                 soundManager.playWarning()
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error updating day status", e)
@@ -2221,6 +2264,8 @@ class HomeViewModel @Inject constructor(
                 val currentAgent = _agentName.value
                 val currentUid = _remoteAgentUid.value ?: _currentUserUid.value
                 repository.deleteProduction(date, currentAgent, currentUid)
+                _uiEvent.value = "Produção excluída com sucesso."
+                soundManager.playPop()
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error deleting production", e)
                 _uiEvent.value = "Erro ao excluir produção: ${e.message}"

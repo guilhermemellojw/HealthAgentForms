@@ -54,8 +54,17 @@ fun SemanalScreen(
     onOpenSettings: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val uiEvent by viewModel.uiEvent.collectAsState()
     var showAddActivityDialog by remember { mutableStateOf(false) }
     var newActivityName by remember { mutableStateOf("") }
+
+    val context = LocalContext.current
+    LaunchedEffect(uiEvent) {
+        uiEvent?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.clearUiEvent()
+        }
+    }
 
 
 

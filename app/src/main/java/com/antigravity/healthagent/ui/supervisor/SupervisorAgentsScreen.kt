@@ -39,6 +39,7 @@ fun SupervisorAgentsScreen(
     val agents by viewModel.agents.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val isSolarMode by viewModel.solarMode.collectAsState()
 
     Scaffold(
         topBar = {
@@ -83,7 +84,9 @@ fun SupervisorAgentsScreen(
                 errorMessage?.let { error ->
                     PremiumCard(
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
+                        isSolarMode = isSolarMode,
+                        containerColor = if (isSolarMode) MaterialTheme.colorScheme.surface 
+                                        else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
                     ) {
                         Row(
                             modifier = Modifier.padding(16.dp),
@@ -126,7 +129,7 @@ fun SupervisorAgentsScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         items(agents) { agent ->
-                            SupervisorAgentCard(agent = agent, viewModel = viewModel)
+                            SupervisorAgentCard(agent = agent, viewModel = viewModel, isSolarMode = isSolarMode)
                         }
                     }
                 }
@@ -137,7 +140,7 @@ fun SupervisorAgentsScreen(
 }
 
 @Composable
-fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel) {
+fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSolarMode: Boolean = false) {
     var expanded by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val lastSync = remember(agent.lastSyncTime) {
@@ -148,6 +151,7 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel) {
 
     PremiumCard(
         modifier = Modifier.fillMaxWidth(),
+        isSolarMode = isSolarMode,
         onClick = { expanded = !expanded }
     ) {
         Column {

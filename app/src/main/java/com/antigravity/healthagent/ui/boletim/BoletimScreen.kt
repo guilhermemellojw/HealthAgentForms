@@ -69,10 +69,6 @@ fun BoletimScreen(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     
-    // State for Transfer Dialog
-    var showTransferDialog by remember { mutableStateOf(false) }
-    var transferDate by remember { mutableStateOf("") }
-    var selectedTransferAgent by remember { mutableStateOf("") }
     
     // Logic for Manual Date Transfer
     var moveSourceDate by remember { mutableStateOf("") }
@@ -91,7 +87,7 @@ fun BoletimScreen(
                 val newDate = String.format(java.util.Locale("pt", "BR"), "%02d-%02d-%04d", dayOfMonth, month + 1, year)
                 if (newDate != moveSourceDate) {
                     viewModel.moveHousesToDate(moveSourceDate, newDate)
-                    scope.launch { snackbarHostState.showSnackbar("Produção transferida para $newDate") }
+                    // Snackbar removed here; ViewModel's uiEvent will handle success/error feedback
                 }
                 moveSourceDate = ""
             },
@@ -105,71 +101,14 @@ fun BoletimScreen(
     }
     
 
-    if (showTransferDialog) {
-        AlertDialog(
-            onDismissRequest = { 
-                showTransferDialog = false
-                selectedTransferAgent = ""
-            },
-            title = { 
-                Text(
-                    "Transferir Produção", 
-                    fontWeight = FontWeight.ExtraBold,
-                    style = if (uiState.isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge
-                ) 
-            },
-            text = {
-                Column {
-                    Text(
-                        "Transferir produção do dia $transferDate para qual agente?",
-                        style = if (uiState.isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    CompactDropdown(
-                        label = "Selecionar Agente",
-                        currentValue = selectedTransferAgent,
-                        options = com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES,
-                        onOptionSelected = { selectedTransferAgent = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        isEasyMode = uiState.isEasyMode
-                    )
-                }
-            },
-            confirmButton = {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            showTransferDialog = false
-                            selectedTransferAgent = ""
-                        },
-                        modifier = Modifier.weight(1f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
-                        shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp)
-                    ) {
-                        Text("Cancelar", fontWeight = FontWeight.Bold)
-                    }
-                    Button(
-                        onClick = {
-                            if (selectedTransferAgent.isNotBlank()) {
-                                viewModel.transferProduction(transferDate, selectedTransferAgent)
-                                showTransferDialog = false
-                                selectedTransferAgent = ""
-                                scope.launch { snackbarHostState.showSnackbar("Produção transferida para $selectedTransferAgent") }
-                            } else {
-                                scope.launch { snackbarHostState.showSnackbar("Selecione um agente") }
-                            }
-                        },
-                        modifier = Modifier.weight(1.3f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
-                        shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp)
-                    ) {
-                        Text("Confirmar", fontWeight = FontWeight.Bold)
-                    }
-                }
-            },
-            shape = RoundedCornerShape(if (uiState.isEasyMode) 28.dp else 24.dp)
-        )
+    // Collect UI Events from ViewModel
+    LaunchedEffect(Unit) {
+        viewModel.uiEvent.collect { event ->
+            event?.let {
+                snackbarHostState.showSnackbar(it)
+                viewModel.clearUiEvent()
+            }
+        }
     }
 
     // History Warning Dialog
@@ -283,7 +222,7 @@ fun BoletimScreen(
                         onClick = {
                             viewModel.deleteProduction(deleteDate)
                             showDeleteDialog = false
-                            scope.launch { snackbarHostState.showSnackbar("Produção excluída.") }
+                            // snackbar removed: uiEvent will handle it
                         },
                         modifier = Modifier.weight(1.3f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
                         shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp),
@@ -339,7 +278,7 @@ fun BoletimScreen(
                     onClick = { viewModel.navigateToDate(summary.date) },
                     isSolarMode = uiState.isSolarMode
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(if (uiState.isEasyMode) 20.dp else 16.dp)) {
                         // Header Row: Status and Title
                         // Header Row: Status and Title
                         // Header Row: Date and Agent
@@ -351,7 +290,7 @@ fun BoletimScreen(
                             // Date (Primary Title)
                             Text(
                                 text = summary.date,
-                                style = MaterialTheme.typography.titleLarge,
+                                style = if (uiState.isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Black,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -360,7 +299,7 @@ fun BoletimScreen(
                             if (summary.agentName.isNotBlank()) {
                                 Text(
                                     text = summary.agentName.uppercase(),
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = if (uiState.isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontWeight = FontWeight.Black
                                 )
@@ -381,7 +320,7 @@ fun BoletimScreen(
                                          Row(verticalAlignment = Alignment.CenterVertically) {
                                              Text(
                                                  text = block.bairro.uppercase(),
-                                                 style = MaterialTheme.typography.titleSmall,
+                                                 style = if (uiState.isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
                                                  fontWeight = FontWeight.Bold,
                                                  color = MaterialTheme.colorScheme.onSurface
                                              )
@@ -397,7 +336,7 @@ fun BoletimScreen(
                                          }
                                          Text(
                                              text = "Quarteirão ${block.number}",
-                                             style = MaterialTheme.typography.labelMedium,
+                                             style = if (uiState.isEasyMode) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium,
                                              color = MaterialTheme.colorScheme.onSurfaceVariant
                                          )
                                          
@@ -407,14 +346,14 @@ fun BoletimScreen(
                                          Row(verticalAlignment = Alignment.CenterVertically) {
                                              Text(
                                                  text = "Trabalhados: ${block.totalHouses}",
-                                                 style = MaterialTheme.typography.labelMedium,
+                                                 style = if (uiState.isEasyMode) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.labelMedium,
                                                  color = MaterialTheme.colorScheme.primary,
                                                  fontWeight = FontWeight.Bold
                                              )
                                              Text(" • ", color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                                              Text(
                                                  text = "Visitas: ${block.totalVisits}",
-                                                 style = MaterialTheme.typography.labelMedium,
+                                                 style = if (uiState.isEasyMode) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.labelMedium,
                                                  color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                  fontWeight = FontWeight.Bold
                                              )
@@ -422,7 +361,7 @@ fun BoletimScreen(
                                                  Text(" • ", color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                                                  Text(
                                                      text = "Focos: ${block.focos}",
-                                                     style = MaterialTheme.typography.labelMedium,
+                                                     style = if (uiState.isEasyMode) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.labelMedium,
                                                      color = MaterialTheme.colorScheme.error,
                                                      fontWeight = FontWeight.Black
                                                  )
@@ -443,7 +382,7 @@ fun BoletimScreen(
                                  
                                  if (index < summary.blocks.size - 1) {
                                      Divider(
-                                         modifier = Modifier.padding(vertical = 12.dp),
+                                         modifier = Modifier.padding(vertical = if (uiState.isEasyMode) 16.dp else 12.dp),
                                          color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                                      )
                                  }
@@ -455,7 +394,7 @@ fun BoletimScreen(
                         // Actions row
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(if (uiState.isEasyMode) 10.dp else 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // Generate PDF Button
@@ -493,13 +432,13 @@ fun BoletimScreen(
                                 },
                                 modifier = Modifier
                                     .weight(1.2f)
-                                    .height(40.dp),
-                                shape = RoundedCornerShape(12.dp),
+                                    .height(if (uiState.isEasyMode) 52.dp else 40.dp),
+                                shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp),
                                 contentPadding = PaddingValues(horizontal = 8.dp)
                             ) {
-                                Icon(Icons.Default.PictureAsPdf, null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.PictureAsPdf, null, modifier = Modifier.size(if (uiState.isEasyMode) 20.dp else 16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Gerar PDF", style = MaterialTheme.typography.labelLarge)
+                                Text("Gerar PDF", style = if (uiState.isEasyMode) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelLarge)
                             }
 
                             // WhatsApp Button
@@ -520,21 +459,21 @@ fun BoletimScreen(
                                 },
                                 modifier = Modifier
                                     .weight(1.3f)
-                                    .height(40.dp),
-                                shape = RoundedCornerShape(12.dp),
+                                    .height(if (uiState.isEasyMode) 52.dp else 40.dp),
+                                shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color(0xFF25D366)),
                                 contentPadding = PaddingValues(horizontal = 8.dp)
                             ) {
-                                Icon(Icons.Default.Send, null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Send, null, modifier = Modifier.size(if (uiState.isEasyMode) 20.dp else 16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("WhatsApp", style = MaterialTheme.typography.labelLarge)
+                                Text("WhatsApp", style = if (uiState.isEasyMode) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelLarge)
                             }
                             
                             var showMenu by remember { mutableStateOf(false) }
                             IconButton(
                                 onClick = { showMenu = true },
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(if (uiState.isEasyMode) 48.dp else 40.dp)
                             ) {
                                 Icon(Icons.Default.MoreVert, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -542,18 +481,6 @@ fun BoletimScreen(
                                         text = { Text("Ver Detalhes") },
                                         onClick = { showMenu = false; viewModel.navigateToDate(summary.date) },
                                         leadingIcon = { Icon(imageVector = Icons.Default.Visibility, contentDescription = null) }
-                                    )
-                                    // Transfer
-                                    DropdownMenuItem(
-                                        text = { Text("Transferir Produção") },
-                                        leadingIcon = { Icon(Icons.Default.SwapHoriz, contentDescription = null) },
-                                        onClick = {
-                                            showMenu = false
-                                            checkHistoryAndProceed(summary.date) {
-                                                transferDate = summary.date
-                                                showTransferDialog = true
-                                            }
-                                        }
                                     )
                                     // Move Date
                                     DropdownMenuItem(
@@ -578,16 +505,6 @@ fun BoletimScreen(
                                         }
                                     )
                                     Divider()
-                                    // Force Full Sync (Admin/Correction tool)
-                                    DropdownMenuItem(
-                                        text = { Text("Recarregar Tudo (Sync)", color = MaterialTheme.colorScheme.primary) },
-                                        leadingIcon = { Icon(Icons.Default.SwapHoriz, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                                        onClick = {
-                                            showMenu = false
-                                            viewModel.forceFullSync()
-                                            scope.launch { snackbarHostState.showSnackbar("Sincronização total iniciada...") }
-                                        }
-                                    )
                                     // Delete
                                     DropdownMenuItem(
                                         text = { Text("Excluir", color = MaterialTheme.colorScheme.error) },

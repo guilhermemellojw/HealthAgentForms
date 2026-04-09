@@ -6,13 +6,13 @@ import androidx.room.*
 
 @Dao
 interface DayActivityDao {
-    @Query("SELECT * FROM day_activities WHERE date = :date AND (UPPER(agentName) = UPPER(:agentName) OR (agentUid != '' AND agentUid = :agentUid))")
+    @Query("SELECT * FROM day_activities WHERE REPLACE(date, '/', '-') = REPLACE(:date, '/', '-') AND (UPPER(agentName) = UPPER(:agentName) OR (agentUid != '' AND agentUid = :agentUid))")
     suspend fun getDayActivity(date: String, agentName: String, agentUid: String? = ""): DayActivity?
 
-    @Query("SELECT * FROM day_activities WHERE date IN (:dates) AND (UPPER(agentName) = UPPER(:agentName) OR (agentUid != '' AND agentUid = :agentUid))")
+    @Query("SELECT * FROM day_activities WHERE REPLACE(date, '/', '-') IN (:dates) AND (UPPER(agentName) = UPPER(:agentName) OR (agentUid != '' AND agentUid = :agentUid))")
     fun getDayActivities(dates: List<String>, agentName: String, agentUid: String? = ""): Flow<List<DayActivity>>
 
-    @Query("SELECT * FROM day_activities WHERE date = :date AND (UPPER(agentName) = UPPER(:agentName) OR (agentUid != '' AND agentUid = :agentUid))")
+    @Query("SELECT * FROM day_activities WHERE REPLACE(date, '/', '-') = REPLACE(:date, '/', '-') AND (UPPER(agentName) = UPPER(:agentName) OR (agentUid != '' AND agentUid = :agentUid))")
     fun getDayActivityFlow(date: String, agentName: String, agentUid: String? = ""): Flow<DayActivity?>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -33,10 +33,10 @@ interface DayActivityDao {
     @Query("SELECT * FROM day_activities WHERE isSynced = 0 AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
     suspend fun getUnsyncedActivities(agentName: String, agentUid: String): List<DayActivity>
 
-    @Query("UPDATE day_activities SET isSynced = 1 WHERE date IN (:dates) AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
-    suspend fun markAsSynced(dates: List<String>, agentName: String, agentUid: String)
+    @Query("UPDATE day_activities SET isSynced = 1 WHERE REPLACE(date, '/', '-') = REPLACE(:date, '/', '-') AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND lastUpdated = :timestamp")
+    suspend fun markAsSyncedWithTimestamp(date: String, agentName: String, agentUid: String, timestamp: Long)
 
-    @Query("DELETE FROM day_activities WHERE date = :date AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    @Query("DELETE FROM day_activities WHERE REPLACE(date, '/', '-') = REPLACE(:date, '/', '-') AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
     suspend fun deleteDayActivity(date: String, agentName: String, agentUid: String)
 
     @Transaction
@@ -58,7 +58,7 @@ interface DayActivityDao {
     @Query("DELETE FROM day_activities WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
     suspend fun deleteByAgent(agentName: String, agentUid: String)
 
-    @Query("DELETE FROM day_activities WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND date IN (:dates)")
+    @Query("DELETE FROM day_activities WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(date, '/', '-') IN (:dates)")
     suspend fun deleteByAgentAndDates(agentName: String, agentUid: String, dates: List<String>)
 
     @Query("SELECT COUNT(*) FROM day_activities WHERE isClosed = 0 AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")

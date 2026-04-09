@@ -136,13 +136,43 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 
                 houseColumnsToGuard.forEach { (col, type) ->
-                    try { database.execSQL("ALTER TABLE houses ADD COLUMN `$col` $type") } catch(e: Exception) {}
+                    try { 
+                        database.execSQL("ALTER TABLE houses ADD COLUMN `$col` $type") 
+                    } catch(e: Exception) {
+                        if (e.message?.contains("duplicate column name", ignoreCase = true) != true) {
+                            android.util.Log.w("AppDatabase", "Error adding house col $col: ${e.message}")
+                        }
+                    }
                 }
 
-                try { database.execSQL("ALTER TABLE day_activities ADD COLUMN agentUid TEXT NOT NULL DEFAULT ''") } catch(e: Exception) {}
-                try { database.execSQL("ALTER TABLE day_activities ADD COLUMN isSynced INTEGER NOT NULL DEFAULT 0") } catch(e: Exception) {}
-                try { database.execSQL("ALTER TABLE day_activities ADD COLUMN lastUpdated INTEGER NOT NULL DEFAULT 0") } catch(e: Exception) {}
-                try { database.execSQL("ALTER TABLE day_activities ADD COLUMN isManualUnlock INTEGER NOT NULL DEFAULT 0") } catch(e: Exception) {}
+                try { 
+                    database.execSQL("ALTER TABLE day_activities ADD COLUMN agentUid TEXT NOT NULL DEFAULT ''") 
+                } catch(e: Exception) {
+                    if (e.message?.contains("duplicate column name", ignoreCase = true) != true) {
+                        android.util.Log.w("AppDatabase", "Error adding activities col agentUid: ${e.message}")
+                    }
+                }
+                try { 
+                    database.execSQL("ALTER TABLE day_activities ADD COLUMN isSynced INTEGER NOT NULL DEFAULT 0") 
+                } catch(e: Exception) {
+                    if (e.message?.contains("duplicate column name", ignoreCase = true) != true) {
+                        android.util.Log.w("AppDatabase", "Error adding activities col isSynced: ${e.message}")
+                    }
+                }
+                try { 
+                    database.execSQL("ALTER TABLE day_activities ADD COLUMN lastUpdated INTEGER NOT NULL DEFAULT 0") 
+                } catch(e: Exception) {
+                    if (e.message?.contains("duplicate column name", ignoreCase = true) != true) {
+                        android.util.Log.w("AppDatabase", "Error adding activities col lastUpdated: ${e.message}")
+                    }
+                }
+                try { 
+                    database.execSQL("ALTER TABLE day_activities ADD COLUMN isManualUnlock INTEGER NOT NULL DEFAULT 0") 
+                } catch(e: Exception) {
+                    if (e.message?.contains("duplicate column name", ignoreCase = true) != true) {
+                        android.util.Log.w("AppDatabase", "Error adding activities col isManualUnlock: ${e.message}")
+                    }
+                }
 
                 // 2. Rebuild houses
                 android.util.Log.d("AppDatabase", "Creating houses_new table...")

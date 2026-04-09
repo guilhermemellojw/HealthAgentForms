@@ -27,8 +27,8 @@ interface HouseDao {
     @Query("SELECT * FROM houses WHERE isSynced = 0 AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
     suspend fun getUnsyncedHouses(agentName: String, agentUid: String): List<House>
 
-    @Query("UPDATE houses SET isSynced = 1 WHERE id IN (:ids)")
-    suspend fun markAsSynced(ids: List<Int>)
+    @Query("UPDATE houses SET isSynced = 1 WHERE id = :id AND lastUpdated = :timestamp")
+    suspend fun markAsSyncedWithTimestamp(id: Int, timestamp: Long)
 
     @Query("SELECT DISTINCT data FROM houses WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
     suspend fun getDistinctDates(agentName: String, agentUid: String): List<String>
@@ -51,14 +51,14 @@ interface HouseDao {
     @Delete
     suspend fun deleteHouse(house: House)
 
-    @Query("UPDATE houses SET data = :newDate, isSynced = 0, lastUpdated = :now WHERE data = :oldDate AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    @Query("UPDATE houses SET data = :newDate, isSynced = 0, lastUpdated = :now WHERE REPLACE(data, '/', '-') = REPLACE(:oldDate, '/', '-') AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
     suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String, now: Long = System.currentTimeMillis())
 
 
-    @Query("DELETE FROM houses WHERE data = :date AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    @Query("DELETE FROM houses WHERE REPLACE(data, '/', '-') = REPLACE(:date, '/', '-') AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
     suspend fun deleteHousesByDateAndAgent(date: String, agentName: String, agentUid: String)
 
-    @Query("SELECT * FROM houses WHERE data = :date AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) ORDER BY listOrder ASC")
+    @Query("SELECT * FROM houses WHERE REPLACE(data, '/', '-') = REPLACE(:date, '/', '-') AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) ORDER BY listOrder ASC")
     suspend fun getHousesByDateAndAgent(date: String, agentName: String, agentUid: String): List<House>
 
     @Transaction
@@ -80,10 +80,10 @@ interface HouseDao {
     @Query("DELETE FROM houses WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
     suspend fun deleteByAgent(agentName: String, agentUid: String)
 
-    @Query("DELETE FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND data IN (:dates)")
+    @Query("DELETE FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(data, '/', '-') IN (:dates)")
     suspend fun deleteByAgentAndDates(agentName: String, agentUid: String, dates: List<String>)
 
-    @Query("SELECT * FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND data IN (:dates) ORDER BY listOrder ASC")
+    @Query("SELECT * FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(data, '/', '-') IN (:dates) ORDER BY listOrder ASC")
     suspend fun getHousesByAgentAndDates(agentName: String, agentUid: String, dates: List<String>): List<House>
 
     @Query("""

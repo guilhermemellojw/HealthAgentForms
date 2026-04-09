@@ -106,8 +106,17 @@ class SyncRepositoryImpl @Inject constructor(
 
             if (shouldReplace) {
                 // SURGICAL WIPE: Only delete cloud data for the dates we are actually pushing.
-                // This prevents "Full Sync" from wiping historical data not present in the current session.
-                val backupDates = (housesToPush.map { it.data } + activitiesToPush.map { it.date }).toSet()
+                // IMPROVEMENT: Include dates from tombstones in the wipe to ensure moved/deleted 
+                // production does not "ghost" back from the cloud during a Full Sync.
+                val backupDates = (
+                    housesToPush.map { it.data } + 
+                    activitiesToPush.map { it.date } +
+                    tombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.ACTIVITY }.map { it.naturalKey.split("|")[0] } +
+                    tombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE }.mapNotNull { tk -> 
+                        val parts = tk.naturalKey.split("_")
+                        if (parts.size >= 3) parts[2] else null
+                    }
+                ).toSet()
                 
                 if (backupDates.isNotEmpty()) {
                     val existingHouses = userDocRef.collection("houses").get().await()
@@ -133,112 +142,108 @@ class SyncRepositoryImpl @Inject constructor(
                 metadata["email"] = userEmail
             }
 
-            val operations = mutableListOf<Pair<com.google.firebase.firestore.DocumentReference, Any>>()
+            // PREPARE AND COMMIT DATA IN ATOMIC BATCHES
+            // To ensure atomicity and prevent duplicate pushes on partial failures, we commit and locally confirm each batch immediately.
             
-            // Houses
-            // 1. Convert Houses to Firestore Maps (Using existing VisitSegments for Natural Key stability)
-            if (housesToPush.isNotEmpty()) {
-                housesToPush.forEach { house ->
-                    // Consistency: Use official agent name for both the Natural Key and the document content.
-                    // This ensures that even if local agentName was slightly different, the cloud ID remains stable and matches the pulled content.
-                    val officialHouse = house.copy(agentName = officialAgentName ?: house.agentName)
-                    val houseData = officialHouse.toFirestoreMap()
+            // 1. TOMBSTONES (Deletions)
+            if (tombstones.isNotEmpty()) {
+                val cloudDeletedHouses = mutableListOf<String>()
+                val cloudDeletedActivities = mutableListOf<String>()
+                
+                tombstones.chunked(400).forEach { chunk ->
+                    val batch = firestore.batch()
+                    chunk.forEach { t ->
+                        if (t.type == com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE) {
+                            batch.delete(userDocRef.collection("houses").document(t.naturalKey))
+                            cloudDeletedHouses.add(t.naturalKey)
+                        } else {
+                            batch.delete(userDocRef.collection("day_activities").document(t.naturalKey.split("|")[0]))
+                            cloudDeletedActivities.add(t.naturalKey)
+                        }
+                    }
                     
-                    operations.add(userDocRef.collection("houses").document(officialHouse.generateNaturalKey()) to houseData)
-                }
-                
-                // CRITICAL recovery: If we are pushing a house, ensure its natural key is NOT in the deleted_house_ids array anymore.
-                // This prevents re-added houses from being immediately deleted by stale cloud tombstones on other devices (or on re-pull).
-                if (!shouldReplace) {
-                    val pushedKeys = housesToPush.map { it.generateNaturalKey() }.distinct()
-                    operations.add(userDocRef to mapOf("deleted_house_ids" to com.google.firebase.firestore.FieldValue.arrayRemove(*pushedKeys.toTypedArray())))
-                }
-            }
-
-            // Activities
-            if (activitiesToPush.isNotEmpty()) {
-                activitiesToPush.forEach { activity ->
-                    val activityData = activity.copy(agentName = officialAgentName, agentUid = uid).toFirestoreMap()
-                    operations.add(userDocRef.collection("day_activities").document(activity.date.replace("/", "-")) to activityData)
-                }
-                
-                if (!shouldReplace) {
-                    val pushedDates = activitiesToPush.map { it.date.replace("/", "-") }.distinct()
-                    operations.add(userDocRef to mapOf("deleted_activity_dates" to com.google.firebase.firestore.FieldValue.arrayRemove(*pushedDates.toTypedArray())))
+                    // Update cloud metadata arrays for tombstones 
+                    if (cloudDeletedHouses.isNotEmpty()) {
+                        batch.update(userDocRef, "deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayUnion(*cloudDeletedHouses.toTypedArray()))
+                    }
+                    if (cloudDeletedActivities.isNotEmpty()) {
+                        batch.update(userDocRef, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(*cloudDeletedActivities.toTypedArray()))
+                    }
+                    
+                    batch.commit().await()
+                    
+                    // Local confirmation
+                    database.withTransaction {
+                        tombstoneDao.deleteTombstones(chunk.map { it.id })
+                    }
+                    cloudDeletedHouses.clear()
+                    cloudDeletedActivities.clear()
                 }
             }
 
-            // Deletions (Tombstones)
-            val cloudDeletedHouses = mutableListOf<String>()
-            val cloudDeletedActivities = mutableListOf<String>()
-            tombstones.forEach { t ->
-                if (t.type == com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE) {
-                    operations.add(userDocRef.collection("houses").document(t.naturalKey) to com.google.firebase.firestore.FieldValue.delete())
-                    cloudDeletedHouses.add(t.naturalKey)
-                } else {
-                    operations.add(userDocRef.collection("day_activities").document(t.naturalKey.split("|")[0]) to com.google.firebase.firestore.FieldValue.delete())
-                    cloudDeletedActivities.add(t.naturalKey)
-                }
-            }
-
-            // Metadata update including cloud-side tombstones
-            if (cloudDeletedHouses.isNotEmpty()) {
-                 operations.add(userDocRef to mapOf("deleted_house_ids" to com.google.firebase.firestore.FieldValue.arrayUnion(*cloudDeletedHouses.toTypedArray())))
-            }
-            if (cloudDeletedActivities.isNotEmpty()) {
-                 operations.add(userDocRef to mapOf("deleted_activity_dates" to com.google.firebase.firestore.FieldValue.arrayUnion(*cloudDeletedActivities.toTypedArray())))
-            }
-            operations.add(0, userDocRef to metadata)
-
-            // Commit in Batches
-            val chunks = operations.chunked(400)
-            chunks.forEachIndexed { index, chunk ->
-                val batch = firestore.batch()
-                chunk.forEach { (ref, data) ->
-                    when (data) {
-                        is com.google.firebase.firestore.FieldValue -> batch.delete(ref)
-                        is Map<*, *> -> {
-                            @Suppress("UNCHECKED_CAST")
-                            batch.set(ref, data as Map<String, Any>, com.google.firebase.firestore.SetOptions.merge())
+            // 2. HOUSES
+            if (housesToPush.isNotEmpty()) {
+                housesToPush.chunked(400).forEach { chunk ->
+                    val batch = firestore.batch()
+                    val pushedKeys = mutableListOf<String>()
+                    
+                    chunk.forEach { house ->
+                        val officialHouse = house.copy(agentName = officialAgentName ?: house.agentName)
+                        val houseData = officialHouse.toFirestoreMap()
+                        val key = officialHouse.generateNaturalKey()
+                        batch.set(userDocRef.collection("houses").document(key), houseData, com.google.firebase.firestore.SetOptions.merge())
+                        pushedKeys.add(key)
+                    }
+                    
+                    // CRITICAL recovery: ensure re-added houses aren't in deleted_house_ids
+                    if (!shouldReplace) {
+                        batch.update(userDocRef, "deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayRemove(*pushedKeys.toTypedArray()))
+                    }
+                    
+                    batch.commit().await()
+                    
+                    // Local confirmation
+                    database.withTransaction {
+                        chunk.forEach { house ->
+                            houseDao.markAsSyncedWithTimestamp(house.id, house.lastUpdated)
                         }
                     }
                 }
-                
-                // OPTIMIZATION: Include final metadata update in the LAST batch to save 1 write operation
-                if (index == chunks.size - 1) {
-                    batch.update(userDocRef, mapOf(
-                        "lastSyncTime" to System.currentTimeMillis(),
-                        "lastSyncError" to com.google.firebase.firestore.FieldValue.delete()
-                    ))
-                }
-                
-                kotlinx.coroutines.withTimeout(60000L) { batch.commit().await() }
             }
 
-            // Post-Sync Success: Update local state
-            database.withTransaction {
-                if (housesToPush.isNotEmpty()) {
-                    // Note: If shouldReplace was true, we push full list. If false, only unsynced.
-                    // Either way, these are the ones now successfully in the cloud.
-                    houseDao.markAsSynced(housesToPush.map { it.id })
-                }
-                if (activitiesToPush.isNotEmpty()) {
-                    dayActivityDao.markAsSynced(activitiesToPush.map { it.date }, officialAgentName, uid)
-                }
-                if (tombstones.isNotEmpty()) {
-                    tombstoneDao.deleteTombstones(tombstones.map { it.id })
+            // 3. ACTIVITIES
+            if (activitiesToPush.isNotEmpty()) {
+                activitiesToPush.chunked(400).forEach { chunk ->
+                    val batch = firestore.batch()
+                    val pushedDates = mutableListOf<String>()
+                    
+                    chunk.forEach { activity ->
+                        val activityData = activity.copy(agentName = officialAgentName, agentUid = uid).toFirestoreMap()
+                        val dateKey = activity.date.replace("/", "-")
+                        batch.set(userDocRef.collection("day_activities").document(dateKey), activityData, com.google.firebase.firestore.SetOptions.merge())
+                        pushedDates.add(dateKey)
+                    }
+                    
+                    if (!shouldReplace) {
+                        batch.update(userDocRef, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayRemove(*pushedDates.toTypedArray()))
+                    }
+                    
+                    batch.commit().await()
+                    
+                    // Local confirmation
+                    database.withTransaction {
+                        chunk.forEach { activity ->
+                            dayActivityDao.markAsSyncedWithTimestamp(activity.date, officialAgentName, uid, activity.lastUpdated)
+                        }
+                    }
                 }
             }
 
-            // Final Metadata Update: Mark success and clear Error (Handled in batch above if operations existed)
-            if (operations.isEmpty()) {
-                userDocRef.update(
-                    mapOf(
-                        "lastSyncTime" to System.currentTimeMillis(),
-                        "lastSyncError" to com.google.firebase.firestore.FieldValue.delete()
-                    )
-                ).await()
-            }
+            // 4. METADATA (Final Step)
+            userDocRef.update(metadata + mapOf(
+                "lastSyncTime" to System.currentTimeMillis(),
+                "lastSyncError" to com.google.firebase.firestore.FieldValue.delete()
+            )).await()
 
             Result.success(Unit)
         } catch (e: com.google.firebase.firestore.FirebaseFirestoreException) {
@@ -414,6 +419,16 @@ class SyncRepositoryImpl @Inject constructor(
                 cloudDeletedActivities.addAll(deletedActivities)
             }
 
+            // --- CRITICAL PROTECTION: Data Trumps Deletions ---
+            // If a house or activity exists in the cloud as valid data, it should NEVER be considered deleted.
+            // This prevents "fragmented" agent records (old UIDs/docs for same email) from using stale tombstones
+            // to delete valid work found in other documents.
+            val validCloudHouseKeys = cloudHouses.map { it.generateNaturalKey() }.toSet()
+            val validCloudActivityKeys = cloudDayActivities.map { "${it.date.replace("/", "-")}|${it.agentName.uppercase()}" }.toSet()
+            
+            cloudDeletedHouses.removeAll { it in validCloudHouseKeys }
+            cloudDeletedActivities.removeAll { it in validCloudActivityKeys }
+
             // 3. Deletion logic
             val allLocalHouses = houseDao.getAllHousesSnapshot()
             
@@ -476,8 +491,15 @@ class SyncRepositoryImpl @Inject constructor(
                     }
 
                     val existing = localHouses[key]?.firstOrNull()
-                    if (existing != null && !existing.isSynced && existing.lastUpdated >= cloudHouse.lastUpdated) {
-                        return@mapNotNull null
+                    
+                    // CONFLICT RESOLUTION: Protect local work
+                    if (existing != null && !existing.isSynced) {
+                        // If local house is unsynced, only overwrite if cloud is SIGNIFICANTLY newer (e.g. > 10 min)
+                        // to account for clock skew. Otherwise, prioritize the pending local change.
+                        // 10 minutes (600,000ms) is a safer buffer for manual clock discrepancies.
+                        if (existing.lastUpdated >= (cloudHouse.lastUpdated - 600000L)) {
+                            return@mapNotNull null
+                        }
                     }
 
                     val finalListOrder = if (cloudHouse.listOrder == 0L && existing != null && existing.listOrder != 0L) {
@@ -510,8 +532,12 @@ class SyncRepositoryImpl @Inject constructor(
                          return@mapNotNull null
                     }
 
-                    if (existing != null && !existing.isSynced && existing.lastUpdated >= activity.lastUpdated) {
-                        return@mapNotNull null
+                    if (existing != null && !existing.isSynced) {
+                         // Protect local unsynced workday metadata
+                         // Use 10 minute buffer as well
+                         if (existing.lastUpdated >= (activity.lastUpdated - 600000L)) {
+                             return@mapNotNull null
+                         }
                     }
 
                     activity.copy(
@@ -694,11 +720,14 @@ class SyncRepositoryImpl @Inject constructor(
                 
                 val normalizedActivities = activities.map { 
                     val finalAgentName = if (it.agentName.isNotBlank()) it.agentName else agentName
-                    it.copy(
+                    val normalized = it.copy(
                         agentName = finalAgentName.uppercase(),
                         agentUid = finalUid,
                         date = it.date.replace("/", "-")
                     ) 
+                    // CRITICAL: Clear local tombstone for restored activity
+                    tombstoneDao.deleteByNaturalKey("${normalized.date}|${normalized.agentName}", normalized.agentName, normalized.agentUid)
+                    normalized
                 }
                 val housesToUpsert = mutableListOf<House>()
 
@@ -706,15 +735,19 @@ class SyncRepositoryImpl @Inject constructor(
                     val key = restoredHouse.generateNaturalKey()
                     // 1-to-1 Mapping: Consume an existing ID if available for this specific key.
                     // This prevents multiple houses from the backup overwriting the same local record.
-                    val existingId = localHouseGroups[key]?.removeFirstOrNull()?.id ?: 0
                     val finalAgentName = if (restoredHouse.agentName.isNotBlank()) restoredHouse.agentName else agentName
-                    
-                    housesToUpsert.add(restoredHouse.copy(
+                    val existingId = localHouseGroups[key]?.removeFirstOrNull()?.id ?: 0
+                    val finalHouse = restoredHouse.copy(
                         id = existingId,
                         agentName = finalAgentName.uppercase(),
                         agentUid = finalUid,
                         data = restoredHouse.data.replace("/", "-")
-                    ))
+                    )
+                    
+                    // CRITICAL: Clear local tombstone for restored house
+                    tombstoneDao.deleteByNaturalKey(finalHouse.generateNaturalKey(), finalHouse.agentName, finalHouse.agentUid)
+                    
+                    housesToUpsert.add(finalHouse)
                 }
 
                 houseDao.upsertHouses(housesToUpsert)

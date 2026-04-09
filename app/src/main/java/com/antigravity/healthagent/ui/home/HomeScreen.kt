@@ -1038,6 +1038,7 @@ fun HomeScreen(
                         onEnableReorder = onEnableReorder,
                         onMoveDate = onMoveDate,
                         streetSuggestions = streetSuggestions,
+                        isEasyMode = uiState.isEasyMode,
                         isSolarMode = uiState.isSolarMode,
                         focusRequester = focusRequester,
                         onGetLocation = onGetLocation,

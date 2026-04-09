@@ -245,11 +245,11 @@ fun SettingsScreen(
     val isEasyMode by viewModel.easyMode.collectAsState()
     val isSolarMode by viewModel.solarMode.collectAsState()
     
-    val itemContainerColor = if (isSolarMode) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-    val itemBorderColor = if (isSolarMode) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+    val itemContainerColor = if (isSolarMode) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+    val itemBorderColor = if (isSolarMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
     
-    val dangerContainerColor = if (isSolarMode) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.error.copy(alpha = 0.08f)
-    val dangerBorderColor = if (isSolarMode) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
+    val dangerContainerColor = if (isSolarMode) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.error.copy(alpha = 0.08f)
+    val dangerBorderColor = if (isSolarMode) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
 
     Scaffold(
         topBar = {
@@ -743,13 +743,13 @@ fun SettingsItemCard(
     badgeCount: Int? = null
 ) {
     val containerColor = if (isSolarMode) {
-        MaterialTheme.colorScheme.surfaceVariant
+        MaterialTheme.colorScheme.surface
     } else {
         color.copy(alpha = 0.08f)
     }
 
     val borderColor = if (isSolarMode) {
-        MaterialTheme.colorScheme.outline
+        color.copy(alpha = 0.5f)
     } else {
         color.copy(alpha = 0.15f)
     }

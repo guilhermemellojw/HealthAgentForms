@@ -2,8 +2,10 @@ package com.antigravity.healthagent.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -13,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -180,6 +183,7 @@ fun HouseRowItem(
                 width = if (isTreated) 1.5.dp else 1.dp,
                 color = when {
                     highlightErrors -> MaterialTheme.colorScheme.error
+                    isSolarMode -> MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
                     else -> Color.White.copy(alpha = 0.15f)
                 }
             )
@@ -481,27 +485,29 @@ fun EasyHouseCard(
     focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
     onGetLocation: (callback: (com.google.android.gms.maps.model.LatLng) -> Unit) -> Unit = {}
 ) {
+    val haptic = LocalHapticFeedback.current
+    
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSolarMode) animatedBgColor else animatedBgColor.copy(alpha = 0.7f)
+            containerColor = if (isSolarMode) animatedBgColor else MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(
-            width = if (isTreated) 1.5.dp else 1.dp,
-            color = if (isTreated) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f) 
-                    else Color.White.copy(alpha = 0.15f)
-        )
+        border = when {
+            highlightErrors -> BorderStroke(3.dp, MaterialTheme.colorScheme.error)
+            isTreated -> BorderStroke(1.2.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f))
+            else -> BorderStroke(1.dp, if (isSolarMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.15f))
+        }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp)
+                .padding(16.dp)
         ) {
-            // Header Row
+            // --- HEADER ---
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -511,288 +517,377 @@ fun EasyHouseCard(
                     Text(
                         text = house.streetName.formatStreetName().ifBlank { "NOME DA RUA" },
                         style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                     Text(
                         text = "Quarteirão ${house.blockNumber} • ${house.bairro.uppercase()}",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                     )
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        onClick = onShowObservation,
-                        color = Color.Transparent,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                if (house.observation.isNotBlank()) Icons.Default.NoteAlt else Icons.Default.EditNote,
-                                contentDescription = "Observação",
-                                tint = if (house.observation.isNotBlank()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-
-                    Surface(
-                        onClick = onMoveDate,
-                        color = Color.Transparent,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.DateRange,
-                                contentDescription = "Mover Data",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
+                // Date Icon
+                Surface(
+                    onClick = onMoveDate,
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.size(44.dp),
+                    enabled = enabled
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.CalendarToday,
+                            contentDescription = "Mover Data",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(10.dp))
 
-            // Input Grid Row 1
+            // --- INFORMATION GRID ---
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                DebouncedCompactInputBox(
-                    label = "Nº",
-                    initialValue = house.number,
-                    onValueChange = { onUpdate(house.copy(number = it)) },
+                EasyGridItem(
+                    label = "NÚMERO",
                     modifier = Modifier.weight(1f),
-                    enabled = enabled,
-                    isEasyMode = true,
-                    focusRequester = focusRequester
-                )
-                CompactDropdown(
+                    isError = invalidFields.contains("number") && highlightErrors
+                ) {
+                    DebouncedCompactInputBox(
+                        label = "Número",
+                        initialValue = house.number,
+                        onValueChange = { onUpdate(house.copy(number = it)) },
+                        enabled = enabled,
+                        isEasyMode = true,
+                        focusRequester = focusRequester,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                EasyGridItem(
                     label = "TIPO DE IMÓVEL",
-                    currentValue = house.propertyType.displayValue,
-                    options = propertyTypeOptions,
-                    displayOptions = propertyTypeDisplayOptions,
-                    onOptionSelected = { selected ->
-                        PropertyType.entries.find { it.code == selected }?.let {
-                            onUpdate(house.copy(propertyType = it))
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                    enabled = enabled,
-                    isEasyMode = true
-                )
+                    modifier = Modifier.weight(1.3f),
+                    isError = invalidFields.contains("propertyType") && highlightErrors
+                ) {
+                    CompactDropdown(
+                        label = "Tipo de Imóvel",
+                        currentValue = house.propertyType.code.ifBlank { "—" },
+                        options = propertyTypeOptions,
+                        displayOptions = propertyTypeDisplayOptions,
+                        onOptionSelected = { selected ->
+                            PropertyType.entries.find { it.code == selected }?.let {
+                                onUpdate(house.copy(propertyType = it))
+                            }
+                        },
+                        enabled = enabled,
+                        isEasyMode = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
-            // Input Grid Row 2
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                DebouncedCompactInputBox(
+                EasyGridItem(
                     label = "SEQUÊNCIA",
-                    initialValue = if (house.sequence == 0) "" else house.sequence.toString(),
-                    onValueChange = { onUpdate(house.copy(sequence = it.trim().toIntOrNull() ?: 0)) },
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
-                        imeAction = androidx.compose.ui.text.input.ImeAction.Next
-                    ),
-                    modifier = Modifier.weight(1f),
-                    enabled = enabled,
-                    isEasyMode = true
-                )
-                DebouncedCompactInputBox(
-                    label = "COMPLEMENTO",
-                    initialValue = if (house.complement == 0) "" else house.complement.toString(),
-                    onValueChange = { onUpdate(house.copy(complement = it.trim().toIntOrNull() ?: 0)) },
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
-                        imeAction = androidx.compose.ui.text.input.ImeAction.Done
-                    ),
-                    modifier = Modifier.weight(1.2f),
-                    enabled = enabled,
-                    isEasyMode = true
-                )
-                CompactDropdown(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    DebouncedCompactInputBox(
+                        label = "Sequência",
+                        initialValue = if (house.sequence == 0) "" else house.sequence.toString(),
+                        onValueChange = { onUpdate(house.copy(sequence = it.trim().toIntOrNull() ?: 0)) },
+                        enabled = enabled,
+                        isEasyMode = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                    )
+                }
+                EasyGridItem(
+                    label = "COMPL.",
+                    modifier = Modifier.weight(1f)
+                ) {
+                    DebouncedCompactInputBox(
+                        label = "Compl.",
+                        initialValue = if (house.complement == 0) "" else house.complement.toString(),
+                        onValueChange = { onUpdate(house.copy(complement = it.trim().toIntOrNull() ?: 0)) },
+                        enabled = enabled,
+                        isEasyMode = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                    )
+                }
+                EasyGridItem(
                     label = "SITUAÇÃO",
-                    currentValue = house.situation.displayValue,
-                    options = situationOptions,
-                    displayOptions = situationDisplayOptions,
-                    onOptionSelected = { selected ->
-                        Situation.entries.find { it.code == selected }?.let {
-                            onUpdate(house.copy(situation = it))
-                        }
-                    },
-                    modifier = Modifier.weight(1.8f),
-                    enabled = enabled,
-                    isEasyMode = true
-                )
+                    modifier = Modifier.weight(1.4f),
+                    isError = invalidFields.contains("situation") && highlightErrors
+                ) {
+                    CompactDropdown(
+                        label = "Situação",
+                        currentValue = house.situation.code.ifBlank { "—" },
+                        options = situationOptions,
+                        displayOptions = situationDisplayOptions,
+                        onOptionSelected = { selected ->
+                            Situation.entries.find { it.code == selected }?.let {
+                                onUpdate(house.copy(situation = it))
+                            }
+                        },
+                        enabled = enabled,
+                        isEasyMode = true
+                    )
+                }
             }
 
-            Spacer(Modifier.height(24.dp))
-
-            // Registrar Tratamento Button
-            // (isTreated is now passed as a parameter)
-
-            Surface(
-                onClick = onShowTreatment,
-                color = Color.Transparent,
-                enabled = enabled,
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, if (isTreated) MaterialTheme.colorScheme.tertiary.copy(alpha = if(enabled) 0.7f else 0.3f) 
-                                           else MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 0.7f else 0.3f)),
-                modifier = Modifier.fillMaxWidth()
+            Spacer(Modifier.height(10.dp))
+            // --- ACTIONS & FOOTER ---
+            Column(
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // ROW 1: Registrar Tratamento (1.6) + Notas (1.0)
                 Row(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Surface(
-                        color = Color.Transparent,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.size(40.dp)
+                        onClick = onShowTreatment,
+                        color = if (isTreated) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.15f) else Color.Transparent,
+                        enabled = enabled,
+                        shape = RoundedCornerShape(20.dp),
+                        border = BorderStroke(1.5.dp, if (isTreated) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
+                        modifier = Modifier.weight(1.6f).fillMaxHeight()
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                if (isTreated) Icons.Default.Opacity else Icons.Default.Add,
-                                contentDescription = null,
-                                tint = if (isTreated) MaterialTheme.colorScheme.tertiary else Color(0xFF00897B),
-                                modifier = Modifier.size(24.dp)
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Surface(
+                                color = if (isTreated) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                shape = CircleShape,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        if (isTreated) Icons.Default.Opacity else Icons.Default.Add,
+                                        contentDescription = null,
+                                        tint = if (isTreated) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = if (isTreated) "Tratado" else "Tratamento",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isTreated) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                         }
                     }
-                    Spacer(Modifier.width(16.dp))
-                    Text(
-                        text = if (isTreated) "Ver Tratamento" else "Registrar Tratamento",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isTreated) MaterialTheme.colorScheme.tertiary else Color(0xFF00897B),
-                        modifier = Modifier.weight(1f)
-                    )
-                    Icon(
-                        Icons.Default.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = if (isTreated) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f) 
-                               else Color(0xFF00897B).copy(alpha = 0.5f)
-                    )
+
+                        Surface(
+                            onClick = onShowObservation,
+                            color = Color.Transparent,
+                            enabled = enabled,
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f)),
+                            modifier = Modifier.weight(1.0f).fillMaxHeight()
+                        ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                if (house.observation.isNotBlank()) Icons.Default.NoteAlt else Icons.Default.EditNote,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "Notas",
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
+                    }
+                }
+
+                // ROW 2: Editar Local (1.6) + Mover (0.5) + Excluir (0.5)
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isReorderMode) {
+                        Surface(
+                            onClick = onMoveUp,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            enabled = enabled,
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
+                            modifier = Modifier.weight(0.9f).fillMaxHeight()
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                Spacer(Modifier.width(4.dp))
+                                Text("Subir", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                        }
+                        Surface(
+                            onClick = onMoveDown,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            enabled = enabled,
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
+                            modifier = Modifier.weight(0.9f).fillMaxHeight()
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                Spacer(Modifier.width(4.dp))
+                                Text("Descer", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                        }
+                        Surface(
+                            onClick = onToggleReorder,
+                            color = MaterialTheme.colorScheme.primary,
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.weight(0.8f).fillMaxHeight()
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Check, contentDescription = "Confirmar", tint = MaterialTheme.colorScheme.onPrimary)
+                            }
+                        }
+                    } else {
+                        Surface(
+                            onClick = onShowContext,
+                            color = Color.Transparent,
+                            enabled = enabled,
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
+                            modifier = Modifier.weight(1.6f).fillMaxHeight()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Editar Local", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        Surface(
+                            onClick = onToggleReorder,
+                            color = Color.Transparent,
+                            enabled = enabled,
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)),
+                            modifier = Modifier.weight(0.5f).fillMaxHeight()
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.SwapVert, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Mover", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Surface(
+                            onClick = { onDelete(house) },
+                            color = Color.Transparent,
+                            enabled = enabled,
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.7f)),
+                            modifier = Modifier.weight(0.5f).fillMaxHeight()
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error)
+                                Text("Excluir", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
                 }
             }
 
             if (house.comFoco) {
+                Spacer(Modifier.height(12.dp))
                 val hasCoords = house.latitude != null
                 Surface(
-                    color = if (hasCoords) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.2f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
+                    color = if (hasCoords) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier.padding(8.dp),
+                        modifier = Modifier.padding(vertical = 6.dp, horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             if (hasCoords) Icons.Default.LocationOn else Icons.Default.GpsOff, 
                             contentDescription = null, 
-                            tint = if (hasCoords) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error, 
-                            modifier = Modifier.size(16.dp)
+                            tint = if (hasCoords) Color(0xFF388E3C) else Color(0xFFD32F2F), 
+                            modifier = Modifier.size(14.dp)
                         )
-                        androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text(
                             if (hasCoords) "Coordenadas registradas" else "Foco sem localização GPS", 
                             style = MaterialTheme.typography.labelMedium, 
-                            color = if (hasCoords) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
-                            fontWeight = if (hasCoords) FontWeight.Normal else FontWeight.Bold
+                            color = if (hasCoords) Color(0xFF2E7D32) else Color(0xFFC62828),
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            // Action Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (isReorderMode) {
-                    Button(
-                        onClick = onMoveUp,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = MaterialTheme.colorScheme.primary),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Subir")
-                    }
-                    Button(
-                        onClick = onMoveDown,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = MaterialTheme.colorScheme.primary),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Descer")
-                    }
-                } else {
-                    Surface(
-                        onClick = onShowContext,
-                        color = Color.Transparent,
-                        enabled = enabled,
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 0.7f else 0.3f)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Row(
-                            Modifier.padding(vertical = 12.dp, horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 1f else 0.4f))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Editar Local", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 1f else 0.4f))
-                        }
-                    }
-                    Surface(
-                        onClick = onToggleReorder,
-                        color = Color.Transparent,
-                        enabled = enabled,
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 0.7f else 0.3f)),
-                        modifier = Modifier.weight(0.8f)
-                    ) {
-                        Row(
-                            Modifier.padding(vertical = 12.dp, horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(Icons.Default.SwapVert, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 1f else 0.4f))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Mover", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary.copy(alpha = if(enabled) 1f else 0.4f))
-                        }
-                    }
-                }
-
-                Spacer(Modifier.weight(0.1f))
-
-                IconButton(
-                    onClick = { onDelete(house) },
-                    modifier = Modifier.size(48.dp),
-                    enabled = enabled
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Excluir", tint = MaterialTheme.colorScheme.error.copy(alpha = if(enabled) 1f else 0.4f), modifier = Modifier.size(24.dp))
                 }
             }
         }
     }
 }
+
+@Composable
+private fun EasyGridItem(
+    label: String,
+    modifier: Modifier = Modifier,
+    isError: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    Column(
+        modifier = modifier
+            .background(Color.Transparent, RoundedCornerShape(20.dp))
+            .let { if (isError) it.border(2.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(20.dp)) else it }
+            .fillMaxWidth()
+            .height(64.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        content()
+    }
+}
+
 
 
 

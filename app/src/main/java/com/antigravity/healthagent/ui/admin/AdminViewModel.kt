@@ -33,7 +33,8 @@ class AdminViewModel @Inject constructor(
     private val syncRepository: SyncRepository,
     private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository,
     private val restoreDataUseCase: RestoreDataUseCase,
-    private val syncDataUseCase: SyncDataUseCase
+    private val syncDataUseCase: SyncDataUseCase,
+    private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<AdminUiState>(AdminUiState.Loading)
@@ -44,6 +45,9 @@ class AdminViewModel @Inject constructor(
 
     private val _uiEvent = MutableSharedFlow<String>()
     val uiEvent: SharedFlow<String> = _uiEvent
+
+    val solarMode: StateFlow<Boolean> = settingsManager.solarMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     private val _bairros = MutableStateFlow<List<String>>(emptyList())
     val bairros: StateFlow<List<String>> = _bairros.asStateFlow()

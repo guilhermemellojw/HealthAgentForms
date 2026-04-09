@@ -49,6 +49,8 @@ class HouseManagementUseCaseTest {
         override suspend fun clearAllData() {}
         override suspend fun migrateLocalData(agentName: String, email: String, targetUid: String) {}
         override suspend fun deduplicateAgentData(agentName: String, agentUid: String) {}
+        override suspend fun normalizeLocalDates() {}
+        override suspend fun getHousesByDateAndAgent(date: String, agentName: String, agentUid: String): List<House> = emptyList()
     }
 
     private val dummyHouseDao = object : HouseDao {
@@ -59,7 +61,7 @@ class HouseManagementUseCaseTest {
         override fun getAllHousesOrderedByBlock(agentName: String, agentUid: String): Flow<List<House>> = flowOf(emptyList())
         override fun getDistinctAgentNames(): Flow<List<String>> = flowOf(emptyList())
         override suspend fun getUnsyncedHouses(agentName: String, agentUid: String): List<House> = emptyList()
-        override suspend fun markAsSynced(ids: List<Int>) {}
+        override suspend fun markAsSyncedWithTimestamp(id: Int, timestamp: Long) {}
         override suspend fun getDistinctDates(agentName: String, agentUid: String): List<String> = emptyList()
         override suspend fun getHouseById(id: Long): House? = null
         override suspend fun insertHouse(house: House): Long = 0L
@@ -81,6 +83,11 @@ class HouseManagementUseCaseTest {
         override suspend fun checkClash(uid: String, name: String, date: String, blockNum: String, blockSeq: String, street: String, num: String, seq: Int, compl: Int, bairro: String, segment: Int): Int = 0
         override suspend fun deleteHouseById(id: Int) {}
         override suspend fun updateHouseIdentity(id: Int, uid: String, name: String) {}
+        override suspend fun checkNaturalKeyConflict(
+            excludeId: Int, date: String, agentName: String, agentUid: String,
+            blockNumber: String, blockSequence: String, streetName: String,
+            number: String, sequence: Int, complement: Int, bairro: String, visitSegment: Int
+        ): Int = 0
     }
 
     private val dummyCustomStreetDao = object : CustomStreetDao {
@@ -128,7 +135,7 @@ class HouseManagementUseCaseTest {
         
         // Then
         assertEquals("", prediction.number)
-        assertNull(prediction.sequence)
+        assertEquals(0, prediction.sequence)
         assertEquals(PropertyType.EMPTY, prediction.propertyType)
         assertEquals(Situation.NONE, prediction.situation)
     }

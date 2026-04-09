@@ -354,18 +354,18 @@ object RGPdfGenerator {
         }
 
         // --- Footer (Totals & Signatures) ---
-        // ONLY drawn on the last page of the report
-        if (pageNumber == totalPages) {
+        // Drawn on EVERY page of the report
+        if (true) {
             val footerY = cursorY + listHeaderHeight + (maxRows * itemHeight) + 10
             
-            // Calculate Totals CUMULATIVELY for all houses in the block
-            val totalResidencial = allHouses.count { it.propertyType == PropertyType.R && it.situation == Situation.NONE }
-            val totalComercial = allHouses.count { it.propertyType == PropertyType.C && it.situation == Situation.NONE }
-            val totalTerreno = allHouses.count { it.propertyType == PropertyType.TB && it.situation == Situation.NONE }
-            val totalPonto = allHouses.count { it.propertyType == PropertyType.PE && it.situation == Situation.NONE }
-            val totalOutros = allHouses.count { it.propertyType == PropertyType.O && it.situation == Situation.NONE }
-            val totalPendentes = allHouses.count { it.situation != Situation.NONE && it.situation != Situation.EMPTY } 
-            val totalGeral = allHouses.size
+            // Calculate Totals for the houses on THIS page
+            val totalResidencial = pageHouses.count { it.propertyType == PropertyType.R && it.situation == Situation.NONE }
+            val totalComercial = pageHouses.count { it.propertyType == PropertyType.C && it.situation == Situation.NONE }
+            val totalTerreno = pageHouses.count { it.propertyType == PropertyType.TB && it.situation == Situation.NONE }
+            val totalPonto = pageHouses.count { it.propertyType == PropertyType.PE && it.situation == Situation.NONE }
+            val totalOutros = pageHouses.count { it.propertyType == PropertyType.O && it.situation == Situation.NONE }
+            val totalPendentes = pageHouses.count { it.situation != Situation.NONE && it.situation != Situation.EMPTY } 
+            val totalGeral = pageHouses.size
             
             val gap = 0f
             val totalTableWidth = PAGE_WIDTH - 2 * MARGIN
@@ -412,8 +412,8 @@ object RGPdfGenerator {
             fy += fh + 12
             
             // --- Signatures ---
-            // Collect all distinct agent names found in the block
-            val rawAgentName = allHouses
+            // Collect all distinct agent names found on THIS page
+            val rawAgentName = pageHouses
                 .mapNotNull { it.agentName }
                 .filter { it.isNotBlank() }
                 .distinct()
@@ -425,7 +425,7 @@ object RGPdfGenerator {
             val totalSigWidth = PAGE_WIDTH - 2 * MARGIN
             val maxSigNameWidth = totalSigWidth - (textPaint.measureText("ASSINATURA:") + 15f)
             val agentNameDisplay = rawAgentName.fitToWidth(textPaint, maxSigNameWidth)
-            val dateValue = allHouses.lastOrNull()?.data ?: ""
+            val dateValue = pageHouses.lastOrNull()?.data ?: ""
 
             // Row 1: NOME
             drawRect(canvas, linePaint, MARGIN, fy, totalSigWidth, sigH)
@@ -443,6 +443,7 @@ object RGPdfGenerator {
             val sigLabel = "ASSINATURA:"
             val sigLabelWidth = textPaint.measureText(sigLabel)
             drawTextInRect(canvas, textPaint, sigLabel, MARGIN, fy, sigLabelWidth + 10, sigH, alignLeft = true)
+            drawTextInRect(canvas, textPaint, agentNameDisplay, MARGIN + sigLabelWidth + 5f, fy, sigColWidth - sigLabelWidth - 5f, sigH, alignLeft = true)
             
             val dataX = MARGIN + sigColWidth
             drawRect(canvas, linePaint, dataX, fy, dateColWidth, sigH)

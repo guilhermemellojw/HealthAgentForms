@@ -62,6 +62,8 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun clearAllData() {}
         override suspend fun migrateLocalData(agentName: String, email: String, targetUid: String) {}
         override suspend fun deduplicateAgentData(agentName: String, agentUid: String) {}
+        override suspend fun normalizeLocalDates() {}
+        override suspend fun getHousesByDateAndAgent(date: String, agentName: String, agentUid: String): List<House> = emptyList()
     }
 
     private val mockSyncRepository = object : SyncRepository {

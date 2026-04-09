@@ -15,11 +15,15 @@ import javax.inject.Inject
 class SupervisorViewModel @Inject constructor(
     private val syncRepository: SyncRepository,
     private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository,
-    private val restoreDataUseCase: com.antigravity.healthagent.domain.usecase.RestoreDataUseCase
+    private val restoreDataUseCase: com.antigravity.healthagent.domain.usecase.RestoreDataUseCase,
+    private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager
 ) : ViewModel() {
 
     private val _uiEvent = MutableStateFlow<String?>(null)
     val uiEvent: StateFlow<String?> = _uiEvent.asStateFlow()
+
+    val solarMode: StateFlow<Boolean> = settingsManager.solarMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     fun clearUiEvent() { _uiEvent.value = null }
 
