@@ -75,4 +75,6 @@ interface DayActivityDao {
 
     @Query("UPDATE day_activities SET agentUid = :targetUid, isSynced = 0, lastUpdated = :now WHERE agentUid = '' AND (UPPER(agentName) = UPPER(:agentName) OR UPPER(agentName) = UPPER(:email) OR UPPER(agentName) = UPPER(:emailPrefix))")
     suspend fun updateAgentUidForAll(agentName: String, email: String, emailPrefix: String, targetUid: String, now: Long = System.currentTimeMillis())
+    @Query("SELECT * FROM day_activities WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(date, '/', '-') LIKE '%-' || :monthYearSuffix")
+    suspend fun getDayActivitiesByMonth(agentName: String, agentUid: String, monthYearSuffix: String): List<DayActivity>
 }

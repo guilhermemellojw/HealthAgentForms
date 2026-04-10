@@ -263,7 +263,8 @@ fun BoletimScreen(
             isRefreshing = isSyncing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
-            modifier = Modifier.padding(paddingValues).fillMaxSize()
+            modifier = Modifier.padding(paddingValues).fillMaxSize(),
+            indicator = { /* Hide simple circle */ }
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
             com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())

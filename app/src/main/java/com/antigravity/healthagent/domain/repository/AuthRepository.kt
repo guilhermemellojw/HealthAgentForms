@@ -42,7 +42,8 @@ data class AuthUser(
     val photoUrl: String?,
     val role: UserRole = UserRole.AGENT,
     val isAuthorized: Boolean = false,
-    val agentName: String? = null
+    val agentName: String? = null,
+    val requireDataReset: Boolean = false
 ) {
     val isAdmin: Boolean get() = role == UserRole.ADMIN
     val isSupervisor: Boolean get() = role == UserRole.SUPERVISOR

@@ -9,6 +9,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
+import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
@@ -155,6 +156,13 @@ class SyncRepositoryImpl @Inject constructor(
             if (targetUid == null || (existingEmail.isNullOrBlank() && userEmail != "Remote Sync")) {
                 metadata["email"] = userEmail
             }
+            
+            val photoUrl = if (targetUid != null) {
+                try { firestore.collection("users").document(uid).get().await().getString("photoUrl") } catch(e: Exception) { null }
+            } else { auth.currentUser?.photoUrl?.toString() }
+            
+            if (photoUrl != null) metadata["photoUrl"] = photoUrl
+            if (officialAgentName != null) metadata["agentName"] = officialAgentName
 
             // PREPARE AND COMMIT DATA IN ATOMIC BATCHES
             // To ensure atomicity and prevent duplicate pushes on partial failures, we commit and locally confirm each batch immediately.
@@ -253,7 +261,45 @@ class SyncRepositoryImpl @Inject constructor(
                 }
             }
 
-            // 4. METADATA (Final Step)
+            // 4. SUMMARY AGGREGATION (Recalculate from local ground truth for accuracy)
+            val allAffectedDates = (housesToPush.map { it.data } + activitiesToPush.map { it.date }).map { it.replace("/", "-") }
+            val monthsToUpdate = allAffectedDates.map { it.split("-").let { if(it.size >= 3) "${it[1]}-${it[2]}" else "" } }
+                .filter { it.isNotBlank() }
+                .toSet()
+
+            for (monthYear in monthsToUpdate) {
+                val isProxyPush = targetUid != null && targetUid != auth.currentUser?.uid
+                
+                val housesInMonth = if (isProxyPush && shouldReplace) {
+                    housesToPush.filter { it.data.replace("/", "-").endsWith(monthYear) }
+                } else {
+                    houseDao.getHousesByMonth(officialAgentName ?: "", uid, monthYear)
+                }
+                
+                val activitiesInMonth = if (isProxyPush && shouldReplace) {
+                    activitiesToPush.filter { it.date.replace("/", "-").endsWith(monthYear) }
+                } else {
+                    dayActivityDao.getDayActivitiesByMonth(officialAgentName ?: "", uid, monthYear)
+                }
+                
+                val summary = mapOf(
+                    "monthYear" to monthYear,
+                    "treatedCount" to housesInMonth.count { house ->
+                        (house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e + house.eliminados) > 0 ||
+                        house.larvicida > 0.0 || house.comFoco
+                    },
+                    "focusCount" to housesInMonth.count { it.comFoco },
+                    "situationCounts" to housesInMonth.groupingBy { it.situation.name }.eachCount(),
+                    "propertyTypeCounts" to housesInMonth.groupingBy { it.propertyType.name }.eachCount(),
+                    "totalHouses" to housesInMonth.size,
+                    "daysWorked" to activitiesInMonth.size,
+                    "lastUpdated" to System.currentTimeMillis()
+                )
+                
+                userDocRef.collection("monthly_summaries").document(monthYear).set(summary).await()
+            }
+
+            // 5. METADATA (Final Step)
             userDocRef.update(metadata + mapOf(
                 "lastSyncTime" to System.currentTimeMillis(),
                 "lastSyncError" to com.google.firebase.firestore.FieldValue.delete()
@@ -299,8 +345,17 @@ class SyncRepositoryImpl @Inject constructor(
             val profileDisplayName = userDoc.getString("displayName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
             val finalAgentName = profileAgentName ?: profileDisplayName ?: email.substringBefore("@").uppercase()
             
+            // --- REMOTE WIPE CHECK (Data Transfer Safety) ---
+            val requireReset = userDoc.getBoolean("requireDataReset") ?: false
+            if (requireReset) {
+                android.util.Log.w("SyncRepository", "Remote Wipe Triggered for UID: $uid")
+                clearLocalData() // Wipes local SQLite
+                // Reset flag in Firestore
+                firestore.collection("users").document(uid).update("requireDataReset", false)
+            }
+
             // BUG FIX: Detect if lastSync is in the future (Device clock skew) and reset to 0 to force recovery
-            val cachedLastSync = if (isTargetDifferentUser || force) 0L else settingsManager.lastSyncTimestamp.first()
+            val cachedLastSync = if (isTargetDifferentUser || force || requireReset) 0L else settingsManager.lastSyncTimestamp.first()
             val now = System.currentTimeMillis()
             val lastSync = if (cachedLastSync > now + 3600000L) 0L else cachedLastSync // Buffer of 1h
             
@@ -333,41 +388,55 @@ class SyncRepositoryImpl @Inject constructor(
 
             val cloudDeletedActivities = mutableSetOf<String>()
 
-            for (agentDocRef in possibleAgentDocs) {
-                val agentDoc = try { agentDocRef.get().await() } catch(e: Exception) { null }
-                val housesCollection = agentDocRef.collection("houses")
-                val activitiesCollection = agentDocRef.collection("day_activities")
+            val discoveryResults = coroutineScope {
+                possibleAgentDocs.map { agentDocRef ->
+                    async {
+                        val agentDoc = try { agentDocRef.get().await() } catch(e: Exception) { null }
+                        val housesCollection = agentDocRef.collection("houses")
+                        val activitiesCollection = agentDocRef.collection("day_activities")
 
-                val houses = if (lastSync > 0) {
-                    housesCollection.whereGreaterThan("lastUpdated", com.google.firebase.Timestamp(lastSync / 1000, ((lastSync % 1000) * 1000000).toInt()))
-                        .get().await()
-                        .documents.mapNotNull { it.toHouseSafe(uid, finalAgentName) }
-                } else {
-                    housesCollection.get().await()
-                        .documents.mapNotNull { it.toHouseSafe(uid, finalAgentName) }
-                }
+                        val housesJob = async {
+                            if (lastSync > 0) {
+                                housesCollection.whereGreaterThan("lastUpdated", com.google.firebase.Timestamp(lastSync / 1000, ((lastSync % 1000) * 1000000).toInt()))
+                                    .get().await()
+                                    .documents.mapNotNull { it.toHouseSafe(uid, finalAgentName) }
+                            } else {
+                                housesCollection.get().await()
+                                    .documents.mapNotNull { it.toHouseSafe(uid, finalAgentName) }
+                            }
+                        }
 
-                val activities = if (lastSync > 0) {
-                    activitiesCollection.whereGreaterThan("lastUpdated", com.google.firebase.Timestamp(lastSync / 1000, ((lastSync % 1000) * 1000000).toInt()))
-                        .get().await()
-                        .documents.mapNotNull { it.toDayActivitySafe(uid, finalAgentName) }
-                } else {
-                    activitiesCollection.get().await()
-                        .documents.mapNotNull { it.toDayActivitySafe(uid, finalAgentName) }
-                }
+                        val activitiesJob = async {
+                            if (lastSync > 0) {
+                                activitiesCollection.whereGreaterThan("lastUpdated", com.google.firebase.Timestamp(lastSync / 1000, ((lastSync % 1000) * 1000000).toInt()))
+                                    .get().await()
+                                    .documents.mapNotNull { it.toDayActivitySafe(uid, finalAgentName) }
+                            } else {
+                                activitiesCollection.get().await()
+                                    .documents.mapNotNull { it.toDayActivitySafe(uid, finalAgentName) }
+                            }
+                        }
 
-                // Discovery of Deletions from Metadata Arrays (Correct way)
-                @Suppress("UNCHECKED_CAST")
-                val deletedHouses = (agentDoc?.get("deleted_house_ids") as? List<String> ?: emptyList())
-                    .map { it.replace("/", "-") }
-                @Suppress("UNCHECKED_CAST")
-                val deletedActivities = (agentDoc?.get("deleted_activity_dates") as? List<String> ?: emptyList())
-                    .map { it.replace("/", "-") }
-                
-                cloudHouses.addAll(houses)
-                cloudDayActivities.addAll(activities)
-                cloudDeletedHouses.addAll(deletedHouses)
-                cloudDeletedActivities.addAll(deletedActivities)
+                        val houses = housesJob.await()
+                        val activities = activitiesJob.await()
+
+                        @Suppress("UNCHECKED_CAST")
+                        val deletedHouses = (agentDoc?.get("deleted_house_ids") as? List<String> ?: emptyList())
+                            .map { it.replace("/", "-") }
+                        @Suppress("UNCHECKED_CAST")
+                        val deletedActivities = (agentDoc?.get("deleted_activity_dates") as? List<String> ?: emptyList())
+                            .map { it.replace("/", "-") }
+                        
+                        Triple(houses, activities, deletedHouses to deletedActivities)
+                    }
+                }.awaitAll()
+            }
+
+            for (result in discoveryResults) {
+                cloudHouses.addAll(result.first)
+                cloudDayActivities.addAll(result.second)
+                cloudDeletedHouses.addAll(result.third.first)
+                cloudDeletedActivities.addAll(result.third.second)
             }
 
             // --- CRITICAL PROTECTION: Data Trumps Deletions ---

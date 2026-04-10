@@ -788,7 +788,8 @@ fun HomeScreen(
             isRefreshing = isSyncing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
-            modifier = Modifier.padding(paddingValues).fillMaxSize()
+            modifier = Modifier.padding(paddingValues).fillMaxSize(),
+            indicator = { /* Hide the simple loading circle as we use the SyncStatusOverlay */ }
         ) {
             // Indentation and content will be below
         

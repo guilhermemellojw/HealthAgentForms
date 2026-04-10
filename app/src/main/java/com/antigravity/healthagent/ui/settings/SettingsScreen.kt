@@ -49,7 +49,7 @@ fun SettingsScreen(
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {}
 ) {
-    val canAccessAdmin = isAdmin || isSupervisor
+    val canAccessAdmin = isAdmin
     // Intercept system back button
     androidx.activity.compose.BackHandler {
         onNavigateBack()

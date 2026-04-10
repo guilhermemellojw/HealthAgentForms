@@ -1,31 +1,40 @@
 package com.antigravity.healthagent.ui.components
 
+import androidx.compose.animation.core.*
 import androidx.compose.animation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.CloudUpload
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.antigravity.healthagent.ui.home.SyncStage
 import com.antigravity.healthagent.ui.home.SyncStatus
+import com.antigravity.healthagent.ui.home.SyncStage
 
 @Composable
 fun SyncStatusOverlay(
     syncStatus: SyncStatus,
     isEasyMode: Boolean = false
 ) {
+    val infiniteTransition = rememberInfiniteTransition(label = "sync_loading")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "rotation"
+    )
+
     AnimatedVisibility(
         visible = syncStatus.stage != SyncStage.IDLE,
         enter = slideInVertically { -it } + fadeIn(),
@@ -77,15 +86,16 @@ fun SyncStatusOverlay(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        if (syncStatus.stage != SyncStage.SUCCESS && syncStatus.stage != SyncStage.ERROR) {
-                             // Minimal animated indicator instead of standard icon if desired, 
-                             // but we'll stick to icons for now as requested for clarity
-                        }
-                        
+                        val isRotating = syncStatus.stage == SyncStage.STARTING || 
+                                       syncStatus.stage == SyncStage.UPLOADING || 
+                                       syncStatus.stage == SyncStage.DOWNLOADING
+
                         Icon(
                             imageVector = icon,
                             contentDescription = null,
-                            modifier = Modifier.size(if (isEasyMode) 24.dp else 20.dp)
+                            modifier = Modifier
+                                .size(if (isEasyMode) 24.dp else 20.dp)
+                                .rotate(if (isRotating) rotation else 0f)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(

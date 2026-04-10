@@ -153,4 +153,6 @@ interface HouseDao {
         bairro: String,
         visitSegment: Int
     ): Int
+    @Query("SELECT * FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND data LIKE '%-' || :monthYearSuffix")
+    suspend fun getHousesByMonth(agentName: String, agentUid: String, monthYearSuffix: String): List<House>
 }

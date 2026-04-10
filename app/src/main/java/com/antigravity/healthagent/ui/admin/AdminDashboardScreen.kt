@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.AccessRequest
-import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.DayActivity
 import java.text.SimpleDateFormat
 import java.util.*
@@ -41,6 +40,7 @@ import androidx.compose.foundation.*
 import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.text.style.TextAlign
 
 // --- Helper Components ---
 
@@ -354,6 +354,9 @@ fun AdminDashboardScreen(
     var userToDelete by remember { mutableStateOf<UnifiedProfile?>(null) }
     var deleteCloudDataWithUser by remember { mutableStateOf(false) }
 
+    var showTransferDataDialog by remember { mutableStateOf(false) }
+    var transferSourceProfile by remember { mutableStateOf<UnifiedProfile?>(null) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val tabs = listOf("Gestão", "Config.")
@@ -549,6 +552,10 @@ fun AdminDashboardScreen(
                                                         if (authUser != null) {
                                                             confirmTitle = "Migrar Dados"; confirmMessage = "Deseja migrar os dados de conta não vinculada para este perfil (${authUser.email})?"; onConfirmAction = { viewModel.migrateData(authUser) }; showConfirmDialog = true
                                                         }
+                                                    },
+                                                    onTransferData = {
+                                                        transferSourceProfile = profile
+                                                        showTransferDataDialog = true
                                                     }
                                                 )
                                             }
@@ -630,6 +637,23 @@ fun AdminDashboardScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteUserDialog = false }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    if (showTransferDataDialog && transferSourceProfile != null) {
+        val availableTargets = unifiedProfiles.filter { 
+            it.uid != null && it.uid != transferSourceProfile?.uid && !it.isPreRegistered 
+        }
+        
+        TransferDataDialog(
+            sourceProfile = transferSourceProfile!!,
+            availableTargets = availableTargets,
+            onDismiss = { showTransferDataDialog = false; transferSourceProfile = null },
+            onConfirm = { targetUid ->
+                viewModel.transferData(transferSourceProfile?.uid ?: "", targetUid)
+                showTransferDataDialog = false
+                transferSourceProfile = null
             }
         )
     }
@@ -849,7 +873,8 @@ fun UnifiedProfileCard(
     onRestoreDay: (String?) -> Unit,
     onEditAgent: () -> Unit,
     onClearSyncError: () -> Unit,
-    onMigrateData: () -> Unit
+    onMigrateData: () -> Unit,
+    onTransferData: () -> Unit
 ) {
     var expandedRole by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
@@ -1020,6 +1045,7 @@ fun UnifiedProfileCard(
                     }
                     if (profile.uid != null) {
                         ActionButton(Icons.Default.DeleteForever, "Excluir", tint = MaterialTheme.colorScheme.error, onClick = onDelete)
+                        ActionButton(Icons.Default.MoveUp, "Transferir Dados", onClick = onTransferData)
                     }
                 }
 
@@ -1141,4 +1167,123 @@ private fun ActionButton(
         Spacer(Modifier.width(8.dp))
         Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = tint)
     }
+}
+
+@Composable
+fun TransferDataDialog(
+    sourceProfile: UnifiedProfile,
+    availableTargets: List<UnifiedProfile>,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedTargetUid by remember { mutableStateOf<String?>(null) }
+    var showStep2 by remember { mutableStateOf(false) }
+
+    val filteredTargets = availableTargets.filter {
+        it.agentName?.contains(searchQuery, ignoreCase = true) == true ||
+        it.email?.contains(searchQuery, ignoreCase = true) == true
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (!showStep2) "Transferir Dados de Produção" else "CONFIRMAR TRANSFERÊNCIA") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (!showStep2) {
+                    Text("Selecione o destino para os dados de ${sourceProfile.agentName ?: sourceProfile.email}:", style = MaterialTheme.typography.bodyMedium)
+                    
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Pesquisar destino...") },
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    
+                    Box(modifier = Modifier.heightIn(max = 300.dp)) {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(filteredTargets) { target ->
+                                Surface(
+                                    onClick = { selectedTargetUid = target.uid },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (selectedTargetUid == target.uid) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                    border = BorderStroke(1.dp, if (selectedTargetUid == target.uid) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                ) {
+                                    Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        RadioButton(selected = selectedTargetUid == target.uid, onClick = { selectedTargetUid = target.uid })
+                                        Spacer(Modifier.width(8.dp))
+                                        Column {
+                                            Text(target.agentName ?: "Sem nome", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                                            Text(target.email ?: "", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                            }
+                            if (filteredTargets.isEmpty()) {
+                                item { 
+                                    Text("Nenhum alvo de transferência disponível.", 
+                                        style = MaterialTheme.typography.bodySmall, 
+                                        modifier = Modifier.padding(16.dp),
+                                        textAlign = TextAlign.Center
+                                    ) 
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val target = availableTargets.find { it.uid == selectedTargetUid }
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error)
+                                Spacer(Modifier.width(8.dp))
+                                Text("AÇÃO IRREVERSÍVEL", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
+                            }
+                            Text(
+                                "Você está movendo TODA a produção de:",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(sourceProfile.agentName ?: sourceProfile.email ?: "", fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.ArrowDownward, null, modifier = Modifier.align(Alignment.CenterHorizontally))
+                            Text(
+                                "Para a conta de:",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(target?.agentName ?: target?.email ?: "", fontWeight = FontWeight.Bold)
+                            
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Os dados serão REMOVIDOS da conta de origem e mesclados ao destino. Este processo não pode ser desfeito.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (!showStep2) {
+                Button(
+                    onClick = { showStep2 = true },
+                    enabled = selectedTargetUid != null
+                ) { Text("Próximo") }
+            } else {
+                Button(
+                    onClick = { selectedTargetUid?.let { onConfirm(it) } },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("CONFIRMAR TRANSFERÊNCIA") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = if (showStep2) { { showStep2 = false } } else onDismiss) { 
+                Text(if (showStep2) "Voltar" else "Cancelar") 
+            }
+        }
+    )
 }

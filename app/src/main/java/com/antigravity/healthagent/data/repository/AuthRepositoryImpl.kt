@@ -229,6 +229,7 @@ class AuthRepositoryImpl @Inject constructor(
                         firestore.collection("agents").document(uid).set(mapOf(
                             "email" to email,
                             "agentName" to null,
+                            "photoUrl" to firebaseUser.photoUrl?.toString(),
                             "isPreRegistered" to false
                         ), com.google.firebase.firestore.SetOptions.merge()).await()
                     }
@@ -384,6 +385,7 @@ class AuthRepositoryImpl @Inject constructor(
                     "displayName" to firebaseUser.displayName,
                     "role" to role.name,
                     "isAuthorized" to isAuthorized,
+                    "photoUrl" to firebaseUser.photoUrl?.toString(),
                     "createdAt" to System.currentTimeMillis()
                 )
                 
@@ -392,8 +394,14 @@ class AuthRepositoryImpl @Inject constructor(
                     if (role == UserRole.ADMIN) {
                         firestore.collection("admins").document(uid).set(mapOf("email" to email)).await()
                     }
+                    // Ensure basic agent doc exists with photoUrl for supervisor view
+                    firestore.collection("agents").document(uid).set(mapOf(
+                        "email" to email,
+                        "photoUrl" to firebaseUser.photoUrl?.toString(),
+                        "isPreRegistered" to false
+                    ), com.google.firebase.firestore.SetOptions.merge()).await()
                 } catch(e: Exception) {
-                    android.util.Log.e("AuthRepository", "Failed to create new user profile offline", e)
+                    android.util.Log.e("AuthRepository", "Failed to create new user profile", e)
                 }
             }
             
@@ -498,7 +506,7 @@ class AuthRepositoryImpl @Inject constructor(
                     uid = doc.id,
                     email = doc.getString("email"),
                     displayName = doc.getString("displayName"),
-                    photoUrl = null,
+                    photoUrl = doc.getString("photoUrl"),
                     role = try { UserRole.valueOf(doc.getString("role") ?: "AGENT") } catch (e: Exception) { UserRole.AGENT },
                     isAuthorized = doc.getBoolean("isAuthorized") ?: false,
                     agentName = doc.getString("agentName")?.uppercase()
@@ -688,6 +696,7 @@ class AuthRepositoryImpl @Inject constructor(
             val agentMetadata = mutableMapOf<String, Any?>()
             if (newAgentName != null) agentMetadata["agentName"] = newAgentName
             updates["email"]?.let { agentMetadata["email"] = it }
+            updates["photoUrl"]?.let { agentMetadata["photoUrl"] = it }
             
             if (agentMetadata.isNotEmpty()) {
                 firestore.collection("agents").document(uid).set(agentMetadata, com.google.firebase.firestore.SetOptions.merge()).await()

@@ -93,10 +93,11 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun fetchAgentNames(): Result<List<String>> = Result.success(emptyList())
         override suspend fun addAgentName(name: String): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAgentName(name: String): Result<Unit> = Result.success(Unit)
-        override suspend fun fetchAllAgentsData(sinceTimestamp: Long): Result<List<AgentData>> = Result.success(emptyList())
+        override suspend fun fetchAllAgentsData(sinceTimestamp: Long, untilTimestamp: Long, datePattern: String?): Result<List<AgentData>> = Result.success(emptyList())
         override suspend fun deleteAgentHouse(uid: String, houseId: String): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAgentActivity(uid: String, activityDate: String): Result<Unit> = Result.success(Unit)
         override suspend fun clearSyncError(uid: String): Result<Unit> = Result.success(Unit)
+        override suspend fun transferAgentData(fromUid: String, toUid: String): Result<Unit> = Result.success(Unit)
     }
 
     private val useCase = CleanupHistoricalDataUseCase(mockHouseRepository, mockSyncRepository, mockAgentRepository)

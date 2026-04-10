@@ -43,6 +43,11 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.shadow
 import coil.compose.AsyncImage
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.ui.draw.rotate
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.ui.zIndex
 
 @Composable
 fun CompactInputBox(
@@ -792,6 +797,33 @@ fun UserAvatar(
     size: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier
 ) {
+    UserAvatar(
+        uid = user.uid,
+        displayName = user.displayName,
+        email = user.email,
+        photoUrl = user.photoUrl,
+        size = size,
+        modifier = modifier
+    )
+}
+
+@Composable
+fun UserAvatar(
+    uid: String,
+    displayName: String?,
+    email: String?,
+    photoUrl: String?,
+    size: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier
+) {
+    val googleColors = listOf(
+        Color(0xFF4285F4), // Google Blue (Right)
+        Color(0xFF34A853), // Google Green (Bottom)
+        Color(0xFFFBBC04), // Google Yellow (Left)
+        Color(0xFFEA4335), // Google Red (Top)
+        Color(0xFF4285F4)  // Back to Blue
+    )
+
     val avatarColors = listOf(
         Color(0xFF4285F4), // Google Blue
         Color(0xFFEA4335), // Google Red
@@ -802,29 +834,33 @@ fun UserAvatar(
         Color(0xFF2196F3), // Blue
         Color(0xFF4CAF50)  // Green
     )
-    
-    val backgroundColor = remember(user.uid) {
-        avatarColors[user.uid.hashCode().let { if (it < 0) -it else it } % avatarColors.size]
+
+    val backgroundColor = remember(uid) {
+        avatarColors[uid.hashCode().let { if (it < 0) -it else it } % avatarColors.size]
     }
 
     var hasImageFailed by remember { mutableStateOf(false) }
     
-    val initials = remember(user.displayName, user.email) {
-        (user.displayName ?: user.email ?: "?").take(1).uppercase()
+    val initials = remember(displayName, email) {
+        (displayName ?: email ?: "?").take(1).uppercase()
     }
 
     Surface(
         modifier = modifier
             .size(size)
-            .clip(CircleShape)
-            .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.8f), CircleShape),
+            .border(
+                BorderStroke(2.5.dp, Brush.sweepGradient(googleColors)),
+                CircleShape
+            )
+            .padding(2.5.dp)
+            .clip(CircleShape),
         color = backgroundColor,
         tonalElevation = 4.dp,
         shadowElevation = 2.dp
     ) {
-        if (!user.photoUrl.isNullOrEmpty() && !hasImageFailed) {
+        if (!photoUrl.isNullOrEmpty() && !hasImageFailed) {
             AsyncImage(
-                model = user.photoUrl,
+                model = photoUrl,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize().clip(CircleShape),
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
@@ -935,6 +971,66 @@ fun GlassNavigationBar(
             containerColor = Color.Transparent,
             content = content
         )
+    }
+}
+
+@Composable
+fun SupervisorLoadingOverlay(isVisible: Boolean) {
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = slideInVertically { -it } + fadeIn(),
+        exit = slideOutVertically { -it } + fadeOut()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp)
+                .padding(horizontal = 24.dp)
+                .zIndex(1000f),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.95f),
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shape = RoundedCornerShape(32.dp),
+                tonalElevation = 12.dp,
+                shadowElevation = 8.dp,
+                modifier = Modifier.wrapContentSize(),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    val infiniteTransition = rememberInfiniteTransition(label = "loading")
+                    val rotation by infiniteTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 360f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1200, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "rotation"
+                    )
+                    
+                    Icon(
+                        imageVector = Icons.Default.Sync,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .rotate(rotation),
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Aguardando nuvem...",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            }
+        }
     }
 }
 
