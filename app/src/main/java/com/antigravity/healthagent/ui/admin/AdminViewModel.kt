@@ -3,7 +3,6 @@ package com.antigravity.healthagent.ui.admin
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.antigravity.healthagent.domain.repository.AgentData
-import com.antigravity.healthagent.domain.repository.SyncRepository
 import com.antigravity.healthagent.domain.usecase.RestoreDataUseCase
 import com.antigravity.healthagent.domain.usecase.SyncDataUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -22,16 +21,21 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
 import android.view.View
+import android.content.Context
+import com.antigravity.healthagent.domain.repository.AgentRepository
+import com.antigravity.healthagent.domain.repository.LocalizationRepository
+import com.antigravity.healthagent.domain.repository.AuthRepository
+import com.antigravity.healthagent.domain.repository.AccessRequest
 import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.UserRole
 import kotlinx.coroutines.flow.combine
 import android.net.Uri
-import android.content.Context
 
 @HiltViewModel
 class AdminViewModel @Inject constructor(
-    private val syncRepository: SyncRepository,
-    private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository,
+    private val agentRepository: AgentRepository,
+    private val localizationRepository: LocalizationRepository,
+    private val authRepository: AuthRepository,
     private val restoreDataUseCase: RestoreDataUseCase,
     private val syncDataUseCase: SyncDataUseCase,
     private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager
@@ -40,8 +44,8 @@ class AdminViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<AdminUiState>(AdminUiState.Loading)
     val uiState: StateFlow<AdminUiState> = _uiState.asStateFlow()
 
-    private val _users = MutableStateFlow<List<com.antigravity.healthagent.domain.repository.AuthUser>>(emptyList())
-    val users: StateFlow<List<com.antigravity.healthagent.domain.repository.AuthUser>> = _users.asStateFlow()
+    private val _users = MutableStateFlow<List<AuthUser>>(emptyList())
+    val users: StateFlow<List<AuthUser>> = _users.asStateFlow()
 
     private val _uiEvent = MutableSharedFlow<String>()
     val uiEvent: SharedFlow<String> = _uiEvent
@@ -63,8 +67,8 @@ class AdminViewModel @Inject constructor(
 
     fun updateSearchQuery(query: String) { _searchQuery.value = query }
 
-    private val _accessRequests = MutableStateFlow<List<com.antigravity.healthagent.domain.repository.AccessRequest>>(emptyList())
-    val accessRequests: StateFlow<List<com.antigravity.healthagent.domain.repository.AccessRequest>> = _accessRequests.asStateFlow()
+    private val _accessRequests = MutableStateFlow<List<AccessRequest>>(emptyList())
+    val accessRequests: StateFlow<List<AccessRequest>> = _accessRequests.asStateFlow()
 
 
     val unifiedProfiles: StateFlow<List<UnifiedProfile>> = combine(
@@ -208,7 +212,7 @@ class AdminViewModel @Inject constructor(
     }
 
     private suspend fun loadAgentsData() {
-        val result = syncRepository.fetchAllAgentsData()
+        val result = agentRepository.fetchAllAgentsData()
         if (result.isSuccess) {
             _uiState.value = AdminUiState.Success(result.getOrNull() ?: emptyList())
         } else {
@@ -225,7 +229,7 @@ class AdminViewModel @Inject constructor(
 
 
     private suspend fun loadAgentNames() {
-        val result = syncRepository.fetchAgentNames()
+        val result = agentRepository.fetchAgentNames()
         if (result.isSuccess) {
             _agentNames.value = result.getOrNull() ?: emptyList()
         }
@@ -233,7 +237,7 @@ class AdminViewModel @Inject constructor(
 
     fun addAgentName(name: String) {
         viewModelScope.launch {
-            val result = syncRepository.addAgentName(name)
+            val result = agentRepository.addAgentName(name)
             if (result.isSuccess) {
                 loadAgentNames()
                 _uiEvent.emit("Nome adicionado com sucesso")
@@ -245,7 +249,7 @@ class AdminViewModel @Inject constructor(
 
     fun removeAgentName(name: String) {
         viewModelScope.launch {
-            val result = syncRepository.deleteAgentName(name)
+            val result = agentRepository.deleteAgentName(name)
             if (result.isSuccess) {
                 loadAgentNames()
                 _uiEvent.emit("Nome removido com sucesso")
@@ -300,7 +304,7 @@ class AdminViewModel @Inject constructor(
 
     fun createAgent(email: String, agentName: String?) {
         viewModelScope.launch {
-            val result = syncRepository.createAgent(email, agentName)
+            val result = agentRepository.createAgent(email, agentName)
             if (result.isSuccess) {
                 loadAgentsData()
             }
@@ -311,7 +315,7 @@ class AdminViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 if (deleteCloudData) {
-                    val syncResult = syncRepository.deleteAgent(uid)
+                    val syncResult = agentRepository.deleteAgent(uid)
                     if (syncResult.isFailure) {
                         _uiEvent.emit("Aviso: Falha ao excluir dados da nuvem")
                     }
@@ -333,7 +337,7 @@ class AdminViewModel @Inject constructor(
 
     fun deleteAgent(uid: String) {
         viewModelScope.launch {
-            val result = syncRepository.deleteAgent(uid)
+            val result = agentRepository.deleteAgent(uid)
             if (result.isSuccess) {
                 loadAgentsData()
             }
@@ -343,14 +347,14 @@ class AdminViewModel @Inject constructor(
     // --- Super Admin Settings ---
 
     private suspend fun loadBairros() {
-        val result = syncRepository.fetchBairros()
+        val result = localizationRepository.fetchBairros()
         if (result.isSuccess) {
             _bairros.value = result.getOrNull() ?: emptyList()
         }
     }
 
     private suspend fun loadSystemSettings() {
-        val result = syncRepository.fetchSystemSettings()
+        val result = localizationRepository.fetchSystemSettings()
         if (result.isSuccess) {
             _systemSettings.value = result.getOrNull() ?: emptyMap()
         }
@@ -358,7 +362,7 @@ class AdminViewModel @Inject constructor(
 
     fun addBairro(name: String) {
         viewModelScope.launch {
-            val result = syncRepository.addBairro(name)
+            val result = localizationRepository.addBairro(name)
             if (result.isSuccess) {
                 loadBairros()
                 _uiEvent.emit("Bairro adicionado")
@@ -368,7 +372,7 @@ class AdminViewModel @Inject constructor(
 
     fun deleteBairro(name: String) {
         viewModelScope.launch {
-            val result = syncRepository.deleteBairro(name)
+            val result = localizationRepository.deleteBairro(name)
             if (result.isSuccess) {
                 loadBairros()
                 _uiEvent.emit("Bairro removido")
@@ -378,7 +382,7 @@ class AdminViewModel @Inject constructor(
 
     fun updateSystemSetting(key: String, value: Any) {
         viewModelScope.launch {
-            val result = syncRepository.updateSystemSetting(key, value)
+            val result = localizationRepository.updateSystemSetting(key, value)
             if (result.isSuccess) {
                 loadSystemSettings()
                 _uiEvent.emit("Configuração atualizada: $key = $value")
@@ -443,7 +447,7 @@ class AdminViewModel @Inject constructor(
 
     fun deleteAgentHouse(agentUid: String, houseId: String) {
         viewModelScope.launch {
-            val result = syncRepository.deleteAgentHouse(agentUid, houseId)
+            val result = agentRepository.deleteAgentHouse(agentUid, houseId)
             if (result.isSuccess) {
                 loadAgentsData()
                 _uiEvent.emit("Registro de imóvel excluído")
@@ -453,7 +457,7 @@ class AdminViewModel @Inject constructor(
 
     fun deleteAgentActivity(agentUid: String, activityDate: String) {
         viewModelScope.launch {
-            val result = syncRepository.deleteAgentActivity(agentUid, activityDate)
+            val result = agentRepository.deleteAgentActivity(agentUid, activityDate)
             if (result.isSuccess) {
                 loadAgentsData()
                 _uiEvent.emit("Registro de atividade excluído")
@@ -463,7 +467,7 @@ class AdminViewModel @Inject constructor(
 
     fun clearSyncError(uid: String) {
         viewModelScope.launch {
-            val result = syncRepository.clearSyncError(uid)
+            val result = agentRepository.clearSyncError(uid)
             if (result.isSuccess) {
                 _uiEvent.emit("Erro de sincronização limpo")
                 loadAgentsData()

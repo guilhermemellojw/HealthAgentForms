@@ -20,8 +20,8 @@ import com.antigravity.healthagent.data.backup.BackupManager
 import com.antigravity.healthagent.data.backup.BackupData
 import com.antigravity.healthagent.utils.SemanalPdfGenerator
 import com.antigravity.healthagent.utils.BoletimPdfGenerator
-import com.antigravity.healthagent.domain.repository.SyncRepository
-import com.antigravity.healthagent.domain.repository.AgentData
+import com.antigravity.healthagent.domain.repository.*
+import com.antigravity.healthagent.domain.usecase.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -39,6 +39,8 @@ import javax.inject.Inject
 class HomeViewModel @Inject constructor(
     private val repository: HouseRepository,
     private val syncRepository: SyncRepository,
+    private val agentRepository: AgentRepository,
+    private val localizationRepository: LocalizationRepository,
     private val houseValidationUseCase: HouseValidationUseCase,
     val dayManagementUseCase: DayManagementUseCase,
     private val houseManagementUseCase: HouseManagementUseCase,
@@ -46,12 +48,12 @@ class HomeViewModel @Inject constructor(
     private val settingsManager: SettingsManager,
     private val backupScheduler: BackupScheduler,
     private val streetRepository: StreetRepository,
-    private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository,
-    private val syncDataUseCase: com.antigravity.healthagent.domain.usecase.SyncDataUseCase,
-    private val getWeeklySummaryUseCase: com.antigravity.healthagent.domain.usecase.GetWeeklySummaryUseCase,
-    private val getBoletimSummaryUseCase: com.antigravity.healthagent.domain.usecase.GetBoletimSummaryUseCase,
-    private val getRGBlocksUseCase: com.antigravity.healthagent.domain.usecase.GetRGBlocksUseCase,
-    private val cleanupHistoricalDataUseCase: com.antigravity.healthagent.domain.usecase.CleanupHistoricalDataUseCase
+    private val authRepository: AuthRepository,
+    private val syncDataUseCase: SyncDataUseCase,
+    private val getWeeklySummaryUseCase: GetWeeklySummaryUseCase,
+    private val getBoletimSummaryUseCase: GetBoletimSummaryUseCase,
+    private val getRGBlocksUseCase: GetRGBlocksUseCase,
+    private val cleanupHistoricalDataUseCase: CleanupHistoricalDataUseCase
 ) : ViewModel() {
 
     // --- State Definitions ---
@@ -665,7 +667,7 @@ class HomeViewModel @Inject constructor(
     private suspend fun loadDynamicConfig() {
         withTimeoutOrNull(5000) {
             // 1. Sync Bairros
-            val bairrosResult = syncRepository.fetchBairros()
+            val bairrosResult = localizationRepository.fetchBairros()
             if (bairrosResult.isSuccess) {
                 _bairrosList.value = bairrosResult.getOrNull() ?: com.antigravity.healthagent.utils.AppConstants.BAIRROS
             }
@@ -839,7 +841,7 @@ class HomeViewModel @Inject constructor(
             }
             
             // 1. Fetch Agent Names (with 3s timeout)
-            val agentNamesResult = withTimeoutOrNull(3000) { syncRepository.fetchAgentNames() }
+            val agentNamesResult = withTimeoutOrNull(3000) { agentRepository.fetchAgentNames() }
             if (agentNamesResult != null && agentNamesResult.isSuccess) {
                 _agentNames.value = agentNamesResult.getOrNull() ?: com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES
             } else if (agentNamesResult == null) {
@@ -849,7 +851,7 @@ class HomeViewModel @Inject constructor(
             }
 
             // 2. Fetch Bairros (with 3s timeout)
-            val bairrosResult = withTimeoutOrNull(3000) { syncRepository.fetchBairros() }
+            val bairrosResult = withTimeoutOrNull(3000) { localizationRepository.fetchBairros() }
             if (bairrosResult != null && bairrosResult.isSuccess) {
                 _bairrosList.value = bairrosResult.getOrNull() ?: com.antigravity.healthagent.utils.AppConstants.BAIRROS
             } else if (bairrosResult == null) {

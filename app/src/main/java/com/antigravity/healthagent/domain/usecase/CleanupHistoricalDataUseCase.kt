@@ -1,6 +1,7 @@
 package com.antigravity.healthagent.domain.usecase
 
 import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.AgentRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -8,7 +9,8 @@ import javax.inject.Inject
 
 class CleanupHistoricalDataUseCase @Inject constructor(
     private val houseRepository: HouseRepository,
-    private val syncRepository: SyncRepository
+    private val syncRepository: SyncRepository,
+    private val agentRepository: AgentRepository
 ) {
     /**
      * Deletes houses and activities before the specified date for the given agent (or all agents if global).
@@ -26,7 +28,7 @@ class CleanupHistoricalDataUseCase @Inject constructor(
 
             if (isGlobal) {
                 // GLOBAL CLEANUP (Admin Only in Cloud)
-                val allAgentsResult = syncRepository.fetchAllAgentsData()
+                val allAgentsResult = agentRepository.fetchAllAgentsData()
                 if (allAgentsResult.isFailure) return Result.failure(allAgentsResult.exceptionOrNull() ?: Exception("Falha ao buscar agentes"))
                 
                 val agents = allAgentsResult.getOrNull() ?: emptyList()

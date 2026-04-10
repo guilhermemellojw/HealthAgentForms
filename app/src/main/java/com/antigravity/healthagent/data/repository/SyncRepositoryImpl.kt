@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.*
+import com.antigravity.healthagent.data.util.*
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -113,8 +114,9 @@ class SyncRepositoryImpl @Inject constructor(
                     activitiesToPush.map { it.date } +
                     tombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.ACTIVITY }.map { it.naturalKey.split("|")[0] } +
                     tombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE }.mapNotNull { tk -> 
-                        val parts = tk.naturalKey.split("_")
-                        if (parts.size >= 3) parts[2] else null
+                        // Robustly extract date (DD-MM-YYYY) from natural key
+                        val dateRegex = Regex("\\d{2}-\\d{2}-\\d{4}")
+                        dateRegex.find(tk.naturalKey)?.value
                     }
                 ).toSet()
                 
@@ -272,70 +274,7 @@ class SyncRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun fetchAllAgentsData(sinceTimestamp: Long): Result<List<AgentData>> {
-        return try {
-            val agentsSnapshot = firestore.collection("agents").get().await()
-            val allAgents = mutableListOf<AgentData>()
-            
-            val timestampThreshold = com.google.firebase.Timestamp(sinceTimestamp / 1000, ((sinceTimestamp % 1000) * 1000000).toInt())
 
-            for (agentDoc in agentsSnapshot.documents) {
-                var email = agentDoc.getString("email") ?: ""
-                var agentName = agentDoc.getString("agentName")?.uppercase()
-                val lastSyncTime = agentDoc.getLong("lastSyncTime") ?: 0L
-                val lastSyncError = agentDoc.getString("lastSyncError")
-                val uid = agentDoc.id
-
-                // If email is missing, try to fetch it from the 'users' collection to avoid "Unknown" cards
-                if (email.isBlank() || email == "Unknown") {
-                    email = try { 
-                        firestore.collection("users").document(uid).get().await().getString("email") ?: "Unknown"
-                    } catch(e: Exception) { "Unknown" }
-                }
-
-                val housesQuery = if (sinceTimestamp > 0) {
-                    agentDoc.reference.collection("houses").whereGreaterThanOrEqualTo("lastUpdated", timestampThreshold)
-                } else {
-                    agentDoc.reference.collection("houses")
-                }
-                val housesSnapshot = housesQuery.get().await()
-                val houses = housesSnapshot.documents.mapNotNull { it.toHouseSafe(uid) }
-
-                val activitiesQuery = if (sinceTimestamp > 0) {
-                    agentDoc.reference.collection("day_activities").whereGreaterThanOrEqualTo("lastUpdated", timestampThreshold)
-                } else {
-                    agentDoc.reference.collection("day_activities")
-                }
-                val activitiesSnapshot = activitiesQuery.get().await()
-                val activities = activitiesSnapshot.documents.mapNotNull { it.toDayActivitySafe(uid) }
-
-                // IMPROVEMENT: If agentName is missing in the main doc, recover it from the data
-                if (agentName.isNullOrBlank()) {
-                    agentName = houses.firstOrNull { it.agentName.isNotBlank() }?.agentName?.uppercase()
-                        ?: activities.firstOrNull { it.agentName.isNotBlank() }?.agentName?.uppercase()
-                }
-
-                allAgents.add(
-                    AgentData(
-                        uid = uid,
-                        email = email,
-                        agentName = agentName,
-                        houses = houses,
-                        activities = activities,
-                        lastSyncTime = lastSyncTime,
-                        lastSyncError = lastSyncError
-                    )
-                )
-            }
-            Result.success(allAgents)
-        } catch (e: Exception) {
-            if (e.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true) {
-                Result.failure(Exception("Acesso negado ao carregar dados dos agentes. Verifique se você é um administrador ou supervisor e se as regras do Firestore permitem a leitura desta coleção."))
-            } else {
-                Result.failure(e)
-            }
-        }
-    }
       override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> {
         return try {
             val uid = targetUid ?: auth.currentUser?.uid ?: return Result.failure(Exception("Not logged in"))
@@ -494,10 +433,10 @@ class SyncRepositoryImpl @Inject constructor(
                     
                     // CONFLICT RESOLUTION: Protect local work
                     if (existing != null && !existing.isSynced) {
-                        // If local house is unsynced, only overwrite if cloud is SIGNIFICANTLY newer (e.g. > 10 min)
+                        // If local house is unsynced, only overwrite if cloud is SIGNIFICANTLY newer
                         // to account for clock skew. Otherwise, prioritize the pending local change.
-                        // 10 minutes (600,000ms) is a safer buffer for manual clock discrepancies.
-                        if (existing.lastUpdated >= (cloudHouse.lastUpdated - 600000L)) {
+                        val threshold = com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS
+                        if (existing.lastUpdated >= (cloudHouse.lastUpdated - threshold)) {
                             return@mapNotNull null
                         }
                     }
@@ -535,7 +474,7 @@ class SyncRepositoryImpl @Inject constructor(
                     if (existing != null && !existing.isSynced) {
                          // Protect local unsynced workday metadata
                          // Use 10 minute buffer as well
-                         if (existing.lastUpdated >= (activity.lastUpdated - 600000L)) {
+                         if (existing.lastUpdated >= (activity.lastUpdated - com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS)) {
                              return@mapNotNull null
                          }
                     }
@@ -569,120 +508,6 @@ class SyncRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun createAgent(email: String, agentName: String?): Result<Unit> {
-        return try {
-            val normalizedEmail = email.trim().lowercase()
-            // Check if agent already exists
-            val existing = firestore.collection("agents")
-                .whereEqualTo("email", normalizedEmail)
-                .get()
-                .await()
-            
-            if (!existing.isEmpty) {
-                return Result.failure(Exception("Agente já cadastrado com este e-mail"))
-            }
-
-            val docId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
-            val agentData = mapOf(
-                "email" to normalizedEmail,
-                "agentName" to agentName?.trim()?.uppercase()?.takeIf { it.isNotBlank() },
-                "lastSyncTime" to 0L,
-                "isPreRegistered" to true
-            )
-            
-            firestore.collection("agents").document(docId).set(agentData).await()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun deleteAgent(uid: String): Result<Unit> {
-        return try {
-            val agentRef = firestore.collection("agents").document(uid)
-            
-            // Firestore delete doesn't cascade to subcollections, we must delete them manually
-            val houses = agentRef.collection("houses").get().await()
-            val activities = agentRef.collection("day_activities").get().await()
-            
-            val operations = (houses.documents + activities.documents).map { it.reference }.toMutableList()
-            operations.add(agentRef)
-            
-            // Also check for 'users' document associated if any (though usually handled by AuthRepository)
-            // For robustness, we focus on the AGENT data here.
-            
-            if (operations.isNotEmpty()) {
-                // Chunk deletions to stay within 500 limit
-                operations.chunked(400).forEach { chunk ->
-                    val batch = firestore.batch()
-                    for (ref in chunk) {
-                        batch.delete(ref)
-                    }
-                    batch.commit().await()
-                }
-            }
-            
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun fetchAgentNames(): Result<List<String>> {
-        return try {
-            // OPTIMIZATION: Try cache first, then server in background or with short timeout
-            val snapshot = withTimeoutOrNull(1500) {
-                firestore.collection("metadata").document("agent_info")
-                    .get().await()
-            }
-            
-            if (snapshot == null) {
-                return Result.success(com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES)
-            }
-            
-            val names = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
-            Result.success(names.map { it.uppercase().trim() }.sorted())
-        } catch (e: Exception) {
-            android.util.Log.w("SyncRepository", "fetchAgentNames offline fallback: ${e.message}")
-            Result.success(com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES)
-        }
-    }
-
-    override suspend fun addAgentName(name: String): Result<Unit> {
-        return try {
-            val normalizedName = name.trim().uppercase()
-            if (normalizedName.isBlank()) return Result.failure(Exception("Nome não pode ser vazio"))
-
-            val docRef = firestore.collection("metadata").document("agent_info")
-            val snapshot = docRef.get().await()
-            
-            val currentNames = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
-            if (!currentNames.contains(normalizedName)) {
-                currentNames.add(normalizedName)
-                docRef.set(mapOf("names" to currentNames.sorted())).await()
-            }
-            
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun deleteAgentName(name: String): Result<Unit> {
-        return try {
-            val docRef = firestore.collection("metadata").document("agent_info")
-            val snapshot = docRef.get().await()
-            
-            val currentNames = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
-            if (currentNames.remove(name)) {
-                docRef.set(mapOf("names" to currentNames.sorted())).await()
-            }
-            
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
 
     override suspend fun clearLocalData(): Result<Unit> {
         return try {
@@ -777,71 +602,6 @@ class SyncRepositoryImpl @Inject constructor(
         }
     }
 
-    // --- Super Admin / Dynamic Configuration ---
-
-    override suspend fun fetchBairros(): Result<List<String>> {
-        return try {
-            val snapshot = withTimeoutOrNull(2500) {
-                firestore.collection("metadata").document("locations")
-                    .get().await()
-            }
-            
-            if (snapshot == null || !snapshot.exists()) {
-                return Result.success(com.antigravity.healthagent.utils.AppConstants.BAIRROS)
-            }
-            
-            val bairros = (snapshot.get("bairros") as? List<*>)?.filterIsInstance<String>()?.filter { it.isNotBlank() } ?: emptyList()
-            
-            if (bairros.isEmpty()) {
-                Result.success(com.antigravity.healthagent.utils.AppConstants.BAIRROS)
-            } else {
-                Result.success(bairros.map { it.uppercase().trim() }.sorted())
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("SyncRepository", "fetchBairros offline fallback: ${e.message}")
-            Result.success(com.antigravity.healthagent.utils.AppConstants.BAIRROS)
-        }
-    }
-
-    override suspend fun addBairro(name: String): Result<Unit> {
-        return try {
-            val normalizedName = name.trim().uppercase()
-            if (normalizedName.isBlank()) return Result.failure(Exception("Nome do bairro não pode ser vazio"))
-            
-            val docRef = firestore.collection("metadata").document("locations")
-            val snapshot = docRef.get().await()
-            
-            // If the document doesn't exist or is empty, we SEED it with the current built-in list + the new one
-            val current = (snapshot.get("bairros") as? List<*>)?.filterIsInstance<String>()?.toMutableList() 
-                ?: com.antigravity.healthagent.utils.AppConstants.BAIRROS.toMutableList()
-            
-            if (!current.contains(normalizedName)) {
-                current.add(normalizedName)
-                docRef.set(mapOf("bairros" to current.map { it.uppercase().trim() }.sorted())).await()
-            }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun deleteBairro(name: String): Result<Unit> {
-        return try {
-            val docRef = firestore.collection("metadata").document("locations")
-            val snapshot = docRef.get().await()
-            
-            // If we are deleting from something that doesn't exist in cloud yet, we start from built-in list
-            val current = (snapshot.get("bairros") as? List<*>)?.filterIsInstance<String>()?.toMutableList()
-                ?: com.antigravity.healthagent.utils.AppConstants.BAIRROS.toMutableList()
-            
-            if (current.remove(name.trim().uppercase())) {
-                docRef.set(mapOf("bairros" to current.map { it.uppercase().trim() }.sorted())).await()
-            }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
 
     override suspend fun fetchSystemSettings(): Result<Map<String, Any>> {
         return try {
@@ -1112,85 +872,4 @@ class SyncRepositoryImpl @Inject constructor(
         }
     }
     
-    private fun com.google.firebase.firestore.DocumentSnapshot.toHouseSafe(uid: String, agentName: String = ""): House? {
-        return try {
-            val house = this.toObject(House::class.java) ?: return null
-            val createdAtRaw = this.get("createdAt")
-            val lastUpdatedRaw = this.get("lastUpdated")
-            
-            val createdAt = when(createdAtRaw) {
-                is com.google.firebase.Timestamp -> createdAtRaw.toDate().time
-                is Long -> createdAtRaw
-                else -> house.createdAt
-            }
-            val lastUpdated = when(lastUpdatedRaw) {
-                is com.google.firebase.Timestamp -> lastUpdatedRaw.toDate().time
-                is Long -> lastUpdatedRaw
-                else -> house.lastUpdated
-            }
-
-            // --- CRITICAL FIX: Explicitly map sequence and complement ---
-            // Firestore often stores numbers as Long, causing toObject() to ignore Int fields.
-            // This was causing all sequences/complements to become 0, leading to Natural Key collisions.
-            val finalSequence = (this.get("sequence") as? Long)?.toInt() ?: house.sequence
-            val finalComplement = (this.get("complement") as? Long)?.toInt() ?: house.complement
-
-            // CRITICAL: Enforce the standardized agentName and Uid from the session/profile
-            // Also ensure Municipality and Bairro are not blank to prevent future deadlocks
-            val finalAgentName = (if (agentName.isNotBlank()) agentName else (house.agentName.ifBlank { "" })).trim().uppercase()
-            val finalMunicipio = if (house.municipio.isBlank()) "BOM JARDIM" else house.municipio
-            val finalBairro = if (house.bairro.isBlank()) "" else house.bairro
-            
-            house.copy(
-                sequence = finalSequence,
-                complement = finalComplement,
-                data = house.data.replace("/", "-"),
-                createdAt = createdAt, 
-                lastUpdated = lastUpdated, 
-                agentUid = uid, 
-                agentName = finalAgentName,
-                municipio = finalMunicipio,
-                bairro = finalBairro
-            )
-        } catch (e: Exception) {
-            android.util.Log.e("SyncRepository", "toHouseSafe: Error mapping ${this.id}", e)
-            null
-        }
-    }
-
-    private fun com.google.firebase.firestore.DocumentSnapshot.toDayActivitySafe(uid: String, agentName: String = ""): DayActivity? {
-        return try {
-            val activity = this.toObject(DayActivity::class.java) ?: return null
-            val lastUpdatedRaw = this.get("lastUpdated")
-            
-            val lastUpdated = when(lastUpdatedRaw) {
-                is com.google.firebase.Timestamp -> lastUpdatedRaw.toDate().time
-                is Long -> lastUpdatedRaw
-                else -> activity.lastUpdated
-            }
-            // CRITICAL: Robust Boolean Mapping for Firestore/Kotlin "is" prefix issues
-            // This ensures isClosed and isManualUnlock are correctly captured even if toObject fails to map them.
-            val isClosed = this.getBoolean("isClosed") ?: activity.isClosed
-            val isManualUnlock = this.getBoolean("isManualUnlock") ?: activity.isManualUnlock
-
-            // CRITICAL: Explicit Status Mapping to avoid serialization gaps
-            val finalStatus = this.getString("status") ?: activity.status
-
-            // CRITICAL: Enforce the standardized agentName and Uid from the session/profile
-            val finalAgentName = (if (agentName.isNotBlank()) agentName else (activity.agentName.ifBlank { "" })).trim().uppercase()
-            activity.copy(
-                status = finalStatus,
-                date = activity.date.replace("/", "-"),
-                isClosed = isClosed,
-                isManualUnlock = isManualUnlock,
-                lastUpdated = lastUpdated, 
-                agentUid = uid, 
-                agentName = finalAgentName
-            )
-
-        } catch (e: Exception) {
-            android.util.Log.e("SyncRepository", "toDayActivitySafe: Error mapping ${this.id}", e)
-            null
-        }
-    }
 }

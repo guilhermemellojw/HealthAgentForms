@@ -462,18 +462,19 @@ object SemanalPdfGenerator {
                     val recup = 0 // Placeholder
                     val samples = 0 
                     
+                    val workedDayHouses = dayHouses.filter { it.situation == Situation.NONE }
                     val dists = intArrayOf(
-                        dayHouses.sumOf { it.a1 },
-                        dayHouses.sumOf { it.a2 },
-                        dayHouses.sumOf { it.b },
-                        dayHouses.sumOf { it.c },
-                        dayHouses.sumOf { it.d1 },
-                        dayHouses.sumOf { it.d2 },
-                        dayHouses.sumOf { it.e }
+                        workedDayHouses.sumOf { it.a1 },
+                        workedDayHouses.sumOf { it.a2 },
+                        workedDayHouses.sumOf { it.b },
+                        workedDayHouses.sumOf { it.c },
+                        workedDayHouses.sumOf { it.d1 },
+                        workedDayHouses.sumOf { it.d2 },
+                        workedDayHouses.sumOf { it.e }
                     )
                     val dayTotalDeps = dists.sum()
-                    val elim = dayHouses.sumOf { it.eliminados }
-                    val larv = dayHouses.sumOf { it.larvicida }
+                    val elim = workedDayHouses.sumOf { it.eliminados }
+                    val larv = workedDayHouses.sumOf { it.larvicida }
                     
                     fun dsh(v: Int): String = if (v == 0) dash else v.toString()
                     fun dshD(v: Double): String = if (v == 0.0) dash else String.format(java.util.Locale("pt", "BR"), "%.0f", v)

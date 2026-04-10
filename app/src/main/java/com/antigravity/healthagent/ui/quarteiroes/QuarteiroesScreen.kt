@@ -43,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import com.antigravity.healthagent.utils.formatStreetName
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -215,7 +216,7 @@ fun QuarteiroesScreen(
                     MarkerComposable(
                         keys = arrayOf(house.id, position),
                         state = remember(house.id) { MarkerState(position = position) },
-                        title = "${house.agentName}: FOCO: ${house.streetName} nº ${house.number}",
+                        title = "${house.agentName}: FOCO: ${house.streetName.formatStreetName()} nº ${house.number}",
                         snippet = "Quadra: ${house.blockNumber} | ${house.bairro}"
                     ) {
                         Box(

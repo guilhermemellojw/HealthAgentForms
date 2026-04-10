@@ -3,6 +3,7 @@ package com.antigravity.healthagent.domain.usecase
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.AgentRepository
 import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import kotlinx.coroutines.flow.Flow
@@ -68,18 +69,9 @@ class CleanupHistoricalDataUseCaseTest {
 
     private val mockSyncRepository = object : SyncRepository {
         override suspend fun pushLocalDataToCloud(houses: List<House>, activities: List<DayActivity>, targetUid: String?, shouldReplace: Boolean): Result<Unit> = Result.success(Unit)
-        override suspend fun fetchAllAgentsData(sinceTimestamp: Long): Result<List<AgentData>> = Result.success(emptyList())
         override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> = Result.success(Unit)
-        override suspend fun createAgent(email: String, agentName: String?): Result<Unit> = Result.success(Unit)
-        override suspend fun deleteAgent(uid: String): Result<Unit> = Result.success(Unit)
-        override suspend fun fetchAgentNames(): Result<List<String>> = Result.success(emptyList())
-        override suspend fun addAgentName(name: String): Result<Unit> = Result.success(Unit)
-        override suspend fun deleteAgentName(name: String): Result<Unit> = Result.success(Unit)
         override suspend fun clearLocalData(): Result<Unit> = Result.success(Unit)
         override suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>, agentUid: String?): Result<Unit> = Result.success(Unit)
-        override suspend fun fetchBairros(): Result<List<String>> = Result.success(emptyList())
-        override suspend fun addBairro(name: String): Result<Unit> = Result.success(Unit)
-        override suspend fun deleteBairro(name: String): Result<Unit> = Result.success(Unit)
         override suspend fun fetchSystemSettings(): Result<Map<String, Any>> = Result.success(emptyMap())
         override suspend fun updateSystemSetting(key: String, value: Any): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAgentHouse(agentUid: String, houseId: String): Result<Unit> = Result.success(Unit)
@@ -95,7 +87,19 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun clearSyncError(uid: String): Result<Unit> = Result.success(Unit)
     }
 
-    private val useCase = CleanupHistoricalDataUseCase(mockHouseRepository, mockSyncRepository)
+    private val mockAgentRepository = object : AgentRepository {
+        override suspend fun createAgent(email: String, agentName: String?): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteAgent(uid: String): Result<Unit> = Result.success(Unit)
+        override suspend fun fetchAgentNames(): Result<List<String>> = Result.success(emptyList())
+        override suspend fun addAgentName(name: String): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteAgentName(name: String): Result<Unit> = Result.success(Unit)
+        override suspend fun fetchAllAgentsData(sinceTimestamp: Long): Result<List<AgentData>> = Result.success(emptyList())
+        override suspend fun deleteAgentHouse(uid: String, houseId: String): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteAgentActivity(uid: String, activityDate: String): Result<Unit> = Result.success(Unit)
+        override suspend fun clearSyncError(uid: String): Result<Unit> = Result.success(Unit)
+    }
+
+    private val useCase = CleanupHistoricalDataUseCase(mockHouseRepository, mockSyncRepository, mockAgentRepository)
 
     @Test
     fun `cleanup - deletes houses and activities before limit date handling mixed formats`() = runBlocking {

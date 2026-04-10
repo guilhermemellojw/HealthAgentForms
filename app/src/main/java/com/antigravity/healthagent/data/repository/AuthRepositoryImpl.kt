@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 import com.google.firebase.firestore.Source
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.antigravity.healthagent.domain.repository.AgentRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
 
 
@@ -28,6 +29,7 @@ class AuthRepositoryImpl @Inject constructor(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
     private val syncRepository: SyncRepository,
+    private val agentRepository: AgentRepository,
     private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager,
     private val houseDao: com.antigravity.healthagent.data.local.dao.HouseDao,
     private val activityDao: com.antigravity.healthagent.data.local.dao.DayActivityDao
@@ -669,7 +671,7 @@ class AuthRepositoryImpl @Inject constructor(
             val newAgentName = (updates["agentName"] as? String)?.trim()?.uppercase()
             if (newAgentName != null && newAgentName.isNotBlank()) {
                 finalUpdates["agentName"] = newAgentName
-                syncRepository.addAgentName(newAgentName)
+                agentRepository.addAgentName(newAgentName)
                 
                 // Propagate to agents collection for data consistency
                 try {
@@ -722,7 +724,7 @@ class AuthRepositoryImpl @Inject constructor(
             
             // Auto-sync agentName to metadata if provided
             if (agentName != null && agentName.isNotBlank()) {
-                syncRepository.addAgentName(agentName)
+                agentRepository.addAgentName(agentName)
             }
             
             Result.success(Unit)
@@ -734,9 +736,9 @@ class AuthRepositoryImpl @Inject constructor(
     override suspend fun deleteUser(uid: String): Result<Unit> {
         return try {
             // Robust cleanup: Delete both Auth-related docs and visit data
-            // We use syncRepository.deleteAgent (which handles subcollections) to avoid orphaned data
-            syncRepository.deleteAgent(uid).onFailure { 
-                android.util.Log.e("AuthRepository", "Failed to delete agent data during user deletion: ${it.message}")
+            // We use agentRepository.deleteAgent (which handles subcollections) to avoid orphaned data
+            agentRepository.deleteAgent(uid).onFailure { error -> 
+                android.util.Log.e("AuthRepository", "Failed to delete agent data during user deletion: ${error.message}")
             }
 
             val batch = firestore.batch()

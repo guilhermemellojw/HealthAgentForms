@@ -3,6 +3,7 @@ package com.antigravity.healthagent.domain.usecase
 import android.content.Context
 import android.net.Uri
 import com.antigravity.healthagent.data.backup.BackupManager
+import com.antigravity.healthagent.domain.repository.AuthRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -10,7 +11,7 @@ import javax.inject.Inject
 
 class RestoreDataUseCase @Inject constructor(
     private val syncRepository: SyncRepository,
-    private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository,
+    private val authRepository: AuthRepository,
     private val backupManager: BackupManager
 ) {
     suspend operator fun invoke(

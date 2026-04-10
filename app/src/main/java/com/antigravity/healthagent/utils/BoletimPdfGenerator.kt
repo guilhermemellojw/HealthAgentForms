@@ -752,29 +752,35 @@ object BoletimPdfGenerator {
         drawRectBox(canvas, MARGIN, cursorY, wLabel, totalRowH, "TOTAIS", boldPaint, headerBgPaint)
         var totX = MARGIN + wLabel
         
-        // Sums
+        // Sums (Filter by Situation.NONE to match row logic)
+        val workedHouses = houses.filter { it.situation == Situation.NONE }
         val sums = mutableListOf<Int>()
-        if (houses.isNotEmpty()) {
-             sums.add(houses.sumOf { it.a1 }); sums.add(houses.sumOf { it.a2 }); sums.add(houses.sumOf { it.b })
-             sums.add(houses.sumOf { it.c }); sums.add(houses.sumOf { it.d1 }); sums.add(houses.sumOf { it.d2 }); sums.add(houses.sumOf { it.e })
+        if (workedHouses.isNotEmpty()) {
+             sums.add(workedHouses.sumOf { it.a1 }); sums.add(workedHouses.sumOf { it.a2 }); sums.add(workedHouses.sumOf { it.b })
+             sums.add(workedHouses.sumOf { it.c }); sums.add(workedHouses.sumOf { it.d1 }); sums.add(workedHouses.sumOf { it.d2 }); sums.add(workedHouses.sumOf { it.e })
         } else { repeat(7) { sums.add(0) } }
         sums.forEach { drawCell(canvas, linePaint, boldPaint, it.toString(), totX, cursorY, cwDepSingle, totalRowH); totX += cwDepSingle }
         
-        drawCell(canvas, linePaint, boldPaint, houses.sumOf { it.eliminados }.toString(), totX, cursorY, cwElim, totalRowH); totX += cwElim
+        val totalElim = workedHouses.sumOf { it.eliminados }
+        drawCell(canvas, linePaint, boldPaint, totalElim.toString(), totX, cursorY, cwElim, totalRowH); totX += cwElim
         
         repeat(3) { drawCell(canvas, linePaint, textPaint, "", totX, cursorY, cwAmostraSingle, totalRowH); totX += cwAmostraSingle }
-        drawCell(canvas, linePaint, textPaint, "", totX, cursorY, cwInsp, totalRowH); totX += cwInsp
         
-        // Imov Trabalhados Sum (Match HomeViewModel logic: Situation.NONE)
-        val totalWorked = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE }
-        drawCell(canvas, linePaint, boldPaint, totalWorked.toString(), totX, cursorY, cwImovTrat, totalRowH); totX += cwImovTrat
+        // Imov. Inspec. (Not treated for totals, show em dash)
+        drawCell(canvas, linePaint, boldPaint, "—", totX, cursorY, cwInsp, totalRowH); totX += cwInsp
+        
+        // Imov. Trat. (Houses where any treatment was performed: larvicide or eliminated items)
+        val totalTreated = workedHouses.count { it.larvicida > 0 || it.eliminados > 0 }
+        drawCell(canvas, linePaint, boldPaint, totalTreated.toString(), totX, cursorY, cwImovTrat, totalRowH); totX += cwImovTrat
 
-        // Larv 1 Gramas Sum
-        drawCell(canvas, linePaint, boldPaint, houses.sumOf { it.larvicida }.toString(), totX, cursorY, cwLarvItem, totalRowH); totX += cwLarvItem
+        // Larv 1 Gramas Sum (BPU)
+        val totalLarv = workedHouses.sumOf { it.larvicida }
+        val totalLarvStr = if (totalLarv % 1.0 == 0.0) totalLarv.toInt().toString() else "%.1f".format(java.util.Locale.US, totalLarv)
+        drawCell(canvas, linePaint, boldPaint, totalLarvStr, totX, cursorY, cwLarvItem, totalRowH); totX += cwLarvItem
         
         // Larv 1 Qtde Dep Trat Sum (New)
-        val totalDepsTrated = houses.sumOf { it.a1 + it.a2 + it.b + it.c + it.d1 + it.d2 + it.e }
-        drawCell(canvas, linePaint, boldPaint, totalDepsTrated.toString(), totX, cursorY, cwLarvItem, totalRowH); totX += cwLarvItem
+        val totalDepsTreated = workedHouses.sumOf { it.a1 + it.a2 + it.b + it.c + it.d1 + it.d2 + it.e }
+        drawCell(canvas, linePaint, boldPaint, totalDepsTreated.toString(), totX, cursorY, cwLarvItem, totalRowH); totX += cwLarvItem
         
         // Remaining 4 columns (Larv2 and Adult)
         repeat(4) { drawCell(canvas, linePaint, textPaint, "", totX, cursorY, cwLarvItem, totalRowH); totX += cwLarvItem }

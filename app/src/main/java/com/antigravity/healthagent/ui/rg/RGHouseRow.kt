@@ -9,6 +9,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.antigravity.healthagent.data.local.model.House
+import com.antigravity.healthagent.utils.formatStreetName
 @Composable
 fun RGHouseRow(
     house: House,
@@ -33,7 +34,7 @@ fun RGHouseRow(
         ) {
             // Street Name - Weight 1f to take available space
             Text(
-                text = house.streetName,
+                text = house.streetName.formatStreetName(),
                 style = basicStyle,
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,

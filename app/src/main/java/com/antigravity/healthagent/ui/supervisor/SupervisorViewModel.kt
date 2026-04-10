@@ -3,7 +3,10 @@ package com.antigravity.healthagent.ui.supervisor
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.antigravity.healthagent.domain.repository.AgentData
+import com.antigravity.healthagent.domain.repository.AgentRepository
+import com.antigravity.healthagent.domain.repository.AuthRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
+import com.antigravity.healthagent.domain.usecase.RestoreDataUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -13,9 +16,9 @@ import javax.inject.Inject
 
 @HiltViewModel
 class SupervisorViewModel @Inject constructor(
-    private val syncRepository: SyncRepository,
-    private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository,
-    private val restoreDataUseCase: com.antigravity.healthagent.domain.usecase.RestoreDataUseCase,
+    private val agentRepository: AgentRepository,
+    private val authRepository: AuthRepository,
+    private val restoreDataUseCase: RestoreDataUseCase,
     private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager
 ) : ViewModel() {
 
@@ -62,7 +65,7 @@ class SupervisorViewModel @Inject constructor(
             _isLoading.value = true
             _errorMessage.value = null
             val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
-            val result = syncRepository.fetchAllAgentsData(thirtyDaysAgo)
+            val result = agentRepository.fetchAllAgentsData(thirtyDaysAgo)
             if (result.isSuccess) {
                 _agents.value = result.getOrNull() ?: emptyList()
             } else {
