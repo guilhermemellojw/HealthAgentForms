@@ -719,7 +719,7 @@ fun HomeScreen(
                                 }
                             }
                         }
-                    } else if (isGoalReached && !uiState.isManualUnlock) {
+                    } else if (isGoalReached) {
                         viewModel.startDayClosingFlow()
                     } else {
                         val isHeaderValid = uiState.municipality.isNotBlank() &&
@@ -746,14 +746,14 @@ fun HomeScreen(
                 val fabText = when {
                     uiState.isDayClosed -> "DIA FECHADO"
                     hasErrors -> "CORRIGIR ERROS"
-                    isGoalReached && !uiState.isManualUnlock -> "FECHAR PRODUÇÃO"
+                    isGoalReached -> "FECHAR PRODUÇÃO"
                     else -> "ADICIONAR"
                 }
                 
                 val fabIcon = when {
                     uiState.isDayClosed -> Icons.Default.Lock
                     hasErrors -> Icons.Default.Warning
-                    isGoalReached && !uiState.isManualUnlock -> Icons.Default.Check
+                    isGoalReached -> Icons.Default.Check
                     else -> Icons.Default.Add
                 }
 

@@ -78,14 +78,20 @@ fun LoginScreen(
                     modifier = Modifier.size(120.dp)
                 )
 
-                if (authState is AuthState.Error) {
+                val displayError = when (val state = authState) {
+                    is AuthState.Error -> state.message
+                    is AuthState.WaitingForAuthorization -> state.error
+                    else -> null
+                }
+
+                if (displayError != null) {
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = (authState as AuthState.Error).message,
+                            text = displayError,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,

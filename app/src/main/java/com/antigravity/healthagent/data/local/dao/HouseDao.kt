@@ -95,8 +95,8 @@ interface HouseDao {
     """)
     suspend fun cleanupZeroValues()
 
-    @Query("UPDATE houses SET agentName = :newName WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:oldName))")
-    suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String)
+    @Query("UPDATE houses SET agentName = :newName, isSynced = 0, lastUpdated = :now WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:oldName)))")
+    suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String, now: Long = System.currentTimeMillis())
 
     @Query("""
         SELECT * FROM houses 

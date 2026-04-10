@@ -2075,14 +2075,26 @@ class HomeViewModel @Inject constructor(
                         _uiEvent.value = "Mudança de tipo de dia detectada (${if(wasWorking) "Trabalho" else "Folga"} -> ${if(isWorking) "Trabalho" else "Folga"})"
                     }
                     
-                    // Update the status first
+                    // Update the status and manage lock state
                     val updatedActivity = if (existing != null) {
                         if (existing.agentUid != currentUid) {
                             repository.deleteDayActivity(existing.date, existing.agentName, existing.agentUid)
                         }
-                        existing.copy(date = date, status = status, agentUid = currentUid)
+                        existing.copy(
+                            date = date, 
+                            status = status, 
+                            isClosed = !isWorking, 
+                            isManualUnlock = if (isWorking) false else existing.isManualUnlock,
+                            agentUid = currentUid
+                        )
                     } else {
-                        DayActivity(date = date, status = status, agentName = currentAgent, agentUid = currentUid)
+                        DayActivity(
+                            date = date, 
+                            status = status, 
+                            isClosed = !isWorking, 
+                            agentName = currentAgent, 
+                            agentUid = currentUid
+                        )
                     }
                     repository.updateDayActivity(updatedActivity)
 

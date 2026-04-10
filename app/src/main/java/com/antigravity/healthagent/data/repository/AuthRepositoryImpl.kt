@@ -753,10 +753,34 @@ class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun requestAccess(uid: String, email: String, displayName: String?, requestedName: String?): Result<Unit> {
         return try {
+            val normalizedEmail = email.trim().lowercase()
             val normalizedName = requestedName?.trim()?.uppercase()
+            
+            // 1. Proactively ensure basic user profile existence
+            // Some Firestore rules might require a user profile to exist before allowing an access request
+            try {
+                val userRef = firestore.collection("users").document(uid)
+                val userDoc = userRef.get(Source.SERVER).await()
+                if (!userDoc.exists()) {
+                    val newUser = mapOf(
+                        "email" to normalizedEmail,
+                        "displayName" to displayName,
+                        "role" to UserRole.AGENT.name,
+                        "isAuthorized" to false,
+                        "createdAt" to System.currentTimeMillis()
+                    )
+                    userRef.set(newUser).await()
+                }
+            } catch (e: Exception) {
+                // If creating profile fails, we log it but still try to send the request
+                // in case the rules for access_requests are more permissive
+                android.util.Log.w("AuthRepository", "Could not ensure user profile before request: ${e.message}")
+            }
+
+            // 2. Send the Access Request
             val request = mapOf(
                 "uid" to uid,
-                "email" to email.trim(),
+                "email" to normalizedEmail,
                 "displayName" to displayName,
                 "requestedName" to normalizedName,
                 "timestamp" to System.currentTimeMillis(),

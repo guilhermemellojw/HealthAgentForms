@@ -383,13 +383,22 @@ class HouseRepositoryImpl @Inject constructor(
                         date = date, 
                         status = "NORMAL", 
                         isClosed = true, 
+                        isManualUnlock = false,
                         agentName = upperName, 
                         agentUid = finalUid, 
                         isSynced = false,
                         lastUpdated = System.currentTimeMillis()
                     ))
-                } else if (!activity.isClosed) {
-                    dayActivityDao.insertDayActivity(activity.copy(date = date, isClosed = true, agentName = upperName, agentUid = finalUid, isSynced = false, lastUpdated = System.currentTimeMillis()))
+                } else if (!activity.isClosed || activity.isManualUnlock) {
+                    dayActivityDao.insertDayActivity(activity.copy(
+                        date = date, 
+                        isClosed = true, 
+                        isManualUnlock = false,
+                        agentName = upperName, 
+                        agentUid = finalUid, 
+                        isSynced = false, 
+                        lastUpdated = System.currentTimeMillis()
+                    ))
                 }
             }
         }

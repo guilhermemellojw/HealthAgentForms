@@ -816,7 +816,8 @@ fun UserAvatar(
     Surface(
         modifier = modifier
             .size(size)
-            .clip(CircleShape),
+            .clip(CircleShape)
+            .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.8f), CircleShape),
         color = backgroundColor,
         tonalElevation = 4.dp,
         shadowElevation = 2.dp
@@ -887,6 +888,7 @@ fun GlassTopAppBar(
             actions = {
                 actions()
                 if (user != null) {
+                    Spacer(modifier = Modifier.width(12.dp))
                     UserIconMenu(
                         user = user,
                         onLogout = onLogout,

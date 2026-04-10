@@ -64,12 +64,20 @@ class LoginViewModel @Inject constructor(
     }
 
     fun setError(message: String) {
-        _authState.value = AuthState.Error(message)
+        val currentState = _authState.value
+        if (currentState is AuthState.WaitingForAuthorization) {
+            _authState.value = currentState.copy(error = message)
+        } else {
+            _authState.value = AuthState.Error(message)
+        }
     }
 
     fun resetError() {
-        if (_authState.value is AuthState.Error) {
+        val currentState = _authState.value
+        if (currentState is AuthState.Error) {
             _authState.value = AuthState.Unauthenticated
+        } else if (currentState is AuthState.WaitingForAuthorization) {
+            _authState.value = currentState.copy(error = null)
         }
     }
 
@@ -98,7 +106,7 @@ class LoginViewModel @Inject constructor(
 sealed class AuthState {
     object Loading : AuthState()
     object Unauthenticated : AuthState()
-    data class WaitingForAuthorization(val user: AuthUser) : AuthState()
+    data class WaitingForAuthorization(val user: AuthUser, val error: String? = null) : AuthState()
     data class Authenticated(val user: AuthUser) : AuthState()
     data class Error(val message: String) : AuthState()
 }

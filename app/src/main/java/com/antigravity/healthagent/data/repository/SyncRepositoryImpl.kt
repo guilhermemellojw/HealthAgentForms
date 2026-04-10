@@ -13,6 +13,8 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.text.SimpleDateFormat
 import java.util.*
 import com.antigravity.healthagent.data.util.*
@@ -31,12 +33,14 @@ class SyncRepositoryImpl @Inject constructor(
     private val syncScheduler: com.antigravity.healthagent.data.sync.SyncScheduler
 ) : SyncRepository {
 
+    private val syncMutex = Mutex()
+
     override suspend fun pushLocalDataToCloud(
         houses: List<House>,
         activities: List<DayActivity>,
         targetUid: String?,
         shouldReplace: Boolean
-    ): Result<Unit> {
+    ): Result<Unit> = syncMutex.withLock {
         return try {
             val uid = targetUid ?: auth.currentUser?.uid ?: return Result.failure(Exception("User not authenticated"))
             val userDocRef = firestore.collection("agents").document(uid)
@@ -121,12 +125,20 @@ class SyncRepositoryImpl @Inject constructor(
                 ).toSet()
                 
                 if (backupDates.isNotEmpty()) {
-                    val existingHouses = userDocRef.collection("houses").get().await()
-                    val existingActivities = userDocRef.collection("day_activities").get().await()
+                    val toDelete = mutableListOf<DocumentReference>()
                     
-                    val toDelete = (existingHouses.documents.filter { it.getString("data")?.replace("/", "-") in backupDates } +
-                                  existingActivities.documents.filter { it.getString("date")?.replace("/", "-") in backupDates })
-                                  .map { it.reference }
+                    // We can use whereIn for up to 30 values at a time in Firestore
+                    backupDates.toList().chunked(30).forEach { dateChunk ->
+                        val houseDocs = userDocRef.collection("houses")
+                            .whereIn("data", dateChunk)
+                            .get().await()
+                        toDelete.addAll(houseDocs.documents.map { it.reference })
+                        
+                        val activityDocs = userDocRef.collection("day_activities")
+                            .whereIn("date", dateChunk)
+                            .get().await()
+                        toDelete.addAll(activityDocs.documents.map { it.reference })
+                    }
 
                     if (toDelete.isNotEmpty()) {
                         toDelete.chunked(400).forEach { chunk ->
@@ -275,7 +287,7 @@ class SyncRepositoryImpl @Inject constructor(
     }
 
 
-      override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> {
+      override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> = syncMutex.withLock {
         return try {
             val uid = targetUid ?: auth.currentUser?.uid ?: return Result.failure(Exception("Not logged in"))
             val isTargetDifferentUser = targetUid != null && targetUid != auth.currentUser?.uid
@@ -383,19 +395,18 @@ class SyncRepositoryImpl @Inject constructor(
 
             val housesToDelete = allLocalHouses.filter { house ->
                 val key = house.generateNaturalKey()
-                val dateKey = "${house.data}|${house.agentName.uppercase()}"
                 
                 // BUG FIX: Only delete local houses if they are already marked as synced. 
                 // If isSynced=false, it means the local state is newer/different from the cloud's awareness of it, 
                 // or it's a re-added house. We should never delete unsynced/new local houses via cloud tombstones.
-                key in cloudDeletedHouses && house.isSynced && dateKey !in lockedKeys
+                key in cloudDeletedHouses && house.isSynced
             }
 
             val allLocalActivities = dayActivityDao.getAllDayActivities(finalAgentName, uid)
             val activitiesToDelete = allLocalActivities.filter { activity ->
                 val dateKey = "${activity.date}|${activity.agentName.uppercase()}"
                 // Consistency check: also guard activity deletions with isSynced
-                dateKey in cloudDeletedActivities && activity.isSynced && dateKey !in lockedKeys
+                dateKey in cloudDeletedActivities && activity.isSynced
             }
 
             // 4. Reconciliation
@@ -423,11 +434,6 @@ class SyncRepositoryImpl @Inject constructor(
                 // Upsert Houses
                 val housesToUpsert = housesDelta.mapNotNull { cloudHouse ->
                     val key = cloudHouse.generateNaturalKey()
-                    val dateKey = "${cloudHouse.data}|${finalAgentName.uppercase()}"
-                    
-                    if (dateKey in lockedKeys) {
-                        return@mapNotNull null
-                    }
 
                     val existing = localHouses[key]?.firstOrNull()
                     
@@ -467,9 +473,6 @@ class SyncRepositoryImpl @Inject constructor(
                     }
                     
                     val existing = localActivities[key]?.firstOrNull()
-                    if (dateKey in lockedKeys) {
-                         return@mapNotNull null
-                    }
 
                     if (existing != null && !existing.isSynced) {
                          // Protect local unsynced workday metadata

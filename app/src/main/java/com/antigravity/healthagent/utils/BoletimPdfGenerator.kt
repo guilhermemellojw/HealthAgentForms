@@ -704,7 +704,7 @@ object BoletimPdfGenerator {
             
             // Amostras & Insp
              repeat(3) { drawCell(canvas, linePaint, textPaint, "", curX, cursorY, cwAmostraSingle, gridRowH); curX += cwAmostraSingle }
-            val inspected = if (isOpen) "—" else ""
+            val inspected = "" // User requested to leave this column empty
             drawCell(canvas, linePaint, textPaint, inspected, curX, cursorY, cwInsp, gridRowH); curX += cwInsp
             
             // Tratamento: Imov Trat + Larv1 (2 cols) + Larv2 (2 cols) + Adult (2 cols) -> 7 cols total
@@ -768,8 +768,8 @@ object BoletimPdfGenerator {
         
         repeat(3) { drawCell(canvas, linePaint, textPaint, "", totX, cursorY, cwAmostraSingle, totalRowH); totX += cwAmostraSingle }
         
-        // Imov. Inspec. (Not treated for totals, show em dash)
-        drawCell(canvas, linePaint, boldPaint, "—", totX, cursorY, cwInsp, totalRowH); totX += cwInsp
+        // Imov. Inspec. (Left empty per user request)
+        drawCell(canvas, linePaint, boldPaint, "", totX, cursorY, cwInsp, totalRowH); totX += cwInsp
         
         // Imov. Trat. (Houses where any treatment was performed: larvicide or eliminated items)
         val totalTreated = workedHouses.count { it.larvicida > 0 || it.eliminados > 0 }
@@ -1009,7 +1009,7 @@ object BoletimPdfGenerator {
         val t2Labels = listOf("Trat. Focal", "Trat. Perifocal", "Inspecionados")
         val tratFocal = chunkHouses.count { it.larvicida > 0 }
         val inspec = chunkHouses.count { it.situation == Situation.NONE }
-        val t2Vals = listOf(tratFocal.toString(), "—", inspec.toString())
+        val t2Vals = listOf(tratFocal.toString(), "—", "—")
         
         val colW2 = 60f
         val wT2 = colW2 * 3
