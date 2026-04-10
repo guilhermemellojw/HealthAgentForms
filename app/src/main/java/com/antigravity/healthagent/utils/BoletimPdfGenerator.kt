@@ -704,13 +704,15 @@ object BoletimPdfGenerator {
             
             // Amostras & Insp
              repeat(3) { drawCell(canvas, linePaint, textPaint, "", curX, cursorY, cwAmostraSingle, gridRowH); curX += cwAmostraSingle }
-            val inspected = ""
+            val inspected = if (isOpen) "—" else ""
             drawCell(canvas, linePaint, textPaint, inspected, curX, cursorY, cwInsp, gridRowH); curX += cwInsp
             
             // Tratamento: Imov Trat + Larv1 (2 cols) + Larv2 (2 cols) + Adult (2 cols) -> 7 cols total
              // Only show treatment if Open
-             val larvG = if (house != null && (house.larvicida > 0.0) && isOpen) house.larvicida.toString() else ""
-             val treated = if (larvG.isNotEmpty()) "X" else "" 
+             val larvG = if (house != null && (house.larvicida > 0.0) && isOpen) {
+                 if (house.larvicida % 1.0 == 0.0) house.larvicida.toInt().toString() else house.larvicida.toString()
+             } else ""
+             val treated = if (larvG.isNotEmpty() || (house != null && house.eliminados > 0)) "X" else "" 
              
              // Imov. Trat. (X)
              drawCell(canvas, linePaint, textPaint, if(isOpen) chk(treated) else "", curX, cursorY, cwImovTrat, gridRowH); curX += cwImovTrat

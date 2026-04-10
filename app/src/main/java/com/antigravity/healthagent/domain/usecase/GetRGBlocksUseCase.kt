@@ -42,27 +42,18 @@ class GetRGBlocksUseCase @Inject constructor() {
             sortedDates.forEach { date ->
                 val dayHousesForBlock = housesByDate[date] ?: emptyList()
                 
-                // 1. Group by agent and find their earliest work in this specific block/day
-                val agentFirstTouch = dayHousesForBlock.groupBy { it.agentName.uppercase() }
-                    .mapValues { (_, houses) -> houses.minOf { it.createdAt } }
-                
-                // 2. Sort agents by who started THIS block first
-                val sortedAgents = agentFirstTouch.toList().sortedBy { it.second }.map { it.first }
-                
-                // 3. Complete all of the first agent's houses before moving to the next
-                val dayHouses = dayHousesForBlock.sortedWith(compareBy(
-                    { sortedAgents.indexOf(it.agentName.uppercase()) },
-                    { it.listOrder }
-                ))
-                
-                currentSegmentHouses.addAll(dayHouses)
-                
-                val lastHouseOfDay = dayHouses.last()
+                // Sort by listOrder strictly to match the production workday order across all agents
+                val dayHouses = dayHousesForBlock.sortedBy { it.listOrder }
                 val manualConcluded = dayHouses.any { it.quarteiraoConcluido }
                 
                 // Auto-Conclusion logic: did the agent(s) work on something else AFTER this block on the same day?
                 // We sort all global work that day by absolute creation time to detect block transitions
                 val allWorkThatDay = allHouses.filter { it.data == date }.sortedBy { it.listOrder }
+                
+                currentSegmentHouses.addAll(dayHouses)
+                
+                val lastHouseOfDay = dayHouses.last()
+                
                 val indexOfLast = allWorkThatDay.indexOfFirst { it.id == lastHouseOfDay.id }
                 val autoConcluded = indexOfLast != -1 && indexOfLast < allWorkThatDay.size - 1
                 

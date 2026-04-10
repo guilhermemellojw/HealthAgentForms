@@ -477,7 +477,9 @@ object SemanalPdfGenerator {
                     val larv = workedDayHouses.sumOf { it.larvicida }
                     
                     fun dsh(v: Int): String = if (v == 0) dash else v.toString()
-                    fun dshD(v: Double): String = if (v == 0.0) dash else String.format(java.util.Locale("pt", "BR"), "%.0f", v)
+                    fun dshD(v: Double): String = if (v == 0.0) dash else {
+                        if (v % 1.0 == 0.0) v.toInt().toString() else v.toString()
+                    }
 
                     drawCell(canvas, linePaint, textPaint, dsh(res), tx, cursorY, colRes, rowH); tx += colRes
                     drawCell(canvas, linePaint, textPaint, dsh(com), tx, cursorY, colCom, rowH); tx += colCom

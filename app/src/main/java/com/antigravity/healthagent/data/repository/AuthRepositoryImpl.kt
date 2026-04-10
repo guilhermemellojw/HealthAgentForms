@@ -755,9 +755,8 @@ class AuthRepositoryImpl @Inject constructor(
         return try {
             val normalizedName = requestedName?.trim()?.uppercase()
             val request = mapOf(
-                "id" to uid,
                 "uid" to uid,
-                "email" to email.trim().lowercase(),
+                "email" to email.trim(),
                 "displayName" to displayName,
                 "requestedName" to normalizedName,
                 "timestamp" to System.currentTimeMillis(),

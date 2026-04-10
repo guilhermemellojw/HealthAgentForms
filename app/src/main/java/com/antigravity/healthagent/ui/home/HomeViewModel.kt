@@ -1069,10 +1069,10 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val closed = isDayClosed.value
-                val currentUid = _remoteAgentUid.value
+                val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value
                 if (closed) {
                     if (dayManagementUseCase.canSafelyUnlock(_data.value)) {
-                        dayManagementUseCase.unlockDay(_data.value, _agentName.value, currentUid)
+                        dayManagementUseCase.unlockDay(_data.value, _agentName.value, effectiveUid)
                     } else {
                         _showHistoryUnlockConfirmation.value = true
                     }
@@ -1082,8 +1082,8 @@ class HomeViewModel @Inject constructor(
                     val currentAgent = _agentName.value
                     val currentData = _data.value
                     
-                    val activity = dayManagementUseCase.getDayActivity(currentData, currentAgent, currentUid)
-                        ?: com.antigravity.healthagent.data.local.model.DayActivity(date = currentData, agentName = currentAgent, agentUid = currentUid ?: "")
+                    val activity = dayManagementUseCase.getDayActivity(currentData, currentAgent, effectiveUid)
+                        ?: com.antigravity.healthagent.data.local.model.DayActivity(date = currentData, agentName = currentAgent, agentUid = effectiveUid)
                     
                     repository.updateDayActivity(activity.copy(isManualUnlock = !manualUnlock))
                     
@@ -2335,9 +2335,10 @@ class HomeViewModel @Inject constructor(
     fun dismissGoalReached() { _showGoalReached.value = false }
     fun navigateToErroneousDay(d: String) { 
         viewModelScope.launch {
-            val activity = dayManagementUseCase.getDayActivity(d, _agentName.value)
+            val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value
+            val activity = dayManagementUseCase.getDayActivity(d, _agentName.value, effectiveUid)
             if (activity?.isClosed == true) {
-                dayManagementUseCase.unlockDay(d, _agentName.value, _remoteAgentUid.value)
+                dayManagementUseCase.unlockDay(d, _agentName.value, effectiveUid)
             }
             _data.value = d
             _showMultiDayErrorDialog.value = false
@@ -2358,7 +2359,8 @@ class HomeViewModel @Inject constructor(
 
     fun confirmUnlockHistory() {
         viewModelScope.launch {
-            dayManagementUseCase.unlockDay(_data.value, _agentName.value, _remoteAgentUid.value)
+            val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value
+            dayManagementUseCase.unlockDay(_data.value, _agentName.value, effectiveUid)
             _showHistoryUnlockConfirmation.value = false
         }
     }
