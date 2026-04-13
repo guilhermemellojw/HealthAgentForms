@@ -359,11 +359,11 @@ object RGPdfGenerator {
             val footerY = cursorY + listHeaderHeight + (maxRows * itemHeight) + 10
             
             // Calculate Totals for the houses on THIS page
-            val totalResidencial = pageHouses.count { it.propertyType == PropertyType.R && it.situation == Situation.NONE }
-            val totalComercial = pageHouses.count { it.propertyType == PropertyType.C && it.situation == Situation.NONE }
-            val totalTerreno = pageHouses.count { it.propertyType == PropertyType.TB && it.situation == Situation.NONE }
-            val totalPonto = pageHouses.count { it.propertyType == PropertyType.PE && it.situation == Situation.NONE }
-            val totalOutros = pageHouses.count { it.propertyType == PropertyType.O && it.situation == Situation.NONE }
+            val totalResidencial = pageHouses.count { it.propertyType == PropertyType.R && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+            val totalComercial = pageHouses.count { it.propertyType == PropertyType.C && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+            val totalTerreno = pageHouses.count { it.propertyType == PropertyType.TB && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+            val totalPonto = pageHouses.count { it.propertyType == PropertyType.PE && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+            val totalOutros = pageHouses.count { it.propertyType == PropertyType.O && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
             val totalPendentes = pageHouses.count { it.situation != Situation.NONE && it.situation != Situation.EMPTY } 
             val totalGeral = pageHouses.size
             
@@ -531,7 +531,7 @@ object RGPdfGenerator {
         cur += wComp
         drawRect(canvas, line, cur, y, wTipo, h); drawCenteredText(canvas, text, house.propertyType.code, cur, y, wTipo, h)
         cur += wTipo
-        val pendText = if(house.situation == Situation.NONE) "—" else house.situation.code
+        val pendText = if(house.situation == Situation.NONE || house.situation == Situation.EMPTY) "—" else house.situation.code
         drawRect(canvas, line, cur, y, wPend, h); drawCenteredText(canvas, text, pendText, cur, y, wPend, h)
     }
     

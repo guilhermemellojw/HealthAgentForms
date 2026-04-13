@@ -66,5 +66,6 @@ data class HomeUiState(
     val isSolarMode: Boolean = false,
     val maxOpenHouses: Int = 25,
     val syncStatus: SyncStatus = SyncStatus(),
-    val backupConfirmation: BackupConfirmation? = null
+    val backupConfirmation: BackupConfirmation? = null,
+    val isDuplicateIds: Set<Int> = emptySet()
 )

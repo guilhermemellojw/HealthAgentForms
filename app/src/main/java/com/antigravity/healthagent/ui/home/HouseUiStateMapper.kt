@@ -29,6 +29,7 @@ object HouseUiStateMapper {
                     "blockNumber" -> errorLabels.add("SEM QUART.")
                     "situation_treatment" -> errorLabels.add("TRAT. INDEVIDO")
                     "larvicide_inspection" -> errorLabels.add("LARV. SEM DEP.")
+                    "treatment_without_larvicide" -> errorLabels.add("DEP. SEM LARV.")
                 }
             }
         }
@@ -46,8 +47,12 @@ object HouseUiStateMapper {
         if (house.eliminados > 0) treatmentParts.add("Elim: ${house.eliminados}")
         if (house.larvicida > 0.0) treatmentParts.add("Larv: ${house.larvicida}g")
         
-        // Resilience: Ensure house has a fallback agentName if missing during mapping
-        val displayHouse = if (house.agentName.isBlank()) house.copy(agentName = "NÃO ATRIBUÍDO") else house
+        // Resilience: Ensure house has a fallback agentName and healed situation if missing during mapping
+        val displayHouse = house.copy(
+            agentName = house.agentName.ifBlank { "NÃO ATRIBUÍDO" },
+            situation = if (house.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) 
+                com.antigravity.healthagent.data.local.model.Situation.NONE else house.situation
+        )
         
         val idParts = mutableListOf<String>()
         if (house.number.isNotBlank()) idParts.add(house.number)

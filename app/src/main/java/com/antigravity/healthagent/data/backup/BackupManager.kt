@@ -123,46 +123,46 @@ class BackupManager @Inject constructor() {
     }
 
     private fun sanitizeHouses(houses: List<House>): List<House> {
-        val mappedHouses = houses.mapIndexed { index, house ->
+        return houses.mapIndexed { index, house ->
             val stableOrder = if (house.listOrder == 0L) index.toLong() else house.listOrder
             
             // Bug Fix: Normalize Date Formats
-            // Legacy/Web JSON often uses YYYY-MM-DD. App expects DD-MM-YYYY for repository suffix filtering.
-            var normalizedData = house.data?.replace("/", "-")?.trim() ?: ""
+            var normalizedData = try { house.data?.replace("/", "-")?.trim() ?: "" } catch(e: Exception) { "" }
             if (normalizedData.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
                 val parts = normalizedData.split("-")
                 normalizedData = "${parts[2]}-${parts[1]}-${parts[0]}"
             }
 
-            // Bug Fix: Enum Fallback (Mapping codes to member names if GSON failed)
-            // If GSON fails to find a member name matching the string, it might return null/default.
-            // We force it back to the correct member based on known codes.
-            // Since BackupManager uses GSON defaults, we need to inspect the parsed object.
-            // Note: If house.situation was parsed from a code like "F", GSON might have returned EMPTY.
-            // However, we don't have access to the raw JSON string here. 
-            // Better Approach: Use @SerializedName in the Enum members.
-            // But since we can't easily edit Enums now, we'll use a healing step in sanitize.
+            // CRITICAL SAFETY: GSON can result in null values for non-nullable Kotlin fields 
+            // if fields are missing in JSON. We must check for null even if Kotlin says it's impossible.
+            @Suppress("SENSELESS_COMPARISON")
+            var finalSituation = if (house.situation == null) com.antigravity.healthagent.data.local.model.Situation.EMPTY else house.situation
             
-            // Bug Fix: Enum Healing
-            // If GSON failed to map (e.g. unknown code or charset issue), it might be EMPTY.
-            // We ensure that if we can't determine situation but it has worked flags, it's NONE.
-            var finalSituation = house.situation
+            @Suppress("SENSELESS_COMPARISON")
+            val finalPropertyType = if (house.propertyType == null) com.antigravity.healthagent.data.local.model.PropertyType.EMPTY else house.propertyType
+
+            // Healing logic: If situation is EMPTY, force to NONE (Worked/Aberto)
+            // Since these houses are part of a workday production list, they should at least be "Aberto".
             if (finalSituation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
-                // If it has treatments or foci, it MUST be NONE (Worked)
-                if ((house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e + house.eliminados) > 0 || 
-                    house.larvicida > 0.0 || house.comFoco) {
-                    finalSituation = com.antigravity.healthagent.data.local.model.Situation.NONE
-                }
+                finalSituation = com.antigravity.healthagent.data.local.model.Situation.NONE
             }
 
+            // Fallback for missing or malformed names
+            @Suppress("SENSELESS_COMPARISON")
+            val safeAgentName = if (house.agentName == null) "" else house.agentName.trim().uppercase()
+            @Suppress("SENSELESS_COMPARISON")
+            val safeStreet = if (house.streetName == null) "" else house.streetName.trim().uppercase()
+            @Suppress("SENSELESS_COMPARISON")
+            val safeNum = if (house.number == null || house.number.trim() == "0") "" else house.number.trim().uppercase()
+
             house.copy(
-                agentName = house.agentName?.trim()?.uppercase() ?: "",
+                agentName = safeAgentName,
                 municipio = house.municipio?.trim()?.uppercase() ?: "BOM JARDIM",
                 bairro = house.bairro?.trim()?.uppercase() ?: "",
                 blockNumber = house.blockNumber?.trim() ?: "",
                 blockSequence = house.blockSequence?.trim() ?: "",
-                streetName = house.streetName?.trim()?.uppercase() ?: "",
-                number = if (house.number?.trim() == "0") "" else house.number?.trim() ?: "",
+                streetName = safeStreet,
+                number = safeNum,
                 sequence = house.sequence,
                 complement = house.complement,
                 data = normalizedData,
@@ -170,6 +170,7 @@ class BackupManager @Inject constructor() {
                 createdAt = if (house.createdAt == 0L) stableOrder else house.createdAt,
                 ciclo = house.ciclo?.trim() ?: "1º",
                 situation = finalSituation,
+                propertyType = finalPropertyType,
                 categoria = house.categoria?.trim() ?: "BRR",
                 zona = house.zona?.trim() ?: "URB",
                 tipo = house.tipo,
@@ -177,21 +178,25 @@ class BackupManager @Inject constructor() {
                 lastUpdated = System.currentTimeMillis()
             )
         }
-        return mappedHouses
     }
 
     private fun sanitizeActivities(activities: List<DayActivity>): List<DayActivity> {
         return activities.map { activity ->
-            var normalizedDate = activity.date?.replace("/", "-")?.trim() ?: ""
+            var normalizedDate = try { activity.date?.replace("/", "-")?.trim() ?: "" } catch(e: Exception) { "" }
             if (normalizedDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
                 val parts = normalizedDate.split("-")
                 normalizedDate = "${parts[2]}-${parts[1]}-${parts[0]}"
             }
 
+            @Suppress("SENSELESS_COMPARISON")
+            val safeAgentName = if (activity.agentName == null) "" else activity.agentName.trim().uppercase()
+            @Suppress("SENSELESS_COMPARISON")
+            val safeStatus = if (activity.status == null) "NORMAL" else activity.status.trim().uppercase()
+
             activity.copy(
-                agentName = activity.agentName?.trim()?.uppercase() ?: "",
+                agentName = safeAgentName,
                 date = normalizedDate,
-                status = activity.status?.trim()?.uppercase() ?: "NORMAL",
+                status = safeStatus,
                 isClosed = activity.isClosed,
                 isSynced = false,
                 lastUpdated = System.currentTimeMillis()

@@ -419,10 +419,10 @@ fun HouseRowItem(
                         IconButton(
                             onClick = { showTreatmentDialog = true },
                             modifier = Modifier.size(32.dp),
-                            enabled = enabled && house.situation == Situation.NONE
+                            enabled = enabled && (house.situation == Situation.NONE || house.situation == Situation.EMPTY)
                         ) {
                             val iconColor = if (isTreated) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primary
-                            val isLocked = !enabled || house.situation != Situation.NONE
+                            val isLocked = !enabled || (house.situation != Situation.NONE && house.situation != Situation.EMPTY)
                             Icon(
                                 Icons.Default.Opacity, 
                                 contentDescription = "Tratamento", 

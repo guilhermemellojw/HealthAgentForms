@@ -1,8 +1,7 @@
 package com.antigravity.healthagent.data.local.model
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
-import androidx.room.Index
+import androidx.room.*
+import com.antigravity.healthagent.utils.normalize
 
 @Entity(
     tableName = "houses",
@@ -68,21 +67,13 @@ data class House(
      * will break synchronization by changing the document ID in Firestore, leading to duplicates.
      */
     fun generateNaturalKey(): String {
-        // Firestore forbidden characters in IDs: . / .. __.*__
-        // We replace any non-alphanumeric separators (slash, dot, multiple spaces) with a single dash.
-        fun sanitize(text: String): String = text.trim()
-            .replace("/", "-")
-            .replace(".", "-")
-            .replace(Regex("\\s+"), " ")
-            .replace(Regex("-+"), "-")
-
         val normalizedDate = data.replace("/", "-")
-        val normalizedStreet = sanitize(streetName)
-        val normalizedBairro = sanitize(bairro)
-        val normalizedAgent = sanitize(agentName)
-        val normalizedBlock = sanitize(blockNumber)
-        val normalizedBlockSeq = sanitize(blockSequence)
-        val normalizedNumber = sanitize(number)
+        val normalizedStreet = streetName.normalize()
+        val normalizedBairro = bairro.normalize()
+        val normalizedAgent = agentName.normalize()
+        val normalizedBlock = blockNumber.normalize()
+        val normalizedBlockSeq = blockSequence.normalize()
+        val normalizedNumber = number.normalize()
         
         // Uniqueness is guaranteed by agentUid + normalizedAgent + date + address details + visitSegment.
         // We remove createdAt to ensure the key is stable even if the house object is recreated.

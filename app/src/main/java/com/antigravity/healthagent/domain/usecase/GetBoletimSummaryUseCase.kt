@@ -49,8 +49,8 @@ class GetBoletimSummaryUseCase @Inject constructor() {
                     bairro = firstBH.bairro,
                     isCompleted = completedBlocks.contains(blockKey),
                     isLocalidadeConcluded = bairrosWithLocalidadeConcluida.contains(firstBH.bairro),
-                    totalHouses = blockHouses.count { it.situation == Situation.NONE }, // Abertos
-                    totalVisits = blockHouses.count { it.situation != Situation.EMPTY }, // Total real visits
+                    totalHouses = blockHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }, // Abertos
+                    totalVisits = blockHouses.size, // Total real visits
                     focos = blockHouses.count { it.comFoco }
                 )
             }.sortedWith(compareBy({ it.isCompleted }, { it.bairro }, { it.number }))
@@ -59,13 +59,13 @@ class GetBoletimSummaryUseCase @Inject constructor() {
                 date = date,
                 agentName = dayHouses.firstOrNull()?.agentName ?: "",
                 totals = DashboardTotals(
-                    totalHouses = dayHouses.count { it.situation != Situation.EMPTY },
+                    totalHouses = dayHouses.size,
                     a1 = dayHouses.sumOf { it.a1 }, a2 = dayHouses.sumOf { it.a2 },
                     b = dayHouses.sumOf { it.b }, c = dayHouses.sumOf { it.c },
                     d1 = dayHouses.sumOf { it.d1 }, d2 = dayHouses.sumOf { it.d2 },
                     e = dayHouses.sumOf { it.e }, eliminados = dayHouses.sumOf { it.eliminados },
                     larvicida = dayHouses.sumOf { it.larvicida },
-                    worked = dayHouses.count { it.situation == Situation.NONE },
+                    worked = dayHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY },
                     recused = dayHouses.count { it.situation == Situation.REC },
                     absent = dayHouses.count { it.situation == Situation.A },
                     closed = dayHouses.count { it.situation == Situation.F },

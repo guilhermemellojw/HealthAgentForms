@@ -22,7 +22,8 @@ class HouseRepositoryImpl @Inject constructor(
     private val syncScheduler: SyncScheduler
 ) : HouseRepository {
 
-    private suspend fun ensureDayNotLocked(originalDate: String, agentName: String, agentUid: String? = "") {
+    private suspend fun ensureDayNotLocked(originalDate: String, agentName: String, agentUid: String? = "", force: Boolean = false) {
+        if (force) return // Admin bypass
         val date = originalDate.replace("/", "-")
         val activity = dayActivityDao.getDayActivity(date, agentName.uppercase(), agentUid ?: "")
         if (activity?.isClosed == true && !activity.isManualUnlock) {
@@ -58,8 +59,8 @@ class HouseRepositoryImpl @Inject constructor(
         return houseDao.getAllHousesSnapshotFlow()
     }
 
-    override suspend fun insertHouse(house: House): Long {
-        ensureDayNotLocked(house.data, house.agentName, house.agentUid)
+    override suspend fun insertHouse(house: House, force: Boolean): Long {
+        ensureDayNotLocked(house.data, house.agentName, house.agentUid, force)
         val id = database.withTransaction {
             val clashCount = houseDao.checkNaturalKeyConflict(
                 excludeId = 0,
@@ -75,20 +76,29 @@ class HouseRepositoryImpl @Inject constructor(
                 bairro = house.bairro,
                 visitSegment = house.visitSegment
             )
-            if (clashCount > 0) {
+            if (clashCount > 0 && !force) {
                 throw IllegalStateException("Este endereço (${house.streetName}, ${house.number}) já existe em outro registro.")
             }
 
+            // Healing logic: Prevent EMPTY from being stored locally
+            val finalSituation = if (house.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
+                com.antigravity.healthagent.data.local.model.Situation.NONE
+            } else house.situation
+
             // CRITICAL: Cleanup any stale local tombstone for this same house key
             tombstoneDao.deleteByNaturalKey(house.generateNaturalKey(), house.agentName, house.agentUid)
-            houseDao.insertHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
+            houseDao.insertHouse(house.copy(
+                situation = finalSituation,
+                isSynced = false, 
+                lastUpdated = System.currentTimeMillis()
+            ))
         }
         syncScheduler.scheduleSync()
         return id
     }
 
-    override suspend fun updateHouse(house: House) {
-        ensureDayNotLocked(house.data, house.agentName, house.agentUid)
+    override suspend fun updateHouse(house: House, force: Boolean) {
+        ensureDayNotLocked(house.data, house.agentName, house.agentUid, force)
         database.withTransaction {
             val clashCount = houseDao.checkNaturalKeyConflict(
                 excludeId = house.id,
@@ -104,7 +114,7 @@ class HouseRepositoryImpl @Inject constructor(
                 bairro = house.bairro,
                 visitSegment = house.visitSegment
             )
-            if (clashCount > 0) {
+            if (clashCount > 0 && !force) {
                 throw IllegalStateException("Alteração impedida: o endereço (${house.streetName}, ${house.number}) já pertence a outro registro. Use o botão de Mesclar se desejar unir os dados.")
             }
 
@@ -118,18 +128,28 @@ class HouseRepositoryImpl @Inject constructor(
                 // Also ensures NO tombstone exists for the NEW key (re-added or restored)
                 tombstoneDao.deleteByNaturalKey(newKey, house.agentName, house.agentUid)
             }
-            houseDao.updateHouse(house.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
+
+            // Healing logic: Prevent EMPTY from being stored locally
+            val finalSituation = if (house.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
+                com.antigravity.healthagent.data.local.model.Situation.NONE
+            } else house.situation
+
+            houseDao.updateHouse(house.copy(
+                situation = finalSituation,
+                isSynced = false, 
+                lastUpdated = System.currentTimeMillis()
+            ))
         }
         syncScheduler.scheduleSync()
     }
 
-    override suspend fun updateHouses(houses: List<House>) {
+    override suspend fun updateHouses(houses: List<House>, force: Boolean) {
         if (houses.isEmpty()) return
         
         // Ensure all affected days are not locked
         val distinctContexts = houses.map { Triple(it.data, it.agentName, it.agentUid) }.distinct()
         distinctContexts.forEach { (date, agent, uid) ->
-            ensureDayNotLocked(date, agent, uid)
+            ensureDayNotLocked(date, agent, uid, force)
         }
         
         database.withTransaction {
@@ -148,7 +168,7 @@ class HouseRepositoryImpl @Inject constructor(
                     bairro = house.bairro,
                     visitSegment = house.visitSegment
                 )
-                if (clashCount > 0) {
+                if (clashCount > 0 && !force) {
                     throw IllegalStateException("Erro ao atualizar lote: conflito de endereço para o imóvel ID ${house.id}.")
                 }
 
@@ -163,15 +183,26 @@ class HouseRepositoryImpl @Inject constructor(
                     tombstoneDao.deleteByNaturalKey(newKey, house.agentName, house.agentUid)
                 }
             }
-            houseDao.upsertHouses(houses.map { it.copy(isSynced = false, lastUpdated = System.currentTimeMillis()) })
+            val healedHouses = houses.map { house ->
+                val finalSituation = if (house.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
+                    com.antigravity.healthagent.data.local.model.Situation.NONE
+                } else house.situation
+
+                house.copy(
+                    situation = finalSituation,
+                    isSynced = false, 
+                    lastUpdated = System.currentTimeMillis()
+                )
+            }
+            houseDao.upsertHouses(healedHouses)
         }
         syncScheduler.scheduleSync()
     }
 
-    override suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String?) {
+    override suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String?, force: Boolean) {
         val finalUid = agentUid ?: ""
-        ensureDayNotLocked(oldDate, agentName, finalUid)
-        ensureDayNotLocked(newDate, agentName, finalUid)
+        ensureDayNotLocked(oldDate, agentName, finalUid, force)
+        ensureDayNotLocked(newDate, agentName, finalUid, force)
         
         database.withTransaction {
             val houses = houseDao.getHousesByDateAndAgent(oldDate, agentName.uppercase(), finalUid)
@@ -183,8 +214,8 @@ class HouseRepositoryImpl @Inject constructor(
         syncScheduler.scheduleSync()
     }
 
-    override suspend fun deleteHouse(house: House) {
-        ensureDayNotLocked(house.data, house.agentName, house.agentUid)
+    override suspend fun deleteHouse(house: House, force: Boolean) {
+        ensureDayNotLocked(house.data, house.agentName, house.agentUid, force)
         database.withTransaction {
             houseDao.deleteHouse(house)
             tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = house.generateNaturalKey(), agentName = house.agentName, agentUid = house.agentUid))
@@ -283,11 +314,17 @@ class HouseRepositoryImpl @Inject constructor(
                 // This prevents multiple houses from the backup overwriting the same local record.
                 val existingId = localHouseGroups[key]?.removeFirstOrNull()?.id ?: 0
                 
+                // Healing logic: Default EMPTY to NONE (Aberto) for restored data
+                val finalSituation = if (restoredHouse.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
+                    com.antigravity.healthagent.data.local.model.Situation.NONE
+                } else restoredHouse.situation
+
                 housesToUpsert.add(restoredHouse.copy(
                     id = existingId,
                     agentName = agentName.uppercase(),
                     agentUid = finalUid,
                     data = restoredHouse.data.replace("/", "-"),
+                    situation = finalSituation,
                     isSynced = false, // Force re-sync after restoration
                     lastUpdated = System.currentTimeMillis()
                 ))
@@ -312,10 +349,10 @@ class HouseRepositoryImpl @Inject constructor(
         syncScheduler.scheduleSync()
     }
 
-    override suspend fun deleteProduction(originalDate: String, agentName: String, agentUid: String?) {
+    override suspend fun deleteProduction(originalDate: String, agentName: String, agentUid: String?, force: Boolean) {
         val date = originalDate.replace("/", "-")
         val finalUid = agentUid ?: ""
-        ensureDayNotLocked(date, agentName, finalUid)
+        ensureDayNotLocked(date, agentName, finalUid, force)
         val upperName = agentName.uppercase()
         database.withTransaction {
             // 1. Get all houses for this date to record tombstones
@@ -336,12 +373,12 @@ class HouseRepositoryImpl @Inject constructor(
         syncScheduler.scheduleSync()
     }
 
-    override suspend fun deleteByAgentAndDates(agentName: String, originalDates: List<String>, agentUid: String?) {
+    override suspend fun deleteByAgentAndDates(agentName: String, originalDates: List<String>, agentUid: String?, force: Boolean) {
         val dates = originalDates.map { it.replace("/", "-") }
         val upperName = agentName.uppercase()
         val finalUid = agentUid ?: ""
         // Lock Check: Verify all dates
-        dates.forEach { ensureDayNotLocked(it, upperName, finalUid) }
+        dates.forEach { ensureDayNotLocked(it, upperName, finalUid, force) }
 
         database.withTransaction {
             // 1. Get all houses and activities for these dates to record tombstones
@@ -507,7 +544,10 @@ class HouseRepositoryImpl @Inject constructor(
             }
 
             if (toDelete.isNotEmpty()) {
+                val houseTombstones = toDelete.map { Tombstone(type = TombstoneType.HOUSE, naturalKey = it.generateNaturalKey(), agentName = it.agentName, agentUid = it.agentUid) }
                 toDelete.forEach { houseDao.deleteHouse(it) }
+                tombstoneDao.insertTombstones(houseTombstones)
+                syncScheduler.scheduleSync()
             }
         }
     }

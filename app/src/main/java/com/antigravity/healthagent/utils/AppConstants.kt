@@ -52,6 +52,6 @@ object AppConstants {
 
     const val MAPS_URL = "https://www.google.com/maps/d/embed?mid=1NpRquCEtQSu0aM13rHr8em0FYmerTDs"
 
-    // 10 minutes buffer to prevent clock skew overwriting local data
-    const val SYNC_CONFLICT_THRESHOLD_MS = 10 * 60 * 1000L 
+    // 10 seconds buffer to prevent clock skew overwriting local data
+    const val SYNC_CONFLICT_THRESHOLD_MS = 10 * 1000L 
 }

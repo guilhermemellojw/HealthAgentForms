@@ -13,21 +13,21 @@ class HouseManagementUseCase @Inject constructor(
     private val streetRepository: StreetRepository
 ) {
 
-    suspend fun insertHouse(house: House, allHouses: List<House>): Long {
+    suspend fun insertHouse(house: House, allHouses: List<House>, force: Boolean = false): Long {
         return repository.runInTransaction {
             val sanitized = sanitizeHouse(house)
-            val id = repository.insertHouse(sanitized)
+            val id = repository.insertHouse(sanitized, force)
             
             val dayHouses = allHouses.filter { it.data == sanitized.data }
             val withNewHouse = (dayHouses + sanitized.copy(id = id.toInt())).sortedBy { it.listOrder }
             val recalculated = recalculateVisitSegments(withNewHouse)
-            repository.updateHouses(recalculated)
+            repository.updateHouses(recalculated, force)
             streetRepository.saveCustomStreet(sanitized.streetName, sanitized.bairro)
             id
         }
     }
 
-    suspend fun updateHouse(house: House, allHouses: List<House>) {
+    suspend fun updateHouse(house: House, allHouses: List<House>, force: Boolean = false) {
         repository.runInTransaction {
             val sanitized = sanitizeHouse(house)
             val originalHouse = allHouses.find { it.id == house.id }
@@ -43,28 +43,28 @@ class HouseManagementUseCase @Inject constructor(
                 recalculateVisitSegments(dayHouses.sortedBy { it.listOrder })
             }
             
-            repository.updateHouses(finalUpdated)
+            repository.updateHouses(finalUpdated, force)
             streetRepository.saveCustomStreet(sanitized.streetName, sanitized.bairro)
         }
     }
 
-    suspend fun updateHouses(houses: List<House>) {
+    suspend fun updateHouses(houses: List<House>, force: Boolean = false) {
         // Assume these are already recalculated if coming from a flow that does it
-        repository.updateHouses(houses)
+        repository.updateHouses(houses, force)
     }
 
-    suspend fun deleteHouse(house: House, allHouses: List<House>) {
+    suspend fun deleteHouse(house: House, allHouses: List<House>, force: Boolean = false) {
         repository.runInTransaction {
             val dayHouses = allHouses.filter { it.data == house.data }
-            repository.deleteHouse(house)
+            repository.deleteHouse(house, force)
             val remaining = dayHouses.filter { it.id != house.id }.sortedBy { it.listOrder }
             val recalculated = recalculateVisitSegments(remaining)
-            repository.updateHouses(recalculated)
+            repository.updateHouses(recalculated, force)
         }
     }
 
-    suspend fun deleteProduction(date: String, agentName: String) {
-        repository.deleteProduction(date, agentName)
+    suspend fun deleteProduction(date: String, agentName: String, force: Boolean = false) {
+        repository.deleteProduction(date, agentName, null, force)
     }
 
     suspend fun updateHouseWithContext(
@@ -358,7 +358,7 @@ class HouseManagementUseCase @Inject constructor(
         val toUpdate = allHouses.filter { it.streetName != it.streetName.formatStreetName() }
         if (toUpdate.isNotEmpty()) {
             val updated = toUpdate.map { it.copy(streetName = it.streetName.formatStreetName()) }
-            repository.updateHouses(updated)
+            repository.updateHouses(updated, force = true)
         }
     }
 
@@ -367,7 +367,7 @@ class HouseManagementUseCase @Inject constructor(
         val toUpdate = allHouses.filter { it.bairro != it.bairro.trim().uppercase() }
         if (toUpdate.isNotEmpty()) {
             val updated = toUpdate.map { it.copy(bairro = it.bairro.trim().uppercase()) }
-            repository.updateHouses(updated)
+            repository.updateHouses(updated, force = true)
         }
     }
 
@@ -378,7 +378,7 @@ class HouseManagementUseCase @Inject constructor(
         if (housesToUpdate.isNotEmpty()) {
             android.util.Log.i("HouseManagement", "Migrating ${housesToUpdate.size} legacy date formats (/) to standard (-)")
             val updatedHouses = housesToUpdate.map { it.copy(data = it.data.replace("/", "-")) }
-            repository.updateHouses(updatedHouses)
+            repository.updateHouses(updatedHouses, force = true)
         }
         
         val allActivities = repository.getAllDayActivitiesSnapshot()
@@ -392,7 +392,7 @@ class HouseManagementUseCase @Inject constructor(
                  // Repository doesn't have a direct 'updatePrimaryKey' but SyncRepositoryImpl does some similar stuff.
                  // In Room, for primary key changes, usually we delete and re-insert.
                  repository.runInTransaction {
-                     repository.deleteProduction(activity.date, activity.agentName, activity.agentUid)
+                     repository.deleteProduction(activity.date, activity.agentName, activity.agentUid, force = true)
                      repository.updateDayActivity(activity.copy(date = newDate))
                  }
              }

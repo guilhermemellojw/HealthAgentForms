@@ -576,7 +576,7 @@ private fun shareToWhatsApp(
     }
 
     // Calculate statistics
-    val trabalhados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE }
+    val trabalhados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE || it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY }
     val tratados = houses.count {
         (it.a1 + it.a2 + it.b + it.c + it.d1 + it.d2 + it.e + it.eliminados) > 0 || 
         it.larvicida > 0.0 || it.comFoco

@@ -289,7 +289,9 @@ class SyncRepositoryImpl @Inject constructor(
                         house.larvicida > 0.0 || house.comFoco
                     },
                     "focusCount" to housesInMonth.count { it.comFoco },
-                    "situationCounts" to housesInMonth.groupingBy { it.situation.name }.eachCount(),
+                    "situationCounts" to housesInMonth.groupingBy { 
+                        if (it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) "NONE" else it.situation.name 
+                    }.eachCount(),
                     "propertyTypeCounts" to housesInMonth.groupingBy { it.propertyType.name }.eachCount(),
                     "totalHouses" to housesInMonth.size,
                     "daysWorked" to activitiesInMonth.size,
@@ -468,14 +470,32 @@ class SyncRepositoryImpl @Inject constructor(
                 // BUG FIX: Only delete local houses if they are already marked as synced. 
                 // If isSynced=false, it means the local state is newer/different from the cloud's awareness of it, 
                 // or it's a re-added house. We should never delete unsynced/new local houses via cloud tombstones.
-                key in cloudDeletedHouses && house.isSynced
+                // EXCEPTION: If the house is in cloudDeletedHouses and the local lastUpdated is significantly
+                // older than the current sync (more than 1 hour), we assume it's a "Ghost" and delete it.
+                if (key in cloudDeletedHouses) {
+                    if (house.isSynced) true
+                    else (System.currentTimeMillis() - house.lastUpdated > 3600000L) // 1h ghost check
+                } else false
             }
 
             val allLocalActivities = dayActivityDao.getAllDayActivities(finalAgentName, uid)
+            
+            // HEALING: Delete any activities with empty dates (corruption from previous sync versions)
+            val corruptActivities = allLocalActivities.filter { it.date.isBlank() }
+            if (corruptActivities.isNotEmpty()) {
+                android.util.Log.w("SyncRepository", "Healing: Cleaning up ${corruptActivities.size} records with empty dates")
+                corruptActivities.forEach { 
+                    dayActivityDao.deleteDayActivity(it.date, it.agentName, it.agentUid)
+                }
+            }
+
             val activitiesToDelete = allLocalActivities.filter { activity ->
                 val dateKey = "${activity.date}|${activity.agentName.uppercase()}"
-                // Consistency check: also guard activity deletions with isSynced
-                dateKey in cloudDeletedActivities && activity.isSynced
+                
+                if (dateKey in cloudDeletedActivities) {
+                    if (activity.isSynced) true
+                    else (System.currentTimeMillis() - activity.lastUpdated > 3600000L) // 1h ghost check
+                } else false
             }
 
             // 4. Reconciliation
@@ -506,12 +526,12 @@ class SyncRepositoryImpl @Inject constructor(
 
                     val existing = localHouses[key]?.firstOrNull()
                     
-                    // CONFLICT RESOLUTION: Protect local work
+                    // CONFLICT RESOLUTION: Last Side to Change Wins (LWW)
                     if (existing != null && !existing.isSynced) {
-                        // If local house is unsynced, only overwrite if cloud is SIGNIFICANTLY newer
-                        // to account for clock skew. Otherwise, prioritize the pending local change.
+                        // Priority: Cloud wins if it is newer than (Local + threshold).
+                        // Local only persists if it is significantly newer (handles device clock ahead of server).
                         val threshold = com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS
-                        if (existing.lastUpdated >= (cloudHouse.lastUpdated - threshold)) {
+                        if (existing.lastUpdated > (cloudHouse.lastUpdated + threshold)) {
                             return@mapNotNull null
                         }
                     }
@@ -544,9 +564,12 @@ class SyncRepositoryImpl @Inject constructor(
                     val existing = localActivities[key]?.firstOrNull()
 
                     if (existing != null && !existing.isSynced) {
-                         // Protect local unsynced workday metadata
-                         // Use 10 minute buffer as well
-                         if (existing.lastUpdated >= (activity.lastUpdated - com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS)) {
+                         // Protect local unsynced workday metadata using LWW
+                         // Priority: Remote "Manual Unlock" always wins over local lock.
+                         val isRemoteUnlock = activity.isManualUnlock && !existing.isManualUnlock
+                         val threshold = com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS
+                         
+                         if (!isRemoteUnlock && existing.lastUpdated > (activity.lastUpdated + threshold)) {
                              return@mapNotNull null
                          }
                     }
@@ -634,11 +657,18 @@ class SyncRepositoryImpl @Inject constructor(
                     // This prevents multiple houses from the backup overwriting the same local record.
                     val finalAgentName = if (restoredHouse.agentName.isNotBlank()) restoredHouse.agentName else agentName
                     val existingId = localHouseGroups[key]?.removeFirstOrNull()?.id ?: 0
+                    
+                    // Healing logic: Default EMPTY to NONE (Aberto) for restored data
+                    val finalSituation = if (restoredHouse.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
+                        com.antigravity.healthagent.data.local.model.Situation.NONE
+                    } else restoredHouse.situation
+
                     val finalHouse = restoredHouse.copy(
                         id = existingId,
                         agentName = finalAgentName.uppercase(),
                         agentUid = finalUid,
-                        data = restoredHouse.data.replace("/", "-")
+                        data = restoredHouse.data.replace("/", "-"),
+                        situation = finalSituation
                     )
                     
                     // CRITICAL: Clear local tombstone for restored house

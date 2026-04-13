@@ -14,7 +14,7 @@ enum class PropertyType(val code: String, val description: String) {
 }
 
 enum class Situation(val code: String, val description: String) {
-    @SerializedName("") EMPTY("", "Não Informado"),
+    @SerializedName("") EMPTY("—", "Aberto"),
     @SerializedName("—") NONE("—", "Aberto"),
     @SerializedName("F") F("F", "Fechado"),
     @SerializedName("REC") REC("REC", "Recusado"),

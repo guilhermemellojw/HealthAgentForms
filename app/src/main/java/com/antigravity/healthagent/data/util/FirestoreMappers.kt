@@ -24,10 +24,17 @@ fun DocumentSnapshot.toHouseSafe(uid: String, agentName: String = ""): House? {
         val finalSequence = (this.get("sequence") as? Long)?.toInt() ?: house.sequence
         val finalComplement = (this.get("complement") as? Long)?.toInt() ?: house.complement
 
-        val finalAgentName = (if (agentName.isNotBlank()) agentName else (house.agentName.ifBlank { "" })).trim().uppercase()
+        val sourceName = if (agentName.isNotBlank()) agentName else (house.agentName.ifBlank { "" })
+        val finalAgentName = normalizeAgentName(sourceName)
+        
         val finalMunicipio = if (house.municipio.isBlank()) "BOM JARDIM" else house.municipio
         val finalBairro = if (house.bairro.isBlank()) "" else house.bairro
         
+        // Healing logic: Default EMPTY to NONE (Aberto) for cloud data
+        val finalSituation = if (house.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
+            com.antigravity.healthagent.data.local.model.Situation.NONE
+        } else house.situation
+
         house.copy(
             sequence = finalSequence,
             complement = finalComplement,
@@ -37,7 +44,8 @@ fun DocumentSnapshot.toHouseSafe(uid: String, agentName: String = ""): House? {
             agentUid = uid, 
             agentName = finalAgentName,
             municipio = finalMunicipio,
-            bairro = finalBairro
+            bairro = finalBairro,
+            situation = finalSituation
         )
     } catch (e: Exception) {
         android.util.Log.e("FirestoreMappers", "toHouseSafe: Error mapping ${this.id}", e)
@@ -59,10 +67,15 @@ fun DocumentSnapshot.toDayActivitySafe(uid: String, agentName: String = ""): Day
         val isManualUnlock = this.getBoolean("isManualUnlock") ?: activity.isManualUnlock
         val finalStatus = this.getString("status") ?: activity.status
 
-        val finalAgentName = (if (agentName.isNotBlank()) agentName else (activity.agentName.ifBlank { "" })).trim().uppercase()
+        val rawDate = this.getString("date") ?: activity.date
+        val finalDate = rawDate.ifBlank { this.id }.replace("/", "-")
+
+        val sourceName = if (agentName.isNotBlank()) agentName else (activity.agentName.ifBlank { "" })
+        val finalAgentName = normalizeAgentName(sourceName)
+        
         activity.copy(
             status = finalStatus,
-            date = activity.date.replace("/", "-"),
+            date = finalDate,
             isClosed = isClosed,
             isManualUnlock = isManualUnlock,
             lastUpdated = lastUpdated, 
@@ -73,4 +86,12 @@ fun DocumentSnapshot.toDayActivitySafe(uid: String, agentName: String = ""): Day
         android.util.Log.e("FirestoreMappers", "toDayActivitySafe: Error mapping ${this.id}", e)
         null
     }
+}
+
+private fun normalizeAgentName(name: String): String {
+    val normalized = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD)
+    return Regex("\\p{InCombiningDiacriticalMarks}+").replace(normalized, "")
+        .trim()
+        .uppercase()
+        .replace(Regex("\\s+"), " ")
 }

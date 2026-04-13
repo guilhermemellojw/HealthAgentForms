@@ -450,11 +450,11 @@ object SemanalPdfGenerator {
                     drawCell(canvas, linePaint, textPaint, dash, tx, cursorY, colQuart, rowH)
                 } else {
                     // Property Types - Filter by OPEN houses only
-                    val res = dayHouses.count { it.propertyType == PropertyType.R && it.situation == Situation.NONE }
-                    val com = dayHouses.count { it.propertyType == PropertyType.C && it.situation == Situation.NONE }
-                    val tb = dayHouses.count { it.propertyType == PropertyType.TB && it.situation == Situation.NONE }
-                    val out = dayHouses.count { it.propertyType == PropertyType.O && it.situation == Situation.NONE }
-                    val pe = dayHouses.count { it.propertyType == PropertyType.PE && it.situation == Situation.NONE }
+                    val res = dayHouses.count { it.propertyType == PropertyType.R && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+                    val com = dayHouses.count { it.propertyType == PropertyType.C && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+                    val tb = dayHouses.count { it.propertyType == PropertyType.TB && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+                    val out = dayHouses.count { it.propertyType == PropertyType.O && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+                    val pe = dayHouses.count { it.propertyType == PropertyType.PE && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
                     val dayTotalVisits = res + com + tb + out + pe
                     
                     val fec = dayHouses.count { it.situation == Situation.F }
@@ -462,7 +462,7 @@ object SemanalPdfGenerator {
                     val recup = 0 // Placeholder
                     val samples = 0 
                     
-                    val workedDayHouses = dayHouses.filter { it.situation == Situation.NONE }
+                    val workedDayHouses = dayHouses.filter { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
                     val dists = intArrayOf(
                         workedDayHouses.sumOf { it.a1 },
                         workedDayHouses.sumOf { it.a2 },
@@ -476,10 +476,7 @@ object SemanalPdfGenerator {
                     val elim = workedDayHouses.sumOf { it.eliminados }
                     val larv = workedDayHouses.sumOf { it.larvicida }
                     
-                    fun dsh(v: Int): String = if (v == 0) dash else v.toString()
-                    fun dshD(v: Double): String = if (v == 0.0) dash else {
-                        if (v % 1.0 == 0.0) v.toInt().toString() else v.toString()
-                    }
+                // formatDouble and dsh are now shared helpers below
 
                     drawCell(canvas, linePaint, textPaint, dsh(res), tx, cursorY, colRes, rowH); tx += colRes
                     drawCell(canvas, linePaint, textPaint, dsh(com), tx, cursorY, colCom, rowH); tx += colCom
@@ -509,7 +506,7 @@ object SemanalPdfGenerator {
 
                     drawCell(canvas, linePaint, boldPaint, dsh(dayTotalDeps), tx, cursorY, colTotalDeps, rowH); tx += colTotalDeps
                     drawCell(canvas, linePaint, textPaint, dsh(elim), tx, cursorY, colElim, rowH); tx += colElim
-                    drawCell(canvas, linePaint, textPaint, dshD(larv), tx, cursorY, colLarv, rowH); tx += colLarv
+                    drawCell(canvas, linePaint, textPaint, formatDouble(larv), tx, cursorY, colLarv, rowH); tx += colLarv
                     
                     // Draw Blocks with auto-scale
                     if (blocksStr != dash) {
@@ -566,30 +563,29 @@ object SemanalPdfGenerator {
         drawRectBox(canvas, tx, cursorY, colData, rowH, "TOTAIS", boldPaint, headerBgPaint)
         tx += colData
         
-        fun dshT(v: Int): String = if (v == 0) dash else v.toString()
-        fun dshTD(v: Double): String = if (v == 0.0) dash else String.format(java.util.Locale("pt", "BR"), "%.0f", v)
+        // dshT and formatDouble are now shared helpers below
 
-        drawRectBox(canvas, tx, cursorY, colRes, rowH, dshT(totRes), boldPaint, headerBgPaint); tx += colRes
-        drawRectBox(canvas, tx, cursorY, colCom, rowH, dshT(totCom), boldPaint, headerBgPaint); tx += colCom
-        drawRectBox(canvas, tx, cursorY, colTB, rowH, dshT(totTB), boldPaint, headerBgPaint); tx += colTB
-        drawRectBox(canvas, tx, cursorY, colOut, rowH, dshT(totOut), boldPaint, headerBgPaint); tx += colOut
-        drawRectBox(canvas, tx, cursorY, colPE, rowH, dshT(totPE), boldPaint, headerBgPaint); tx += colPE
-        drawRectBox(canvas, tx, cursorY, colTotalVisits, rowH, dshT(totVisits), boldPaint, headerBgPaint); tx += colTotalVisits
+        drawRectBox(canvas, tx, cursorY, colRes, rowH, dsh(totRes), boldPaint, headerBgPaint); tx += colRes
+        drawRectBox(canvas, tx, cursorY, colCom, rowH, dsh(totCom), boldPaint, headerBgPaint); tx += colCom
+        drawRectBox(canvas, tx, cursorY, colTB, rowH, dsh(totTB), boldPaint, headerBgPaint); tx += colTB
+        drawRectBox(canvas, tx, cursorY, colOut, rowH, dsh(totOut), boldPaint, headerBgPaint); tx += colOut
+        drawRectBox(canvas, tx, cursorY, colPE, rowH, dsh(totPE), boldPaint, headerBgPaint); tx += colPE
+        drawRectBox(canvas, tx, cursorY, colTotalVisits, rowH, dsh(totVisits), boldPaint, headerBgPaint); tx += colTotalVisits
         
-        drawRectBox(canvas, tx, cursorY, colFEC, rowH, dshT(totFEC), boldPaint, headerBgPaint); tx += colFEC
-        drawRectBox(canvas, tx, cursorY, colREC, rowH, dshT(totREC), boldPaint, headerBgPaint); tx += colREC
-        drawRectBox(canvas, tx, cursorY, colRecup, rowH, dshT(totRecup), boldPaint, headerBgPaint); tx += colRecup
+        drawRectBox(canvas, tx, cursorY, colFEC, rowH, dsh(totFEC), boldPaint, headerBgPaint); tx += colFEC
+        drawRectBox(canvas, tx, cursorY, colREC, rowH, dsh(totREC), boldPaint, headerBgPaint); tx += colREC
+        drawRectBox(canvas, tx, cursorY, colRecup, rowH, dsh(totRecup), boldPaint, headerBgPaint); tx += colRecup
         
-        drawRectBox(canvas, tx, cursorY, colAmostras, rowH, dshT(totAmostras), boldPaint, headerBgPaint); tx += colAmostras
+        drawRectBox(canvas, tx, cursorY, colAmostras, rowH, dsh(totAmostras), boldPaint, headerBgPaint); tx += colAmostras
         
         for (i in 0..6) {
-            drawRectBox(canvas, tx, cursorY, colDep, rowH, dshT(totDeps[i]), boldPaint, headerBgPaint)
+            drawRectBox(canvas, tx, cursorY, colDep, rowH, dsh(totDeps[i]), boldPaint, headerBgPaint)
             tx += colDep
         }
         
-        drawRectBox(canvas, tx, cursorY, colTotalDeps, rowH, dshT(totTotalDeps), boldPaint, headerBgPaint); tx += colTotalDeps
-        drawRectBox(canvas, tx, cursorY, colElim, rowH, dshT(totElim), boldPaint, headerBgPaint); tx += colElim
-        drawRectBox(canvas, tx, cursorY, colLarv, rowH, dshTD(totLarv), boldPaint, headerBgPaint); tx += colLarv
+        drawRectBox(canvas, tx, cursorY, colTotalDeps, rowH, dsh(totTotalDeps), boldPaint, headerBgPaint); tx += colTotalDeps
+        drawRectBox(canvas, tx, cursorY, colElim, rowH, dsh(totElim), boldPaint, headerBgPaint); tx += colElim
+        drawRectBox(canvas, tx, cursorY, colLarv, rowH, formatDouble(totLarv), boldPaint, headerBgPaint); tx += colLarv
         val totBlocksStr = if (totCompletedBlocks.isEmpty()) dash else totCompletedBlocks.sorted().joinToString("   ")
         drawRectBox(canvas, tx, cursorY, colQuart, rowH, totBlocksStr, boldPaint, headerBgPaint)
         
@@ -758,5 +754,15 @@ object SemanalPdfGenerator {
             e.printStackTrace()
         }
         return ""
+    }
+
+    private val DASH = "—"
+
+    private fun dsh(v: Int): String = if (v == 0) DASH else v.toString()
+
+    private fun formatDouble(v: Double): String {
+        if (v == 0.0) return DASH
+        return if (v % 1.0 == 0.0) v.toInt().toString() 
+        else String.format(java.util.Locale("pt", "BR"), "%.1f", v)
     }
 }

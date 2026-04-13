@@ -169,3 +169,14 @@ fun String.fitToWidth(paint: android.graphics.Paint, maxWidth: Float): String {
         middleAbbr // Should have been caught by check 3, but safe fallback
     }
 }
+
+fun String.normalize(): String {
+    val normalized = java.text.Normalizer.normalize(this, java.text.Normalizer.Form.NFD)
+    return Regex("\\p{InCombiningDiacriticalMarks}+").replace(normalized, "")
+        .trim()
+        .replace("/", "-")
+        .replace(".", "-")
+        .replace(Regex("\\s+"), " ")
+        .replace(Regex("-+"), "-")
+        .uppercase()
+}

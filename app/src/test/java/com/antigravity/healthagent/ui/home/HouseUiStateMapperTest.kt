@@ -52,4 +52,14 @@ class HouseUiStateMapperTest {
         assertFalse(uiState.isTreated)
         assertEquals("", uiState.treatmentShortSummary)
     }
+    @Test
+    fun `map - house with EMPTY situation - is healed to NONE in displayHouse`() {
+        val house = House(situation = Situation.EMPTY)
+        
+        val uiState = HouseUiStateMapper.map(house, houseValidationUseCase)
+        
+        assertEquals("Situation should be healed to NONE in UI state", Situation.NONE, uiState.house.situation)
+        // Note: enum code for both EMPTY and NONE is now "—" and description is "Aberto"
+        assertEquals("—", uiState.house.situation.code)
+    }
 }

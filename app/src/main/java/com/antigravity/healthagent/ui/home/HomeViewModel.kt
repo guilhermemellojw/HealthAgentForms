@@ -13,6 +13,7 @@ import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
 import com.antigravity.healthagent.domain.usecase.DayManagementUseCase
 import com.antigravity.healthagent.domain.usecase.HouseManagementUseCase
 import com.antigravity.healthagent.utils.formatStreetName
+import com.antigravity.healthagent.utils.normalize
 import com.antigravity.healthagent.utils.SoundManager
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.data.backup.BackupScheduler
@@ -359,8 +360,8 @@ class HomeViewModel @Inject constructor(
             dates.map { date ->
                 val dayHouses = all.filter { it.data == date }
                 val activity = activities.find { it.date == date }
-                val visitedHousesCount = dayHouses.count { it.situation != Situation.EMPTY }
-                val inspectedHousesCount = dayHouses.count { it.situation == Situation.NONE }
+                val visitedHousesCount = dayHouses.size
+                val inspectedHousesCount = dayHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
                 DaySummary(date, visitedHousesCount, inspectedHousesCount, activity?.status ?: "")
             }
         }
@@ -371,13 +372,13 @@ class HomeViewModel @Inject constructor(
     val weeklySummaryTotals: StateFlow<WeeklySummaryTotals> = combine(allHousesFlow, currentWeekDates) { list, dates ->
         val weekHouses = list.filter { dates.contains(it.data) }
         WeeklySummaryTotals(
-            totalHouses = weekHouses.count { it.situation != Situation.EMPTY },
+            totalHouses = weekHouses.size,
             totalTratados = weekHouses.count { house ->
                 house.a1 > 0 || house.a2 > 0 || house.b > 0 || house.c > 0 ||
                 house.d1 > 0 || house.d2 > 0 || house.e > 0 || house.eliminados > 0 || house.larvicida > 0
             },
             totalFoci = weekHouses.count { it.comFoco },
-            totalWorked = weekHouses.count { it.situation == Situation.NONE },
+            totalWorked = weekHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY },
             totalFechados = weekHouses.count { it.situation == Situation.F },
             totalRecusados = weekHouses.count { it.situation == Situation.REC },
             totalAbsent = weekHouses.count { it.situation == Situation.A },
@@ -574,18 +575,34 @@ class HomeViewModel @Inject constructor(
             val recentlyEdited = args[41] as Map<Int, Long>
             
             val dayHouses = h.filter { it.data == d }
-            val totals = calculateDashboardTotals(dayHouses)
             
-            // Map houses with duplicate detection and silent-window flags
-            val mappedDayHouses = dayHouses.filter { it.streetName.contains(q, true) || it.number.contains(q, true) }.map { house ->
-                val isDuplicate = dayHouses.any { other -> 
-                    other.id != house.id && 
-                    other.listOrder != house.listOrder && // Avoid self-collision for drafts
-                    other.streetName.equals(house.streetName, ignoreCase = true) &&
-                    other.number.equals(house.number, ignoreCase = true) &&
-                    other.sequence == house.sequence &&
-                    other.complement == house.complement
+            // Optimization: Pre-calculate duplicate counts for O(N) detection
+            val identityCounts = mutableMapOf<String, Int>()
+            val duplicates = mutableSetOf<Int>()
+            
+            dayHouses.forEach { hh ->
+                // Identity key matching HouseUiStateMapper's criteria
+                val key = "${hh.streetName.uppercase()}|${hh.number.uppercase()}|${hh.sequence}|${hh.complement}"
+                identityCounts[key] = (identityCounts[key] ?: 0) + 1
+            }
+            
+            // Second pass for specific IDs
+            dayHouses.forEach { hh ->
+                val key = "${hh.streetName.uppercase()}|${hh.number.uppercase()}|${hh.sequence}|${hh.complement}"
+                if ((identityCounts[key] ?: 0) > 1) {
+                    duplicates.add(hh.id)
                 }
+            }
+
+            val normalizedQ = q.normalize()
+            
+            // Map houses with O(N) duplicate detection and normalized search
+            val mappedDayHouses = dayHouses.filter { 
+                it.streetName.normalize().contains(normalizedQ, true) || 
+                it.number.contains(q, true) 
+            }.map { house ->
+                val key = "${house.streetName.uppercase()}|${house.number.uppercase()}|${house.sequence}|${house.complement}"
+                val isDuplicate = (identityCounts[key] ?: 0) > 1
                 
                 // For in-flight houses (id 0), check if any are recently edited using ID 0
                 val isRecentlyEdited = recentlyEdited.containsKey(house.id)
@@ -598,6 +615,8 @@ class HomeViewModel @Inject constructor(
                 )
             }
             
+            val totals = calculateDashboardTotals(dayHouses)
+            
             // Weekly dates
             val weekDates = mutableListOf<String>()
             val cal = weekStart.clone() as Calendar
@@ -607,7 +626,7 @@ class HomeViewModel @Inject constructor(
             }
             _uiState.update { current ->
                 val dayHouses = h.filter { it.data == d }
-                val workedCount = dayHouses.count { it.situation == Situation.NONE }
+                val workedCount = dayHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
                 val errorsCount = dayHouses.count { !houseValidationUseCase.isHouseValid(it, strict = true) }
 
                 current.copy(
@@ -651,6 +670,7 @@ class HomeViewModel @Inject constructor(
                     syncStatus = args[34] as SyncStatus,
                     weeklySummaryTotals = args[35] as WeeklySummaryTotals,
                     backupConfirmation = args[39] as BackupConfirmation?,
+                    isDuplicateIds = duplicates,
                     pendingCount = workedCount,
                     strictPendingCount = errorsCount
                 )
@@ -1068,6 +1088,13 @@ class HomeViewModel @Inject constructor(
     fun toggleDayLock() {
         viewModelScope.launch {
             try {
+                // RULE: Regular Supervisors cannot toggle locks, only Admins.
+                if (_isSupervisor.value && !_isAdmin.value) {
+                    _uiEvent.value = "Apenas administradores podem gerenciar travas remotamente."
+                    soundManager.playWarning()
+                    return@launch
+                }
+
                 val closed = isDayClosed.value
                 val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value
                 if (closed) {
@@ -1100,6 +1127,37 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    fun deduplicateCurrentDay() {
+        viewModelScope.launch {
+            if (!_isAdmin.value) {
+                _uiEvent.value = "Apenas administradores podem executar deduplicação."
+                soundManager.playWarning()
+                return@launch
+            }
+            
+            _isSyncing.value = true
+            _uiEvent.value = "Iniciando deduplicação..."
+            
+            try {
+                val currentAgent = _agentName.value
+                val currentUid = _remoteAgentUid.value ?: _currentUserUid.value
+                
+                if (currentAgent.isNotBlank() && currentUid.isNotBlank()) {
+                    repository.deduplicateAgentData(currentAgent, currentUid)
+                    _uiEvent.value = "Deduplicação concluída. Imóveis conflitantes removidos."
+                    soundManager.playSuccess()
+                } else {
+                    _uiEvent.value = "Erro: Identidade do agente não localizada."
+                }
+            } catch (e: Exception) {
+                _uiEvent.value = "Erro na deduplicação: ${e.message}"
+                soundManager.playWarning()
+            } finally {
+                _isSyncing.value = false
+            }
+        }
+    }
+
     fun startDayClosingFlow() {
         viewModelScope.launch {
             // CRITICAL: DRAFT CHECK - Defer duplicate confirmation to this point
@@ -1111,7 +1169,7 @@ class HomeViewModel @Inject constructor(
                 return@launch
             }
 
-            val workedCount = houses.value.count { it.data == _data.value && it.situation == Situation.NONE }
+            val workedCount = houses.value.count { it.data == _data.value && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
             if (workedCount < maxOpenHouses.value) {
                 _uiEvent.value = "Meta de Abertos não atingida! (Abertos: $workedCount / ${maxOpenHouses.value})"
                 return@launch
@@ -1206,7 +1264,7 @@ class HomeViewModel @Inject constructor(
         val dayHouses = houses.value.filter { it.data == date }
         return AuditSummary(
             date = date,
-            totalWorked = dayHouses.count { it.situation == Situation.NONE },
+            totalWorked = dayHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY },
             totalTreated = dayHouses.count { (it.a1+it.a2+it.b+it.c+it.d1+it.d2+it.e+it.eliminados) > 0 || it.larvicida > 0.0 || it.comFoco },
             totalClosed = dayHouses.count { it.situation == Situation.F },
             totalRefused = dayHouses.count { it.situation == Situation.REC },
@@ -1295,6 +1353,13 @@ class HomeViewModel @Inject constructor(
     private var lastAddClickTime = 0L
 
     fun addNewHouse() {
+        // ROLE ENFORCEMENT
+        if (_isSupervisor.value && !_isAdmin.value) {
+            _uiEvent.value = "Apenas administradores podem adicionar dados remotamente."
+            soundManager.playWarning()
+            return
+        }
+
         val currentTime = System.currentTimeMillis()
         if (isAddingHouse || currentTime - lastAddClickTime < 300) return
         
@@ -1392,6 +1457,10 @@ class HomeViewModel @Inject constructor(
                 // that might have created a new conflict since the last auto-validation.
                 validateCurrentDay(showDialog = false, strict = true) 
                 
+                val currentAgent = _agentName.value
+                val currentUid = _remoteAgentUid.value ?: _currentUserUid.value
+                val adminBypass = _isAdmin.value
+                
                 val clashingDraftIds = _isDuplicateIds.value
                 val hasClashes = clashingDraftIds.isNotEmpty()
                 
@@ -1473,7 +1542,7 @@ class HomeViewModel @Inject constructor(
                 // Add to In-Flight temporarily to prevent duplicate prediction in rapid-fire clicks
                 _housesInFlight.update { it + houseToInsert }
                 
-                val newId = houseManagementUseCase.insertHouse(houseToInsert, latestHouses)
+                val newId = houseManagementUseCase.insertHouse(houseToInsert, latestHouses, adminBypass)
                 
                 // CRITICAL BUG FIX (Race Condition): 
                 // Any edits made to the 'in-flight' house card while 'insertHouse' was suspending (Saving)
@@ -1495,7 +1564,8 @@ class HomeViewModel @Inject constructor(
                      
                      houseManagementUseCase.updateHouse(
                         finalInFlightState.copy(id = newId.toInt()), 
-                        refreshedLatestHouses
+                        refreshedLatestHouses,
+                        adminBypass
                     )
                 }
 
@@ -1528,6 +1598,13 @@ class HomeViewModel @Inject constructor(
         // LOCK ENFORCEMENT
         val isUnlocked = isWorkdayManualUnlock.value
         val isAdmin = _isAdmin.value
+        val isSupervisor = _isSupervisor.value
+
+        // ROLE ENFORCEMENT: Non-admin supervisors cannot edit
+        if (isSupervisor && !isAdmin) {
+            return // Silent return as fields are usually disabled in UI
+        }
+
         // Early lock check - If day is closed, we shouldn't even reach here from the UI usually (since fields are disabled)
         // But for safety, we return early WITHOUT a noisy Snackbar during active typing
         if (uiState.value.isDayClosed && !isUnlocked && !isAdmin && house.id != 0) {
@@ -1542,7 +1619,7 @@ class HomeViewModel @Inject constructor(
         val originalIsWorked = original != null && (original.situation == Situation.NONE || original.situation == Situation.EMPTY)
 
         if (houseIsWorked && !originalIsWorked) {
-            val workedCount = houses.value.count { it.data == _data.value && it.situation == Situation.NONE }
+            val workedCount = houses.value.count { it.data == _data.value && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
             val isUnlocked = isWorkdayManualUnlock.value
             val isAdmin = _isAdmin.value
             
@@ -1679,6 +1756,7 @@ class HomeViewModel @Inject constructor(
                 val latestHouses = houses.value.map { _pendingUpdateDrafts.value[it.id] ?: it }
                 
                 // Use UseCase for context-aware updates (segment recalculation)
+                val adminBypass = _isAdmin.value
                 val result = houseManagementUseCase.updateHouseWithContext(houseWithIdentity, latestHouses, baselineHouse)
                 
                 if (result.localizationChanged) {
@@ -1689,9 +1767,9 @@ class HomeViewModel @Inject constructor(
                     
                     // Also ensure subsequent houses get the current session identity if they are being updated
                     val subsequentWithIdentity = result.subsequentHouses.map { it.copy(agentName = currentName, agentUid = currentUid) }
-                    houseManagementUseCase.updateHouses(subsequentWithIdentity + result.updatedHouse)
+                    houseManagementUseCase.updateHouses(subsequentWithIdentity + result.updatedHouse, adminBypass)
                 } else {
-                    houseManagementUseCase.updateHouse(result.updatedHouse, houses.value)
+                    houseManagementUseCase.updateHouse(result.updatedHouse, houses.value, adminBypass)
                 }
                 
                 // If this house had a validation error highlight, remove it as it's being corrected
@@ -1707,6 +1785,13 @@ class HomeViewModel @Inject constructor(
     }
 
     fun deleteHouse(house: House) {
+        // ROLE ENFORCEMENT
+        if (_isSupervisor.value && !_isAdmin.value) {
+            _uiEvent.value = "Apenas administradores podem excluir dados remotamente."
+            soundManager.playWarning()
+            return
+        }
+
         // LOCK ENFORCEMENT
         val isUnlocked = isWorkdayManualUnlock.value
         val isAdmin = _isAdmin.value
@@ -1722,10 +1807,13 @@ class HomeViewModel @Inject constructor(
                 recentlyDeletedHouse = house
                 // Immediately clear from drafts to prevent "Ghost" house in UI
                 _pendingUpdateDrafts.update { it - house.id }
-                houseManagementUseCase.deleteHouse(house, houses.value)
+                val adminBypass = _isAdmin.value
+                houseManagementUseCase.deleteHouse(house, houses.value, adminBypass)
                 soundManager.playPop()
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error deleting house", e)
+                _uiEvent.value = "Erro ao excluir: ${e.message}"
+                soundManager.playWarning()
             }
         }
     }
@@ -1763,7 +1851,8 @@ class HomeViewModel @Inject constructor(
                     _pendingUpdateDrafts.update { it + (house.id to house.copy(id = house.id)) }
                     _uiEvent.value = "Imóvel restaurado com conflito detectado."
                 } else {
-                    houseManagementUseCase.insertHouse(house.copy(id = 0), houses.value)
+                    val adminBypass = _isAdmin.value
+                    houseManagementUseCase.insertHouse(house.copy(id = 0), houses.value, adminBypass)
                 }
                 
                 recentlyDeletedHouse = null 
@@ -1774,9 +1863,10 @@ class HomeViewModel @Inject constructor(
 
     fun persistListOrder(reorderedList: List<House>) {
         viewModelScope.launch {
+            val adminBypass = _isAdmin.value
             val updatedList = reorderedList.mapIndexed { index, h -> h.copy(listOrder = index.toLong()) }
             val recalculated = houseManagementUseCase.recalculateVisitSegments(updatedList)
-            houseManagementUseCase.updateHouses(recalculated)
+            houseManagementUseCase.updateHouses(recalculated, adminBypass)
         }
     }
 
@@ -1817,9 +1907,10 @@ class HomeViewModel @Inject constructor(
              return
         }
 
-        val existingWorked = houses.value.count { it.data == newDate && it.situation == Situation.NONE }
+        val existingWorked = houses.value.count { it.data == newDate && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+        val houseIsWorked = house.situation == Situation.NONE || house.situation == Situation.EMPTY
 
-        if (existingWorked >= maxOpenHouses.value && maxOpenHouses.value > 0 && house.situation == Situation.NONE) {
+        if (existingWorked >= maxOpenHouses.value && maxOpenHouses.value > 0 && houseIsWorked) {
             soundManager.playWarning()
             _uiEvent.value = "Impossível mover: Meta Diária do dia de destino atingida!"
             return
@@ -2844,7 +2935,7 @@ class HomeViewModel @Inject constructor(
 
     private fun calculateDashboardTotals(dayHouses: List<House>): DashboardTotals {
         return DashboardTotals(
-            totalHouses = dayHouses.count { it.situation != Situation.EMPTY },
+            totalHouses = dayHouses.size, // If it's in the list, it's a property being counted
             a1 = dayHouses.sumOf { it.a1 }, a2 = dayHouses.sumOf { it.a2 },
             b = dayHouses.sumOf { it.b }, c = dayHouses.sumOf { it.c },
             d1 = dayHouses.sumOf { it.d1 }, d2 = dayHouses.sumOf { it.d2 },
@@ -2852,7 +2943,7 @@ class HomeViewModel @Inject constructor(
             larvicida = dayHouses.sumOf { it.larvicida },
             totalFocos = dayHouses.count { it.comFoco },
             totalRegisteredHouses = dayHouses.size,
-            worked = dayHouses.count { it.situation == Situation.NONE },
+            worked = dayHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY },
             recused = dayHouses.count { it.situation == Situation.REC },
             absent = dayHouses.count { it.situation == Situation.A },
             closed = dayHouses.count { it.situation == Situation.F },

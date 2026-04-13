@@ -462,6 +462,19 @@ fun HomeScreen(
                             Text("FECHAR PRODUÇÃO", fontWeight = FontWeight.Bold) 
                         }
                     }
+                    
+                    if (uiState.isAdmin && uiState.isDuplicateIds.isNotEmpty()) {
+                        TextButton(
+                            onClick = { 
+                                viewModel.deduplicateCurrentDay()
+                                isDashboardOpen = false
+                            },
+                            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFFF9800)) // Orange
+                        ) { 
+                            Text("DEDUPLICAR AGORA", fontWeight = FontWeight.Bold) 
+                        }
+                    }
+
                     TextButton(onClick = { isDashboardOpen = false }) { Text("FECHAR") }
                 }
             }
@@ -609,7 +622,7 @@ fun HomeScreen(
                         // Locker Icon
                         IconButton(
                             onClick = {
-                                if (!uiState.isSupervisor) {
+                                if (uiState.isAdmin || !uiState.isSupervisor) {
                                     if (uiState.isDayClosed) {
                                         showUnlockDialog = true
                                     } else {
@@ -646,7 +659,7 @@ fun HomeScreen(
         },
 
         floatingActionButton = {
-            if (!isReorderMode && !uiState.isSupervisor) {
+            if (!isReorderMode && (!uiState.isSupervisor || uiState.isAdmin)) {
                 // Scroll Logic for FAB
                 val isScrollingUp = remember {
                     derivedStateOf {
@@ -1043,7 +1056,7 @@ fun HomeScreen(
                         isSolarMode = uiState.isSolarMode,
                         focusRequester = focusRequester,
                         onGetLocation = onGetLocation,
-                        enabled = !uiState.isDayClosed
+                        enabled = if (uiState.isSupervisor) uiState.isAdmin else (!uiState.isDayClosed || uiState.isManualUnlock)
                     )
                     }
                 }

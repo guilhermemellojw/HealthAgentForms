@@ -63,7 +63,12 @@ class HouseValidationUseCase @Inject constructor() {
                 val isMissingNumAndSeq = house.number.isBlank() && house.sequence == 0
                 if (isMissingNumAndSeq) missingFields.add("Número/Sequência")
                 if (house.propertyType == PropertyType.EMPTY) missingFields.add("Tipo")
-                if (house.situation == Situation.EMPTY) missingFields.add("Situação")
+                // Situation.EMPTY is allowed and treated as "Aberto" (NONE)
+                if (house.situation == Situation.EMPTY) {
+                     // No longer considered missing if we treat it as Aberto, 
+                     // but in strict mode we might want to encourage NONE.
+                     // However, based on the requirement to turn it into open, we should allow it.
+                }
                 if (house.agentName.isBlank()) missingFields.add("Agente")
                 if (house.bairro.isBlank()) missingFields.add("Bairro")
                 if (house.streetName.isBlank()) missingFields.add("Logradouro")
@@ -72,8 +77,10 @@ class HouseValidationUseCase @Inject constructor() {
                 val totalDeposits = house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e
                 val hasTreatment = totalDeposits > 0 || house.eliminados > 0 || house.larvicida > 0.0 || house.comFoco
                 
-                if (house.situation != Situation.NONE && hasTreatment) missingFields.add("Tratamento Indevido")
+                val isWorked = house.situation == Situation.NONE || house.situation == Situation.EMPTY
+                if (!isWorked && hasTreatment) missingFields.add("Tratamento Indevido")
                 if (house.larvicida > 0.0 && totalDeposits == 0) missingFields.add("Larvicida sem Depósitos")
+                if (totalDeposits > 0 && house.larvicida == 0.0) missingFields.add("Depósitos sem Larvicida")
                 
                 val parts = mutableListOf<String>()
                 if (house.number.isNotBlank()) parts.add("Nº ${house.number}")
@@ -111,8 +118,9 @@ class HouseValidationUseCase @Inject constructor() {
         
         if (house.propertyType == PropertyType.EMPTY) invalidFields.add("propertyType")
         
+        // Situation.EMPTY is no longer considered invalid as it's healed to NONE in data layers
         if (strict && house.situation == Situation.EMPTY) {
-            invalidFields.add("situation")
+            // invalidFields.add("situation")
         }
 
         if (house.agentName.isBlank()) invalidFields.add("agentName")
@@ -123,12 +131,17 @@ class HouseValidationUseCase @Inject constructor() {
         val totalDeposits = house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e
         val hasTreatment = totalDeposits > 0 || house.eliminados > 0 || house.larvicida > 0.0 || house.comFoco
         
-        if (house.situation != Situation.NONE && hasTreatment) {
+        val isWorked = house.situation == Situation.NONE || house.situation == Situation.EMPTY
+        if (!isWorked && hasTreatment) {
             invalidFields.add("situation_treatment")
         }
 
         if (house.larvicida > 0.0 && totalDeposits == 0) {
             invalidFields.add("larvicide_inspection")
+        }
+
+        if (totalDeposits > 0 && house.larvicida == 0.0) {
+            invalidFields.add("treatment_without_larvicide")
         }
 
         return invalidFields

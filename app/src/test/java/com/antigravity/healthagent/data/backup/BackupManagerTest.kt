@@ -65,6 +65,21 @@ class BackupManagerTest {
         assertTrue("Key should contain segment 1", key2.contains("_1"))
     }
 
+    @Test
+    fun testSituationHealing() {
+        val json = """
+            {
+                "houses": [
+                    {"blockNumber": "1", "streetName": "Rua A", "data": "10-01-2024", "situation": "EMPTY"}
+                ]
+            }
+        """.trimIndent()
+        
+        val backupData = parseNew(json)
+        val house = backupData.houses[0]
+        assertEquals("EMPTY should be healed to NONE (Aberto)", com.antigravity.healthagent.data.local.model.Situation.NONE, house.situation)
+    }
+
     // Helper to mimic BackupManager logic
     private fun parseLegacy(json: String): List<House> {
         val typeList = object : TypeToken<List<House>>() {}.type
@@ -82,6 +97,12 @@ class BackupManagerTest {
 
     private fun sanitizeHouses(houses: List<House>): List<House> {
         return houses.map { house ->
+            // Mimic REAL healing logic from BackupManager.kt
+            var finalSituation = house.situation
+            if (finalSituation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
+                finalSituation = com.antigravity.healthagent.data.local.model.Situation.NONE
+            }
+
             house.copy(
                 agentName = house.agentName.trim().uppercase(),
                 municipio = house.municipio.trim(),
@@ -92,7 +113,8 @@ class BackupManagerTest {
                 number = if (house.number.trim() == "0") "" else house.number.trim(),
                 sequence = house.sequence,
                 complement = house.complement,
-                data = house.data.trim()
+                data = house.data.trim(),
+                situation = finalSituation
             )
         }
     }

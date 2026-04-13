@@ -677,7 +677,7 @@ object BoletimPdfGenerator {
             drawCell(canvas, linePaint, textPaint, chk(complStr), curX, cursorY, cwComp, gridRowH); curX += cwComp
             drawCell(canvas, linePaint, textPaint, house?.propertyType?.code ?: "", curX, cursorY, cwTipo, gridRowH); curX += cwTipo
             drawCell(canvas, linePaint, textPaint, "", curX, cursorY, cwHora, gridRowH); curX += cwHora
-            val sit = if(house?.situation == Situation.NONE) "—" else house?.situation?.code ?: ""
+            val sit = if(house?.situation == Situation.NONE || house?.situation == Situation.EMPTY) "—" else house?.situation?.code ?: ""
             // User Logic: "—" means OPEN. If situation != "—" (meaning it is NOT open, e.g. Closed/Refused/etc), 
             // then ALL subsequent cells must be empty.
             // Note: In code model, Situation.NONE usually maps to "—" display or empty. 
@@ -755,7 +755,7 @@ object BoletimPdfGenerator {
         var totX = MARGIN + wLabel
         
         // Sums (Filter by Situation.NONE to match row logic)
-        val workedHouses = houses.filter { it.situation == Situation.NONE }
+        val workedHouses = houses.filter { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
         val sums = mutableListOf<Int>()
         if (workedHouses.isNotEmpty()) {
              sums.add(workedHouses.sumOf { it.a1 }); sums.add(workedHouses.sumOf { it.a2 }); sums.add(workedHouses.sumOf { it.b })
@@ -978,11 +978,11 @@ object BoletimPdfGenerator {
 
         
         // --- Table Row 1 ---
-        val typeR = chunkHouses.count { it.propertyType == PropertyType.R && it.situation == Situation.NONE }
-        val typeC = chunkHouses.count { it.propertyType == PropertyType.C && it.situation == Situation.NONE }
-        val typeTB = chunkHouses.count { it.propertyType == PropertyType.TB && it.situation == Situation.NONE }
-        val typePE = chunkHouses.count { it.propertyType == PropertyType.PE && it.situation == Situation.NONE }
-        val typeO = chunkHouses.count { it.propertyType == PropertyType.O && it.situation == Situation.NONE }
+        val typeR = chunkHouses.count { it.propertyType == PropertyType.R && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+        val typeC = chunkHouses.count { it.propertyType == PropertyType.C && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+        val typeTB = chunkHouses.count { it.propertyType == PropertyType.TB && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+        val typePE = chunkHouses.count { it.propertyType == PropertyType.PE && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
+        val typeO = chunkHouses.count { it.propertyType == PropertyType.O && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
         val totalTypes = typeR + typeC + typeTB + typePE + typeO
         
         // Table 1: Imoveis Tipo
@@ -1008,7 +1008,7 @@ object BoletimPdfGenerator {
         // Table 2: Nº de Imóveis
         val t2Labels = listOf("Trat. Focal", "Trat. Perifocal", "Inspecionados")
         val tratFocal = chunkHouses.count { it.larvicida > 0 }
-        val inspec = chunkHouses.count { it.situation == Situation.NONE }
+        val inspec = chunkHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
         val t2Vals = listOf(tratFocal.toString(), "—", "—")
         
         val colW2 = 60f

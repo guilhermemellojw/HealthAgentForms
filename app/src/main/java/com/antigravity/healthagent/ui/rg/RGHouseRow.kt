@@ -85,7 +85,7 @@ fun RGHouseRow(
             
             // Situation
             Text(
-                text = house.situation.code,
+                text = house.situation.code.ifBlank { "—" },
                 style = basicStyle,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.width(typeWidth)

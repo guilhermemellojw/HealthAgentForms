@@ -33,11 +33,11 @@ class CleanupHistoricalDataUseCaseTest {
         }
         override suspend fun getAllHousesSnapshot(): List<House> = emptyList()
         override fun getAllHousesSnapshotFlow(): Flow<List<House>> = flowOf(emptyList())
-        override suspend fun insertHouse(house: House): Long = 0L
-        override suspend fun updateHouse(house: House) {}
-        override suspend fun updateHouses(houses: List<House>) {}
-        override suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String?) {}
-        override suspend fun deleteHouse(house: House) { deletedHouses.add(house) }
+        override suspend fun insertHouse(house: House, force: Boolean): Long = 0L
+        override suspend fun updateHouse(house: House, force: Boolean) {}
+        override suspend fun updateHouses(houses: List<House>, force: Boolean) {}
+        override suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String?, force: Boolean) {}
+        override suspend fun deleteHouse(house: House, force: Boolean) { deletedHouses.add(house) }
         override suspend fun replaceAllHouses(houses: List<House>) {}
         override fun getDayActivities(dates: List<String>, agentName: String, agentUid: String?): Flow<List<DayActivity>> = flowOf(emptyList())
         override fun getDayActivityFlow(date: String, agentName: String, agentUid: String?): Flow<DayActivity?> = flowOf(null)
@@ -54,8 +54,8 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun getAllDayActivitiesSnapshot(): List<DayActivity> = emptyList()
         override suspend fun replaceAllDayActivities(activities: List<DayActivity>) {}
         override suspend fun restoreAgentData(agentName: String, houses: List<House>, activities: List<DayActivity>, agentUid: String?) {}
-        override suspend fun deleteProduction(date: String, agentName: String, agentUid: String?) {}
-        override suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>, agentUid: String?) {
+        override suspend fun deleteProduction(date: String, agentName: String, agentUid: String?, force: Boolean) {}
+        override suspend fun deleteByAgentAndDates(agentName: String, dates: List<String>, agentUid: String?, force: Boolean) {
             deletedActivityDates.addAll(dates)
         }
         override suspend fun countOpenDays(agentName: String, agentUid: String?): Int = 0
