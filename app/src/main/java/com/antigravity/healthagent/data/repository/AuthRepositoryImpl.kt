@@ -68,28 +68,32 @@ class AuthRepositoryImpl @Inject constructor(
                             .addSnapshotListener { snapshot, error ->
                                 if (error != null || snapshot == null) return@addSnapshotListener
                                 
-                                // Return early if doc doesn't exist (might be a new user)
-                                if (!snapshot.exists()) {
-                                     // At least we sent the basic user from getFullUserData already
-                                     return@addSnapshotListener
-                                }
+                                try {
+                                    // Return early if doc doesn't exist (might be a new user)
+                                    if (!snapshot.exists()) {
+                                         // At least we sent the basic user from getFullUserData already
+                                         return@addSnapshotListener
+                                    }
 
-                                val roleStr = snapshot.getString("role") ?: "AGENT"
-                                val isAuthorized = snapshot.getBoolean("isAuthorized") ?: false
-                                val finalRole = try { UserRole.valueOf(roleStr) } catch(_:Exception){ UserRole.AGENT }
-                                
-                                val updatedUser = AuthUser(
-                                    uid = firebaseUser.uid,
-                                    email = firebaseUser.email ?: "",
-                                    displayName = snapshot.getString("displayName") ?: firebaseUser.displayName,
-                                    photoUrl = firebaseUser.photoUrl?.toString(),
-                                    role = finalRole,
-                                    isAuthorized = isAuthorized,
-                                    agentName = snapshot.getString("agentName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
-                                )
-                                trySend(updatedUser)
-                                // Proactively update cache with the latest cloud data
-                                launch { settingsManager.saveUserProfile(updatedUser) }
+                                    val roleStr = snapshot.getString("role") ?: "AGENT"
+                                    val isAuthorized = snapshot.getBoolean("isAuthorized") ?: false
+                                    val finalRole = try { UserRole.valueOf(roleStr) } catch(_:Exception){ UserRole.AGENT }
+                                    
+                                    val updatedUser = AuthUser(
+                                        uid = firebaseUser.uid,
+                                        email = firebaseUser.email ?: "",
+                                        displayName = snapshot.getString("displayName") ?: firebaseUser.displayName,
+                                        photoUrl = firebaseUser.photoUrl?.toString(),
+                                        role = finalRole,
+                                        isAuthorized = isAuthorized,
+                                        agentName = snapshot.getString("agentName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+                                    )
+                                    trySend(updatedUser)
+                                    // Proactively update cache with the latest cloud data
+                                    launch { settingsManager.saveUserProfile(updatedUser) }
+                                } catch (e: Exception) {
+                                    android.util.Log.e("AuthRepository", "Crash prevented in SnapshotListener: ${e.message}", e)
+                                }
                             }
                     } catch (e: Exception) {
                         android.util.Log.e("AuthRepository", "Error fetching user data, trying cache fallback", e)

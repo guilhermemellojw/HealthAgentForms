@@ -148,19 +148,32 @@ class AgentRepositoryImpl @Inject constructor(
                         try {
                             val summaryDoc = agentDoc.reference.collection("monthly_summaries").document(cleanMonthYear!!).get().await()
                             if (summaryDoc.exists()) {
+                                // DEFENSIVE PARSING: Handle mixed types (Long/Int/Number) gracefully
+                                val treatedCount = (summaryDoc.get("treatedCount") as? Number ?: 0).toInt()
+                                val focusCount = (summaryDoc.get("focusCount") as? Number ?: 0).toInt()
+                                val totalHouses = (summaryDoc.get("totalHouses") as? Number ?: 0).toInt()
+                                val daysWorked = (summaryDoc.get("daysWorked") as? Number ?: 0).toInt()
+                                val lastUpdated = (summaryDoc.get("lastUpdated") as? Number ?: 0L).toLong()
+
+                                val situationCounts = (summaryDoc.get("situationCounts") as? Map<*, *> ?: emptyMap<Any, Any>())
+                                    .entries.associate { it.key.toString() to (it.value as? Number ?: 0).toInt() }
+                                
+                                val propertyTypeCounts = (summaryDoc.get("propertyTypeCounts") as? Map<*, *> ?: emptyMap<Any, Any>())
+                                    .entries.associate { it.key.toString() to (it.value as? Number ?: 0).toInt() }
+
                                 agentSummary = com.antigravity.healthagent.domain.repository.AgentSummary(
                                     monthYear = datePattern,
-                                    treatedCount = (summaryDoc.getLong("treatedCount") ?: 0L).toInt(),
-                                    focusCount = (summaryDoc.getLong("focusCount") ?: 0L).toInt(),
-                                    situationCounts = (summaryDoc.get("situationCounts") as? Map<String, Long> ?: emptyMap()).mapValues { it.value.toInt() },
-                                    propertyTypeCounts = (summaryDoc.get("propertyTypeCounts") as? Map<String, Long> ?: emptyMap()).mapValues { it.value.toInt() },
-                                    totalHouses = (summaryDoc.getLong("totalHouses") ?: 0L).toInt(),
-                                    daysWorked = (summaryDoc.getLong("daysWorked") ?: 0L).toInt(),
-                                    lastUpdated = summaryDoc.getLong("lastUpdated") ?: 0L
+                                    treatedCount = treatedCount,
+                                    focusCount = focusCount,
+                                    situationCounts = situationCounts,
+                                    propertyTypeCounts = propertyTypeCounts,
+                                    totalHouses = totalHouses,
+                                    daysWorked = daysWorked,
+                                    lastUpdated = lastUpdated
                                 )
                             }
                         } catch (e: Exception) {
-                            android.util.Log.w("AgentRepository", "Summary fetch failed for $uid: ${e.message}")
+                            android.util.Log.e("AgentRepository", "Defensive summary fetch failed for $uid: ${e.message}", e)
                         }
                     }
 
