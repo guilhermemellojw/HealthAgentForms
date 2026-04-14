@@ -19,7 +19,7 @@ interface DayActivityDao {
     suspend fun insertDayActivity(dayActivity: DayActivity)
 
     @Query("SELECT * FROM day_activities")
-    fun getAllDayActivitiesSnapshot(): List<DayActivity>
+    suspend fun getAllDayActivitiesSnapshot(): List<DayActivity>
 
     @Query("SELECT COUNT(*) FROM day_activities")
     suspend fun count(): Int

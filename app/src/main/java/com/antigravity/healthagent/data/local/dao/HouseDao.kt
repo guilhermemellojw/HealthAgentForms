@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface HouseDao {
     @Query("SELECT * FROM houses ORDER BY listOrder ASC, id ASC")
-    fun getAllHousesSnapshot(): List<House>
+    suspend fun getAllHousesSnapshot(): List<House>
 
     @Query("SELECT * FROM houses ORDER BY listOrder ASC, id ASC")
     fun getAllHousesSnapshotFlow(): Flow<List<House>>

@@ -11,15 +11,95 @@ import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.CustomStreet
 import com.antigravity.healthagent.data.local.model.Tombstone
 
-@Database(entities = [House::class, DayActivity::class, CustomStreet::class, Tombstone::class], version = 27, exportSchema = false)
+@Database(
+    entities = [
+        House::class, 
+        DayActivity::class, 
+        CustomStreet::class, 
+        Tombstone::class,
+        com.antigravity.healthagent.data.local.model.CachedAgent::class,
+        com.antigravity.healthagent.data.local.model.CachedAgentSummary::class
+    ], 
+    version = 31, 
+    exportSchema = false
+)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun houseDao(): HouseDao
     abstract fun dayActivityDao(): DayActivityDao
     abstract fun customStreetDao(): CustomStreetDao
     abstract fun tombstoneDao(): com.antigravity.healthagent.data.local.dao.TombstoneDao
+    abstract fun agentCacheDao(): com.antigravity.healthagent.data.local.dao.AgentCacheDao
 
     companion object {
+        val MIGRATION_31_32 = object : androidx.room.migration.Migration(31, 32) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                performFullNuclearRebuild(database)
+            }
+        }
+
+        val MIGRATION_30_31 = object : androidx.room.migration.Migration(30, 31) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                performFullNuclearRebuild(database)
+            }
+        }
+
+        val MIGRATION_29_30 = object : androidx.room.migration.Migration(29, 30) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                performFullNuclearRebuild(database)
+            }
+        }
+
+        val MIGRATION_28_29 = object : androidx.room.migration.Migration(28, 29) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                try {
+                    database.execSQL("ALTER TABLE houses ADD COLUMN `editedByAdmin` INTEGER NOT NULL DEFAULT 0")
+                } catch (e: Exception) {
+                    if (e.message?.contains("duplicate column name", ignoreCase = true) != true) {
+                        android.util.Log.e("AppDatabase", "Error adding editedByAdmin to houses in MIGRATION_28_29: ${e.message}")
+                    }
+                }
+                try {
+                    database.execSQL("ALTER TABLE day_activities ADD COLUMN `editedByAdmin` INTEGER NOT NULL DEFAULT 0")
+                } catch (e: Exception) {
+                    if (e.message?.contains("duplicate column name", ignoreCase = true) != true) {
+                        android.util.Log.e("AppDatabase", "Error adding editedByAdmin to day_activities in MIGRATION_28_29: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        val MIGRATION_27_28 = object : androidx.room.migration.Migration(27, 28) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `cached_agents` (
+                        `uid` TEXT NOT NULL, 
+                        `email` TEXT NOT NULL, 
+                        `agentName` TEXT, 
+                        `lastSyncTime` INTEGER NOT NULL, 
+                        `lastSyncError` TEXT, 
+                        `photoUrl` TEXT, 
+                        `cachedAt` INTEGER NOT NULL, 
+                        PRIMARY KEY(`uid`)
+                    )
+                """)
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `cached_agent_summaries` (
+                        `agentUid` TEXT NOT NULL, 
+                        `monthYear` TEXT NOT NULL, 
+                        `treatedCount` INTEGER NOT NULL, 
+                        `focusCount` INTEGER NOT NULL, 
+                        `totalHouses` INTEGER NOT NULL, 
+                        `daysWorked` INTEGER NOT NULL, 
+                        `lastUpdated` INTEGER NOT NULL, 
+                        `situationCounts` TEXT NOT NULL, 
+                        `propertyTypeCounts` TEXT NOT NULL, 
+                        PRIMARY KEY(`agentUid`, `monthYear`)
+                    )
+                """)
+            }
+        }
+
         val MIGRATION_26_27 = object : androidx.room.migration.Migration(26, 27) {
             override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
                 performFullNuclearRebuild(database)
@@ -129,6 +209,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "observation" to "TEXT NOT NULL DEFAULT ''",
                     "createdAt" to "INTEGER NOT NULL DEFAULT 0",
                     "isSynced" to "INTEGER NOT NULL DEFAULT 0",
+                    "editedByAdmin" to "INTEGER NOT NULL DEFAULT 0",
                     "latitude" to "REAL",
                     "longitude" to "REAL",
                     "focusCaptureTime" to "INTEGER",
@@ -183,10 +264,10 @@ abstract class AppDatabase : RoomDatabase() {
                         `blockNumber` TEXT NOT NULL, 
                         `streetName` TEXT NOT NULL, 
                         `number` TEXT NOT NULL, 
-                        `sequence` INTEGER NOT NULL, 
-                        `complement` INTEGER NOT NULL, 
-                        `propertyType` TEXT NOT NULL, 
-                        `situation` TEXT NOT NULL, 
+                        `sequence` INTEGER NOT NULL DEFAULT 0, 
+                        `complement` INTEGER NOT NULL DEFAULT 0, 
+                        `propertyType` TEXT NOT NULL DEFAULT 'EMPTY', 
+                        `situation` TEXT NOT NULL DEFAULT 'EMPTY', 
                         `municipio` TEXT NOT NULL DEFAULT 'Bom Jardim', 
                         `bairro` TEXT NOT NULL, 
                         `categoria` TEXT NOT NULL DEFAULT 'BRR', 
@@ -215,6 +296,7 @@ abstract class AppDatabase : RoomDatabase() {
                         `observation` TEXT NOT NULL DEFAULT '', 
                         `createdAt` INTEGER NOT NULL DEFAULT 0, 
                         `isSynced` INTEGER NOT NULL DEFAULT 0, 
+                        `editedByAdmin` INTEGER NOT NULL DEFAULT 0, 
                         `latitude` REAL, 
                         `longitude` REAL, 
                         `focusCaptureTime` INTEGER, 
@@ -229,17 +311,17 @@ abstract class AppDatabase : RoomDatabase() {
                         municipio, bairro, categoria, zona, tipo, `data`, ciclo, atividade, agentName,
                         a1, a2, b, c, d1, d2, e, eliminados, larvicida, comFoco, localidadeConcluida,
                         blockSequence, quarteiraoConcluido, listOrder, visitSegment, agentUid,
-                        observation, createdAt, isSynced, latitude, longitude, focusCaptureTime, lastUpdated
+                        observation, createdAt, isSynced, editedByAdmin, latitude, longitude, focusCaptureTime, lastUpdated
                     )
                     SELECT 
                         UPPER(TRIM(COALESCE(CAST(blockNumber AS TEXT), ''))), UPPER(TRIM(COALESCE(CAST(streetName AS TEXT), ''))), UPPER(TRIM(COALESCE(CAST(number AS TEXT), ''))), COALESCE(CAST(sequence AS INTEGER), 0), COALESCE(CAST(complement AS INTEGER), 0), COALESCE(CAST(propertyType AS TEXT), 'EMPTY'), COALESCE(CAST(situation AS TEXT), 'EMPTY'),
-                        COALESCE(CAST(municipio AS TEXT), 'Bom Jardim'), UPPER(TRIM(COALESCE(CAST(bairro AS TEXT), ''))), COALESCE(CAST(categoria AS TEXT), 'BRR'), COALESCE(CAST(zona AS TEXT), 'URB'), COALESCE(CAST(tipo AS INTEGER), 2), COALESCE(CAST(`data` AS TEXT), ''), COALESCE(CAST(ciclo AS TEXT), '1º'), COALESCE(CAST(atividade AS INTEGER), 4), UPPER(TRIM(COALESCE(CAST(agentName AS TEXT), ''))),
+                        COALESCE(CAST(municipio AS TEXT), 'Bom Jardim'), UPPER(TRIM(COALESCE(CAST(bairro AS TEXT), ''))), COALESCE(CAST(categoria AS TEXT), 'BRR'), COALESCE(CAST(zona AS TEXT), 'URB'), COALESCE(CAST(tipo AS INTEGER), 2), REPLACE(COALESCE(CAST(`data` AS TEXT), ''), '/', '-'), COALESCE(CAST(ciclo AS TEXT), '1º'), COALESCE(CAST(atividade AS INTEGER), 4), UPPER(TRIM(COALESCE(CAST(agentName AS TEXT), ''))),
                         COALESCE(CAST(a1 AS INTEGER), 0), COALESCE(CAST(a2 AS INTEGER), 0), COALESCE(CAST(b AS INTEGER), 0), COALESCE(CAST(c AS INTEGER), 0), COALESCE(CAST(d1 AS INTEGER), 0), COALESCE(CAST(d2 AS INTEGER), 0), COALESCE(CAST(e AS INTEGER), 0), COALESCE(CAST(eliminados AS INTEGER), 0), COALESCE(CAST(larvicida AS REAL), 0.0), COALESCE(CAST(comFoco AS INTEGER), 0), COALESCE(CAST(localidadeConcluida AS INTEGER), 0), 
                         UPPER(TRIM(COALESCE(CAST(blockSequence AS TEXT), ''))), COALESCE(CAST(quarteiraoConcluido AS INTEGER), 0), COALESCE(CAST(listOrder AS INTEGER), 0), COALESCE(CAST(visitSegment AS INTEGER), 0), COALESCE(MAX(CAST(agentUid AS TEXT)), ''),
-                        COALESCE(CAST(observation AS TEXT), ''), COALESCE(CAST(createdAt AS INTEGER), 0), COALESCE(MAX(CAST(isSynced AS INTEGER)), 0), latitude, longitude, focusCaptureTime, COALESCE(MAX(CAST(lastUpdated AS INTEGER)), 0)
+                        COALESCE(CAST(observation AS TEXT), ''), COALESCE(CAST(createdAt AS INTEGER), 0), COALESCE(MAX(CAST(isSynced AS INTEGER)), 0), COALESCE(MAX(CAST(editedByAdmin AS INTEGER)), 0), MAX(latitude), MAX(longitude), MAX(focusCaptureTime), COALESCE(MAX(CAST(lastUpdated AS INTEGER)), 0)
                     FROM houses
                     GROUP BY 
-                        UPPER(TRIM(COALESCE(CAST(agentName AS TEXT), ''))), COALESCE(CAST(`data` AS TEXT), ''), UPPER(TRIM(COALESCE(CAST(blockNumber AS TEXT), ''))), UPPER(TRIM(COALESCE(CAST(blockSequence AS TEXT), ''))), 
+                        UPPER(TRIM(COALESCE(CAST(agentName AS TEXT), ''))), REPLACE(COALESCE(CAST(`data` AS TEXT), ''), '/', '-'), UPPER(TRIM(COALESCE(CAST(blockNumber AS TEXT), ''))), UPPER(TRIM(COALESCE(CAST(blockSequence AS TEXT), ''))), 
                         UPPER(TRIM(COALESCE(CAST(streetName AS TEXT), ''))), UPPER(TRIM(COALESCE(CAST(number AS TEXT), ''))), COALESCE(CAST(sequence AS INTEGER), 0), COALESCE(CAST(complement AS INTEGER), 0), UPPER(TRIM(COALESCE(CAST(bairro AS TEXT), ''))), COALESCE(CAST(visitSegment AS INTEGER), 0)
                 """)
 
@@ -265,19 +347,20 @@ abstract class AppDatabase : RoomDatabase() {
                     CREATE TABLE IF NOT EXISTS `day_activities_new` (
                         `date` TEXT NOT NULL, 
                         `status` TEXT NOT NULL, 
-                        `isClosed` INTEGER NOT NULL, 
+                        `isClosed` INTEGER NOT NULL DEFAULT 0, 
                         `agentName` TEXT NOT NULL, 
                         `agentUid` TEXT NOT NULL DEFAULT '', 
                         `isSynced` INTEGER NOT NULL DEFAULT 0, 
                         `lastUpdated` INTEGER NOT NULL DEFAULT 0, 
                         `isManualUnlock` INTEGER NOT NULL DEFAULT 0, 
+                        `editedByAdmin` INTEGER NOT NULL DEFAULT 0, 
                         PRIMARY KEY(`date`, `agentName`, `agentUid`)
                     )
                 """)
 
                 database.execSQL("""
-                    INSERT OR IGNORE INTO day_activities_new (date, status, isClosed, agentName, agentUid, isSynced, lastUpdated, isManualUnlock)
-                    SELECT `date`, status, isClosed, UPPER(TRIM(agentName)), agentUid, isSynced, lastUpdated, COALESCE(isManualUnlock, 0) FROM day_activities
+                    INSERT OR IGNORE INTO day_activities_new (date, status, isClosed, agentName, agentUid, isSynced, lastUpdated, isManualUnlock, editedByAdmin)
+                    SELECT REPLACE(`date`, '/', '-'), status, isClosed, UPPER(TRIM(agentName)), agentUid, isSynced, lastUpdated, COALESCE(isManualUnlock, 0), COALESCE(editedByAdmin, 0) FROM day_activities
                 """)
 
                 database.execSQL("DROP TABLE day_activities")
@@ -298,6 +381,11 @@ abstract class AppDatabase : RoomDatabase() {
 
                 // 5. Rebuild tombstones
                 android.util.Log.d("AppDatabase", "Rebuilding tombstones...")
+                
+                // Ensure columns exist before select
+                try { database.execSQL("ALTER TABLE tombstones ADD COLUMN agentName TEXT NOT NULL DEFAULT ''") } catch(e: Exception) {}
+                try { database.execSQL("ALTER TABLE tombstones ADD COLUMN agentUid TEXT NOT NULL DEFAULT ''") } catch(e: Exception) {}
+
                 database.execSQL("DROP TABLE IF EXISTS `tombstones_new`")
                 database.execSQL("""
                     CREATE TABLE `tombstones_new` (
@@ -309,7 +397,10 @@ abstract class AppDatabase : RoomDatabase() {
                         `deletedAt` INTEGER NOT NULL
                     )
                 """)
-                database.execSQL("INSERT INTO tombstones_new (id, type, naturalKey, deletedAt) SELECT id, type, naturalKey, deletedAt FROM tombstones")
+                database.execSQL("""
+                    INSERT INTO tombstones_new (id, type, naturalKey, agentName, agentUid, deletedAt) 
+                    SELECT id, type, REPLACE(naturalKey, '/', '-'), UPPER(TRIM(agentName)), agentUid, deletedAt FROM tombstones
+                """)
                 database.execSQL("DROP TABLE tombstones")
                 database.execSQL("ALTER TABLE tombstones_new RENAME TO tombstones")
 

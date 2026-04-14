@@ -14,8 +14,14 @@ import javax.inject.Singleton
 @Singleton
 class AgentRepositoryImpl @Inject constructor(
     private val auth: FirebaseAuth,
-    private val firestore: FirebaseFirestore
+    private val firestore: FirebaseFirestore,
+    private val agentCacheDao: com.antigravity.healthagent.data.local.dao.AgentCacheDao
 ) : AgentRepository {
+
+    // Session cache for agent names to further reduce reads
+    private var cachedNamesList: List<String>? = null
+    private var lastNamesFetch: Long = 0L
+    private val NAMES_CACHE_TTL = 300_000L // 5 minutes
 
     override suspend fun createAgent(email: String, agentName: String?): Result<Unit> {
         return try {
@@ -70,13 +76,26 @@ class AgentRepositoryImpl @Inject constructor(
     }
 
     override suspend fun fetchAgentNames(): Result<List<String>> {
+        val now = System.currentTimeMillis()
+        if (cachedNamesList != null && (now - lastNamesFetch) < NAMES_CACHE_TTL) {
+            return Result.success(cachedNamesList!!)
+        }
+
         return try {
             val snapshot = firestore.collection("metadata").document("agent_info").get().await()
             val names = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
-            Result.success(names.map { it.uppercase().trim() }.sorted())
+            
+            val result = if (names.isEmpty()) {
+                com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES.map { it.uppercase().trim() }.sorted()
+            } else {
+                names.map { it.uppercase().trim() }.sorted()
+            }
+            
+            cachedNamesList = result
+            lastNamesFetch = now
+            Result.success(result)
         } catch (e: Exception) {
-            // Fallback to constants if needed (could be injected separately if strictly required)
-            Result.success(com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES)
+            Result.success(com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES.map { it.uppercase().trim() }.sorted())
         }
     }
 
@@ -103,6 +122,7 @@ class AgentRepositoryImpl @Inject constructor(
             val currentNames = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
             if (currentNames.remove(name)) {
                 docRef.set(mapOf("names" to currentNames.sorted())).await()
+                cachedNamesList = null // Invalidate cache
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -113,181 +133,195 @@ class AgentRepositoryImpl @Inject constructor(
     override suspend fun fetchAllAgentsData(sinceTimestamp: Long, untilTimestamp: Long, datePattern: String?): Result<List<AgentData>> = coroutineScope {
         try {
             val startTime = System.currentTimeMillis()
-            val agentsSnapshot = firestore.collection("agents").get().await()
-            val sinceThreshold = com.google.firebase.Timestamp(sinceTimestamp / 1000, ((sinceTimestamp % 1000) * 1000000).toInt())
+            
+            // 1. LOAD FROM LOCAL CACHE FIRST
+            val cachedAgents = agentCacheDao.getAllCachedAgents()
+            val latestCacheUpdate = cachedAgents.maxOfOrNull { it.lastSyncTime } ?: 0L
+            
+            android.util.Log.d("AgentRepository", "Cache Check: Found ${cachedAgents.size} agents. Latest cache update: $latestCacheUpdate")
 
-            val agentDeferred = agentsSnapshot.documents.map { agentDoc ->
+            // 2. FETCH DELTAS FROM FIRESTORE
+            // Only pull agents that have been updated since our last cache update to find NEW or MODIFIED agents
+            val agentsQuery = firestore.collection("agents")
+            val agentsSnapshot = if (latestCacheUpdate > 0) {
+                agentsQuery.whereGreaterThan("lastSyncTime", latestCacheUpdate).get().await()
+            } else {
+                agentsQuery.get().await()
+            }
+            
+            // Collect IDs of modified agents to trigger summary refresh
+            val modifiedAgentIds = agentsSnapshot.documents.map { it.id }.toSet()
+            
+            // Update cache with new/modified agents
+            if (!agentsSnapshot.isEmpty) {
+                android.util.Log.i("AgentRepository", "Delta Fetch: Found ${agentsSnapshot.size()} new/modified agents in cloud.")
+                val agentsToUpsert = agentsSnapshot.documents.map { doc ->
+                    com.antigravity.healthagent.data.local.model.CachedAgent(
+                        uid = doc.id,
+                        email = doc.getString("email") ?: "Unknown",
+                        agentName = doc.getString("agentName")?.uppercase(),
+                        lastSyncTime = doc.getLong("lastSyncTime") ?: 0L,
+                        lastSyncError = doc.getString("lastSyncError"),
+                        photoUrl = doc.getString("photoUrl")
+                    )
+                }
+                agentCacheDao.upsertAgents(agentsToUpsert)
+            }
+
+            // 3. TARGETED DATA FETCH (Summaries and Raw Data)
+            // We now look at ALL agents we know about (from cache + the new ones)
+            val allAgents = agentCacheDao.getAllCachedAgents()
+            val cleanMonthYear = datePattern?.removePrefix("-")
+            val isSpecificMonth = cleanMonthYear != null && cleanMonthYear.length == 7 
+            val isYearOnly = cleanMonthYear != null && cleanMonthYear.length == 4
+
+            val finalAgentsDeferred = allAgents.map { agent ->
                 async {
-                    val uid = agentDoc.id
-                    var email = agentDoc.getString("email") ?: "Unknown"
-                    var agentName = agentDoc.getString("agentName")?.uppercase()
-                    val lastSyncTime = agentDoc.getLong("lastSyncTime") ?: 0L
-                    val lastSyncError = agentDoc.getString("lastSyncError")
-                    var photoUrl = agentDoc.getString("photoUrl")
+                    val uid = agent.uid
+                    val isModified = modifiedAgentIds.contains(uid)
                     
-                    // Parallel Metadata Fallback
-                    if (email == "Unknown" || photoUrl == null || agentName == null) {
-                        try {
-                            val userDoc = firestore.collection("users").document(uid).get().await()
-                            if (userDoc.exists()) {
-                                if (email == "Unknown") email = userDoc.getString("email") ?: "Unknown"
-                                if (agentName == null) agentName = userDoc.getString("displayName")?.uppercase()
-                                if (photoUrl == null) photoUrl = userDoc.getString("photoUrl")
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("AgentRepository", "Fallback metadata fetch failed for $uid")
-                        }
-                    }
-
-                    // 1. Try to fetch Monthly Summary first for lightning-fast totals
-                    var agentSummary: com.antigravity.healthagent.domain.repository.AgentSummary? = null
-                    val cleanMonthYear = datePattern?.removePrefix("-")
-                    val isSpecificMonth = cleanMonthYear != null && cleanMonthYear.length == 7 // e.g., "01-2025"
-                    
+                    // FETCH SUMMARY IF MISSING IN CACHE OR IF AGENT WAS RECENTLY MODIFIED
                     if (isSpecificMonth) {
-                        try {
-                            val summaryDoc = agentDoc.reference.collection("monthly_summaries").document(cleanMonthYear!!).get().await()
-                            if (summaryDoc.exists()) {
-                                // DEFENSIVE PARSING: Handle mixed types (Long/Int/Number) gracefully
-                                val treatedCount = (summaryDoc.get("treatedCount") as? Number ?: 0).toInt()
-                                val focusCount = (summaryDoc.get("focusCount") as? Number ?: 0).toInt()
-                                val totalHouses = (summaryDoc.get("totalHouses") as? Number ?: 0).toInt()
-                                val daysWorked = (summaryDoc.get("daysWorked") as? Number ?: 0).toInt()
-                                val lastUpdated = (summaryDoc.get("lastUpdated") as? Number ?: 0L).toLong()
-
-                                val situationCounts = (summaryDoc.get("situationCounts") as? Map<*, *> ?: emptyMap<Any, Any>())
-                                    .entries.associate { it.key.toString() to (it.value as? Number ?: 0).toInt() }
+                        val targetMonth = cleanMonthYear!!
+                        val cachedSummary = agentCacheDao.getSummary(uid, targetMonth)
+                        
+                        // Force cloud fetch if modified in cloud or missing in local cache
+                        if (isModified || cachedSummary == null) {
+                            try {
+                                val agentRef = firestore.collection("agents").document(uid)
+                                val alternativeMonth = targetMonth.replace("-", "/")
                                 
-                                val propertyTypeCounts = (summaryDoc.get("propertyTypeCounts") as? Map<*, *> ?: emptyMap<Any, Any>())
-                                    .entries.associate { it.key.toString() to (it.value as? Number ?: 0).toInt() }
-
-                                agentSummary = com.antigravity.healthagent.domain.repository.AgentSummary(
-                                    monthYear = datePattern,
-                                    treatedCount = treatedCount,
-                                    focusCount = focusCount,
-                                    situationCounts = situationCounts,
-                                    propertyTypeCounts = propertyTypeCounts,
-                                    totalHouses = totalHouses,
-                                    daysWorked = daysWorked,
-                                    lastUpdated = lastUpdated
-                                )
+                                var summaryDoc = agentRef.collection("monthly_summaries").document(targetMonth).get().await()
+                                if (!summaryDoc.exists()) {
+                                    summaryDoc = agentRef.collection("monthly_summaries").document(alternativeMonth).get().await()
+                                }
+                                
+                                if (summaryDoc.exists()) {
+                                    val summary = parseSummary(summaryDoc, uid, targetMonth)
+                                    agentCacheDao.upsertSummaries(listOf(summary.toCached(uid)))
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.e("AgentRepository", "Summary fetch error for $uid ($targetMonth): ${e.message}")
                             }
+                        }
+                    } else if (isYearOnly) {
+                        // Optimization: Only fetch if we have 0 summaries for this year in cache
+                        // OR if the agent was modified in cloud (they might have new months)
+                        val yearSuffixHyphen = "-$cleanMonthYear"
+                        val yearSuffixSlash = "/$cleanMonthYear"
+                        val cachedSummaries = agentCacheDao.getSummariesForAgent(uid)
+                            .filter { it.monthYear.endsWith(yearSuffixHyphen) || it.monthYear.endsWith(yearSuffixSlash) }
+                        
+                        if (isModified || cachedSummaries.isEmpty()) {
+                            try {
+                                val agentRef = firestore.collection("agents").document(uid)
+                                val allSummaries = agentRef.collection("monthly_summaries").get().await()
+                                val yearSummaries = allSummaries.documents.filter { 
+                                    it.id.endsWith(yearSuffixHyphen) || it.id.endsWith(yearSuffixSlash)
+                                }.map { parseSummary(it, uid, it.id) }
+                                
+                                if (yearSummaries.isNotEmpty()) {
+                                    agentCacheDao.upsertSummaries(yearSummaries.map { it.toCached(uid) })
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.e("AgentRepository", "Yearly summaries fetch error for $uid: ${e.message}")
+                            }
+                        }
+                    }
+
+                    // FETCH RAW HOUSES AND ACTIVITIES IF RANGE PROVIDED (e.g. for Weekly View)
+                    var houses = emptyList<com.antigravity.healthagent.data.local.model.House>()
+                    var activities = emptyList<com.antigravity.healthagent.data.local.model.DayActivity>()
+
+                    if (sinceTimestamp > 0 && untilTimestamp > 0 && sinceTimestamp < untilTimestamp) {
+                        try {
+                            val agentRef = firestore.collection("agents").document(uid)
+                            val sinceT = com.google.firebase.Timestamp(sinceTimestamp / 1000, 0)
+                            val untilT = com.google.firebase.Timestamp(untilTimestamp / 1000, 999999999)
+
+                            // Fetch houses in range
+                            val houseDocs = agentRef.collection("houses")
+                                .whereGreaterThanOrEqualTo("lastUpdated", sinceT)
+                                .whereLessThanOrEqualTo("lastUpdated", untilT)
+                                .get().await()
+                            
+                            houses = houseDocs.documents.mapNotNull { it.toHouseSafe(uid, agent.agentName ?: "") }
+
+                            // Fetch activities in range
+                            val activityDocs = agentRef.collection("day_activities")
+                                .whereGreaterThanOrEqualTo("lastUpdated", sinceT)
+                                .whereLessThanOrEqualTo("lastUpdated", untilT)
+                                .get().await()
+                            
+                            activities = activityDocs.documents.mapNotNull { it.toDayActivitySafe(uid, agent.agentName ?: "") }
                         } catch (e: Exception) {
-                            android.util.Log.e("AgentRepository", "Defensive summary fetch failed for $uid: ${e.message}", e)
+                            android.util.Log.e("AgentRepository", "Raw data fetch error for $uid: ${e.message}")
                         }
                     }
 
-                    // 2. sub-collection fetches (Parallel)
-                    val housesJob = async {
-                        try {
-                            if (isSpecificMonth && cleanMonthYear != null) {
-                                // PRECISION FILTERING: Use whereIn on actual production dates
-                                // This bypasses sync-time and clock-skew issues.
-                                val monthParts = cleanMonthYear.split("-")
-                                val mm = monthParts[0]
-                                val yyyy = monthParts[1]
-                                
-                                val daysInMonth = java.util.Calendar.getInstance().apply {
-                                    set(yyyy.toInt(), mm.toInt() - 1, 1)
-                                }.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
-                                
-                                val allDates = (1..daysInMonth).map { String.format("%02d-%s-%s", it, mm, yyyy) }
-                                
-                                // Firestore whereIn limit is 30, so we split into two queries for a full month
-                                val chunk1 = allDates.take(15)
-                                val chunk2 = allDates.drop(15)
-                                
-                                val results1 = agentDoc.reference.collection("houses")
-                                    .whereIn("data", chunk1)
-                                    .get().await().documents.mapNotNull { it.toHouseSafe(uid) }
-                                
-                                val results2 = agentDoc.reference.collection("houses")
-                                    .whereIn("data", chunk2)
-                                    .get().await().documents.mapNotNull { it.toHouseSafe(uid) }
-                                
-                                (results1 + results2)
-                            } else {
-                                // LONG RANGE / LEGACY: Fetch by update time but WITHOUT truncation
-                                agentDoc.reference.collection("houses").let { collection ->
-                                    var q: com.google.firebase.firestore.Query = collection
-                                    if (sinceTimestamp > 0) q = q.whereGreaterThanOrEqualTo("lastUpdated", sinceThreshold)
-                                    q
-                                }.get().await().documents.mapNotNull { it.toHouseSafe(uid) }
-                                .let { list -> 
-                                    if (datePattern != null) {
-                                        val target = datePattern.replace("/", "-")
-                                        list.filter { it.data.replace("/", "-").endsWith(target) } 
-                                    } else list 
-                                }
+                    // Final AgentData for this agent
+                    val summary = if (isYearOnly) {
+                        val targetStr = cleanMonthYear!!
+                        val yearSummaries = agentCacheDao.getSummariesForAgent(uid)
+                            .filter { it.monthYear.endsWith("-$targetStr") || it.monthYear.endsWith("/$targetStr") }
+                        
+                        if (yearSummaries.isNotEmpty()) {
+                            val sitCounts = mutableMapOf<String, Int>()
+                            val propCounts = mutableMapOf<String, Int>()
+                            yearSummaries.forEach { s ->
+                                s.situationCounts.forEach { (k, v) -> sitCounts[k] = (sitCounts[k] ?: 0) + v }
+                                s.propertyTypeCounts.forEach { (k, v) -> propCounts[k] = (propCounts[k] ?: 0) + v }
                             }
-                        } catch (e: Exception) { 
-                            android.util.Log.e("AgentRepository", "House fetch failed for $uid", e)
-                            emptyList() 
+                            
+                            com.antigravity.healthagent.domain.repository.AgentSummary(
+                                monthYear = targetStr,
+                                treatedCount = yearSummaries.sumOf { it.treatedCount },
+                                focusCount = yearSummaries.sumOf { it.focusCount },
+                                situationCounts = sitCounts,
+                                propertyTypeCounts = propCounts,
+                                totalHouses = yearSummaries.sumOf { it.totalHouses },
+                                daysWorked = yearSummaries.sumOf { it.daysWorked },
+                                lastUpdated = yearSummaries.maxOf { it.lastUpdated }
+                            )
+                        } else null
+                    } else if (isSpecificMonth) {
+                        agentCacheDao.getSummary(uid, cleanMonthYear!!)?.let { s ->
+                            com.antigravity.healthagent.domain.repository.AgentSummary(
+                                monthYear = s.monthYear,
+                                treatedCount = s.treatedCount,
+                                focusCount = s.focusCount,
+                                situationCounts = s.situationCounts,
+                                propertyTypeCounts = s.propertyTypeCounts,
+                                totalHouses = s.totalHouses,
+                                daysWorked = s.daysWorked,
+                                lastUpdated = s.lastUpdated
+                            )
                         }
-                    }
+                    } else null
 
-                    val activitiesJob = async {
-                        try {
-                            if (isSpecificMonth && cleanMonthYear != null) {
-                                val monthParts = cleanMonthYear.split("-")
-                                val mm = monthParts[0]
-                                val yyyy = monthParts[1]
-                                val daysInMonth = java.util.Calendar.getInstance().apply {
-                                    set(yyyy.toInt(), mm.toInt() - 1, 1)
-                                }.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
-                                val allDates = (1..daysInMonth).map { String.format("%02d-%s-%s", it, mm, yyyy) }
-                                
-                                val chunk1 = allDates.take(15)
-                                val chunk2 = allDates.drop(15)
-                                
-                                val results1 = agentDoc.reference.collection("day_activities")
-                                    .whereIn("date", chunk1)
-                                    .get().await().documents.mapNotNull { it.toDayActivitySafe(uid) }
-                                
-                                val results2 = agentDoc.reference.collection("day_activities")
-                                    .whereIn("date", chunk2)
-                                    .get().await().documents.mapNotNull { it.toDayActivitySafe(uid) }
-                                
-                                (results1 + results2)
-                            } else {
-                                agentDoc.reference.collection("day_activities").let { collection ->
-                                    var q: com.google.firebase.firestore.Query = collection
-                                    if (sinceTimestamp > 0) q = q.whereGreaterThanOrEqualTo("lastUpdated", sinceThreshold)
-                                    q
-                                }.get().await().documents.mapNotNull { it.toDayActivitySafe(uid) }
-                                .let { list ->
-                                    if (datePattern != null) {
-                                        val target = datePattern.replace("/", "-")
-                                        list.filter { it.date.replace("/", "-").endsWith(target) }
-                                    } else list
-                                }
-                            }
-                        } catch (e: Exception) { 
-                            android.util.Log.e("AgentRepository", "Activity fetch failed for $uid", e)
-                            emptyList() 
-                        }
-                    }
-
-                    val houses = housesJob.await()
-                    val activities = activitiesJob.await()
-
-                    if (agentName.isNullOrBlank()) {
-                        agentName = houses.firstOrNull { it.agentName.isNotBlank() }?.agentName?.uppercase()
-                            ?: activities.firstOrNull { it.agentName.isNotBlank() }?.agentName?.uppercase()
-                    }
-
-                    AgentData(uid, email, agentName, houses, activities, agentSummary, lastSyncTime, lastSyncError, photoUrl)
+                    com.antigravity.healthagent.domain.repository.AgentData(
+                        uid = uid,
+                        email = agent.email,
+                        agentName = agent.agentName,
+                        houses = houses,
+                        activities = activities,
+                        summary = summary,
+                        lastSyncTime = agent.lastSyncTime,
+                        lastSyncError = agent.lastSyncError,
+                        photoUrl = agent.photoUrl
+                    )
                 }
             }
 
-            val allAgents = agentDeferred.awaitAll()
-            android.util.Log.d("AgentRepository", "fetchAllAgentsData took ${System.currentTimeMillis() - startTime}ms for ${allAgents.size} agents")
-            Result.success(allAgents)
+            val finalAgents = finalAgentsDeferred.awaitAll()
+            android.util.Log.d("AgentRepository", "fetchAllAgentsData took ${System.currentTimeMillis() - startTime}ms. Final Count: ${finalAgents.size}")
+            Result.success(finalAgents)
         } catch (e: Exception) {
             android.util.Log.e("AgentRepository", "Failed to fetch all agents data", e)
             Result.failure(e)
         }
     }
+
 
     override suspend fun deleteAgentHouse(uid: String, houseId: String): Result<Unit> {
         return try {
@@ -345,10 +379,12 @@ class AgentRepositoryImpl @Inject constructor(
             if (totalOps == 0) return Result.success(Unit)
 
             // Step 1: Transfer houses with ID re-calculation
+            val transferredHouseIds = mutableListOf<String>()
+            val transferredDates = mutableSetOf<String>()
+
             houses.documents.chunked(100).forEach { chunk ->
                 val batch = firestore.batch()
                 chunk.forEach { docSnapshot ->
-                    // Map to object, update UID and compute NEW key
                     val houseObj = docSnapshot.toHouseSafe(toUid, targetAgentName)
                     if (houseObj != null) {
                         val newKey = houseObj.generateNaturalKey()
@@ -356,6 +392,9 @@ class AgentRepositoryImpl @Inject constructor(
                         
                         batch.set(targetDocRef, houseObj.toFirestoreMap())
                         batch.delete(docSnapshot.reference)
+                        
+                        transferredHouseIds.add(docSnapshot.id)
+                        transferredDates.add(houseObj.data.replace("/", "-"))
                     }
                 }
                 batch.commit().await()
@@ -372,17 +411,75 @@ class AgentRepositoryImpl @Inject constructor(
                         
                         batch.set(targetDocRef, activityObj.toFirestoreMap())
                         batch.delete(docSnapshot.reference)
+                        
+                        transferredDates.add(dateKey)
                     }
                 }
                 batch.commit().await()
             }
 
-            // Step 3: Update target's lastSyncTime to trigger a fresh sync on the client
+            // Step 3: Record deletions in the source agent's tombstones 
+            // This is CRITICAL to prevent the source device from re-syncing this data back to the cloud
+            if (transferredHouseIds.isNotEmpty() || transferredDates.isNotEmpty()) {
+                val updates = mutableMapOf<String, Any>()
+                if (transferredHouseIds.isNotEmpty()) {
+                    updates["deleted_house_ids"] = com.google.firebase.firestore.FieldValue.arrayUnion(*transferredHouseIds.toTypedArray())
+                }
+                if (transferredDates.isNotEmpty()) {
+                    updates["deleted_activity_dates"] = com.google.firebase.firestore.FieldValue.arrayUnion(*transferredDates.toTypedArray())
+                }
+                fromRef.update(updates).await()
+            }
+
+            // Step 4: Update target's lastSyncTime to trigger a fresh sync on the client
             toRef.update("lastSyncTime", System.currentTimeMillis()).await()
             
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private fun parseSummary(doc: com.google.firebase.firestore.DocumentSnapshot, uid: String, monthYear: String): com.antigravity.healthagent.domain.repository.AgentSummary {
+        val treatedCount = (doc.get("treatedCount") as? Number ?: 0).toInt()
+        val focusCount = (doc.get("focusCount") as? Number ?: 0).toInt()
+        val totalHouses = (doc.get("totalHouses") as? Number ?: 0).toInt()
+        val daysWorked = (doc.get("daysWorked") as? Number ?: 0).toInt()
+        
+        val lastUpdatedRaw = doc.get("lastUpdated")
+        val lastUpdated = when (lastUpdatedRaw) {
+            is com.google.firebase.Timestamp -> lastUpdatedRaw.toDate().time
+            is Number -> lastUpdatedRaw.toLong()
+            else -> 0L
+        }
+        val situationCounts = (doc.get("situationCounts") as? Map<*, *> ?: emptyMap<Any, Any>())
+            .entries.associate { it.key.toString() to (it.value as? Number ?: 0).toInt() }
+        val propertyTypeCounts = (doc.get("propertyTypeCounts") as? Map<*, *> ?: emptyMap<Any, Any>())
+            .entries.associate { it.key.toString() to (it.value as? Number ?: 0).toInt() }
+
+        return com.antigravity.healthagent.domain.repository.AgentSummary(
+            monthYear = monthYear.replace("/", "-"),
+            treatedCount = treatedCount,
+            focusCount = focusCount,
+            situationCounts = situationCounts,
+            propertyTypeCounts = propertyTypeCounts,
+            totalHouses = totalHouses,
+            daysWorked = daysWorked,
+            lastUpdated = lastUpdated
+        )
+    }
+
+    private fun com.antigravity.healthagent.domain.repository.AgentSummary.toCached(agentUid: String): com.antigravity.healthagent.data.local.model.CachedAgentSummary {
+        return com.antigravity.healthagent.data.local.model.CachedAgentSummary(
+            agentUid = agentUid,
+            monthYear = this.monthYear,
+            treatedCount = this.treatedCount,
+            focusCount = this.focusCount,
+            totalHouses = this.totalHouses,
+            daysWorked = this.daysWorked,
+            lastUpdated = this.lastUpdated,
+            situationCounts = this.situationCounts,
+            propertyTypeCounts = this.propertyTypeCounts
+        )
     }
 }

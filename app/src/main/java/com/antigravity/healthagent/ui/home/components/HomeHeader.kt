@@ -52,7 +52,8 @@ fun HomeHeader(
     onMoveDateForward: () -> Unit = {},
     isEasyMode: Boolean = false,
     isSolarMode: Boolean = false,
-    bairrosList: List<String> = AppConstants.BAIRROS
+    bairrosList: List<String> = AppConstants.BAIRROS,
+    isBairroEditable: Boolean = true
 ) {
     var isHeaderExpanded by remember { mutableStateOf(false) }
     
@@ -161,7 +162,7 @@ fun HomeHeader(
                             onOptionSelected = { onUpdateBairro(it) },
                             label = "Bairro",
                             modifier = Modifier.weight(1.5f),
-                            enabled = !isDayClosed
+                            enabled = !isDayClosed && isBairroEditable
                         )
                         CompactDropdown(
                             currentValue = zona.uppercase(),

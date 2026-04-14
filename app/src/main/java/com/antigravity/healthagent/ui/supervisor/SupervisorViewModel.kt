@@ -112,6 +112,7 @@ class SupervisorViewModel @Inject constructor(
 
     fun updateWeek(weekIndex: Int) {
         _selectedWeekIndex.value = weekIndex
+        refreshData()
     }
 
     data class WeekRange(val label: String, val start: Date, val end: Date)
@@ -145,15 +146,8 @@ class SupervisorViewModel @Inject constructor(
         }
         
         if (month != -1) {
-            val cal = Calendar.getInstance()
-            cal.set(year, month, 1, 0, 0, 0)
-            val start = cal.time
-            cal.set(Calendar.HOUR_OF_DAY, 23)
-            cal.set(Calendar.MINUTE, 59)
-            cal.set(Calendar.SECOND, 59)
-            cal.set(Calendar.DAY_OF_MONTH, cal.getActualMaximum(Calendar.DAY_OF_MONTH))
-            val end = cal.time
-            return@combine calculateAggregateSummary(filteredAgents, start, end)
+            // pass null bounds to prioritize pre-calculated summaries for the whole month
+            return@combine calculateAggregateSummary(filteredAgents, null, null)
         }
         
         // Year Summary
@@ -172,21 +166,21 @@ class SupervisorViewModel @Inject constructor(
             val calendar = Calendar.getInstance()
             val year = _selectedYear.value
             val month = _selectedMonth.value
+            val weekIndex = _selectedWeekIndex.value
             
-            val (since, until) = if (month == -1) {
-                // Whole Year
-                calendar.set(year, Calendar.JANUARY, 1, 0, 0, 0)
-                val since = calendar.timeInMillis
-                calendar.set(year, Calendar.DECEMBER, 31, 23, 59, 59)
-                val until = calendar.timeInMillis
-                since to until
+            val (since, until) = if (weekIndex != -1) {
+                // Fetch ONLY raw data for the specific week
+                val weeks = weeksInMonth.value
+                val week = weeks.getOrNull(weekIndex)
+                if (week != null) {
+                    week.start.time to week.end.time
+                } else {
+                    -1L to -1L
+                }
             } else {
-                // Specific Month
-                calendar.set(year, month, 1, 0, 0, 0)
-                val since = calendar.timeInMillis
-                calendar.set(year, month, calendar.getActualMaximum(Calendar.DAY_OF_MONTH), 23, 59, 59)
-                val until = calendar.timeInMillis
-                since to until
+                // For whole month or whole year, we prefer summaries only (lazy load houses/activities) 
+                // Passing -1 ensures the repository skips fetching raw houses/activities
+                -1L to -1L
             }
 
             val datePattern = if (month == -1) {
@@ -196,6 +190,7 @@ class SupervisorViewModel @Inject constructor(
                 "-$monthStr-$year"
             }
 
+            // fetchAllAgentsData handles delta agent fetch + targeted summary fetch + optional raw data fetch
             val result = agentRepository.fetchAllAgentsData(since, until, datePattern)
             if (result.isSuccess) {
                 _rawAgents.value = result.getOrNull() ?: emptyList()
@@ -235,17 +230,10 @@ class SupervisorViewModel @Inject constructor(
                 } catch (e: Exception) { true }
             }
             
-            // Re-calculate summary if present, or it will be calculated from filtered lists in UI
-            val updatedSummary = agent.summary?.let { s ->
-                // If summary exists, we might need to be careful. 
-                // In this app, summary is usually cloud-calculated.
-                // But since we are filtering locally for the "Agent Card", we might prefer
-                // to NULL it so the UI re-calculates from the filtered house list if possible,
-                // OR we just trust that 'houses' contains enough data.
-                // Actually, the card UI uses summary if available. 
-                // Let's NULL it to force local calculation from ONLY filtered houses.
-                null 
-            }
+            // Smart Summary Preservation:
+            // Always preserve the summary as the source of truth for dashboarding.
+            // Our calculateAggregateSummary logic will decide whether to use it or fallback to raw data.
+            val updatedSummary = agent.summary
 
             agent.copy(houses = filteredHouses, activities = filteredActivities, summary = updatedSummary)
         }
@@ -381,57 +369,112 @@ class SupervisorViewModel @Inject constructor(
         var activeAgentsCount = 0
 
         agents.forEach { agent ->
-            val periodActivities = agent.activities.filter { dateFilter(it.date) }
-            if (periodActivities.isNotEmpty()) {
-                activeAgentsCount++
-                
+            val summary = agent.summary
+            // We use the pre-calculated summary if available and we're NOT in a specific week view
+            // This is crucial because raw houses/activities may be empty due to lazy loading optimizations.
+            val useSummary = summary != null && (weekStart == null || weekEnd == null)
+            
+            if (useSummary && summary != null) {
+                if (summary.totalHouses > 0 || summary.daysWorked > 0) {
+                    activeAgentsCount++
+                    
+                    val visitCount = summary.totalHouses
+                    if (visitCount > 0) {
+                        totalVisits += visitCount
+                        visitsDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, visitCount, agent.photoUrl))
+                    }
+
+                    val workedCount = (summary.situationCounts["NONE"] ?: 0) + (summary.situationCounts["EMPTY"] ?: 0)
+                    if (workedCount > 0) {
+                        totalWorked += workedCount
+                        housesDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, workedCount, agent.photoUrl))
+                    }
+                    
+                    val fociCount = summary.focusCount
+                    if (fociCount > 0) {
+                        totalFoci += fociCount
+                        fociDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, fociCount, agent.photoUrl))
+                    }
+                    
+                    val treatedCount = summary.treatedCount
+                    if (treatedCount > 0) {
+                        totalTratados += treatedCount
+                        tratadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, treatedCount, agent.photoUrl))
+                    }
+
+                    val closedCount = summary.situationCounts["F"] ?: 0
+                    if (closedCount > 0) {
+                        totalFechados += closedCount
+                        fechadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, closedCount, agent.photoUrl))
+                    }
+
+                    val abandonedCount = summary.situationCounts["A"] ?: 0
+                    if (abandonedCount > 0) {
+                        totalAbandonados += abandonedCount
+                        abandonadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, abandonedCount, agent.photoUrl))
+                    }
+
+                    val recusedCount = summary.situationCounts["REC"] ?: 0
+                    if (recusedCount > 0) {
+                        totalRecusados += recusedCount
+                        recusadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, recusedCount, agent.photoUrl))
+                    }
+                }
+            } else {
+                // FALLBACK TO RAW DATA (Required for Week views or when summary is missing)
+                val periodActivities = agent.activities.filter { dateFilter(it.date) }
                 val periodHouses = agent.houses.filter { dateFilter(it.data) }
-                val visitCount = periodHouses.size
-                if (visitCount > 0) {
-                    totalVisits += visitCount
-                    visitsDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, visitCount, agent.photoUrl))
-                }
-
-                val workedCount = periodHouses.count { 
-                    it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE || 
-                    it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY 
-                }
-                if (workedCount > 0) {
-                    totalWorked += workedCount
-                    housesDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, workedCount, agent.photoUrl))
-                }
                 
-                val fociCount = periodHouses.count { it.comFoco }
-                if (fociCount > 0) {
-                    totalFoci += fociCount
-                    fociDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, fociCount, agent.photoUrl))
-                }
-                
-                val treatedCount = periodHouses.count { house ->
-                    (house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e + house.eliminados) > 0 ||
-                    house.larvicida > 0.0 || house.comFoco
-                }
-                if (treatedCount > 0) {
-                    totalTratados += treatedCount
-                    tratadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, treatedCount, agent.photoUrl))
-                }
+                if (periodActivities.isNotEmpty() || periodHouses.isNotEmpty()) {
+                    activeAgentsCount++
+                    
+                    val visitCount = periodHouses.size
+                    if (visitCount > 0) {
+                        totalVisits += visitCount
+                        visitsDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, visitCount, agent.photoUrl))
+                    }
 
-                val closedCount = periodHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }
-                if (closedCount > 0) {
-                    totalFechados += closedCount
-                    fechadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, closedCount, agent.photoUrl))
-                }
+                    val workedCount = periodHouses.count { 
+                        it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE || 
+                        it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY 
+                    }
+                    if (workedCount > 0) {
+                        totalWorked += workedCount
+                        housesDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, workedCount, agent.photoUrl))
+                    }
+                    
+                    val fociCount = periodHouses.count { it.comFoco }
+                    if (fociCount > 0) {
+                        totalFoci += fociCount
+                        fociDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, fociCount, agent.photoUrl))
+                    }
+                    
+                    val treatedCount = periodHouses.count { house ->
+                        (house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e + house.eliminados) > 0 ||
+                        house.larvicida > 0.0 || house.comFoco
+                    }
+                    if (treatedCount > 0) {
+                        totalTratados += treatedCount
+                        tratadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, treatedCount, agent.photoUrl))
+                    }
 
-                val abandonedCount = periodHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
-                if (abandonedCount > 0) {
-                    totalAbandonados += abandonedCount
-                    abandonadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, abandonedCount, agent.photoUrl))
-                }
+                    val closedCount = periodHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }
+                    if (closedCount > 0) {
+                        totalFechados += closedCount
+                        fechadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, closedCount, agent.photoUrl))
+                    }
 
-                val recusedCount = periodHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }
-                if (recusedCount > 0) {
-                    totalRecusados += recusedCount
-                    recusadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, recusedCount, agent.photoUrl))
+                    val abandonedCount = periodHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
+                    if (abandonedCount > 0) {
+                        totalAbandonados += abandonedCount
+                        abandonadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, abandonedCount, agent.photoUrl))
+                    }
+
+                    val recusedCount = periodHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }
+                    if (recusedCount > 0) {
+                        totalRecusados += recusedCount
+                        recusadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, recusedCount, agent.photoUrl))
+                    }
                 }
             }
         }

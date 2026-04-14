@@ -914,7 +914,8 @@ fun HomeScreen(
                             onMoveDateBackward = { viewModel.moveDateBackward() },
                             onMoveDateForward = { viewModel.moveDateForward() },
                             isEasyMode = uiState.isEasyMode,
-                            isSolarMode = uiState.isSolarMode
+                            isSolarMode = uiState.isSolarMode,
+                            isBairroEditable = uiHouses.isEmpty()
                         )
                     }
                 }

@@ -3,6 +3,7 @@ package com.antigravity.healthagent.data.local.model
 import androidx.room.*
 import com.antigravity.healthagent.utils.normalize
 
+@com.google.firebase.firestore.IgnoreExtraProperties
 @Entity(
     tableName = "houses",
     indices = [
@@ -18,45 +19,46 @@ data class House(
     val blockNumber: String = "",
     val streetName: String = "",
     val number: String = "",
-    val sequence: Int = 0,
-    val complement: Int = 0,
-    val propertyType: PropertyType = PropertyType.EMPTY,
-    val situation: Situation = Situation.EMPTY,
+    @ColumnInfo(defaultValue = "0") val sequence: Int = 0,
+    @ColumnInfo(defaultValue = "0") val complement: Int = 0,
+    @ColumnInfo(defaultValue = "'EMPTY'") val propertyType: PropertyType = PropertyType.EMPTY,
+    @ColumnInfo(defaultValue = "'EMPTY'") val situation: Situation = Situation.EMPTY,
     // Daily Header Context
-    val municipio: String = "Bom Jardim",
+    @ColumnInfo(defaultValue = "'Bom Jardim'") val municipio: String = "Bom Jardim",
     val bairro: String = "",
-    val categoria: String = "BRR",
-    val zona: String = "URB",
-    val tipo: Int = 2,
+    @ColumnInfo(defaultValue = "'BRR'") val categoria: String = "BRR",
+    @ColumnInfo(defaultValue = "'URB'") val zona: String = "URB",
+    @ColumnInfo(defaultValue = "2") val tipo: Int = 2,
     val data: String = "",
-    val ciclo: String = "1º",
-    val atividade: Int = 4,
+    @ColumnInfo(defaultValue = "'1º'") val ciclo: String = "1º",
+    @ColumnInfo(defaultValue = "4") val atividade: Int = 4,
     val agentName: String = "",
     // Treatment Details
-    val a1: Int = 0,
-    val a2: Int = 0,
-    val b: Int = 0,
-    val c: Int = 0,
-    val d1: Int = 0,
-    val d2: Int = 0,
-    val e: Int = 0,
-    val eliminados: Int = 0,
-    val larvicida: Double = 0.0,
-    val comFoco: Boolean = false,
-    val localidadeConcluida: Boolean = false,
-    val blockSequence: String = "",
-    val quarteiraoConcluido: Boolean = false,
-    val listOrder: Long = 0, // For manual reordering
-    val visitSegment: Int = 0, // To distinguish return trips to the same street
-    val agentUid: String = "", // Crucial for multi-agent data isolation
-    val observation: String = "", // Agent notes for the visit
-    val createdAt: Long = System.currentTimeMillis(),
-    val isSynced: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val a1: Int = 0,
+    @ColumnInfo(defaultValue = "0") val a2: Int = 0,
+    @ColumnInfo(defaultValue = "0") val b: Int = 0,
+    @ColumnInfo(defaultValue = "0") val c: Int = 0,
+    @ColumnInfo(defaultValue = "0") val d1: Int = 0,
+    @ColumnInfo(defaultValue = "0") val d2: Int = 0,
+    @ColumnInfo(defaultValue = "0") val e: Int = 0,
+    @ColumnInfo(defaultValue = "0") val eliminados: Int = 0,
+    @ColumnInfo(defaultValue = "0.0") val larvicida: Double = 0.0,
+    @ColumnInfo(defaultValue = "0") val comFoco: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val localidadeConcluida: Boolean = false,
+    @ColumnInfo(defaultValue = "''") val blockSequence: String = "",
+    @ColumnInfo(defaultValue = "0") val quarteiraoConcluido: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val listOrder: Long = 0, // For manual reordering
+    @ColumnInfo(defaultValue = "0") val visitSegment: Int = 0, // To distinguish return trips to the same street
+    @ColumnInfo(defaultValue = "''") val agentUid: String = "", // Crucial for multi-agent data isolation
+    @ColumnInfo(defaultValue = "''") val observation: String = "", // Agent notes for the visit
+    @ColumnInfo(defaultValue = "0") val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val isSynced: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val editedByAdmin: Boolean = false,
     val latitude: Double? = null,
     val longitude: Double? = null,
     val focusCaptureTime: Long? = null,
     @get:com.google.firebase.firestore.Exclude
-    val lastUpdated: Long = System.currentTimeMillis()
+    @ColumnInfo(defaultValue = "0") val lastUpdated: Long = System.currentTimeMillis()
 ) {
     @com.google.firebase.firestore.DocumentId
     @androidx.room.Ignore
@@ -113,7 +115,8 @@ data class House(
             "latitude" to latitude,
             "longitude" to longitude,
             "focusCaptureTime" to focusCaptureTime,
-            "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+            "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+            "editedByAdmin" to editedByAdmin
         )
     }
 }

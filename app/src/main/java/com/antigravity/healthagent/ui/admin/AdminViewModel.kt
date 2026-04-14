@@ -66,10 +66,49 @@ class AdminViewModel @Inject constructor(
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     fun updateSearchQuery(query: String) { _searchQuery.value = query }
+    
+    // Filtering State
+    private val _selectedYear = MutableStateFlow(java.util.Calendar.getInstance().get(java.util.Calendar.YEAR))
+    val selectedYear = _selectedYear.asStateFlow()
+
+    private val _selectedMonth = MutableStateFlow(java.util.Calendar.getInstance().get(java.util.Calendar.MONTH)) // Default current month
+    val selectedMonth = _selectedMonth.asStateFlow()
+
+    val availableYears = (2025..java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)).reversed().toList()
+    val availableMonths = listOf("Ano Todo", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
+
+    fun getFilteredMonths(): List<String> {
+        val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+        val currentMonth = java.util.Calendar.getInstance().get(java.util.Calendar.MONTH)
+        
+        return if (_selectedYear.value >= currentYear) {
+             // Only months up to now + "Ano Todo"
+            availableMonths.take(currentMonth + 2) // +1 for "Ano Todo", +1 for current month index (0-based)
+        } else {
+            availableMonths
+        }
+    }
+
+    fun updateYear(year: Int) {
+        _selectedYear.value = year
+        val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+        val currentMonth = java.util.Calendar.getInstance().get(java.util.Calendar.MONTH)
+        if (year == currentYear && _selectedMonth.value > currentMonth) {
+            _selectedMonth.value = currentMonth
+        }
+        refreshAll()
+    }
+
+    fun updateMonth(monthIndex: Int) {
+        _selectedMonth.value = monthIndex
+        refreshAll()
+    }
 
     private val _accessRequests = MutableStateFlow<List<AccessRequest>>(emptyList())
     val accessRequests: StateFlow<List<AccessRequest>> = _accessRequests.asStateFlow()
 
+
+    private var lastSuccessfulAgentsList: List<AgentData> = emptyList()
 
     val unifiedProfiles: StateFlow<List<UnifiedProfile>> = combine(
         users,
@@ -78,7 +117,11 @@ class AdminViewModel @Inject constructor(
         _searchQuery
     ) { usersList, agentsState, namesList, query ->
         val agentsList = if (agentsState is AdminUiState.Success) {
+            lastSuccessfulAgentsList = agentsState.agents
             agentsState.agents
+        } else if (agentsState is AdminUiState.Loading) {
+            // Keep the last data while loading to prevent card data from disappearing
+            lastSuccessfulAgentsList
         } else {
             emptyList()
         }
@@ -106,7 +149,8 @@ class AdminViewModel @Inject constructor(
                 UnifiedProfile(
                     uid = user.uid,
                     email = user.email,
-                    agentName = user.agentName,
+                    // Prioritize Firestore agentName over Auth displayName
+                    agentName = agentData?.agentName ?: user.agentName,
                     role = user.role,
                     isAuthorized = user.isAuthorized,
                     isPreRegistered = false,
@@ -182,7 +226,7 @@ class AdminViewModel @Inject constructor(
     fun refreshAll() {
         _uiState.value = AdminUiState.Loading
         viewModelScope.launch {
-            loadAgentsData()
+            loadAgentsData(_selectedYear.value, _selectedMonth.value)
             loadUsers()
             loadAgentNames()
             loadBairros()
@@ -219,8 +263,16 @@ class AdminViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadAgentsData() {
-        val result = agentRepository.fetchAllAgentsData()
+    private suspend fun loadAgentsData(year: Int, month: Int) {
+        // Construct date pattern based on filters
+        val datePattern = if (month == -1) {
+            "-$year"
+        } else {
+            val monthStr = String.format("%02d", month + 1)
+            "-$monthStr-$year"
+        }
+
+        val result = agentRepository.fetchAllAgentsData(datePattern = datePattern)
         if (result.isSuccess) {
             _uiState.value = AdminUiState.Success(result.getOrNull() ?: emptyList())
         } else {
@@ -332,9 +384,17 @@ class AdminViewModel @Inject constructor(
 
     fun createAgent(email: String, agentName: String?) {
         viewModelScope.launch {
-            val result = agentRepository.createAgent(email, agentName)
-            if (result.isSuccess) {
-                loadAgentsData()
+            if (!authRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            try {
+                val result = agentRepository.createAgent(email, agentName)
+                if (result.isSuccess) {
+                    loadAgentsData(_selectedYear.value, _selectedMonth.value)
+                }
+            } catch (e: Exception) {
+                _uiEvent.emit("Erro ao criar agente: ${e.message}")
             }
         }
     }
@@ -357,7 +417,7 @@ class AdminViewModel @Inject constructor(
                 if (result.isSuccess) {
                     _uiEvent.emit("Perfil excluído com sucesso")
                     loadUsers()
-                    loadAgentsData()
+                    loadAgentsData(_selectedYear.value, _selectedMonth.value)
                 } else {
                     _uiEvent.emit("Erro ao excluir perfil: ${result.exceptionOrNull()?.message}")
                 }
@@ -375,7 +435,7 @@ class AdminViewModel @Inject constructor(
             }
             val result = agentRepository.deleteAgent(uid)
             if (result.isSuccess) {
-                loadAgentsData()
+                loadAgentsData(_selectedYear.value, _selectedMonth.value)
             }
         }
     }
@@ -478,7 +538,7 @@ class AdminViewModel @Inject constructor(
             val result = restoreDataUseCase(context, agentUid, uri, targetDate, existingDates, isSingleDayImport = autoShift)
             if (result.isSuccess) {
                 _uiEvent.emit("Backup restaurado com sucesso para o agente")
-                loadAgentsData()
+                loadAgentsData(_selectedYear.value, _selectedMonth.value)
             } else {
                 _uiEvent.emit("Erro ao restaurar backup: ${result.exceptionOrNull()?.message}")
             }
@@ -489,7 +549,7 @@ class AdminViewModel @Inject constructor(
         viewModelScope.launch {
             val result = agentRepository.deleteAgentHouse(agentUid, houseId)
             if (result.isSuccess) {
-                loadAgentsData()
+                loadAgentsData(_selectedYear.value, _selectedMonth.value)
                 _uiEvent.emit("Registro de imóvel excluído")
             }
         }
@@ -499,7 +559,7 @@ class AdminViewModel @Inject constructor(
         viewModelScope.launch {
             val result = agentRepository.deleteAgentActivity(agentUid, activityDate)
             if (result.isSuccess) {
-                loadAgentsData()
+                loadAgentsData(_selectedYear.value, _selectedMonth.value)
                 _uiEvent.emit("Registro de atividade excluído")
             }
         }
@@ -510,7 +570,7 @@ class AdminViewModel @Inject constructor(
             val result = agentRepository.clearSyncError(uid)
             if (result.isSuccess) {
                 _uiEvent.emit("Erro de sincronização limpo")
-                loadAgentsData()
+                loadAgentsData(_selectedYear.value, _selectedMonth.value)
             }
         }
     }
@@ -543,7 +603,7 @@ class AdminViewModel @Inject constructor(
                 refreshAll()
             } else {
                 _uiEvent.emit("Erro ao transferir dados: ${result.exceptionOrNull()?.message}")
-                loadAgentsData()
+                loadAgentsData(_selectedYear.value, _selectedMonth.value)
             }
         }
     }

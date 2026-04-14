@@ -45,7 +45,8 @@ fun DocumentSnapshot.toHouseSafe(uid: String, agentName: String = ""): House? {
             agentName = finalAgentName,
             municipio = finalMunicipio,
             bairro = finalBairro,
-            situation = finalSituation
+            situation = finalSituation,
+            editedByAdmin = this.getBoolean("editedByAdmin") ?: house.editedByAdmin
         )
     } catch (e: Exception) {
         android.util.Log.e("FirestoreMappers", "toHouseSafe: Error mapping ${this.id}", e)
@@ -80,7 +81,8 @@ fun DocumentSnapshot.toDayActivitySafe(uid: String, agentName: String = ""): Day
             isManualUnlock = isManualUnlock,
             lastUpdated = lastUpdated, 
             agentUid = uid, 
-            agentName = finalAgentName
+            agentName = finalAgentName,
+            editedByAdmin = this.getBoolean("editedByAdmin") ?: activity.editedByAdmin
         )
     } catch (e: Exception) {
         android.util.Log.e("FirestoreMappers", "toDayActivitySafe: Error mapping ${this.id}", e)

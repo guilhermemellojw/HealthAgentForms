@@ -335,14 +335,15 @@ class SyncRepositoryImpl @Inject constructor(
     }
 
 
-      override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> = syncMutex.withLock {
-        return try {
-            val uid = targetUid ?: auth.currentUser?.uid ?: return Result.failure(Exception("Not logged in"))
-            val isTargetDifferentUser = targetUid != null && targetUid != auth.currentUser?.uid
+    override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> = syncMutex.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+                val uid = targetUid ?: auth.currentUser?.uid ?: return@withContext Result.failure(Exception("Not logged in"))
+                val isTargetDifferentUser = targetUid != null && targetUid != auth.currentUser?.uid
             
             // 1. Basic Setup
             val userDoc = firestore.collection("users").document(uid).get().await()
-            val email = userDoc.getString("email") ?: auth.currentUser?.email ?: return Result.failure(Exception("User email not found"))
+            val email = userDoc.getString("email") ?: auth.currentUser?.email ?: return@withContext Result.failure(Exception("User email not found"))
             val profileAgentName = userDoc.getString("agentName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
             val profileDisplayName = userDoc.getString("displayName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
             val finalAgentName = profileAgentName ?: profileDisplayName ?: email.substringBefore("@").uppercase()
@@ -448,6 +449,8 @@ class SyncRepositoryImpl @Inject constructor(
             val validCloudHouseKeys = cloudHouses.map { it.generateNaturalKey() }.toSet()
             val validCloudActivityKeys = cloudDayActivities.map { "${it.date.replace("/", "-")}|${it.agentName.uppercase()}" }.toSet()
             
+            // BUG FIX: Only remove from deleted list if the data is found in a doc with RECENT activity.
+            // If we found a tombstone in the primary doc, we should favor it unless the data is found in multiple docs.
             cloudDeletedHouses.removeAll { it in validCloudHouseKeys }
             cloudDeletedActivities.removeAll { it in validCloudActivityKeys }
 
@@ -468,12 +471,14 @@ class SyncRepositoryImpl @Inject constructor(
                 val key = house.generateNaturalKey()
                 
                 // BUG FIX: Only delete local houses if they are already marked as synced. 
-                // If isSynced=false, it means the local state is newer/different from the cloud's awareness of it, 
-                // or it's a re-added house. We should never delete unsynced/new local houses via cloud tombstones.
-                // EXCEPTION: If the house is in cloudDeletedHouses and the local lastUpdated is significantly
+                // EXCEPTION 1: If the house is in cloudDeletedHouses and the local lastUpdated is significantly
                 // older than the current sync (more than 1 hour), we assume it's a "Ghost" and delete it.
+                // EXCEPTION 2 (ADMIN AUTHORITY): If the household matches a tombstone and the local record 
+                // was last updated more than 15 minutes ago, we assume the Admin has priority and delete it even if unsynced.
                 if (key in cloudDeletedHouses) {
+                    val fifteenMinutesAgo = System.currentTimeMillis() - 900000L // 15 mins
                     if (house.isSynced) true
+                    else if (house.lastUpdated < fifteenMinutesAgo) true
                     else (System.currentTimeMillis() - house.lastUpdated > 3600000L) // 1h ghost check
                 } else false
             }
@@ -493,7 +498,9 @@ class SyncRepositoryImpl @Inject constructor(
                 val dateKey = "${activity.date}|${activity.agentName.uppercase()}"
                 
                 if (dateKey in cloudDeletedActivities) {
+                    val fifteenMinutesAgo = System.currentTimeMillis() - 900000L // 15 mins
                     if (activity.isSynced) true
+                    else if (activity.lastUpdated < fifteenMinutesAgo) true
                     else (System.currentTimeMillis() - activity.lastUpdated > 3600000L) // 1h ghost check
                 } else false
             }
@@ -523,16 +530,40 @@ class SyncRepositoryImpl @Inject constructor(
                 // Upsert Houses
                 val housesToUpsert = housesDelta.mapNotNull { cloudHouse ->
                     val key = cloudHouse.generateNaturalKey()
-
-                    val existing = localHouses[key]?.firstOrNull()
+                    var existing = localHouses[key]?.firstOrNull()
                     
+                    // --- IDENTITY HEALING (KEY-SHIFT PROTECTION) ---
+                    // If cloud house was edited by Admin but doesn't exist locally by key, 
+                    // check if a house exists with the same (Data, Block, Sequence, Street, Number).
+                    // This handles cases where Admin corrects a typo in the street name or block.
+                    if (existing == null && cloudHouse.editedByAdmin) {
+                        existing = allLocalHouses.find { h ->
+                            h.data == cloudHouse.data && 
+                            h.blockNumber == cloudHouse.blockNumber && 
+                            h.number == cloudHouse.number &&
+                            h.sequence == cloudHouse.sequence &&
+                            h.complement == cloudHouse.complement
+                        }
+                        if (existing != null) {
+                            android.util.Log.i("SyncRepository", "Healing: Key shift detected for Admin edit. Merging ${existing.id}")
+                            // We will delete the "old" local house with the wrong key
+                            houseDao.deleteHouse(existing)
+                        }
+                    }
+
                     // CONFLICT RESOLUTION: Last Side to Change Wins (LWW)
                     if (existing != null && !existing.isSynced) {
-                        // Priority: Cloud wins if it is newer than (Local + threshold).
-                        // Local only persists if it is significantly newer (handles device clock ahead of server).
-                        val threshold = com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS
-                        if (existing.lastUpdated > (cloudHouse.lastUpdated + threshold)) {
-                            return@mapNotNull null
+                        // Priority 1: Admin Authority. If cloud record was edited by admin, it wins immediately
+                        // unless local record is VERY fresh (< 5 mins).
+                        if (cloudHouse.editedByAdmin && (System.currentTimeMillis() - existing.lastUpdated > 300000L)) {
+                            // Cloud wins
+                        } else {
+                            // Priority 2: Standard LWW
+                            // Cloud wins if it is newer than (Local + threshold).
+                            val threshold = com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS
+                            if (existing.lastUpdated > (cloudHouse.lastUpdated + threshold)) {
+                                return@mapNotNull null
+                            }
                         }
                     }
 
@@ -546,7 +577,7 @@ class SyncRepositoryImpl @Inject constructor(
                         id = existing?.id ?: 0,
                         listOrder = finalListOrder,
                         agentName = finalAgentName,
-                        agentUid = uid, // Ensure UID is enforced even if derived from cloudHouse
+                        agentUid = uid,
                         isSynced = true
                     )
                 }
@@ -565,11 +596,15 @@ class SyncRepositoryImpl @Inject constructor(
 
                     if (existing != null && !existing.isSynced) {
                          // Protect local unsynced workday metadata using LWW
-                         // Priority: Remote "Manual Unlock" always wins over local lock.
+                         // Priority 1: Remote "Manual Unlock" always wins over local lock.
                          val isRemoteUnlock = activity.isManualUnlock && !existing.isManualUnlock
+                         
+                         // Priority 2: Admin Authority
+                         val isAdminOverride = activity.editedByAdmin && (System.currentTimeMillis() - existing.lastUpdated > 300000L)
+
                          val threshold = com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS
                          
-                         if (!isRemoteUnlock && existing.lastUpdated > (activity.lastUpdated + threshold)) {
+                         if (!isRemoteUnlock && !isAdminOverride && existing.lastUpdated > (activity.lastUpdated + threshold)) {
                              return@mapNotNull null
                          }
                     }
@@ -592,13 +627,14 @@ class SyncRepositoryImpl @Inject constructor(
                 settingsManager.setLastSyncTimestamp(serverTime - 60000L)
             }
 
-            Result.success(Unit)
-        } catch (e: Exception) {
-            android.util.Log.e("SyncRepository", "Pull failed", e)
-            if (e.message?.contains("PERMISSION_DENIED") == true) {
-                Result.failure(Exception("Acesso negado. Tente fazer login novamente."))
-            } else {
-                Result.failure(e)
+                Result.success(Unit)
+            } catch (e: Exception) {
+                android.util.Log.e("SyncRepository", "Pull failed", e)
+                if (e.message?.contains("PERMISSION_DENIED") == true) {
+                    Result.failure(Exception("Acesso negado. Tente fazer login novamente."))
+                } else {
+                    Result.failure(e)
+                }
             }
         }
     }
@@ -809,8 +845,31 @@ class SyncRepositoryImpl @Inject constructor(
                 }
             }
                 
-            // 3. Record tombstone
-            agentRef.update("deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(activityDate)).await()
+            // 3. Record tombstone (BUG FIX: Use full key format DATE|AGENT_NAME)
+            val agentDoc = agentRef.get().await()
+            val agentName = agentDoc.getString("agentName") ?: ""
+            val fullKey = if (agentName.isNotBlank()) "$activityDate|${agentName.uppercase()}" else activityDate
+            
+            agentRef.update("deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(fullKey)).await()
+            
+            // 4. Also perform wipe on legacy documents for this user (Same Email discovery)
+            val email = agentDoc.getString("email")
+            if (!email.isNullOrBlank()) {
+                 val legacyDocs = firestore.collection("agents").whereEqualTo("email", email).get().await()
+                 legacyDocs.documents.forEach { doc ->
+                     if (doc.id != agentUid) {
+                         val batch = firestore.batch()
+                         batch.delete(doc.reference.collection("day_activities").document(activityDate))
+                         batch.update(doc.reference, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(fullKey))
+                         
+                         // Also clear houses for this date in legacy docs
+                         val legacyHouses = doc.reference.collection("houses").whereEqualTo("data", activityDate).get().await()
+                         legacyHouses.documents.forEach { h -> batch.delete(h.reference) }
+                         
+                         batch.commit().await()
+                     }
+                 }
+            }
             
             Result.success(Unit)
         } catch (e: Exception) {
@@ -898,6 +957,9 @@ class SyncRepositoryImpl @Inject constructor(
         return try {
             val uid = targetUid ?: auth.currentUser?.uid ?: return Result.failure(Exception("User not authenticated"))
             val docRef = firestore.collection("agents").document(uid)
+            val agentDoc = docRef.get().await()
+            val agentName = agentDoc.getString("agentName") ?: ""
+            val email = agentDoc.getString("email")
 
             if (houseKeys.isNotEmpty()) {
                 houseKeys.chunked(400).forEach { chunk ->
@@ -911,13 +973,48 @@ class SyncRepositoryImpl @Inject constructor(
             }
 
             if (activityDates.isNotEmpty()) {
+                val fullKeys = activityDates.map { 
+                    if (it.contains("|")) it else if (agentName.isNotBlank()) "$it|${agentName.uppercase()}" else it
+                }
+                
                 activityDates.chunked(400).forEach { chunk ->
                     val batch = firestore.batch()
                     chunk.forEach { tombstone ->
                         val dateKey = tombstone.split("|")[0]
                         batch.delete(docRef.collection("day_activities").document(dateKey))
                     }
-                    batch.update(docRef, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(*chunk.toTypedArray()))
+                    // Use standardized full keys for tombstones
+                    val chunkKeys = chunk.map { 
+                        if (it.contains("|")) it else if (agentName.isNotBlank()) "$it|${agentName.uppercase()}" else it
+                    }
+                    batch.update(docRef, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(*chunkKeys.toTypedArray()))
+                    batch.commit().await()
+                }
+            }
+            
+            // GLOBAL WIPE: Clear legacy records for same email
+            if (!email.isNullOrBlank()) {
+                val legacyDocs = firestore.collection("agents").whereEqualTo("email", email).get().await()
+                for (legacyDoc in legacyDocs.documents) {
+                    if (legacyDoc.id == uid) continue
+                    
+                    val batch = firestore.batch()
+                    // Houses
+                    if (houseKeys.isNotEmpty()) {
+                        houseKeys.forEach { batch.delete(legacyDoc.reference.collection("houses").document(it)) }
+                        batch.update(legacyDoc.reference, "deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayUnion(*houseKeys.toTypedArray()))
+                    }
+                    // Activities
+                    if (activityDates.isNotEmpty()) {
+                        activityDates.forEach { 
+                            val dateKey = it.split("|")[0]
+                            batch.delete(legacyDoc.reference.collection("day_activities").document(dateKey)) 
+                        }
+                        val fullKeys = activityDates.map { 
+                             if (it.contains("|")) it else if (agentName.isNotBlank()) "$it|${agentName.uppercase()}" else it
+                        }
+                        batch.update(legacyDoc.reference, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(*fullKeys.toTypedArray()))
+                    }
                     batch.commit().await()
                 }
             }

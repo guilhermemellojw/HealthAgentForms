@@ -66,10 +66,13 @@ fun CompactInputBox(
 ) {
     var isFocusedInternal by remember { mutableStateOf(false) }
     
+    val isStrictlyLocked = !enabled || (readOnly && onClick == null)
+    
     val targetBorderColor = when {
         isError -> MaterialTheme.colorScheme.error
         isFocusedInternal -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.primary.copy(alpha = if (isEasyMode) 0.7f else if (enabled) 0.7f else 0.3f)
+        isStrictlyLocked -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f) // Premium locked border
+        else -> MaterialTheme.colorScheme.primary.copy(alpha = if (isEasyMode) 0.7f else 0.7f)
     }
     
     // Defer animations to only when focused or in error to save UI cycles during scroll
@@ -83,8 +86,9 @@ fun CompactInputBox(
     } else targetBorderWidth
 
     val containerColor = if (isError) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f) 
+                        else if (isStrictlyLocked) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.03f) // Locked tint
                         else Color.Transparent
-    val contentAlpha = if (enabled) 1f else 0.4f
+    val contentAlpha = if (enabled && (!readOnly || onClick != null)) 1f else 0.7f // Better legibility for read-only
     
     val shapeCornerRadius = if (isEasyMode) 16.dp else 12.dp
 
@@ -144,7 +148,7 @@ fun CompactInputBox(
                         fontSize = if (isEasyMode) 22.sp else 15.sp, 
                         fontWeight = FontWeight.ExtraBold
                     ),
-                    color = if (isEasyMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                    color = (if (isEasyMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface).copy(alpha = contentAlpha)
                 )
             }
         } else {
@@ -156,7 +160,7 @@ fun CompactInputBox(
                     textAlign = TextAlign.Center,
                     fontSize = if (isEasyMode) 22.sp else 15.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = if (isEasyMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                    color = (if (isEasyMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface).copy(alpha = contentAlpha)
                 ),
                 singleLine = true,
                 decorationBox = { innerTextField ->
@@ -317,7 +321,8 @@ fun CompactDropdown(
     val targetBorderColor = when {
         isError -> MaterialTheme.colorScheme.error
         expanded -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.primary.copy(alpha = if (isEasyMode) 0.7f else if (enabled) 0.7f else 0.3f)
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+        else -> MaterialTheme.colorScheme.primary.copy(alpha = if (isEasyMode) 0.7f else 0.7f)
     }
     val animatedBorderColor by androidx.compose.animation.animateColorAsState(targetValue = targetBorderColor, label = "ddBorderColor")
     
@@ -325,8 +330,9 @@ fun CompactDropdown(
     val animatedBorderWidth by androidx.compose.animation.core.animateDpAsState(targetValue = targetBorderWidth, label = "ddBorderWidth")
 
     val containerColor = if (isError) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f) 
+                        else if (!enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.03f)
                         else Color.Transparent
-    val contentAlpha = if (enabled) 1f else 0.4f
+    val contentAlpha = if (enabled) 1f else 0.7f
     
     val shapeCornerRadius = if (isEasyMode) 16.dp else 12.dp
 
@@ -404,7 +410,7 @@ fun CompactDropdown(
                         ) {
                            Text(
                                text = currentValue,
-                               color = if (isEasyMode && currentValue != "-") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
+                               color = (if (isEasyMode && currentValue != "-") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface).copy(alpha = contentAlpha),
                                fontSize = 22.sp,
                                fontWeight = FontWeight.ExtraBold,
                                modifier = Modifier.weight(1f),

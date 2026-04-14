@@ -54,4 +54,15 @@ class Converters {
             com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE
         }
     }
+
+    private val gson = com.google.gson.Gson()
+
+    @TypeConverter
+    fun fromMap(value: Map<String, Int>): String = gson.toJson(value)
+
+    @TypeConverter
+    fun toMap(value: String): Map<String, Int> {
+        val type = object : com.google.gson.reflect.TypeToken<Map<String, Int>>() {}.type
+        return gson.fromJson(value, type) ?: emptyMap()
+    }
 }

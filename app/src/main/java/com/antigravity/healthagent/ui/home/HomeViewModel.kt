@@ -848,7 +848,7 @@ class HomeViewModel @Inject constructor(
 
     init {
         // Defer non-critical background work to prioritize UI rendering
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             delay(1000) // Small delay to let initial UI state flows settle
             try {
                 houseManagementUseCase.migrateStreetNamesToFormat()

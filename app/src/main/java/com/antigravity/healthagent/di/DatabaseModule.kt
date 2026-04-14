@@ -46,7 +46,11 @@ object DatabaseModule {
             AppDatabase.MIGRATION_23_25,
             AppDatabase.MIGRATION_24_25,
             AppDatabase.MIGRATION_25_26,
-            AppDatabase.MIGRATION_26_27
+            AppDatabase.MIGRATION_26_27,
+            AppDatabase.MIGRATION_27_28,
+            AppDatabase.MIGRATION_28_29,
+            AppDatabase.MIGRATION_29_30,
+            AppDatabase.MIGRATION_30_31
         )
         .fallbackToDestructiveMigration()
         .build()
@@ -70,5 +74,10 @@ object DatabaseModule {
     @Provides
     fun provideTombstoneDao(database: AppDatabase): TombstoneDao {
         return database.tombstoneDao()
+    }
+
+    @Provides
+    fun provideAgentCacheDao(database: AppDatabase): com.antigravity.healthagent.data.local.dao.AgentCacheDao {
+        return database.agentCacheDao()
     }
 }
