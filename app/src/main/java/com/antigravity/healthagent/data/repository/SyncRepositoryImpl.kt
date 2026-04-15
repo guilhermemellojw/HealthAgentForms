@@ -31,8 +31,22 @@ class SyncRepositoryImpl @Inject constructor(
     private val tombstoneDao: com.antigravity.healthagent.data.local.dao.TombstoneDao,
     private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager,
     private val database: com.antigravity.healthagent.data.local.AppDatabase,
-    private val syncScheduler: com.antigravity.healthagent.data.sync.SyncScheduler
+    private val syncSchedulerProvider: javax.inject.Provider<com.antigravity.healthagent.data.sync.SyncScheduler>
 ) : SyncRepository {
+
+    private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
+        var attempts = 0
+        while (true) {
+            try {
+                return database.withTransaction { block() }
+            } catch (e: android.database.sqlite.SQLiteDatabaseLockedException) {
+                attempts++
+                if (attempts >= 3) throw e
+                android.util.Log.w("SyncRepository", "Database locked during sync, retrying ($attempts/3)...")
+                kotlinx.coroutines.delay(100L + (kotlin.random.Random.nextLong(0, 100L)))
+            }
+        }
+    }
 
     private val syncMutex = Mutex()
 
@@ -195,7 +209,7 @@ class SyncRepositoryImpl @Inject constructor(
                     batch.commit().await()
                     
                     // Local confirmation
-                    database.withTransaction {
+                    runInTransactionWithRetry {
                         tombstoneDao.deleteTombstones(chunk.map { it.id })
                     }
                     cloudDeletedHouses.clear()
@@ -225,7 +239,7 @@ class SyncRepositoryImpl @Inject constructor(
                     batch.commit().await()
                     
                     // Local confirmation
-                    database.withTransaction {
+                    runInTransactionWithRetry {
                         chunk.forEach { house ->
                             houseDao.markAsSyncedWithTimestamp(house.id, house.lastUpdated)
                         }
@@ -253,7 +267,7 @@ class SyncRepositoryImpl @Inject constructor(
                     batch.commit().await()
                     
                     // Local confirmation
-                    database.withTransaction {
+                    runInTransactionWithRetry {
                         chunk.forEach { activity ->
                             dayActivityDao.markAsSyncedWithTimestamp(activity.date, officialAgentName, uid, activity.lastUpdated)
                         }
@@ -475,11 +489,20 @@ class SyncRepositoryImpl @Inject constructor(
                 // older than the current sync (more than 1 hour), we assume it's a "Ghost" and delete it.
                 // EXCEPTION 2 (ADMIN AUTHORITY): If the household matches a tombstone and the local record 
                 // was last updated more than 15 minutes ago, we assume the Admin has priority and delete it even if unsynced.
-                if (key in cloudDeletedHouses) {
+                val dateKey = "${house.data.replace("/", "-")}|${house.agentName.uppercase()}"
+                
+                if (key in cloudDeletedHouses || dateKey in cloudDeletedActivities) {
                     val fifteenMinutesAgo = System.currentTimeMillis() - 900000L // 15 mins
                     if (house.isSynced) true
                     else if (house.lastUpdated < fifteenMinutesAgo) true
-                    else (System.currentTimeMillis() - house.lastUpdated > 3600000L) // 1h ghost check
+                    else {
+                        // ZOMBIE PREVENTION: If we decide NOT to delete it (because it's fresh/unsynced),
+                        // we MUST mark it as 'isSynced = true' locally so that it doesn't get pushed back 
+                        // to the cloud on the next cycle, effectively "re-creating" the deleted record.
+                        android.util.Log.i("SyncRepository", "Zombie Prevention: Silencing unsynced record ${house.id} to respect cloud deletion intent.")
+                        houseDao.markAsSyncedWithTimestamp(house.id, house.lastUpdated)
+                        false
+                    }
                 } else false
             }
 
@@ -512,7 +535,7 @@ class SyncRepositoryImpl @Inject constructor(
             val localActivities = dayActivityDao.getAllDayActivities(finalAgentName, uid).groupBy { "${it.date.replace("/", "-")}|${it.agentName}" }
             val activitiesDelta = cloudDayActivities
 
-            database.withTransaction {
+            runInTransactionWithRetry {
                 // Delete Houses
                 if (housesToDelete.isNotEmpty()) {
                     for (house in housesToDelete) {
@@ -528,34 +551,37 @@ class SyncRepositoryImpl @Inject constructor(
                 }
 
                 // Upsert Houses
+                // OPTIMIZATION: Index all local houses by a "Partial Identity Key" (Data + Number + Bairro)
+                // for O(1) identity healing lookup instead of O(N) searching.
+                val localIdentityMap = allLocalHouses.groupBy { h ->
+                    "${h.data}_${h.blockNumber.uppercase()}_${h.number.uppercase()}_${h.sequence}_${h.complement}_${h.bairro.uppercase()}"
+                }
+
                 val housesToUpsert = housesDelta.mapNotNull { cloudHouse ->
                     val key = cloudHouse.generateNaturalKey()
                     var existing = localHouses[key]?.firstOrNull()
                     
                     // --- IDENTITY HEALING (KEY-SHIFT PROTECTION) ---
-                    // If cloud house was edited by Admin but doesn't exist locally by key, 
-                    // check if a house exists with the same (Data, Block, Sequence, Street, Number).
-                    // This handles cases where Admin corrects a typo in the street name or block.
-                    if (existing == null && cloudHouse.editedByAdmin) {
-                        existing = allLocalHouses.find { h ->
-                            h.data == cloudHouse.data && 
-                            h.blockNumber == cloudHouse.blockNumber && 
-                            h.number == cloudHouse.number &&
-                            h.sequence == cloudHouse.sequence &&
-                            h.complement == cloudHouse.complement
-                        }
+                    // If no direct natural key match, try a partial match to identify corrections (street rename, etc.)
+                    if (existing == null) {
+                        val identityKey = "${cloudHouse.data}_${cloudHouse.blockNumber.uppercase()}_${cloudHouse.number.uppercase()}_${cloudHouse.sequence}_${cloudHouse.complement}_${cloudHouse.bairro.uppercase()}"
+                        existing = localIdentityMap[identityKey]?.find { it.agentUid == cloudHouse.agentUid }
+                        
                         if (existing != null) {
-                            android.util.Log.i("SyncRepository", "Healing: Key shift detected for Admin edit. Merging ${existing.id}")
-                            // We will delete the "old" local house with the wrong key
-                            houseDao.deleteHouse(existing)
+                            android.util.Log.i("SyncRepository", "Identity Healing: Found indexed record correlation for house ${existing.id} ($key)")
                         }
                     }
 
                     // CONFLICT RESOLUTION: Last Side to Change Wins (LWW)
                     if (existing != null && !existing.isSynced) {
                         // Priority 1: Admin Authority. If cloud record was edited by admin, it wins immediately
-                        // unless local record is VERY fresh (< 5 mins).
-                        if (cloudHouse.editedByAdmin && (System.currentTimeMillis() - existing.lastUpdated > 300000L)) {
+                        // unless local record is VERY fresh (< 2 mins - the buffer for active typing).
+                        // Note: If both are edited by admin, we fallback to timestamp.
+                        val isAdminOverride = cloudHouse.editedByAdmin && !existing.editedByAdmin && 
+                            (System.currentTimeMillis() - existing.lastUpdated > 120000L) // 2 mins
+
+                        if (isAdminOverride) {
+                            android.util.Log.i("SyncRepository", "Admin Authority: Overwriting local change for house ${existing.id}")
                             // Cloud wins
                         } else {
                             // Priority 2: Standard LWW
@@ -600,7 +626,8 @@ class SyncRepositoryImpl @Inject constructor(
                          val isRemoteUnlock = activity.isManualUnlock && !existing.isManualUnlock
                          
                          // Priority 2: Admin Authority
-                         val isAdminOverride = activity.editedByAdmin && (System.currentTimeMillis() - existing.lastUpdated > 300000L)
+                         val isAdminOverride = activity.editedByAdmin && !existing.editedByAdmin && 
+                            (System.currentTimeMillis() - existing.lastUpdated > 120000L) // 2 mins
 
                          val threshold = com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS
                          
@@ -642,7 +669,7 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun clearLocalData(): Result<Unit> {
         return try {
-            database.withTransaction {
+            runInTransactionWithRetry {
                 houseDao.deleteAll()
                 dayActivityDao.deleteAll()
                 tombstoneDao.deleteAll()
@@ -666,7 +693,7 @@ class SyncRepositoryImpl @Inject constructor(
     override suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>, agentUid: String?): Result<Unit> {
         val finalUid = agentUid ?: ""
         return try {
-            database.withTransaction {
+            runInTransactionWithRetry {
                 // Deduplicate Houses locally to prevent auto-generated ID duplicates.
                 // We group by the natural key and store a mutable list of existing IDs 
                 // to ensure a 1-to-1 mapping during restoration.
@@ -888,7 +915,7 @@ class SyncRepositoryImpl @Inject constructor(
                     agentUid = house.agentUid
                 )
             )
-            syncScheduler.scheduleSync()
+            syncSchedulerProvider.get().scheduleSync()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -905,7 +932,7 @@ class SyncRepositoryImpl @Inject constructor(
                     agentUid = agentUid
                 )
             )
-            syncScheduler.scheduleSync()
+            syncSchedulerProvider.get().scheduleSync()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -942,11 +969,11 @@ class SyncRepositoryImpl @Inject constructor(
                         agentUid = currentUid
                     )
                 }
-                database.withTransaction {
+                runInTransactionWithRetry {
                     tombstoneDao.insertTombstones(houseTombstones)
                     tombstoneDao.insertTombstones(activityTombstones)
                 }
-                syncScheduler.scheduleSync()
+                syncSchedulerProvider.get().scheduleSync()
                 Result.success(Unit)
             } catch (e: Exception) {
                 Result.failure(e)
@@ -977,17 +1004,29 @@ class SyncRepositoryImpl @Inject constructor(
                     if (it.contains("|")) it else if (agentName.isNotBlank()) "$it|${agentName.uppercase()}" else it
                 }
                 
-                activityDates.chunked(400).forEach { chunk ->
+                activityDates.chunked(100).forEach { chunk ->
                     val batch = firestore.batch()
                     chunk.forEach { tombstone ->
                         val dateKey = tombstone.split("|")[0]
                         batch.delete(docRef.collection("day_activities").document(dateKey))
+                        
+                        // CASCADING CLOUD CLEANUP: Also find and delete houses for this date in cloud
+                        try {
+                            // Firestore data is stored with dashes DD-MM-YYYY
+                            val activityDateDashed = dateKey.replace("/", "-")
+                            val activityHouses = docRef.collection("houses")
+                                .whereEqualTo("data", activityDateDashed)
+                                .get().await()
+                            activityHouses.documents.forEach { batch.delete(it.reference) }
+                        } catch (e: Exception) { /* Ignore query errors */ }
                     }
                     // Use standardized full keys for tombstones
                     val chunkKeys = chunk.map { 
                         if (it.contains("|")) it else if (agentName.isNotBlank()) "$it|${agentName.uppercase()}" else it
                     }
                     batch.update(docRef, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(*chunkKeys.toTypedArray()))
+                    // Trigger cache invalidation for supervisors
+                    batch.update(docRef, "lastSyncTime", System.currentTimeMillis())
                     batch.commit().await()
                 }
             }
@@ -1003,6 +1042,7 @@ class SyncRepositoryImpl @Inject constructor(
                     if (houseKeys.isNotEmpty()) {
                         houseKeys.forEach { batch.delete(legacyDoc.reference.collection("houses").document(it)) }
                         batch.update(legacyDoc.reference, "deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayUnion(*houseKeys.toTypedArray()))
+                        batch.update(legacyDoc.reference, "lastSyncTime", System.currentTimeMillis())
                     }
                     // Activities
                     if (activityDates.isNotEmpty()) {

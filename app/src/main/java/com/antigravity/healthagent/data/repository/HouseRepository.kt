@@ -23,7 +23,7 @@ interface HouseRepository {
     // DayActivity (Weekly Status)
     fun getDayActivities(dates: List<String>, agentName: String, agentUid: String? = null): Flow<List<DayActivity>>
     fun getDayActivityFlow(date: String, agentName: String, agentUid: String? = null): Flow<DayActivity?>
-    suspend fun updateDayActivity(dayActivity: DayActivity)
+    suspend fun updateDayActivity(dayActivity: DayActivity, force: Boolean = false)
     suspend fun deleteDayActivity(date: String, agentName: String, agentUid: String? = null)
     suspend fun <T> runInTransaction(block: suspend () -> T): T
     suspend fun getDayActivity(date: String, agentName: String, agentUid: String? = null): DayActivity?

@@ -31,7 +31,7 @@ class HouseValidationUseCase @Inject constructor() {
 
         // 1. Duplicate Validation (Bairro + Address, ignore Segment)
         val duplicateGroups = currentHouses.groupBy { house ->
-            "${house.bairro.trim().uppercase()}_${house.blockNumber.trim().uppercase()}_${house.blockSequence.trim().uppercase()}_${house.streetName.trim().uppercase()}_${house.number.trim().uppercase()}_${house.sequence}_${house.complement}"
+            "${house.bairro.uppercase()}|${house.blockNumber.uppercase()}|${house.blockSequence.uppercase()}|${house.streetName.uppercase()}|${house.number.uppercase()}|${house.sequence}|${house.complement}|${house.visitSegment}"
         }.filter { it.value.size > 1 }
 
         duplicateGroups.forEach { (_, houses) ->

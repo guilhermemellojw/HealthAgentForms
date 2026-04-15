@@ -31,25 +31,25 @@ val SolarPalette = ThemeColorPalette(
 
 // --- 1. EMERALD (Original / Default) ---
 val EmeraldLight = ThemeColorPalette(
-    primary = Color(0xFF0D9488), // Teal 600
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFCCFBF1), // Teal 100
-    onPrimaryContainer = Color(0xFF0F766E), // Teal 700
-    secondary = Color(0xFF4F46E5), // Indigo 600
+    primary = Color(0xFF6FDBA1), // Sampled New Green
+    onPrimary = Color(0xFF1B3D31),
+    primaryContainer = Color(0xFF214F66), // Sampled New Slate Blue
+    onPrimaryContainer = Color(0xFF6FDBA1),
+    secondary = Color(0xFF2DD4BF),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE0E7FF), // Indigo 100
-    onSecondaryContainer = Color(0xFF3730A3) // Indigo 800
+    secondaryContainer = Color(0xFFD1FAE5),
+    onSecondaryContainer = Color(0xFF065F46)
 )
 
 val EmeraldDark = ThemeColorPalette(
-    primary = Color(0xFF2DD4BF), // Teal 400
+    primary = Color(0xFF6FDBA1), // Sampled New Green
     onPrimary = Color(0xFF003833),
-    primaryContainer = Color(0xFF0F766E), // Teal 700
-    onPrimaryContainer = Color(0xFFCCFBF1), // Teal 100
-    secondary = Color(0xFF818CF8), // Indigo 400
-    onSecondary = Color(0xFF312E81),
-    secondaryContainer = Color(0xFF3730A3), // Indigo 800
-    onSecondaryContainer = Color(0xFFE0E7FF)  // Indigo 100
+    primaryContainer = Color(0xFF1B3D31),
+    onPrimaryContainer = Color(0xFF6FDBA1),
+    secondary = Color(0xFF2DD4BF),
+    onSecondary = Color(0xFF003833),
+    secondaryContainer = Color(0xFF214F66), // Sampled Slate Blue
+    onSecondaryContainer = Color(0xFFD1FAE5)
 )
 
 // --- 2. SAPPHIRE (Blue - Trust) ---

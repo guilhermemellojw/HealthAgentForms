@@ -683,7 +683,7 @@ fun MeshGradient(
         MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
         MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f),
         MaterialTheme.colorScheme.tertiary.copy(alpha = 0.4f),
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
     )
 ) {
     Box(
@@ -695,16 +695,21 @@ fun MeshGradient(
                     end = Offset.Infinite
                 )
             )
+            .let { 
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    it.blur(80.dp) // Create a soft, ambient background
+                } else it
+            }
             .drawBehind {
                 drawCircle(
-                    color = colors[0].copy(alpha = 0.3f),
-                    radius = size.width * 0.8f,
-                    center = Offset(size.width * 0.2f, size.height * 0.2f)
+                    color = colors[0].copy(alpha = 0.4f),
+                    radius = size.width * 0.9f,
+                    center = Offset(size.width * 0.1f, size.height * 0.1f)
                 )
                 drawCircle(
-                    color = colors[1].copy(alpha = 0.2f),
-                    radius = size.width * 0.6f,
-                    center = Offset(size.width * 0.8f, size.height * 0.7f)
+                    color = colors[1].copy(alpha = 0.3f),
+                    radius = size.width * 0.7f,
+                    center = Offset(size.width * 0.9f, size.height * 0.8f)
                 )
             }
     )
@@ -717,19 +722,28 @@ fun GlassCard(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .let { 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    it.blur(20.dp)
-                } else it
-            }
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
+            .clip(RoundedCornerShape(32.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.15f),
+                        Color.White.copy(alpha = 0.05f)
+                    )
+                )
+            )
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.4f)) // Adjust for better readability
             .border(
                 BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
-                RoundedCornerShape(16.dp)
+                RoundedCornerShape(32.dp)
+            )
+            .shadow(
+                elevation = 20.dp,
+                shape = RoundedCornerShape(32.dp),
+                ambientColor = Color.Black.copy(alpha = 0.1f),
+                spotColor = Color.Black.copy(alpha = 0.1f)
             )
     ) {
-        Box(modifier = Modifier.padding(16.dp)) {
+        Box(modifier = Modifier.padding(24.dp)) {
             content()
         }
     }

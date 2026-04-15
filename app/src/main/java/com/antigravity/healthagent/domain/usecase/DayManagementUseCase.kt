@@ -16,7 +16,7 @@ class DayManagementUseCase @Inject constructor(
         return repository.getDayActivity(date.replace("/", "-"), agentName.uppercase(), agentUid)
     }
 
-    suspend fun unlockDay(originalDate: String, agentName: String, agentUid: String? = null) {
+    suspend fun unlockDay(originalDate: String, agentName: String, agentUid: String? = null, force: Boolean = false) {
         val date = originalDate.replace("/", "-")
         val upperName = agentName.uppercase()
         val activity = repository.getDayActivity(date, upperName, agentUid)
@@ -37,16 +37,16 @@ class DayManagementUseCase @Inject constructor(
             agentUid = agentUid ?: ""
         )
         
-        repository.updateDayActivity(newActivity)
+        repository.updateDayActivity(newActivity, force)
     }
 
 
-    suspend fun closeDay(originalDate: String, agentName: String, agentUid: String? = null) {
+    suspend fun closeDay(originalDate: String, agentName: String, agentUid: String? = null, force: Boolean = false) {
         val date = originalDate.replace("/", "-")
         val upperName = agentName.uppercase()
         val activity = repository.getDayActivity(date, upperName, agentUid) ?: DayActivity(date, "NORMAL", false, false, upperName, agentUid ?: "")
         // When closing, reset isManualUnlock to false
-        repository.updateDayActivity(activity.copy(isClosed = true, isManualUnlock = false, agentName = upperName, agentUid = agentUid ?: ""))
+        repository.updateDayActivity(activity.copy(isClosed = true, isManualUnlock = false, agentName = upperName, agentUid = agentUid ?: ""), force)
     }
 
     fun isDateLocked(activity: DayActivity?): Boolean {

@@ -24,16 +24,7 @@ fun SyncStatusOverlay(
     syncStatus: SyncStatus,
     isEasyMode: Boolean = false
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "sync_loading")
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "rotation"
-    )
+    // SyncStatusOverlay no longer uses manual rotation state
 
     AnimatedVisibility(
         visible = syncStatus.stage != SyncStage.IDLE,
@@ -90,14 +81,26 @@ fun SyncStatusOverlay(
                                        syncStatus.stage == SyncStage.UPLOADING || 
                                        syncStatus.stage == SyncStage.DOWNLOADING
 
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(if (isEasyMode) 24.dp else 20.dp)
-                                .rotate(if (isRotating) rotation else 0f)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.size(if (isEasyMode) 32.dp else 28.dp)
+                        ) {
+                            if (isRotating) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.fillMaxSize(),
+                                    strokeWidth = 2.dp,
+                                    color = contentColor,
+                                    trackColor = contentColor.copy(alpha = 0.1f)
+                                )
+                            }
+                            
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(if (isEasyMode) 22.dp else 18.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
                         Text(
                             text = syncStatus.message ?: "Sincronizando...",
                             style = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge,

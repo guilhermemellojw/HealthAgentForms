@@ -582,13 +582,13 @@ class HomeViewModel @Inject constructor(
             
             dayHouses.forEach { hh ->
                 // Identity key matching HouseUiStateMapper's criteria
-                val key = "${hh.streetName.uppercase()}|${hh.number.uppercase()}|${hh.sequence}|${hh.complement}"
+                val key = "${hh.bairro.uppercase()}|${hh.blockNumber.uppercase()}|${hh.blockSequence.uppercase()}|${hh.streetName.uppercase()}|${hh.number.uppercase()}|${hh.sequence}|${hh.complement}|${hh.visitSegment}"
                 identityCounts[key] = (identityCounts[key] ?: 0) + 1
             }
             
             // Second pass for specific IDs
             dayHouses.forEach { hh ->
-                val key = "${hh.streetName.uppercase()}|${hh.number.uppercase()}|${hh.sequence}|${hh.complement}"
+                val key = "${hh.bairro.uppercase()}|${hh.blockNumber.uppercase()}|${hh.blockSequence.uppercase()}|${hh.streetName.uppercase()}|${hh.number.uppercase()}|${hh.sequence}|${hh.complement}|${hh.visitSegment}"
                 if ((identityCounts[key] ?: 0) > 1) {
                     duplicates.add(hh.id)
                 }
@@ -601,7 +601,7 @@ class HomeViewModel @Inject constructor(
                 it.streetName.normalize().contains(normalizedQ, true) || 
                 it.number.contains(q, true) 
             }.map { house ->
-                val key = "${house.streetName.uppercase()}|${house.number.uppercase()}|${house.sequence}|${house.complement}"
+                val key = "${house.bairro.uppercase()}|${house.blockNumber.uppercase()}|${house.blockSequence.uppercase()}|${house.streetName.uppercase()}|${house.number.uppercase()}|${house.sequence}|${house.complement}|${house.visitSegment}"
                 val isDuplicate = (identityCounts[key] ?: 0) > 1
                 
                 // For in-flight houses (id 0), check if any are recently edited using ID 0
@@ -1096,10 +1096,11 @@ class HomeViewModel @Inject constructor(
                 }
 
                 val closed = isDayClosed.value
+                val isAdmin = _isAdmin.value
                 val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value
                 if (closed) {
                     if (dayManagementUseCase.canSafelyUnlock(_data.value)) {
-                        dayManagementUseCase.unlockDay(_data.value, _agentName.value, effectiveUid)
+                        dayManagementUseCase.unlockDay(_data.value, _agentName.value, effectiveUid, isAdmin)
                     } else {
                         _showHistoryUnlockConfirmation.value = true
                     }
@@ -1112,7 +1113,7 @@ class HomeViewModel @Inject constructor(
                     val activity = dayManagementUseCase.getDayActivity(currentData, currentAgent, effectiveUid)
                         ?: com.antigravity.healthagent.data.local.model.DayActivity(date = currentData, agentName = currentAgent, agentUid = effectiveUid)
                     
-                    repository.updateDayActivity(activity.copy(isManualUnlock = !manualUnlock))
+                    repository.updateDayActivity(activity.copy(isManualUnlock = !manualUnlock), isAdmin)
                     
                     if (!manualUnlock) {
                         _uiEvent.value = "Edição extra habilitada para este dia."
@@ -1280,7 +1281,8 @@ class HomeViewModel @Inject constructor(
     fun confirmAndCloseDay(audit: AuditSummary) {
         viewModelScope.launch {
             try {
-                dayManagementUseCase.closeDay(audit.date, _agentName.value, _remoteAgentUid.value)
+                val isAdmin = _isAdmin.value
+                dayManagementUseCase.closeDay(audit.date, _agentName.value, _remoteAgentUid.value, isAdmin)
                 _showClosingAudit.value = null
                 if (audit.totalWorked >= maxOpenHouses.value && maxOpenHouses.value > 0) {
                     _showGoalReached.value = true
