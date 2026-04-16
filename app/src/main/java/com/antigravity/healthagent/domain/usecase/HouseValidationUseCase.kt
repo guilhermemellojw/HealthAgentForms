@@ -23,7 +23,8 @@ class HouseValidationUseCase @Inject constructor() {
     )
 
     fun validateCurrentDay(currentDate: String, allHouses: List<House>, strict: Boolean = true): ValidationResult {
-        val currentHouses = allHouses.filter { it.data == currentDate }.sortedBy { it.listOrder }
+        val normalizedCurrentDate = currentDate.replace("/", "-")
+        val currentHouses = allHouses.filter { it.data.replace("/", "-") == normalizedCurrentDate }.sortedBy { it.listOrder }
         if (currentHouses.isEmpty()) return ValidationResult(isValid = true)
 
         val errorDetails = mutableListOf<ErrorDetail>()

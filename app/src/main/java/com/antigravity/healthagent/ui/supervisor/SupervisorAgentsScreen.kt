@@ -199,10 +199,24 @@ fun SupervisorAgentsScreen(
 @Composable
 fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSolarMode: Boolean = false) {
     var expanded by remember { mutableStateOf(false) }
-    val lastSync = remember(agent.lastSyncTime) {
-        if (agent.lastSyncTime > 0) {
-            SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(agent.lastSyncTime))
+    val liveAgent by viewModel.liveAgentData.collectAsState()
+    val focusedUid by viewModel.focusedAgentUid.collectAsState()
+    
+    // Use live data if this agent is the one being focused
+    val displayAgent = if (focusedUid == agent.uid && liveAgent != null) liveAgent!! else agent
+
+    val lastSync = remember(displayAgent.lastSyncTime) {
+        if (displayAgent.lastSyncTime > 0) {
+            SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(displayAgent.lastSyncTime))
         } else "Nunca"
+    }
+
+    LaunchedEffect(expanded) {
+        if (expanded) {
+            viewModel.startLiveInspection(agent.uid)
+        } else if (focusedUid == agent.uid) {
+            viewModel.stopLiveInspection()
+        }
     }
 
     PremiumCard(
@@ -216,25 +230,25 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 com.antigravity.healthagent.ui.components.UserAvatar(
-                    uid = agent.uid,
-                    displayName = agent.agentName,
-                    email = agent.email,
-                    photoUrl = agent.photoUrl,
+                    uid = displayAgent.uid,
+                    displayName = displayAgent.agentName,
+                    email = displayAgent.email,
+                    photoUrl = displayAgent.photoUrl,
                     size = 48.dp
                 )
                 
                 Spacer(modifier = Modifier.width(16.dp))
                 
                 Column(modifier = Modifier.weight(1f)) {
-                    val displayName = agent.agentName?.takeIf { it.isNotBlank() } ?: agent.email.ifBlank { "Sem Email" }
+                    val displayName = displayAgent.agentName?.takeIf { it.isNotBlank() } ?: displayAgent.email.ifBlank { "Sem Email" }
                     Text(
                         text = displayName,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    if (agent.agentName?.isNotBlank() == true) {
+                    if (displayAgent.agentName?.isNotBlank() == true) {
                         Text(
-                            text = agent.email,
+                            text = displayAgent.email,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -262,13 +276,13 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        val treatedValue = agent.summary?.treatedCount?.toString() ?: agent.houses.count { house ->
+                        val treatedValue = displayAgent.summary?.treatedCount?.toString() ?: displayAgent.houses.count { house ->
                             (house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e + house.eliminados) > 0 ||
                             house.larvicida > 0.0 || house.comFoco
                         }.toString()
                         
-                        val focusValue = agent.summary?.focusCount?.toString() ?: agent.houses.count { it.comFoco }.toString()
-                        val hasFoci = (agent.summary?.focusCount ?: 0) > 0 || agent.houses.any { it.comFoco }
+                        val focusValue = displayAgent.summary?.focusCount?.toString() ?: displayAgent.houses.count { it.comFoco }.toString()
+                        val hasFoci = (displayAgent.summary?.focusCount ?: 0) > 0 || displayAgent.houses.any { it.comFoco }
 
                         AgentStatItem(label = "TRATADOS", value = treatedValue, modifier = Modifier.weight(1f))
                         AgentStatItem(
@@ -293,9 +307,9 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            val openCount = agent.summary?.let { s -> 
+                            val openCount = displayAgent.summary?.let { s -> 
                                 (s.situationCounts["NONE"] ?: 0) + (s.situationCounts["EMPTY"] ?: 0)
-                            }?.toString() ?: agent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE || it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY }.toString()
+                            }?.toString() ?: displayAgent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE || it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY }.toString()
 
                             CompactStatChip(
                                 label = "ABERTOS", 
@@ -303,8 +317,8 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                                 modifier = Modifier.weight(1f)
                             )
                             
-                            val vCount = agent.summary?.situationCounts?.get("V")?.toString() 
-                                ?: agent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.V }.toString()
+                            val vCount = displayAgent.summary?.situationCounts?.get("V")?.toString() 
+                                ?: displayAgent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.V }.toString()
 
                             CompactStatChip(
                                 label = "V", 
@@ -312,8 +326,8 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                                 modifier = Modifier.weight(1f)
                             )
                             
-                            val fCount = agent.summary?.situationCounts?.get("F")?.toString() 
-                                ?: agent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }.toString()
+                            val fCount = displayAgent.summary?.situationCounts?.get("F")?.toString() 
+                                ?: displayAgent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }.toString()
 
                             CompactStatChip(
                                 label = "F", 
@@ -325,8 +339,8 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            val recCount = agent.summary?.situationCounts?.get("REC")?.toString() 
-                                ?: agent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }.toString()
+                            val recCount = displayAgent.summary?.situationCounts?.get("REC")?.toString() 
+                                ?: displayAgent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }.toString()
 
                             CompactStatChip(
                                 label = "REC", 
@@ -334,8 +348,8 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                                 modifier = Modifier.weight(1f)
                             )
                             
-                            val aCount = agent.summary?.situationCounts?.get("A")?.toString() 
-                                ?: agent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }.toString()
+                            val aCount = displayAgent.summary?.situationCounts?.get("A")?.toString() 
+                                ?: displayAgent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }.toString()
 
                             CompactStatChip(
                                 label = "A", 
@@ -361,9 +375,9 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            val resCount = agent.summary?.propertyTypeCounts?.get("R")?.toString() ?: agent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.R }.toString()
-                            val comCount = agent.summary?.propertyTypeCounts?.get("C")?.toString() ?: agent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.C }.toString()
-                            val tbCount = agent.summary?.propertyTypeCounts?.get("TB")?.toString() ?: agent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.TB }.toString()
+                            val resCount = displayAgent.summary?.propertyTypeCounts?.get("R")?.toString() ?: displayAgent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.R }.toString()
+                            val comCount = displayAgent.summary?.propertyTypeCounts?.get("C")?.toString() ?: displayAgent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.C }.toString()
+                            val tbCount = displayAgent.summary?.propertyTypeCounts?.get("TB")?.toString() ?: displayAgent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.TB }.toString()
 
                             CompactStatChip(label = "RES", value = resCount, modifier = Modifier.weight(1f))
                             CompactStatChip(label = "COM", value = comCount, modifier = Modifier.weight(1f))
@@ -373,8 +387,8 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            val peCount = agent.summary?.propertyTypeCounts?.get("PE")?.toString() ?: agent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.PE }.toString()
-                            val outCount = agent.summary?.propertyTypeCounts?.get("O")?.toString() ?: agent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.O }.toString()
+                            val peCount = displayAgent.summary?.propertyTypeCounts?.get("PE")?.toString() ?: displayAgent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.PE }.toString()
+                            val outCount = displayAgent.summary?.propertyTypeCounts?.get("O")?.toString() ?: displayAgent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.O }.toString()
 
                             CompactStatChip(label = "PE", value = peCount, modifier = Modifier.weight(1f))
                             CompactStatChip(label = "OUT", value = outCount, modifier = Modifier.weight(1f))
@@ -393,9 +407,9 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    val sortedActivities = remember(agent.activities) {
+                    val sortedActivities = remember(displayAgent.activities) {
                         val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
-                        agent.activities.sortedByDescending { activity ->
+                        displayAgent.activities.sortedByDescending { activity ->
                             try {
                                 val normalized = activity.date.replace("/", "-")
                                 sdf.parse(normalized)?.time ?: 0L
@@ -409,7 +423,7 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                         Text("Nenhuma produção registrada", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
                         sortedActivities.forEach { activity ->
-                            val activityHouses = agent.houses.filter { it.data == activity.date }
+                            val activityHouses = displayAgent.houses.filter { it.data == activity.date }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()

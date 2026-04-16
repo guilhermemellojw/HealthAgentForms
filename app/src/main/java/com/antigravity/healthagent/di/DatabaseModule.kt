@@ -7,6 +7,7 @@ import com.antigravity.healthagent.data.local.dao.HouseDao
 import com.antigravity.healthagent.data.local.dao.DayActivityDao
 import com.antigravity.healthagent.data.local.dao.TombstoneDao
 import com.antigravity.healthagent.data.local.dao.CustomStreetDao
+import androidx.work.WorkManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -79,5 +80,11 @@ object DatabaseModule {
     @Provides
     fun provideAgentCacheDao(database: AppDatabase): com.antigravity.healthagent.data.local.dao.AgentCacheDao {
         return database.agentCacheDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideWorkManager(@ApplicationContext context: Context): WorkManager {
+        return WorkManager.getInstance(context)
     }
 }

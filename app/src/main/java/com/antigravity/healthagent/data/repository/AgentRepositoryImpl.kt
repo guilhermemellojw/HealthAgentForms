@@ -4,9 +4,13 @@ import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.AgentRepository
 import com.antigravity.healthagent.data.util.toHouseSafe
 import com.antigravity.healthagent.data.util.toDayActivitySafe
+import com.antigravity.healthagent.data.local.model.House
+import com.antigravity.healthagent.data.local.model.DayActivity
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -505,4 +509,71 @@ class AgentRepositoryImpl @Inject constructor(
             propertyTypeCounts = this.propertyTypeCounts
         )
     }
+
+    override fun observeAgentProduction(uid: String, datePattern: String?): Flow<AgentData> = callbackFlow {
+        val agentRef = firestore.collection("agents").document(uid)
+        val currentHouses = MutableStateFlow<List<House>>(emptyList())
+        val currentActivities = MutableStateFlow<List<DayActivity>>(emptyList())
+        
+        // 1. Initial Meta from Cache
+        val cached = agentCacheDao.getCachedAgent(uid)
+        
+        fun sendUpdate() {
+            trySend(AgentData(
+                uid = uid,
+                email = cached?.email ?: "",
+                agentName = cached?.agentName,
+                lastSyncTime = System.currentTimeMillis(),
+                houses = currentHouses.value,
+                activities = currentActivities.value,
+                photoUrl = cached?.photoUrl
+            ))
+        }
+
+        if (cached != null) {
+            currentHouses.value = emptyList() // Or fetch local houses if desired
+            sendUpdate()
+        }
+
+        // 2. Focused Snapshot Listener (Houses)
+        val housesListener = agentRef.collection("houses")
+            .orderBy("lastUpdated", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(50)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                if (snapshot != null) {
+                    launch {
+                        val houses = snapshot.documents.mapNotNull { it.toHouseSafe(uid, cached?.agentName ?: "") }
+                        val filteredHouses = if (datePattern != null) {
+                            val cleanSuffix = datePattern.removePrefix("-")
+                            houses.filter { it.data.contains(cleanSuffix) }
+                        } else houses
+                        currentHouses.value = filteredHouses
+                        sendUpdate()
+                    }
+                }
+            }
+
+        // 3. Focused Snapshot Listener (Activities)
+        val activitiesListener = agentRef.collection("day_activities")
+            .orderBy("lastUpdated", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(10)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                if (snapshot != null) {
+                    launch {
+                        val activities = snapshot.documents.mapNotNull { it.toDayActivitySafe(uid, cached?.agentName ?: "") }
+                        currentActivities.value = activities
+                        sendUpdate()
+                    }
+                }
+            }
+
+        awaitClose { 
+            android.util.Log.d("AgentRepository", "Detaching live inspection for $uid")
+            housesListener.remove() 
+            activitiesListener.remove()
+        }
+    }
 }
+

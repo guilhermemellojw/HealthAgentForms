@@ -15,4 +15,10 @@ interface AgentRepository {
     suspend fun deleteAgentActivity(uid: String, activityDate: String): Result<Unit>
     suspend fun clearSyncError(uid: String): Result<Unit>
     suspend fun transferAgentData(fromUid: String, toUid: String): Result<Unit>
+
+    /**
+     * Provides a real-time stream of an agent's data for administrative inspection.
+     * Uses a snapshot listener for cost-efficiency (only emits on changes).
+     */
+    fun observeAgentProduction(uid: String, datePattern: String?): kotlinx.coroutines.flow.Flow<AgentData>
 }

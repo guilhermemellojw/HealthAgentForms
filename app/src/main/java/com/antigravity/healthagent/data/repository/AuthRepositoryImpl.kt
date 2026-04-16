@@ -32,7 +32,8 @@ class AuthRepositoryImpl @Inject constructor(
     private val agentRepository: AgentRepository,
     private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager,
     private val houseDao: com.antigravity.healthagent.data.local.dao.HouseDao,
-    private val activityDao: com.antigravity.healthagent.data.local.dao.DayActivityDao
+    private val activityDao: com.antigravity.healthagent.data.local.dao.DayActivityDao,
+    private val workManager: androidx.work.WorkManager
 ) : AuthRepository {
 
     private val BOOTSTRAP_ADMINS = listOf("guigomelo9@gmail.com")
@@ -139,40 +140,22 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun signOut() {
-        // Final Sync: Try to push any unsynced local data to the cloud before clearing
-        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-            try {
-                val firebaseUser = auth.currentUser
-                if (firebaseUser != null) {
-                    val userProfile = try { getFullUserData(firebaseUser) } catch(e: Exception) { 
-                        // Fallback: search settingsManager cache if offline
-                        settingsManager.cachedUser.firstOrNull() ?: AuthUser(firebaseUser.uid, firebaseUser.email ?: "", firebaseUser.displayName, null, UserRole.AGENT, false)
-                    }
-                    val agentName = userProfile.agentName ?: ""
-                    val uid = firebaseUser.uid
-
-                    val houses = houseDao.getAllHouses(agentName, uid).first()
-                    val activities = activityDao.getAllDayActivities(agentName, uid)
-                    
-                    if (houses.isNotEmpty() || activities.isNotEmpty()) {
-                        android.util.Log.i("AuthRepository", "Performing final sync before logout for $agentName (${houses.size} houses)...")
-                        val result = syncRepository.pushLocalDataToCloud(houses, activities, uid)
-                        if (result.isSuccess) {
-                            android.util.Log.i("AuthRepository", "Final sync successful.")
-                        } else {
-                            android.util.Log.e("AuthRepository", "Final sync failed: ${result.exceptionOrNull()?.message}")
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("AuthRepository", "Error during final sync preparation: ${e.message}", e)
-            }
-            
-            android.util.Log.i("AuthRepository", "Clearing local data and signing out...")
-            settingsManager.clearSessionSettings()
-            syncRepository.clearLocalData()
-            auth.signOut()
-        }
+        android.util.Log.i("AuthRepository", "SignOut requested - Canceling active syncs and triggering cleanup...")
+        
+        // 0. CANCEL ACTIVE SYNC WORK
+        // Stop background workers from holding the database lock
+        workManager.cancelAllWorkByTag("sync")
+        
+        // 1. CLEAR SESSION IMMEDIATELY (Instant UI transition)
+        settingsManager.clearSessionSettings()
+        
+        // 2. ENQUEUE GUARANTEED CLEANUP
+        // We use WorkManager to ensure the final sync and wipe happen even if the process is killed.
+        val logoutRequest = androidx.work.OneTimeWorkRequestBuilder<com.antigravity.healthagent.data.sync.LogoutWorker>()
+            .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .build()
+        
+        workManager.enqueue(logoutRequest)
     }
 
     override suspend fun isUserAdmin(): Boolean {

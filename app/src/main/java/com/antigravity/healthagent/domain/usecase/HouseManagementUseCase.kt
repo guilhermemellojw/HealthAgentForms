@@ -18,7 +18,8 @@ class HouseManagementUseCase @Inject constructor(
             val sanitized = sanitizeHouse(house)
             val id = repository.insertHouse(sanitized, force)
             
-            val dayHouses = allHouses.filter { it.data == sanitized.data }
+            val normalizedData = sanitized.data.replace("/", "-")
+            val dayHouses = allHouses.filter { it.data.replace("/", "-") == normalizedData }
             val withNewHouse = (dayHouses + sanitized.copy(id = id.toInt())).sortedBy { it.listOrder }
             val recalculated = recalculateVisitSegments(withNewHouse)
             repository.updateHouses(recalculated, force)
@@ -32,10 +33,10 @@ class HouseManagementUseCase @Inject constructor(
             val sanitized = sanitizeHouse(house)
             val originalHouse = allHouses.find { it.id == house.id }
             
-            val affectedDates = mutableSetOf(sanitized.data)
-            originalHouse?.let { affectedDates.add(it.data) }
+            val affectedDates = mutableSetOf(sanitized.data.replace("/", "-"))
+            originalHouse?.let { affectedDates.add(it.data.replace("/", "-")) }
             
-            val housesToUpdate = allHouses.filter { it.data in affectedDates }.map {
+            val housesToUpdate = allHouses.filter { it.data.replace("/", "-") in affectedDates }.map {
                 if (it.id == house.id) sanitized else it
             }
             
@@ -55,7 +56,8 @@ class HouseManagementUseCase @Inject constructor(
 
     suspend fun deleteHouse(house: House, allHouses: List<House>, force: Boolean = false) {
         repository.runInTransaction {
-            val dayHouses = allHouses.filter { it.data == house.data }
+            val normalizedData = house.data.replace("/", "-")
+            val dayHouses = allHouses.filter { it.data.replace("/", "-") == normalizedData }
             repository.deleteHouse(house, force)
             val remaining = dayHouses.filter { it.id != house.id }.sortedBy { it.listOrder }
             val recalculated = recalculateVisitSegments(remaining)
@@ -140,8 +142,8 @@ class HouseManagementUseCase @Inject constructor(
 
         // 3. Recalculate segments ONLY if street name changed or specifically requested
         // This prevents automatic sequence/segment shifts on every minor edit
-        val dayToRecalculate = sanitized.data
-        val affectedHouses = sequenceUpdated.filter { it.data == dayToRecalculate }.sortedBy { it.listOrder }
+        val dayToRecalculate = sanitized.data.replace("/", "-")
+        val affectedHouses = sequenceUpdated.filter { it.data.replace("/", "-") == dayToRecalculate }.sortedBy { it.listOrder }
         val recalculatedDay = if (localizationChanged) {
             recalculateVisitSegments(affectedHouses)
         } else {

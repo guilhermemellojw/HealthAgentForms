@@ -57,6 +57,12 @@ class SupervisorViewModel @Inject constructor(
     fun clearUiEvent() { _uiEvent.value = null }
 
     private val _rawAgents = MutableStateFlow<List<AgentData>>(emptyList())
+    
+    // LIVE INSPECTION STATE
+    private val _focusedAgentUid = MutableStateFlow<String?>(null)
+    private val _liveAgentData = MutableStateFlow<AgentData?>(null)
+    private var liveJob: kotlinx.coroutines.Job? = null
+
     val agents: StateFlow<List<AgentData>> = _rawAgents
         .map { filterFutureData(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -157,6 +163,32 @@ class SupervisorViewModel @Inject constructor(
     init {
         refreshData()
     }
+
+    fun startLiveInspection(uid: String) {
+        if (_focusedAgentUid.value == uid) return
+        
+        _focusedAgentUid.value = uid
+        liveJob?.cancel()
+        liveJob = viewModelScope.launch {
+            val datePattern = if (_selectedMonth.value == -1) "-${_selectedYear.value}" 
+                             else String.format("-%02d-%d", _selectedMonth.value + 1, _selectedYear.value)
+            
+            agentRepository.observeAgentProduction(uid, datePattern)
+                .collect { data ->
+                    _liveAgentData.value = data
+                }
+        }
+    }
+
+    fun stopLiveInspection() {
+        _focusedAgentUid.value = null
+        _liveAgentData.value = null
+        liveJob?.cancel()
+        liveJob = null
+    }
+
+    val liveAgentData: StateFlow<AgentData?> = _liveAgentData.asStateFlow()
+    val focusedAgentUid: StateFlow<String?> = _focusedAgentUid.asStateFlow()
 
     fun refreshData() {
         viewModelScope.launch {

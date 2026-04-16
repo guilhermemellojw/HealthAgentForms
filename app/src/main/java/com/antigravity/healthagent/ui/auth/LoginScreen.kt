@@ -19,12 +19,14 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
 import com.antigravity.healthagent.R
-// import com.antigravity.healthagent.ui.components.MeshGradient
+import com.antigravity.healthagent.ui.components.MeshGradient
+import com.antigravity.healthagent.ui.components.GoogleIcon
 import com.antigravity.healthagent.ui.components.GlassCard
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
@@ -66,10 +68,12 @@ fun LoginScreen(
     }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colorResource(id = R.color.app_background_dark))
+        modifier = Modifier.fillMaxSize()
     ) {
+        // Dynamic animated background that follows the theme
+        MeshGradient(modifier = Modifier.fillMaxSize())
+        
+        // Remove the dark overlay to allow full transparency as requested
         
         AnimatedVisibility(
             visible = showContent,
@@ -83,7 +87,8 @@ fun LoginScreen(
                 contentAlignment = Alignment.Center
             ) {
                 GlassCard(
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = Color.Transparent
                 ) {
                     Column(
                         modifier = Modifier
@@ -96,27 +101,53 @@ fun LoginScreen(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 text = "Eu ACE",
-                                style = MaterialTheme.typography.displaySmall,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary,
-                                letterSpacing = (-1).sp
+                                style = MaterialTheme.typography.displayMedium.copy(
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = (-1.5).sp,
+                                    shadow = androidx.compose.ui.graphics.Shadow(
+                                        color = Color.Black.copy(alpha = 0.5f),
+                                        offset = androidx.compose.ui.geometry.Offset(2f, 2f),
+                                        blurRadius = 8f
+                                    )
+                                ),
+                                color = Color.White
                             )
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Vigilância em Saúde",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                                fontWeight = FontWeight.Bold
+                                text = "VIGILÂNCIA EM SAÚDE",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 4.sp,
+                                    shadow = androidx.compose.ui.graphics.Shadow(
+                                        color = Color.Black.copy(alpha = 0.3f),
+                                        offset = androidx.compose.ui.geometry.Offset(1f, 1f),
+                                        blurRadius = 2f
+                                    )
+                                ),
+                                color = Color.White.copy(alpha = 0.6f)
                             )
                         }
+
+                        val logoTransition = rememberInfiniteTransition(label = "logo")
+                        val logoScale by logoTransition.animateFloat(
+                            initialValue = 1f,
+                            targetValue = 1.05f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(3000, easing = FastOutSlowInEasing),
+                                repeatMode = RepeatMode.Reverse
+                            ),
+                            label = "scale"
+                        )
 
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
                                 .size(140.dp)
                                 .padding(4.dp)
+                                .graphicsLayer(scaleX = logoScale, scaleY = logoScale)
                         ) {
                             Image(
-                                painter = painterResource(id = R.drawable.logo_vigilancia),
+                                painter = painterResource(id = R.drawable.logo_3d_vigilancia),
                                 contentDescription = "Logo",
                                 modifier = Modifier.fillMaxSize()
                             )
@@ -235,9 +266,18 @@ fun LoginScreen(
                             ) {
                                 Text(
                                     text = "Faça login com sua conta Google para sincronizar seus dados.",
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.Medium,
+                                        lineHeight = 22.sp,
+                                        letterSpacing = 0.2.sp,
+                                        shadow = androidx.compose.ui.graphics.Shadow(
+                                            color = Color.Black.copy(alpha = 0.3f),
+                                            offset = androidx.compose.ui.geometry.Offset(1f, 1f),
+                                            blurRadius = 2f
+                                        )
+                                    ),
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                                    color = Color.White.copy(alpha = 0.8f)
                                 )
 
                                 Surface(
@@ -274,33 +314,34 @@ fun LoginScreen(
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(64.dp)
-                                        .shadow(8.dp, RoundedCornerShape(20.dp)),
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = MaterialTheme.colorScheme.surface,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                        .height(58.dp)
+                                        .shadow(12.dp, RoundedCornerShape(16.dp)),
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = Color.White, // Classic Google White
+                                    border = BorderStroke(1.dp, Color(0xFFE2E8F0))
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         if (authState is AuthState.Loading) {
-                                            CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(24.dp), 
+                                                strokeWidth = 2.dp,
+                                                color = Color(0xFF4285F4)
+                                            )
                                         } else {
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.Center,
                                                 modifier = Modifier.padding(horizontal = 24.dp)
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Person,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(24.dp),
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
+                                                GoogleIcon(modifier = Modifier.size(22.dp))
                                                 Spacer(modifier = Modifier.width(16.dp))
                                                 Text(
                                                     text = "Entrar com Google",
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    fontWeight = FontWeight.Black,
-                                                    color = MaterialTheme.colorScheme.onSurface
+                                                    style = MaterialTheme.typography.titleMedium.copy(
+                                                        letterSpacing = 0.4.sp
+                                                    ),
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = Color(0xFF1F2937)
                                                 )
                                             }
                                         }

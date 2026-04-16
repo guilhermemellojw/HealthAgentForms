@@ -13,6 +13,7 @@ import com.antigravity.healthagent.data.sync.SyncScheduler
 import com.antigravity.healthagent.data.local.dao.TombstoneDao
 import com.antigravity.healthagent.data.local.model.Tombstone
 import com.antigravity.healthagent.data.local.model.TombstoneType
+import com.antigravity.healthagent.utils.withRetry
 
 class HouseRepositoryImpl @Inject constructor(
     private val houseDao: HouseDao,
@@ -23,16 +24,8 @@ class HouseRepositoryImpl @Inject constructor(
 ) : HouseRepository {
 
     private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        var attempts = 0
-        while (true) {
-            try {
-                return database.withTransaction { block() }
-            } catch (e: android.database.sqlite.SQLiteDatabaseLockedException) {
-                attempts++
-                if (attempts >= 3) throw e
-                android.util.Log.w("HouseRepository", "Database locked, retrying ($attempts/3)...")
-                kotlinx.coroutines.delay(100L + (kotlin.random.Random.nextLong(0, 100L)))
-            }
+        return database.withRetry {
+            database.withTransaction { block() }
         }
     }
 

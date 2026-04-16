@@ -2,6 +2,7 @@ package com.antigravity.healthagent.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -677,6 +678,60 @@ fun EmptyStateView(
 }
 
 @Composable
+fun GoogleIcon(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(20.dp)) {
+        val width = size.width
+        val height = size.height
+        val strokeWidth = width * 0.18f
+        
+        // Red - Top
+        drawArc(
+            color = Color(0xFFEA4335),
+            startAngle = 140f,
+            sweepAngle = 180f,
+            useCenter = false,
+            style = Stroke(width = strokeWidth),
+            size = size
+        )
+        // Yellow - Left
+        drawArc(
+            color = Color(0xFFFBBC05),
+            startAngle = 140f,
+            sweepAngle = -60f,
+            useCenter = false,
+            style = Stroke(width = strokeWidth),
+            size = size
+        )
+        // Green - Bottom
+        drawArc(
+            color = Color(0xFF34A853),
+            startAngle = 40f,
+            sweepAngle = 100f,
+            useCenter = false,
+            style = Stroke(width = strokeWidth),
+            size = size
+        )
+        // Blue - Right and Bar
+        drawArc(
+            color = Color(0xFF4285F4),
+            startAngle = 0f,
+            sweepAngle = 40f,
+            useCenter = false,
+            style = Stroke(width = strokeWidth),
+            size = size
+        )
+        
+        // Horizontal bar for 'G'
+        val barWidth = width * 0.45f
+        drawRect(
+            color = Color(0xFF4285F4),
+            topLeft = Offset(width * 0.5f, height * 0.41f),
+            size = androidx.compose.ui.geometry.Size(barWidth, height * 0.18f)
+        )
+    }
+}
+
+@Composable
 fun MeshGradient(
     modifier: Modifier = Modifier,
     colors: List<Color> = listOf(
@@ -686,6 +741,28 @@ fun MeshGradient(
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
     )
 ) {
+    val infiniteTransition = rememberInfiniteTransition(label = "mesh")
+    val circleOffset1 by infiniteTransition.animateValue(
+        initialValue = Offset(0.1f, 0.1f),
+        targetValue = Offset(0.2f, 0.3f),
+        typeConverter = Offset.VectorConverter,
+        animationSpec = infiniteRepeatable(
+            animation = tween(8000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "offset1"
+    )
+    val circleOffset2 by infiniteTransition.animateValue(
+        initialValue = Offset(0.9f, 0.8f),
+        targetValue = Offset(0.7f, 0.6f),
+        typeConverter = Offset.VectorConverter,
+        animationSpec = infiniteRepeatable(
+            animation = tween(11000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "offset2"
+    )
+
     Box(
         modifier = modifier
             .background(
@@ -704,12 +781,12 @@ fun MeshGradient(
                 drawCircle(
                     color = colors[0].copy(alpha = 0.4f),
                     radius = size.width * 0.9f,
-                    center = Offset(size.width * 0.1f, size.height * 0.1f)
+                    center = Offset(size.width * circleOffset1.x, size.height * circleOffset1.y)
                 )
                 drawCircle(
                     color = colors[1].copy(alpha = 0.3f),
                     radius = size.width * 0.7f,
-                    center = Offset(size.width * 0.9f, size.height * 0.8f)
+                    center = Offset(size.width * circleOffset2.x, size.height * circleOffset2.y)
                 )
             }
     )
@@ -718,6 +795,7 @@ fun MeshGradient(
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
+    containerColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
     content: @Composable BoxScope.() -> Unit
 ) {
     Box(
@@ -726,12 +804,12 @@ fun GlassCard(
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        Color.White.copy(alpha = 0.15f),
-                        Color.White.copy(alpha = 0.05f)
+                        Color.White.copy(alpha = 0.1f),
+                        Color.White.copy(alpha = 0.02f)
                     )
                 )
             )
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.4f)) // Adjust for better readability
+            .background(containerColor) // Adjust for better readability
             .border(
                 BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
                 RoundedCornerShape(32.dp)

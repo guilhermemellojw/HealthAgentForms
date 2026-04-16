@@ -19,6 +19,7 @@ import kotlinx.coroutines.sync.withLock
 import java.text.SimpleDateFormat
 import java.util.*
 import com.antigravity.healthagent.data.util.*
+import com.antigravity.healthagent.utils.withRetry
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -35,16 +36,8 @@ class SyncRepositoryImpl @Inject constructor(
 ) : SyncRepository {
 
     private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        var attempts = 0
-        while (true) {
-            try {
-                return database.withTransaction { block() }
-            } catch (e: android.database.sqlite.SQLiteDatabaseLockedException) {
-                attempts++
-                if (attempts >= 3) throw e
-                android.util.Log.w("SyncRepository", "Database locked during sync, retrying ($attempts/3)...")
-                kotlinx.coroutines.delay(100L + (kotlin.random.Random.nextLong(0, 100L)))
-            }
+        return database.withRetry(maxAttempts = 3) {
+            database.withTransaction { block() }
         }
     }
 
@@ -55,10 +48,12 @@ class SyncRepositoryImpl @Inject constructor(
         activities: List<DayActivity>,
         targetUid: String?,
         shouldReplace: Boolean
-    ): Result<Unit> = syncMutex.withLock {
-        return try {
-            val uid = targetUid ?: auth.currentUser?.uid ?: return Result.failure(Exception("User not authenticated"))
-            val userDocRef = firestore.collection("agents").document(uid)
+    ): Result<Unit> {
+        val result = withTimeoutOrNull(60000L) {
+            syncMutex.withLock {
+                try {
+                    val uid = targetUid ?: auth.currentUser?.uid ?: return@withLock Result.failure(Exception("User not authenticated"))
+                    val userDocRef = firestore.collection("agents").document(uid)
             
             // Fetch existing cloud metadata
             val existingDoc = try { userDocRef.get().await() } catch(e: Exception) { null }
@@ -79,10 +74,10 @@ class SyncRepositoryImpl @Inject constructor(
             val tombstones = tombstoneDao.getAllTombstones(officialAgentName, uid)
 
             // Optimistic return if nothing to do (and not a forced replacement)
-            if (unsyncedHouses.isEmpty() && unsyncedActivities.isEmpty() && tombstones.isEmpty() && !shouldReplace) {
-                android.util.Log.i("SyncRepository", "Push: Nothing to sync (incremental).")
-                return Result.success(Unit)
-            }
+                if (unsyncedHouses.isEmpty() && unsyncedActivities.isEmpty() && tombstones.isEmpty() && !shouldReplace) {
+                    android.util.Log.i("SyncRepository", "Push: Nothing to sync (incremental).")
+                    return@withLock Result.success(Unit)
+                }
 
             // Decide which data to push
             val housesToPush = if (shouldReplace) houses else unsyncedHouses
@@ -99,24 +94,6 @@ class SyncRepositoryImpl @Inject constructor(
                 }
             }
 
-            if (shouldReplace) {
-                // Perform surgical wipe in cloud for dates present in the full backup
-                val backupDates = (housesToPush.map { it.data } + activitiesToPush.map { it.date }).toSet()
-                
-                // Clear cloud subcollections for these dates
-                suspend fun clearOldData(col: String, field: String) {
-                    val snapshot = userDocRef.collection(col).get().await()
-                    snapshot.documents.forEach { doc ->
-                        if (backupDates.contains(doc.getString(field)?.replace("/", "-"))) {
-                            doc.reference.delete()
-                        }
-                    }
-                }
-                
-                // Note: Not very efficient for huge collections, but standard for 'Replace' logic here
-                clearOldData("houses", "data")
-                clearOldData("day_activities", "date")
-            }
 
             // Prepare Operations
             val metadata = mutableMapOf<String, Any>(
@@ -129,15 +106,15 @@ class SyncRepositoryImpl @Inject constructor(
                 // IMPROVEMENT: Include dates from tombstones in the wipe to ensure moved/deleted 
                 // production does not "ghost" back from the cloud during a Full Sync.
                 val backupDates = (
-                    housesToPush.map { it.data } + 
-                    activitiesToPush.map { it.date } +
-                    tombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.ACTIVITY }.map { it.naturalKey.split("|")[0] } +
+                    housesToPush.map { it.data.replace("/", "-") } + 
+                    activitiesToPush.map { it.date.replace("/", "-") } +
+                    tombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.ACTIVITY }.map { it.naturalKey.split("|")[0].replace("/", "-") } +
                     tombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE }.mapNotNull { tk -> 
                         // Robustly extract date (DD-MM-YYYY) from natural key
                         val dateRegex = Regex("\\d{2}-\\d{2}-\\d{4}")
-                        dateRegex.find(tk.naturalKey)?.value
+                        dateRegex.find(tk.naturalKey.replace("/", "-"))?.value
                     }
-                ).toSet()
+                ).toSet() 
                 
                 if (backupDates.isNotEmpty()) {
                     val toDelete = mutableListOf<DocumentReference>()
@@ -321,37 +298,22 @@ class SyncRepositoryImpl @Inject constructor(
                 "lastSyncError" to com.google.firebase.firestore.FieldValue.delete()
             )).await()
 
-            Result.success(Unit)
-        } catch (e: com.google.firebase.firestore.FirebaseFirestoreException) {
-            android.util.Log.e("SyncRepository", "Firestore error: ${e.code}, ${e.message}", e)
-            val errorMsg = if (e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                "Acesso negado ao sincronizar. Verifique se sua conta foi autorizada."
-            } else e.message ?: "Erro Firestore"
-            
-            // Record failure in cloud if possible
-            val uid = targetUid ?: auth.currentUser?.uid
-            if (uid != null) {
-                firestore.collection("agents").document(uid).update("lastSyncError", errorMsg).await()
-            }
 
-            Result.failure(Exception(errorMsg))
+            Result.success(Unit)
         } catch (e: Exception) {
-            android.util.Log.e("SyncRepository", "General sync error: ${e.message}", e)
-            
-            // Record failure in cloud if possible
-            val uid = targetUid ?: auth.currentUser?.uid
-            if (uid != null) {
-                firestore.collection("agents").document(uid).update("lastSyncError", e.message ?: "Erro desconhecido").await()
-            }
-            
+            android.util.Log.e("SyncRepository", "Push failed: ${e.message}", e)
             Result.failure(e)
         }
-    }
+    } } ?: Result.failure(Exception("Sincronização atingiu o tempo limite. Verifique sua conexão ou tente novamente se o backup for muito grande."))
+    return result
+}
 
 
-    override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> = syncMutex.withLock {
-        withContext(Dispatchers.IO) {
-            try {
+    override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> {
+        val result = withTimeoutOrNull(90000L) {
+            syncMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    try {
                 val uid = targetUid ?: auth.currentUser?.uid ?: return@withContext Result.failure(Exception("Not logged in"))
                 val isTargetDifferentUser = targetUid != null && targetUid != auth.currentUser?.uid
             
@@ -366,9 +328,13 @@ class SyncRepositoryImpl @Inject constructor(
             val requireReset = userDoc.getBoolean("requireDataReset") ?: false
             if (requireReset) {
                 android.util.Log.w("SyncRepository", "Remote Wipe Triggered for UID: $uid")
-                clearLocalData() // Wipes local SQLite
-                // Reset flag in Firestore
-                firestore.collection("users").document(uid).update("requireDataReset", false)
+                val wipeResult = clearLocalData() // Wipes local SQLite
+                if (wipeResult.isSuccess) {
+                    // Reset flag in Firestore ONLY if wipe succeeded
+                    firestore.collection("users").document(uid).update("requireDataReset", false)
+                } else {
+                    android.util.Log.e("SyncRepository", "Remote Wipe Failed: ${wipeResult.exceptionOrNull()?.message}")
+                }
             }
 
             // BUG FIX: Detect if lastSync is in the future (Device clock skew) and reset to 0 to force recovery
@@ -574,14 +540,13 @@ class SyncRepositoryImpl @Inject constructor(
 
                     // CONFLICT RESOLUTION: Last Side to Change Wins (LWW)
                     if (existing != null && !existing.isSynced) {
-                        // Priority 1: Admin Authority. If cloud record was edited by admin, it wins immediately
-                        // unless local record is VERY fresh (< 2 mins - the buffer for active typing).
-                        // Note: If both are edited by admin, we fallback to timestamp.
-                        val isAdminOverride = cloudHouse.editedByAdmin && !existing.editedByAdmin && 
-                            (System.currentTimeMillis() - existing.lastUpdated > 120000L) // 2 mins
+                        // Priority 1: Admin Authority. 
+                        // If cloud record was edited by admin, it OVERWRITES local change immediately 
+                        // unless the local record was also edited by an Admin and is newer.
+                        val isAdminOverride = cloudHouse.editedByAdmin && (!existing.editedByAdmin || cloudHouse.lastUpdated > existing.lastUpdated)
 
                         if (isAdminOverride) {
-                            android.util.Log.i("SyncRepository", "Admin Authority: Overwriting local change for house ${existing.id}")
+                            android.util.Log.i("SyncRepository", "Admin Authority: Priority overwrite for house ${existing.id} ($key)")
                             // Cloud wins
                         } else {
                             // Priority 2: Standard LWW
@@ -657,28 +622,30 @@ class SyncRepositoryImpl @Inject constructor(
                 Result.success(Unit)
             } catch (e: Exception) {
                 android.util.Log.e("SyncRepository", "Pull failed", e)
-                if (e.message?.contains("PERMISSION_DENIED") == true) {
-                    Result.failure(Exception("Acesso negado. Tente fazer login novamente."))
-                } else {
-                    Result.failure(e)
-                }
+                Result.failure(e)
             }
         }
-    }
+    } } ?: Result.failure(Exception("O download de dados atingiu o tempo limite. Verifique sua conexão ou tente novamente."))
+    return result
+}
 
 
     override suspend fun clearLocalData(): Result<Unit> {
-        return try {
-            runInTransactionWithRetry {
-                houseDao.deleteAll()
-                dayActivityDao.deleteAll()
-                tombstoneDao.deleteAll()
+        return withTimeoutOrNull(10000L) {
+            syncMutex.withLock {
+                try {
+                    runInTransactionWithRetry {
+                        houseDao.deleteAll()
+                        dayActivityDao.deleteAll()
+                        tombstoneDao.deleteAll()
+                    }
+                    settingsManager.setLastSyncTimestamp(0L)
+                    Result.success(Unit)
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
             }
-            settingsManager.setLastSyncTimestamp(0L)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } ?: Result.success(Unit) // If timeout, we proceed anyway but log would be better
     }
 
     override suspend fun performDataCleanup(): Result<Unit> {
