@@ -946,10 +946,11 @@ fun HomeScreen(
                 ) { index, houseState ->
                     if (index == 0 && !isSearchActive && !uiState.isDayClosed && (!uiState.isSupervisor || uiState.isAdmin)) {
                         Spacer(Modifier.height(8.dp))
-                        AddBetweenButton(
-                            onClick = { viewModel.addNewHouseAt(-1) },
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        )
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            AddBetweenButton(
+                                onClick = { viewModel.addNewHouseAt(-1) }
+                            )
+                        }
                         Spacer(Modifier.height(8.dp))
                     } else if (index == 0) {
                         Spacer(Modifier.height(10.dp))
@@ -1081,10 +1082,11 @@ fun HomeScreen(
 
                     if (!isSearchActive && !uiState.isDayClosed && (!uiState.isSupervisor || uiState.isAdmin)) {
                         Spacer(Modifier.height(8.dp))
-                        AddBetweenButton(
-                            onClick = { viewModel.addNewHouseAt(houseState.house.id) },
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        )
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            AddBetweenButton(
+                                onClick = { viewModel.addNewHouseAt(houseState.house.id) }
+                            )
+                        }
                         Spacer(Modifier.height(8.dp))
                     } else {
                         Spacer(Modifier.height(10.dp))
