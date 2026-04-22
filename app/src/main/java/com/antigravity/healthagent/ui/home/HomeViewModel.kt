@@ -165,6 +165,7 @@ class HomeViewModel @Inject constructor(
 
     private val clashDialogJobs = mutableMapOf<Int, kotlinx.coroutines.Job>()
     private val houseUpdateJobs = mutableMapOf<Int, kotlinx.coroutines.Job>()
+    private val _highlightedHouseId = MutableStateFlow<Int?>(null)
 
     // --- State Injections ---
     val easyMode: StateFlow<Boolean> = settingsManager.easyMode
@@ -572,7 +573,7 @@ class HomeViewModel @Inject constructor(
             weekRangeText, customActivities, settingsManager.easyMode, settingsManager.solarMode,
             settingsManager.maxOpenHouses, rgBlocks, weeklySummary, boletimList,
             bairrosList, rgBairros, _syncStatus, weeklySummaryTotals, isDayClosed, isWorkdayManualUnlock,
-            weeklyObservations, _backupConfirmation, _isAdmin, _recentlyEditedHouseIds
+            weeklyObservations, _backupConfirmation, _isAdmin, _recentlyEditedHouseIds, _highlightedHouseId
         ) { args ->
             val h = args[0] as List<House>
             val d = args[1] as String
@@ -584,6 +585,7 @@ class HomeViewModel @Inject constructor(
             val weekStart = args[14] as Calendar
             val allH = args[15] as List<House>
             val recentlyEdited = args[41] as Map<Int, Long>
+            val highlightedId = args[42] as Int?
             
             val dayHouses = h.filter { it.data == d }
             
@@ -622,7 +624,8 @@ class HomeViewModel @Inject constructor(
                     house = house,
                     houseValidationUseCase = houseValidationUseCase,
                     isDuplicate = isDuplicate,
-                    isRecentlyEdited = isRecentlyEdited
+                    isRecentlyEdited = isRecentlyEdited,
+                    isHighlighted = house.id == highlightedId
                 )
             }
             
@@ -1481,7 +1484,14 @@ class HomeViewModel @Inject constructor(
                 }
                 if (newlyAdded != null) {
                     val newId = repository.insertHouse(newlyAdded, isAdmin)
-                    _scrollToHouseId.value = newId.toInt()
+                    // Trigger highlight for 2 seconds instead of scrolling
+                    _highlightedHouseId.value = newId.toInt()
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(2000)
+                        if (_highlightedHouseId.value == newId.toInt()) {
+                            _highlightedHouseId.value = null
+                        }
+                    }
                 }
 
                 soundManager.playPop()

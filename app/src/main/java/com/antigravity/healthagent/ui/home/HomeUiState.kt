@@ -67,5 +67,6 @@ data class HomeUiState(
     val maxOpenHouses: Int = 25,
     val syncStatus: SyncStatus = SyncStatus(),
     val backupConfirmation: BackupConfirmation? = null,
-    val isDuplicateIds: Set<Int> = emptySet()
+    val isDuplicateIds: Set<Int> = emptySet(),
+    val highlightedHouseId: Int? = null
 )

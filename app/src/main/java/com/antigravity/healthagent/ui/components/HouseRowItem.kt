@@ -166,7 +166,8 @@ fun HouseRowItem(
             animatedBgColor = animatedBgColor,
             isSolarMode = isSolarMode,
             focusRequester = focusRequester,
-            onGetLocation = onGetLocation
+            onGetLocation = onGetLocation,
+            isHighlighted = houseState.isHighlighted
         )
     } else {
         Card(
@@ -180,8 +181,9 @@ fun HouseRowItem(
             ),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
             border = BorderStroke(
-                width = if (isTreated) 1.5.dp else 1.dp,
+                width = if (houseState.isHighlighted) 3.dp else if (isTreated) 1.5.dp else 1.dp,
                 color = when {
+                    houseState.isHighlighted -> MaterialTheme.colorScheme.tertiary
                     highlightErrors -> MaterialTheme.colorScheme.error
                     isSolarMode -> MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
                     else -> Color.White.copy(alpha = 0.15f)
@@ -483,7 +485,8 @@ fun EasyHouseCard(
     animatedBgColor: Color,
     isSolarMode: Boolean = false,
     focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
-    onGetLocation: (callback: (com.google.android.gms.maps.model.LatLng) -> Unit) -> Unit = {}
+    onGetLocation: (callback: (com.google.android.gms.maps.model.LatLng) -> Unit) -> Unit = {},
+    isHighlighted: Boolean = false
 ) {
     val haptic = LocalHapticFeedback.current
     
@@ -497,8 +500,9 @@ fun EasyHouseCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         border = when {
+            isHighlighted -> BorderStroke(3.dp, MaterialTheme.colorScheme.tertiary)
             highlightErrors -> BorderStroke(3.dp, MaterialTheme.colorScheme.error)
-            isTreated -> BorderStroke(1.2.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f))
+            isTreated -> BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
             else -> BorderStroke(1.dp, if (isSolarMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.15f))
         }
     ) {

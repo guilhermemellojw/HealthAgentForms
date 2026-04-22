@@ -91,6 +91,7 @@ data class HouseUiState(
     val treatmentShortSummary: String,
     val observation: String = "",
     val isRecentlyEdited: Boolean = false,
+    val isHighlighted: Boolean = false,
     val fullIdDisplay: String = "",
     val errorLabels: List<String> = emptyList()
 )

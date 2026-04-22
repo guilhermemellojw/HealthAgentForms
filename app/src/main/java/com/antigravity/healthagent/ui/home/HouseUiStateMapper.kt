@@ -9,7 +9,8 @@ object HouseUiStateMapper {
         house: House, 
         houseValidationUseCase: HouseValidationUseCase, 
         isDuplicate: Boolean = false,
-        isRecentlyEdited: Boolean = false
+        isRecentlyEdited: Boolean = false,
+        isHighlighted: Boolean = false
     ): HouseUiState {
         val invalidFields = houseValidationUseCase.getInvalidFields(house, strict = true).toSet()
         val errorLabels = mutableListOf<String>()
@@ -70,6 +71,7 @@ object HouseUiStateMapper {
             treatmentShortSummary = treatmentParts.joinToString(" | "),
             observation = displayHouse.observation,
             isRecentlyEdited = isRecentlyEdited,
+            isHighlighted = isHighlighted,
             fullIdDisplay = fullIdDisplay,
             errorLabels = errorLabels
         )
