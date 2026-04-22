@@ -1146,6 +1146,7 @@ fun AddBetweenButton(
             .size(32.dp)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), CircleShape)
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
