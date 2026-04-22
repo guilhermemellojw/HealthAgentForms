@@ -20,7 +20,7 @@ import com.antigravity.healthagent.data.local.model.Tombstone
         com.antigravity.healthagent.data.local.model.CachedAgent::class,
         com.antigravity.healthagent.data.local.model.CachedAgentSummary::class
     ], 
-    version = 31, 
+    version = 34, 
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -32,9 +32,28 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun agentCacheDao(): com.antigravity.healthagent.data.local.dao.AgentCacheDao
 
     companion object {
+        val MIGRATION_32_33 = object : androidx.room.migration.Migration(32, 33) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Remove visitSegment from the unique index by performing a full nuclear rebuild
+                // This will handle data deduplication and align with House entity version 33
+                performFullNuclearRebuild(database, includeVisitSegmentInIndex = false)
+            }
+        }
+
+        val MIGRATION_33_34 = object : androidx.room.migration.Migration(33, 34) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Restore visitSegment to the unique index
+                performFullNuclearRebuild(database)
+            }
+        }
+
         val MIGRATION_31_32 = object : androidx.room.migration.Migration(31, 32) {
             override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
-                performFullNuclearRebuild(database)
+                try {
+                    database.execSQL("ALTER TABLE tombstones ADD COLUMN `dataDate` TEXT NOT NULL DEFAULT ''")
+                } catch (e: Exception) {
+                    android.util.Log.e("AppDatabase", "Error adding dataDate to tombstones: ${e.message}")
+                }
             }
         }
 
@@ -173,7 +192,7 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        private fun performFullNuclearRebuild(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+        private fun performFullNuclearRebuild(database: androidx.sqlite.db.SupportSQLiteDatabase, includeVisitSegmentInIndex: Boolean = true) {
             android.util.Log.w("AppDatabase", "NUCLEAR REBUILD STARTING (Schema hardening)...")
             database.execSQL("PRAGMA foreign_keys=OFF")
             
@@ -314,26 +333,79 @@ abstract class AppDatabase : RoomDatabase() {
                         observation, createdAt, isSynced, editedByAdmin, latitude, longitude, focusCaptureTime, lastUpdated
                     )
                     SELECT 
-                        UPPER(TRIM(COALESCE(CAST(blockNumber AS TEXT), ''))), UPPER(TRIM(COALESCE(CAST(streetName AS TEXT), ''))), UPPER(TRIM(COALESCE(CAST(number AS TEXT), ''))), COALESCE(CAST(sequence AS INTEGER), 0), COALESCE(CAST(complement AS INTEGER), 0), COALESCE(CAST(propertyType AS TEXT), 'EMPTY'), COALESCE(CAST(situation AS TEXT), 'EMPTY'),
-                        COALESCE(CAST(municipio AS TEXT), 'Bom Jardim'), UPPER(TRIM(COALESCE(CAST(bairro AS TEXT), ''))), COALESCE(CAST(categoria AS TEXT), 'BRR'), COALESCE(CAST(zona AS TEXT), 'URB'), COALESCE(CAST(tipo AS INTEGER), 2), REPLACE(COALESCE(CAST(`data` AS TEXT), ''), '/', '-'), COALESCE(CAST(ciclo AS TEXT), '1º'), COALESCE(CAST(atividade AS INTEGER), 4), UPPER(TRIM(COALESCE(CAST(agentName AS TEXT), ''))),
-                        COALESCE(CAST(a1 AS INTEGER), 0), COALESCE(CAST(a2 AS INTEGER), 0), COALESCE(CAST(b AS INTEGER), 0), COALESCE(CAST(c AS INTEGER), 0), COALESCE(CAST(d1 AS INTEGER), 0), COALESCE(CAST(d2 AS INTEGER), 0), COALESCE(CAST(e AS INTEGER), 0), COALESCE(CAST(eliminados AS INTEGER), 0), COALESCE(CAST(larvicida AS REAL), 0.0), COALESCE(CAST(comFoco AS INTEGER), 0), COALESCE(CAST(localidadeConcluida AS INTEGER), 0), 
-                        UPPER(TRIM(COALESCE(CAST(blockSequence AS TEXT), ''))), COALESCE(CAST(quarteiraoConcluido AS INTEGER), 0), COALESCE(CAST(listOrder AS INTEGER), 0), COALESCE(CAST(visitSegment AS INTEGER), 0), COALESCE(MAX(CAST(agentUid AS TEXT)), ''),
-                        COALESCE(CAST(observation AS TEXT), ''), COALESCE(CAST(createdAt AS INTEGER), 0), COALESCE(MAX(CAST(isSynced AS INTEGER)), 0), COALESCE(MAX(CAST(editedByAdmin AS INTEGER)), 0), MAX(latitude), MAX(longitude), MAX(focusCaptureTime), COALESCE(MAX(CAST(lastUpdated AS INTEGER)), 0)
+                        UPPER(TRIM(COALESCE(CAST(blockNumber AS TEXT), ''))), 
+                        UPPER(TRIM(COALESCE(CAST(streetName AS TEXT), ''))), 
+                        UPPER(TRIM(COALESCE(CAST(number AS TEXT), ''))), 
+                        COALESCE(CAST(sequence AS INTEGER), 0), 
+                        COALESCE(CAST(complement AS INTEGER), 0), 
+                        MAX(COALESCE(CAST(propertyType AS TEXT), 'EMPTY')), 
+                        MAX(COALESCE(CAST(situation AS TEXT), 'EMPTY')),
+                        MAX(COALESCE(CAST(municipio AS TEXT), 'Bom Jardim')), 
+                        UPPER(TRIM(COALESCE(CAST(bairro AS TEXT), ''))), 
+                        MAX(COALESCE(CAST(categoria AS TEXT), 'BRR')), 
+                        MAX(COALESCE(CAST(zona AS TEXT), 'URB')), 
+                        MAX(COALESCE(CAST(tipo AS INTEGER), 2)), 
+                        REPLACE(COALESCE(CAST(`data` AS TEXT), ''), '/', '-'), 
+                        MAX(COALESCE(CAST(ciclo AS TEXT), '1º')), 
+                        MAX(COALESCE(CAST(atividade AS INTEGER), 4)), 
+                        UPPER(TRIM(COALESCE(CAST(agentName AS TEXT), ''))),
+                        MAX(COALESCE(CAST(a1 AS INTEGER), 0)), 
+                        MAX(COALESCE(CAST(a2 AS INTEGER), 0)), 
+                        MAX(COALESCE(CAST(b AS INTEGER), 0)), 
+                        MAX(COALESCE(CAST(c AS INTEGER), 0)), 
+                        MAX(COALESCE(CAST(d1 AS INTEGER), 0)), 
+                        MAX(COALESCE(CAST(d2 AS INTEGER), 0)), 
+                        MAX(COALESCE(CAST(e AS INTEGER), 0)), 
+                        MAX(COALESCE(CAST(eliminados AS INTEGER), 0)), 
+                        MAX(COALESCE(CAST(larvicida AS REAL), 0.0)), 
+                        MAX(COALESCE(CAST(comFoco AS INTEGER), 0)), 
+                        MAX(COALESCE(CAST(localidadeConcluida AS INTEGER), 0)), 
+                        UPPER(TRIM(COALESCE(CAST(blockSequence AS TEXT), ''))), 
+                        MAX(COALESCE(CAST(quarteiraoConcluido AS INTEGER), 0)), 
+                        MAX(COALESCE(CAST(listOrder AS INTEGER), 0)), 
+                        ${if (includeVisitSegmentInIndex) "COALESCE(CAST(visitSegment AS INTEGER), 0)" else "MAX(COALESCE(CAST(visitSegment AS INTEGER), 0))"}, 
+                        UPPER(TRIM(COALESCE(CAST(agentUid AS TEXT), ''))),
+                        MAX(COALESCE(CAST(observation AS TEXT), '')), 
+                        MAX(COALESCE(CAST(createdAt AS INTEGER), 0)), 
+                        MAX(COALESCE(CAST(isSynced AS INTEGER), 0)), 
+                        MAX(COALESCE(CAST(editedByAdmin AS INTEGER), 0)), 
+                        MAX(latitude), 
+                        MAX(longitude), 
+                        MAX(focusCaptureTime), 
+                        MAX(COALESCE(CAST(lastUpdated AS INTEGER), 0))
                     FROM houses
                     GROUP BY 
-                        UPPER(TRIM(COALESCE(CAST(agentName AS TEXT), ''))), REPLACE(COALESCE(CAST(`data` AS TEXT), ''), '/', '-'), UPPER(TRIM(COALESCE(CAST(blockNumber AS TEXT), ''))), UPPER(TRIM(COALESCE(CAST(blockSequence AS TEXT), ''))), 
-                        UPPER(TRIM(COALESCE(CAST(streetName AS TEXT), ''))), UPPER(TRIM(COALESCE(CAST(number AS TEXT), ''))), COALESCE(CAST(sequence AS INTEGER), 0), COALESCE(CAST(complement AS INTEGER), 0), UPPER(TRIM(COALESCE(CAST(bairro AS TEXT), ''))), COALESCE(CAST(visitSegment AS INTEGER), 0)
+                        UPPER(TRIM(COALESCE(CAST(agentUid AS TEXT), ''))),
+                        UPPER(TRIM(COALESCE(CAST(agentName AS TEXT), ''))), 
+                        REPLACE(COALESCE(CAST(`data` AS TEXT), ''), '/', '-'), 
+                        UPPER(TRIM(COALESCE(CAST(blockNumber AS TEXT), ''))), 
+                        UPPER(TRIM(COALESCE(CAST(blockSequence AS TEXT), ''))), 
+                        UPPER(TRIM(COALESCE(CAST(streetName AS TEXT), ''))), 
+                        UPPER(TRIM(COALESCE(CAST(number AS TEXT), ''))), 
+                        COALESCE(CAST(sequence AS INTEGER), 0), 
+                        COALESCE(CAST(complement AS INTEGER), 0), 
+                        UPPER(TRIM(COALESCE(CAST(bairro AS TEXT), '')))
+                        ${if (includeVisitSegmentInIndex) ", COALESCE(CAST(visitSegment AS INTEGER), 0)" else ""}
                 """)
 
                 android.util.Log.d("AppDatabase", "Finalizing swap...")
                 database.execSQL("DROP TABLE houses")
                 database.execSQL("ALTER TABLE houses_new RENAME TO houses")
                 
+                database.execSQL("DROP INDEX IF EXISTS `index_houses_agentUid_agentName_data_blockNumber_blockSequence_streetName_number_sequence_complement_bairro` ")
                 database.execSQL("DROP INDEX IF EXISTS `index_houses_agentUid_agentName_data_blockNumber_blockSequence_streetName_number_sequence_complement_bairro_visitSegment` ")
-                database.execSQL("""
-                    CREATE UNIQUE INDEX IF NOT EXISTS `index_houses_agentUid_agentName_data_blockNumber_blockSequence_streetName_number_sequence_complement_bairro_visitSegment` 
-                    ON `houses` (`agentUid`, `agentName`, `data`, `blockNumber`, `blockSequence`, `streetName`, `number`, `sequence`, `complement`, `bairro`, `visitSegment`)
-                """)
+                
+                if (includeVisitSegmentInIndex) {
+                    database.execSQL("""
+                        CREATE UNIQUE INDEX IF NOT EXISTS `index_houses_agentUid_agentName_data_blockNumber_blockSequence_streetName_number_sequence_complement_bairro_visitSegment` 
+                        ON `houses` (`agentUid`, `agentName`, `data`, `blockNumber`, `blockSequence`, `streetName`, `number`, `sequence`, `complement`, `bairro`, `visitSegment`)
+                    """)
+                } else {
+                    database.execSQL("""
+                        CREATE UNIQUE INDEX IF NOT EXISTS `index_houses_agentUid_agentName_data_blockNumber_blockSequence_streetName_number_sequence_complement_bairro` 
+                        ON `houses` (`agentUid`, `agentName`, `data`, `blockNumber`, `blockSequence`, `streetName`, `number`, `sequence`, `complement`, `bairro`)
+                    """)
+                }
                 
                 database.execSQL("DROP INDEX IF EXISTS `index_houses_data_agentUid` ")
                 database.execSQL("""
@@ -394,12 +466,13 @@ abstract class AppDatabase : RoomDatabase() {
                         `naturalKey` TEXT NOT NULL, 
                         `agentName` TEXT NOT NULL DEFAULT '', 
                         `agentUid` TEXT NOT NULL DEFAULT '', 
+                        `dataDate` TEXT NOT NULL DEFAULT '', 
                         `deletedAt` INTEGER NOT NULL
                     )
                 """)
                 database.execSQL("""
-                    INSERT INTO tombstones_new (id, type, naturalKey, agentName, agentUid, deletedAt) 
-                    SELECT id, type, REPLACE(naturalKey, '/', '-'), UPPER(TRIM(agentName)), agentUid, deletedAt FROM tombstones
+                    INSERT INTO tombstones_new (id, type, naturalKey, agentName, agentUid, dataDate, deletedAt) 
+                    SELECT id, type, REPLACE(naturalKey, '/', '-'), UPPER(TRIM(agentName)), agentUid, '', deletedAt FROM tombstones
                 """)
                 database.execSQL("DROP TABLE tombstones")
                 database.execSQL("ALTER TABLE tombstones_new RENAME TO tombstones")

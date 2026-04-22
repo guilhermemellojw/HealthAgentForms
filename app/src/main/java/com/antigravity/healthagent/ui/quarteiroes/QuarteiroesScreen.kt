@@ -216,7 +216,7 @@ fun QuarteiroesScreen(
                     MarkerComposable(
                         keys = arrayOf(house.id, position),
                         state = remember(house.id) { MarkerState(position = position) },
-                        title = "${house.agentName}: FOCO: ${house.streetName.formatStreetName()} nº ${house.number}",
+                        title = "${house.agentName.substringBefore("@").uppercase()}: FOCO: ${house.streetName.formatStreetName()} nº ${house.number}",
                         snippet = "Quadra: ${house.blockNumber} | ${house.bairro}"
                     ) {
                         Box(

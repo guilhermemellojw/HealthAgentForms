@@ -91,7 +91,11 @@ fun DocumentSnapshot.toDayActivitySafe(uid: String, agentName: String = ""): Day
 }
 
 private fun normalizeAgentName(name: String): String {
-    val normalized = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD)
+    if (name.isBlank()) return ""
+    // If it's an email, take the part before @ to avoid displaying emails as names in the UI
+    val effectiveName = if (name.contains("@")) name.substringBefore("@") else name
+    
+    val normalized = java.text.Normalizer.normalize(effectiveName, java.text.Normalizer.Form.NFD)
     return Regex("\\p{InCombiningDiacriticalMarks}+").replace(normalized, "")
         .trim()
         .uppercase()

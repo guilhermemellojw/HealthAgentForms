@@ -57,24 +57,48 @@ class AgentRepositoryImpl @Inject constructor(
 
     override suspend fun deleteAgent(uid: String): Result<Unit> {
         return try {
+            // CRITICAL SAFETY: We purge ALL production data sub-collections
+            // but we do NOT delete the root document if it contains metadata like email/name
+            // to prevent breaking user profile logic.
+            
+            agentCacheDao.deleteAgentCache(uid)
+            agentCacheDao.deleteAgentSummaries(uid)
+
             val agentRef = firestore.collection("agents").document(uid)
+
             val houses = agentRef.collection("houses").get().await()
             val activities = agentRef.collection("day_activities").get().await()
+            val summaries = agentRef.collection("monthly_summaries").get().await()
             
-            val operations = (houses.documents + activities.documents).map { it.reference }.toMutableList()
-            operations.add(agentRef)
+            val operations = (houses.documents + activities.documents + summaries.documents).map { it.reference }.toMutableList()
             
+            // IMPROVEMENT: Instead of deleting agentRef (the root doc), we clear its metadata 
+            // except for identifying info, and set a tombstone/lastSync.
+            val wipeMetadata = mapOf(
+                "lastSyncTime" to System.currentTimeMillis(),
+                "deleted_house_ids" to com.google.firebase.firestore.FieldValue.delete(),
+                "deleted_activity_dates" to com.google.firebase.firestore.FieldValue.delete(),
+                "lastSyncError" to com.google.firebase.firestore.FieldValue.delete()
+            )
+
             if (operations.isNotEmpty()) {
                 operations.chunked(400).forEach { chunk ->
                     val batch = firestore.batch()
                     for (ref in chunk) {
                         batch.delete(ref)
                     }
+                    if (chunk == operations.chunked(400).last()) {
+                        batch.set(agentRef, wipeMetadata, com.google.firebase.firestore.SetOptions.merge())
+                    }
                     batch.commit().await()
                 }
+            } else {
+                agentRef.set(wipeMetadata, com.google.firebase.firestore.SetOptions.merge()).await()
             }
+            
             Result.success(Unit)
         } catch (e: Exception) {
+            android.util.Log.e("AgentRepository", "Delete agent production failed", e)
             Result.failure(e)
         }
     }
@@ -148,7 +172,8 @@ class AgentRepositoryImpl @Inject constructor(
             // Only pull agents that have been updated since our last cache update to find NEW or MODIFIED agents
             val agentsQuery = firestore.collection("agents")
             val agentsSnapshot = if (latestCacheUpdate > 0) {
-                agentsQuery.whereGreaterThan("lastSyncTime", latestCacheUpdate).get().await()
+                // Buffer by 500ms to handle write latency and clock skew
+                agentsQuery.whereGreaterThan("lastSyncTime", latestCacheUpdate - 500).get().await()
             } else {
                 agentsQuery.get().await()
             }
@@ -159,11 +184,27 @@ class AgentRepositoryImpl @Inject constructor(
             // Update cache with new/modified agents
             if (!agentsSnapshot.isEmpty) {
                 android.util.Log.i("AgentRepository", "Delta Fetch: Found ${agentsSnapshot.size()} new/modified agents in cloud.")
+                
+                // Load existing cache for these IDs to perform name reconciliation
+                val existingProfiles = agentCacheDao.getAllCachedAgents().associateBy { it.uid }
+
                 val agentsToUpsert = agentsSnapshot.documents.map { doc ->
+                    val email = doc.getString("email") ?: "Unknown"
+                    val cloudName = doc.getString("agentName")?.uppercase()
+                    val cached = existingProfiles[doc.id]
+                    
+                    // RECONCILIATION: If the incoming cloud name is an email/missing, 
+                    // but our cache has a proper name, preserve the proper name. (Bug Fix #11)
+                    val bestName = if ((cloudName == null || cloudName.contains("@")) && cached?.agentName?.isNotBlank() == true && !cached.agentName.contains("@")) {
+                        cached.agentName
+                    } else {
+                        cloudName
+                    }
+
                     com.antigravity.healthagent.data.local.model.CachedAgent(
                         uid = doc.id,
-                        email = doc.getString("email") ?: "Unknown",
-                        agentName = doc.getString("agentName")?.uppercase(),
+                        email = email,
+                        agentName = bestName,
                         lastSyncTime = doc.getLong("lastSyncTime") ?: 0L,
                         lastSyncError = doc.getString("lastSyncError"),
                         photoUrl = doc.getString("photoUrl")
@@ -192,8 +233,9 @@ class AgentRepositoryImpl @Inject constructor(
                             val targetMonth = cleanMonthYear!!
                             val cachedSummary = agentCacheDao.getSummary(uid, targetMonth)
                             
-                            // Force cloud fetch if modified in cloud or missing in local cache
-                            if (isModified || cachedSummary == null) {
+                            // Force cloud fetch if modified in cloud OR missing in local cache OR cache is stale (> 5 mins)
+                            val cacheTtlExceeded = cachedSummary != null && (System.currentTimeMillis() - cachedSummary.lastUpdated) > NAMES_CACHE_TTL
+                            if (isModified || cachedSummary == null || cacheTtlExceeded) {
                                 try {
                                     val agentRef = firestore.collection("agents").document(uid)
                                     val alternativeMonth = targetMonth.replace("-", "/")
@@ -206,7 +248,11 @@ class AgentRepositoryImpl @Inject constructor(
                                     if (summaryDoc.exists()) {
                                         val summary = parseSummary(summaryDoc, uid, targetMonth)
                                         agentCacheDao.upsertSummaries(listOf(summary.toCached(uid)))
+                                    } else {
+                                        // Purge from local cache if missing in cloud after an agent update
+                                        agentCacheDao.deleteAgentSummary(uid, targetMonth)
                                     }
+
                                 } catch (e: Exception) {
                                     android.util.Log.e("AgentRepository", "Summary fetch error for $uid ($targetMonth): ${e.message}")
                                 }
@@ -246,18 +292,18 @@ class AgentRepositoryImpl @Inject constructor(
                                 val sinceT = com.google.firebase.Timestamp(sinceTimestamp / 1000, 0)
                                 val untilT = com.google.firebase.Timestamp(untilTimestamp / 1000, 999999999)
 
-                                // Fetch houses in range
+                                // Fetch houses in range using production dates (DD-MM-YYYY)
+                                // This respects Firebase limits while ensuring historical accuracy
+                                val dateStrings = getDateStringsInRange(sinceTimestamp, untilTimestamp)
                                 val houseDocs = agentRef.collection("houses")
-                                    .whereGreaterThanOrEqualTo("lastUpdated", sinceT)
-                                    .whereLessThanOrEqualTo("lastUpdated", untilT)
+                                    .whereIn("data", dateStrings)
                                     .get().await()
                                 
                                 houses = houseDocs.documents.mapNotNull { it.toHouseSafe(uid, agent.agentName ?: "") }
 
                                 // Fetch activities in range
                                 val activityDocs = agentRef.collection("day_activities")
-                                    .whereGreaterThanOrEqualTo("lastUpdated", sinceT)
-                                    .whereLessThanOrEqualTo("lastUpdated", untilT)
+                                    .whereIn("date", dateStrings)
                                     .get().await()
                                 
                                 activities = activityDocs.documents.mapNotNull { it.toDayActivitySafe(uid, agent.agentName ?: "") }
@@ -332,19 +378,35 @@ class AgentRepositoryImpl @Inject constructor(
 
     override suspend fun deleteAgentHouse(uid: String, houseId: String): Result<Unit> {
         return try {
-            val docRef = firestore.collection("agents").document(uid).collection("houses").document(houseId)
-            docRef.delete().await()
-            // Also add to cloud tombstone for this agent
+            val agentRef = firestore.collection("agents").document(uid)
+            val houseRef = agentRef.collection("houses").document(houseId)
+            
+            // 1. Fetch house to identify month/year for summary invalidation
+            val houseDoc = houseRef.get().await()
+            val houseDate = houseDoc.getString("data")?.replace("/", "-")
+            val monthYear = if (houseDate != null && houseDate.length >= 10) houseDate.substring(3) else null
+
             val batch = firestore.batch()
-            batch.delete(docRef)
-            batch.update(firestore.collection("agents").document(uid), 
+            
+            // 2. Delete house
+            batch.delete(houseRef)
+            
+            // 3. Update tombstones and lastSync
+            batch.update(agentRef, 
                 mapOf(
                     "deleted_house_ids" to com.google.firebase.firestore.FieldValue.arrayUnion(houseId),
                     "lastSyncTime" to System.currentTimeMillis()
                 )
             )
+            
+            // 4. Invalidate Monthly Summary if month was identified
+            if (monthYear != null) {
+                batch.delete(agentRef.collection("monthly_summaries").document(monthYear))
+            }
+            
             batch.commit().await()
             Result.success(Unit)
+
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -369,11 +431,19 @@ class AgentRepositoryImpl @Inject constructor(
             
             // Also add to cloud tombstone for this agent
             batch.update(agentRef, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(dateKey))
+            
+            // Invalidate Monthly Summary for this activity
+            val monthYear = if (dateKey.length >= 10) dateKey.substring(3) else null
+            if (monthYear != null) {
+                batch.delete(agentRef.collection("monthly_summaries").document(monthYear))
+            }
+
             // Trigger cache invalidation for supervisors
             batch.update(agentRef, "lastSyncTime", System.currentTimeMillis())
             
             batch.commit().await()
             Result.success(Unit)
+
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -574,6 +644,27 @@ class AgentRepositoryImpl @Inject constructor(
             housesListener.remove() 
             activitiesListener.remove()
         }
+    }
+
+    private fun getDateStringsInRange(start: Long, end: Long): List<String> {
+        val dates = mutableListOf<String>()
+        val cal = java.util.Calendar.getInstance()
+        cal.timeInMillis = start
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+
+        val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US)
+        
+        // Safety: limit to 31 days to ensure full months are covered while staying within Firestore whereIn limits
+        var count = 0
+        while (cal.timeInMillis <= end && count < 31) {
+            dates.add(sdf.format(cal.time))
+            cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+            count++
+        }
+        return dates
     }
 }
 

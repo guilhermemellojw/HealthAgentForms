@@ -218,8 +218,13 @@ class HomeViewModel @Inject constructor(
             if (_localAgentNameBackup == null) {
                 _localAgentNameBackup = _agentName.value
             }
-            _agentName.value = agent.agentName ?: agent.email
-            _remoteAgent.value = agent.agentName ?: agent.email
+            
+            // IMPROVEMENT: Use the best available name (Bug Fix #11)
+            val selectedName = (agent.agentName?.takeIf { it.isNotBlank() && !it.contains("@") } 
+                ?: agent.email.substringBefore("@")).uppercase()
+                
+            _agentName.value = selectedName
+            _remoteAgent.value = selectedName
             _remoteAgentUid.value = agent.uid
         } else {
             // Restoring local state
@@ -234,8 +239,14 @@ class HomeViewModel @Inject constructor(
             settingsManager.setRemoteAgentUid(agent?.uid)
             if (agent != null) {
                 try {
+                    // Force normalization of all local data for this agent
                     val name = agent.agentName?.takeIf { it.isNotBlank() } ?: agent.email.substringBefore("@")
                     repository.migrateLocalData(name, agent.email, agent.uid)
+                    
+                    // Specific cleanup if name was just an email
+                    if (agent.agentName?.isNotBlank() == true && !agent.agentName.contains("@")) {
+                        repository.fixEmailNamesForUid(agent.uid, agent.agentName)
+                    }
                 } catch (e: Exception) {
                     android.util.Log.e("HomeViewModel", "Error migrating remote agent local data", e)
                 }
@@ -523,8 +534,8 @@ class HomeViewModel @Inject constructor(
                         // Prune if synced or if it no longer clashes and was manually confirmed (implicit).
                         if (isDraftSynced) {
                             resolvedIds.add(id)
-                        } else if (!stillClashes && dbMatch != null && dbMatch.lastUpdated >= draft.lastUpdated) {
-                            // If it no longer clashes and matches the DB timestamp, we can prune safely.
+                        } else if (!stillClashes && dbMatch != null && dbMatch.lastUpdated == draft.lastUpdated) {
+                            // If it no longer clashes and matches the DB timestamp EXACTLY, we can prune safely without flickering.
                             resolvedIds.add(id)
                         }
                     }
@@ -949,6 +960,11 @@ class HomeViewModel @Inject constructor(
                     val currentUser = settingsManager.cachedUser.first()
                     val email = currentUser?.email ?: ""
                     repository.migrateLocalData(name, email, uid)
+                    
+                    // RECONCILIATION: If we have a proper name but records are still using email, fix them.
+                    if (name.isNotBlank() && !name.contains("@")) {
+                        repository.fixEmailNamesForUid(uid, name)
+                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error in initial date fetch", e)
@@ -1088,8 +1104,10 @@ class HomeViewModel @Inject constructor(
     fun toggleDayLock() {
         viewModelScope.launch {
             try {
-                // RULE: Regular Supervisors cannot toggle locks, only Admins.
-                if (_isSupervisor.value && !_isAdmin.value) {
+                // RULE: Regular Supervisors cannot toggle locks REMOTELY (for other agents).
+                // But they CAN toggle locks for THEIR OWN production.
+                val isViewingRemoteAgent = _remoteAgent.value != null
+                if (isViewingRemoteAgent && _isSupervisor.value && !_isAdmin.value) {
                     _uiEvent.value = "Apenas administradores podem gerenciar travas remotamente."
                     soundManager.playWarning()
                     return@launch
@@ -1099,7 +1117,7 @@ class HomeViewModel @Inject constructor(
                 val isAdmin = _isAdmin.value
                 val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value
                 if (closed) {
-                    if (dayManagementUseCase.canSafelyUnlock(_data.value)) {
+                    if (dayManagementUseCase.canSafelyUnlock(_data.value, _agentName.value, effectiveUid, isAdmin)) {
                         dayManagementUseCase.unlockDay(_data.value, _agentName.value, effectiveUid, isAdmin)
                     } else {
                         _showHistoryUnlockConfirmation.value = true
@@ -1171,7 +1189,10 @@ class HomeViewModel @Inject constructor(
             }
 
             val workedCount = houses.value.count { it.data == _data.value && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
-            if (workedCount < maxOpenHouses.value) {
+            val todayStr = dateFormatter.format(java.util.Date())
+            val isToday = _data.value == todayStr
+            
+            if (isToday && workedCount < maxOpenHouses.value) {
                 _uiEvent.value = "Meta de Abertos não atingida! (Abertos: $workedCount / ${maxOpenHouses.value})"
                 return@launch
             }
@@ -1353,6 +1374,127 @@ class HomeViewModel @Inject constructor(
 
     private var isAddingHouse = false
     private var lastAddClickTime = 0L
+
+    fun addNewHouseAt(afterId: Int) {
+        // ROLE ENFORCEMENT
+        if (_isSupervisor.value && !_isAdmin.value) {
+            _uiEvent.value = "Apenas administradores podem adicionar dados remotamente."
+            soundManager.playWarning()
+            return
+        }
+
+        val currentTime = System.currentTimeMillis()
+        if (isAddingHouse || currentTime - lastAddClickTime < 300) return
+        
+        isAddingHouse = true
+        lastAddClickTime = currentTime
+
+        viewModelScope.launch {
+            try {
+                val isUnlocked = isWorkdayManualUnlock.value
+                val isAdmin = _isAdmin.value
+                if (uiState.value.isDayClosed && !isUnlocked && !isAdmin) {
+                    _uiEvent.value = "Este dia está FECHADO."
+                    soundManager.playWarning()
+                    isAddingHouse = false
+                    return@launch
+                }
+
+                val currentDayHouses = houses.value.filter { it.data == _data.value }
+                val targetIndex = if (afterId == -1) -1 else currentDayHouses.indexOfFirst { it.id == afterId }
+                
+                // 1. Prepare Template for inheritance
+                val template = if (targetIndex != -1) currentDayHouses[targetIndex] else currentDayHouses.firstOrNull()
+                
+                // 2. Predict next values based on template
+                val prediction = if (template != null) {
+                    houseManagementUseCase.predictBasedOnHistory(houses.value, template)
+                } else {
+                    HouseManagementUseCase.HousePrediction("", 0, 0, com.antigravity.healthagent.data.local.model.PropertyType.R, Situation.NONE)
+                }
+
+                var houseToInsert = House(
+                    municipio = _municipio.value,
+                    bairro = _bairro.value.uppercase(),
+                    blockNumber = template?.blockNumber ?: _currentBlock.value,
+                    blockSequence = template?.blockSequence ?: _currentBlockSequence.value,
+                    streetName = template?.streetName ?: _currentStreet.value,
+                    number = prediction.nextNumber,
+                    sequence = prediction.nextSequence,
+                    complement = prediction.nextComplement,
+                    propertyType = prediction.nextType,
+                    situation = prediction.nextSituation,
+                    data = _data.value,
+                    agentName = _agentName.value.uppercase(),
+                    agentUid = _remoteAgentUid.value ?: _currentUserUid.value,
+                    listOrder = 0 // Will be set by recalculation
+                )
+
+                // 2.1 Clash Detection (similar to addNewHouse)
+                var finalSequence = houseToInsert.sequence
+                var finalComplement = houseToInsert.complement
+                
+                // We use latestHouses (including drafts) for safe incrementing
+                val allLatest = houses.value 
+                
+                while (allLatest.any { 
+                    it.data == houseToInsert.data && 
+                    it.agentUid == houseToInsert.agentUid &&
+                    it.agentName.equals(houseToInsert.agentName, ignoreCase = true) &&
+                    it.blockNumber.equals(houseToInsert.blockNumber, ignoreCase = true) &&
+                    it.blockSequence.equals(houseToInsert.blockSequence, ignoreCase = true) &&
+                    it.streetName.equals(houseToInsert.streetName, ignoreCase = true) &&
+                    it.number.equals(houseToInsert.number, ignoreCase = true) && 
+                    it.sequence == finalSequence &&
+                    it.complement == finalComplement &&
+                    it.bairro.equals(houseToInsert.bairro, ignoreCase = true)
+                    // visitSegment will be recalculated, but we assume the same for prediction
+                }) {
+                    if (houseToInsert.complement > 0 || houseToInsert.number.isNotBlank()) {
+                        finalComplement++
+                    } else {
+                        finalSequence++
+                    }
+                }
+                
+                if (finalSequence != houseToInsert.sequence || finalComplement != houseToInsert.complement) {
+                    houseToInsert = houseToInsert.copy(sequence = finalSequence, complement = finalComplement)
+                }
+
+                // 3. Insert and Reorder
+                val mutableList = currentDayHouses.toMutableList()
+                if (targetIndex == -1) {
+                    mutableList.add(0, houseToInsert)
+                } else {
+                    mutableList.add(targetIndex + 1, houseToInsert)
+                }
+
+                val updatedList = mutableList.mapIndexed { index, h -> h.copy(listOrder = index.toLong()) }
+                val recalculated = houseManagementUseCase.recalculateVisitSegments(updatedList)
+                
+                // For new house (id 0), we use insertHouse, for others updateHouses
+                val newlyAdded = recalculated.find { it.id == 0 }
+                val others = recalculated.filter { it.id != 0 }
+                
+                if (others.isNotEmpty()) {
+                    repository.updateHouses(others, isAdmin)
+                }
+                if (newlyAdded != null) {
+                    val newId = repository.insertHouse(newlyAdded, isAdmin)
+                    _scrollToHouseId.value = newId.toInt()
+                }
+
+                soundManager.playPop()
+            } catch (e: Exception) {
+                android.util.Log.e("HomeViewModel", "Error adding house at position", e)
+                _uiEvent.value = "Erro ao inserir: ${e.message}"
+                soundManager.playWarning()
+            } finally {
+                isAddingHouse = false
+            }
+        }
+    }
+
 
     fun addNewHouse() {
         // ROLE ENFORCEMENT
@@ -1718,7 +1860,7 @@ class HomeViewModel @Inject constructor(
             clashDialogJobs[house.id]?.cancel()
             clashDialogJobs.remove(house.id)
             _pendingUpdateDrafts.value = _pendingUpdateDrafts.value - house.id
-            performUpdateHouse(house)
+            performUpdateHouse(house, forceMerge = true)
             _duplicateHouseConfirmation.value = null
         }
     }
@@ -1746,7 +1888,7 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    private fun performUpdateHouse(house: House, baselineHouse: House? = null) {
+    private fun performUpdateHouse(house: House, baselineHouse: House? = null, forceMerge: Boolean = false) {
         viewModelScope.launch {
             try {
                 // ... (identity calculation)
@@ -1759,6 +1901,7 @@ class HomeViewModel @Inject constructor(
                 
                 // Use UseCase for context-aware updates (segment recalculation)
                 val adminBypass = _isAdmin.value
+                val shouldForce = adminBypass || forceMerge
                 val result = houseManagementUseCase.updateHouseWithContext(houseWithIdentity, latestHouses, baselineHouse)
                 
                 if (result.localizationChanged) {
@@ -1769,9 +1912,9 @@ class HomeViewModel @Inject constructor(
                     
                     // Also ensure subsequent houses get the current session identity if they are being updated
                     val subsequentWithIdentity = result.subsequentHouses.map { it.copy(agentName = currentName, agentUid = currentUid) }
-                    houseManagementUseCase.updateHouses(subsequentWithIdentity + result.updatedHouse, adminBypass)
+                    houseManagementUseCase.updateHouses(subsequentWithIdentity + result.updatedHouse, shouldForce)
                 } else {
-                    houseManagementUseCase.updateHouse(result.updatedHouse, houses.value, adminBypass)
+                    houseManagementUseCase.updateHouse(result.updatedHouse, houses.value, shouldForce)
                 }
                 
                 // If this house had a validation error highlight, remove it as it's being corrected
@@ -1922,6 +2065,15 @@ class HomeViewModel @Inject constructor(
 
     private fun performMoveHouse(house: House, newDate: String) {
         viewModelScope.launch { 
+            // --- PRO-ACTIVE DESTINATION LOCK CHECK ---
+            val destActivity = dayManagementUseCase.getDayActivity(newDate, _agentName.value, _remoteAgentUid.value ?: _currentUserUid.value)
+            val isDestUnlocked = destActivity?.isManualUnlock == true
+            if (dayManagementUseCase.isDateLocked(destActivity) && !isDestUnlocked && !_isAdmin.value) {
+                _uiEvent.value = "A data de DESTINO está FECHADA. Acesse-a e destranque."
+                soundManager.playWarning()
+                return@launch
+            }
+
             val updatedHouse = house.copy(
                 data = newDate,
                 agentName = _agentName.value,
@@ -2473,9 +2625,11 @@ class HomeViewModel @Inject constructor(
     fun backupData(context: Context, uri: android.net.Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val h = repository.getAllHousesSnapshot()
-                val a = repository.getAllDayActivitiesSnapshot()
-                BackupManager().exportData(context, uri, BackupData(h, a))
+                val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value
+                val agentName = _agentName.value
+                val h = repository.getAllHousesOnce(agentName, effectiveUid)
+                val a = repository.getAllDayActivitiesOnce(agentName, effectiveUid)
+                BackupManager().exportData(context, uri, BackupData(h, a, effectiveUid, agentName))
                 withContext(Dispatchers.Main) {
                     _uiEvent.value = "Backup concluído com sucesso!"
                 }
@@ -2490,9 +2644,11 @@ class HomeViewModel @Inject constructor(
     fun backupDataAndShare(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val h = repository.getAllHousesSnapshot()
-                val a = repository.getAllDayActivitiesSnapshot()
-                val backupData = BackupData(h, a)
+                val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value
+                val agentName = _agentName.value
+                val h = repository.getAllHousesOnce(agentName, effectiveUid)
+                val a = repository.getAllDayActivitiesOnce(agentName, effectiveUid)
+                val backupData = BackupData(h, a, effectiveUid, agentName)
                 
                 // Generate Filename
                 val sdf = java.text.SimpleDateFormat("dd-MM-yyyy_HH-mm", java.util.Locale.US)

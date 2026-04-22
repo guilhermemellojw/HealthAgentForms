@@ -54,4 +54,7 @@ object AppConstants {
 
     // 10 seconds buffer to prevent clock skew overwriting local data
     const val SYNC_CONFLICT_THRESHOLD_MS = 10 * 1000L 
+
+    // Version safety: minimum version allowed to sync if enforced by admin
+    const val MIN_VERSION_CODE = 3 // Represents version 2.0
 }

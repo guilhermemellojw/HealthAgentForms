@@ -16,24 +16,41 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.google.gson.GsonBuilder
+import kotlinx.coroutines.flow.first
 
 @HiltWorker
 class BackupWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    private val repository: HouseRepository
+    private val repository: com.antigravity.healthagent.data.repository.HouseRepository,
+    private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager
 ) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): Result {
         return try {
             Log.d("BackupWorker", "Starting auto-backup...")
-            val houses = repository.getAllHousesSnapshot()
-            val activities = repository.getAllDayActivitiesSnapshot()
-            val backupData = BackupData(houses, activities)
+            val currentUser = settingsManager.cachedUser.first()
+            val currentName = currentUser?.agentName ?: "UNKNOWN"
+            val currentUid = currentUser?.uid ?: ""
 
-            // Create filename with timestamp
+            // CLEAN BACKUP: Only include records belonging to the current user.
+            // Inspected data from others is transient and already in the cloud.
+            val houses = repository.getAllHousesSnapshot()
+                .filter { it.agentUid == currentUid }
+            val activities = repository.getAllDayActivitiesSnapshot()
+                .filter { it.agentUid == currentUid }
+            
+            val backupData = BackupData(
+                houses = houses, 
+                dayActivities = activities,
+                sourceAgentUid = currentUid,
+                sourceAgentName = currentName
+            )
+
+            // Create filename with timestamp and agent name
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
-            val filename = "backup_auto_$timestamp.json"
+            val safeName = currentName.replace(" ", "_").uppercase()
+            val filename = "backup_${safeName}_$timestamp.json"
 
             // Get Documents/HealthAgentBackups directory
             // We'll use app-specific storage for reliability without permissions first, 

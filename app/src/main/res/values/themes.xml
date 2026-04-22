@@ -9,7 +9,8 @@
     <!-- Splash Screen theme -->
     <style name="Theme.App.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/app_background_dark</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/logo_3d_vigilancia_inset</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_icon</item>
         <item name="postSplashScreenTheme">@style/Theme.HealthAgentForms</item>
     </style>
+
 </resources>

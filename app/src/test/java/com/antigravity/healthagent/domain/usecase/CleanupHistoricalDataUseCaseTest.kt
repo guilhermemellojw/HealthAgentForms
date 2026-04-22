@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import java.util.*
 
 class CleanupHistoricalDataUseCaseTest {
 
@@ -41,7 +40,7 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun replaceAllHouses(houses: List<House>) {}
         override fun getDayActivities(dates: List<String>, agentName: String, agentUid: String?): Flow<List<DayActivity>> = flowOf(emptyList())
         override fun getDayActivityFlow(date: String, agentName: String, agentUid: String?): Flow<DayActivity?> = flowOf(null)
-        override suspend fun updateDayActivity(dayActivity: DayActivity) {}
+        override suspend fun updateDayActivity(dayActivity: DayActivity, force: Boolean) {}
         override suspend fun deleteDayActivity(date: String, agentName: String, agentUid: String?) {}
         override suspend fun <T> runInTransaction(block: suspend () -> T): T = block()
         override suspend fun getDayActivity(date: String, agentName: String, agentUid: String?): DayActivity? = null
@@ -65,6 +64,7 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun deduplicateAgentData(agentName: String, agentUid: String) {}
         override suspend fun normalizeLocalDates() {}
         override suspend fun getHousesByDateAndAgent(date: String, agentName: String, agentUid: String): List<House> = emptyList()
+        override suspend fun fixEmailNamesForUid(uid: String, properName: String) {}
     }
 
     private val mockSyncRepository = object : SyncRepository {
@@ -98,6 +98,8 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun deleteAgentActivity(uid: String, activityDate: String): Result<Unit> = Result.success(Unit)
         override suspend fun clearSyncError(uid: String): Result<Unit> = Result.success(Unit)
         override suspend fun transferAgentData(fromUid: String, toUid: String): Result<Unit> = Result.success(Unit)
+        override fun observeAgentProduction(uid: String, datePattern: String?): Flow<AgentData> = flowOf()
+
     }
 
     private val useCase = CleanupHistoricalDataUseCase(mockHouseRepository, mockSyncRepository, mockAgentRepository)

@@ -57,6 +57,16 @@ data class House(
     val latitude: Double? = null,
     val longitude: Double? = null,
     val focusCaptureTime: Long? = null,
+    /**
+     * Timestamp of the last local or remote modification.
+     * 
+     * WARNING: This field is @Excluded from Firestore automatic serialization to prevent 
+     * local device timestamps from being pushed to the cloud. During sync (Push), 
+     * Firestore's serverTimestamp() is used instead. 
+     * 
+     * During Pull, this field MUST be manually extracted from the DocumentSnapshot 
+     * in SyncRepositoryImpl to ensure proper conflict resolution (Last-Write-Wins).
+     */
     @get:com.google.firebase.firestore.Exclude
     @ColumnInfo(defaultValue = "0") val lastUpdated: Long = System.currentTimeMillis()
 ) {
@@ -78,9 +88,25 @@ data class House(
         val normalizedNumber = number.normalize()
         
         // Uniqueness is guaranteed by agentUid + normalizedAgent + date + address details + visitSegment.
-        // We remove createdAt to ensure the key is stable even if the house object is recreated.
         return "${agentUid}_${normalizedAgent}_${normalizedDate}_${normalizedBlock}_${normalizedBlockSeq}_${normalizedStreet}_${normalizedNumber}_${sequence}_${complement}_${normalizedBairro}_${visitSegment}".uppercase()
     }
+
+    /**
+     * Generates a "Logical Identity Key" that remains stable even if street names are corrected
+     * or visit segments shift. Used for deduplication and healing during sync.
+     */
+    fun generateIdentityKey(): String {
+        val normalizedDate = data.replace("/", "-")
+        val normalizedBairro = bairro.normalize()
+        val normalizedBlock = blockNumber.normalize()
+        val normalizedBlockSeq = blockSequence.normalize()
+        val normalizedNumber = number.normalize()
+        
+        // Identity is Agent + Day + Block + BlockSeq + Number + Seq + Complement + Bairro + Segment.
+        // We include municipio and categoria to further stabilize the identity across corrections.
+        return "${agentUid}_${normalizedDate}_${normalizedBlock}_${normalizedBlockSeq}_${normalizedNumber}_${sequence}_${complement}_${normalizedBairro}_${visitSegment}_${municipio.normalize()}_${categoria.normalize()}".uppercase()
+    }
+
 
     fun toFirestoreMap(): Map<String, Any?> {
         return mapOf(

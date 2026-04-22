@@ -360,7 +360,11 @@ fun AdminDashboardScreen(
     var showTransferDataDialog by remember { mutableStateOf(false) }
     var transferSourceProfile by remember { mutableStateOf<UnifiedProfile?>(null) }
 
+    var showWipeDialog by remember { mutableStateOf(false) }
+    var userForWipe by remember { mutableStateOf<UnifiedProfile?>(null) }
+
     val snackbarHostState = remember { SnackbarHostState() }
+
     val context = LocalContext.current
     val tabs = listOf("Gestão", "Config.")
 
@@ -430,7 +434,7 @@ fun AdminDashboardScreen(
                 }
                 
                 val pullToRefreshState = rememberPullToRefreshState()
-                val isRefreshing = uiState is AdminUiState.Loading
+                val isRefreshing by viewModel.isLoading.collectAsState()
 
                 PullToRefreshBox(
                     isRefreshing = isRefreshing,
@@ -621,6 +625,10 @@ fun AdminDashboardScreen(
                                                     onTransferData = {
                                                         transferSourceProfile = profile
                                                         showTransferDataDialog = true
+                                                    },
+                                                    onRemoteWipe = {
+                                                        userForWipe = profile
+                                                        showWipeDialog = true
                                                     }
                                                 )
                                             }
@@ -722,7 +730,39 @@ fun AdminDashboardScreen(
             }
         )
     }
+
+    if (showWipeDialog && userForWipe != null) {
+        AlertDialog(
+            onDismissRequest = { showWipeDialog = false },
+            title = { Text("CONFIRMAR WIPE REMOTO", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error) },
+            text = {
+                Column {
+                    Text("Esta ação irá APAGAR PERMANENTEMENTE toda a produção de:", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(userForWipe?.agentName ?: userForWipe?.email ?: "Usuário", fontWeight = FontWeight.Black)
+                    Spacer(Modifier.height(16.dp))
+                    Text("1. Os dados serão removidos da Nuvem imediatamente.", style = MaterialTheme.typography.labelSmall)
+                    Text("2. O aplicativo no dispositivo do agente será resetado no próximo acesso.", style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.height(16.dp))
+                    Text("O perfil de acesso (e-mail e senha) NÃO será excluído.", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        userForWipe?.uid?.let { viewModel.remoteWipeAgentData(it) }
+                        showWipeDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("CONFIRMAR WIPE") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWipeDialog = false }) { Text("Cancelar") }
+            }
+        )
+    }
 }
+
 
 @Composable
 fun AccessRequestCard(
@@ -939,7 +979,8 @@ fun UnifiedProfileCard(
     onEditAgent: () -> Unit,
     onClearSyncError: () -> Unit,
     onMigrateData: () -> Unit,
-    onTransferData: () -> Unit
+    onTransferData: () -> Unit,
+    onRemoteWipe: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     var expandedRole by remember { mutableStateOf(false) }
@@ -1247,6 +1288,7 @@ fun UnifiedProfileCard(
                     ) {
                         ActionButton(Icons.Default.SettingsBackupRestore, "Restauração", onClick = onRestore)
                         ActionButton(Icons.Default.PostAdd, "Importar Dia", onClick = { onRestoreDay(profile.uid) })
+                        ActionButton(Icons.Default.DeleteSweep, "Wipe Remoto", tint = MaterialTheme.colorScheme.error, onClick = onRemoteWipe)
                         
                         if (agent != null) {
                             ActionButton(Icons.Default.QueryStats, "Analisar", onClick = onEditAgent)

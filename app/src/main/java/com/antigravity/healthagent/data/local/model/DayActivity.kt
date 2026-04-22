@@ -15,6 +15,11 @@ data class DayActivity(
     @ColumnInfo(defaultValue = "''") val agentUid: String = "",
     @ColumnInfo(defaultValue = "0") val isSynced: Boolean = false,
     @ColumnInfo(defaultValue = "0") val editedByAdmin: Boolean = false,
+    /**
+     * Timestamp of the last local or remote modification.
+     * @Exclude is used to prevent local timestamps from overwriting Firestore server timestamps.
+     * Extraction must be handled manually in SyncRepositoryImpl.
+     */
     @get:com.google.firebase.firestore.Exclude
     @ColumnInfo(defaultValue = "0") val lastUpdated: Long = System.currentTimeMillis()
 ) {

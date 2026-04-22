@@ -39,4 +39,5 @@ interface HouseRepository {
     suspend fun migrateLocalData(agentName: String, email: String, targetUid: String)
     suspend fun deduplicateAgentData(agentName: String, agentUid: String)
     suspend fun normalizeLocalDates()
+    suspend fun fixEmailNamesForUid(uid: String, properName: String)
 }

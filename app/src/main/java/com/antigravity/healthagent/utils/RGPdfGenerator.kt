@@ -194,7 +194,7 @@ object RGPdfGenerator {
         headerY += 10.2f 
         
         // Logo
-        val logoBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.logo_vigilancia)
+        val logoBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.logo_vigilancia_ambiental)
         if (logoBitmap != null) {
             val logoWidth = 140
             val logoHeight = (logoBitmap.height.toFloat() / logoBitmap.width.toFloat() * logoWidth).toInt()

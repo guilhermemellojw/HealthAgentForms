@@ -80,7 +80,7 @@ interface HouseDao {
     @Query("DELETE FROM houses WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
     suspend fun deleteByAgent(agentName: String, agentUid: String)
 
-    @Query("DELETE FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(data, '/', '-') IN (:dates)")
+    @Query("DELETE FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(data, '/', '-') IN (:dates) AND isSynced = 1")
     suspend fun deleteByAgentAndDates(agentName: String, agentUid: String, dates: List<String>)
 
     @Query("SELECT * FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(data, '/', '-') IN (:dates) ORDER BY listOrder ASC")
@@ -97,6 +97,9 @@ interface HouseDao {
 
     @Query("UPDATE houses SET agentName = :newName, isSynced = 0, lastUpdated = :now WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:oldName)))")
     suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE houses SET agentName = :properName, isSynced = 0, lastUpdated = :now WHERE agentUid = :uid AND agentName LIKE '%@%'")
+    suspend fun fixEmailNamesForUid(uid: String, properName: String, now: Long = System.currentTimeMillis())
 
     @Query("""
         SELECT * FROM houses 

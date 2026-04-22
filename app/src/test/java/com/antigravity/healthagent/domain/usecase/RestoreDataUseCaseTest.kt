@@ -70,4 +70,51 @@ class RestoreDataUseCaseTest {
         assertEquals("House agentName should be normalized from AuthRepository", "AGENT MASTER", houseSlot.captured[0].agentName)
         assertEquals("Activity agentName should be normalized from AuthRepository", "AGENT MASTER", activitySlot.captured[0].agentName)
     }
+
+    @Test
+    fun `invoke should preserve original agent name when house belongs to a different agent than backup owner`() = runBlocking {
+        // Arrange
+        val targetUid = "restorer-uid"
+        val backupOwnerUid = "restorer-uid"
+        val otherAgentUid = "other-uid"
+        
+        val houses = listOf(
+            House(agentUid = backupOwnerUid, agentName = "RESTORER", streetName = "MY STREET", data = "15-03-2026"),
+            House(agentUid = otherAgentUid, agentName = "OTHER AGENT", streetName = "OTHER STREET", data = "15-03-2026")
+        )
+        val backupData = BackupData(
+            houses = houses, 
+            dayActivities = emptyList(),
+            sourceAgentUid = backupOwnerUid,
+            sourceAgentName = "RESTORER"
+        )
+
+        every { authRepository.getCurrentUserUid() } returns targetUid
+        coEvery { authRepository.fetchAllUsers() } returns Result.success(emptyList())
+        every { backupManager.importData(any(), any()) } returns backupData
+
+        val houseSlot = slot<List<House>>()
+
+        // Act
+        useCase(
+            context = context,
+            targetUid = targetUid,
+            fileUri = uri
+        )
+
+        // Assert
+        coVerify { 
+            syncRepository.pushLocalDataToCloud(
+                houses = capture(houseSlot),
+                activities = any(),
+                targetUid = targetUid,
+                shouldReplace = true
+            )
+        }
+
+        val restoredHouses = houseSlot.captured
+        assertEquals("Own house should be re-assigned/normalized", targetUid, restoredHouses[0].agentUid)
+        assertEquals("Other agent's house should be PRESERVED", otherAgentUid, restoredHouses[1].agentUid)
+        assertEquals("Other agent's name should be PRESERVED", "OTHER AGENT", restoredHouses[1].agentName)
+    }
 }

@@ -219,7 +219,7 @@ class HouseManagementUseCase @Inject constructor(
             situation = situation,
             data = house.data.replace("/", "-").trim(),
             isSynced = false, // Force re-sync on every local edit
-            lastUpdated = System.currentTimeMillis(),
+            lastUpdated = if (house.lastUpdated > 0) house.lastUpdated else System.currentTimeMillis(),
             a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e, eliminados = elims, larvicida = larv
         )
     }

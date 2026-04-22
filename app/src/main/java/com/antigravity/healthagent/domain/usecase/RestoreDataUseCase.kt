@@ -32,8 +32,35 @@ class RestoreDataUseCase @Inject constructor(
             val backupData = backupManager.importData(context, fileUri)
             
             // 3. Filtering by date if requested
-            var importedHouses = backupData.houses
-            var importedActivities = backupData.dayActivities
+            var rawHouses = backupData.houses
+            var rawActivities = backupData.dayActivities
+            
+            // STRICT FILTERING: Prevent mixing of different agent identities in a single restore.
+            // We only import records that belong to the targetUid or have no attribution (legacy).
+            val targetNameUpper = agentName.uppercase()
+            
+            val initialHouseCount = rawHouses.size
+            rawHouses = rawHouses.filter { 
+                val matchesUid = it.agentUid.isNotBlank() && it.agentUid == targetUid
+                val matchesName = it.agentName.isNotBlank() && it.agentName.equals(targetNameUpper, ignoreCase = true)
+                val isLegacyUnassigned = it.agentUid.isBlank() && it.agentName.isBlank()
+                
+                matchesUid || matchesName || isLegacyUnassigned
+            }
+            rawActivities = rawActivities.filter { 
+                val matchesUid = it.agentUid.isNotBlank() && it.agentUid == targetUid
+                val matchesName = it.agentName.isNotBlank() && it.agentName.equals(targetNameUpper, ignoreCase = true)
+                val isLegacyUnassigned = it.agentUid.isBlank() && it.agentName.isBlank()
+                
+                matchesUid || matchesName || isLegacyUnassigned
+            }
+            
+            if (rawHouses.isEmpty() && rawActivities.isEmpty() && initialHouseCount > 0) {
+                return@withContext Result.failure(Exception("Este backup não contém registros para o agente selecionado ($agentName)."))
+            }
+
+            var importedHouses = rawHouses
+            var importedActivities = rawActivities
             var resolveDate = targetDate
 
             if (targetDate != null) {
@@ -50,8 +77,8 @@ class RestoreDataUseCase @Inject constructor(
                 }
             } else if (isSingleDayImport) {
                 // Smart Date Detection for single-day imports
-                val firstDate = backupData.dayActivities.firstOrNull()?.date 
-                               ?: backupData.houses.firstOrNull()?.data
+                val firstDate = rawActivities.firstOrNull()?.date 
+                               ?: rawHouses.firstOrNull()?.data
                 
                 if (firstDate != null) {
                     val normalizedFirstDate = firstDate.replace("/", "-")
@@ -72,24 +99,45 @@ class RestoreDataUseCase @Inject constructor(
             }
 
             // Normalize and potentially shift dates
-            val normalizedHouses = importedHouses.map { 
-                it.copy(
+            val normalizedHouses = importedHouses.map { house ->
+                // SAFE ATTRIBUTION RULE:
+                // We only re-assign/normalize if:
+                // 1. The backup explicitly says this record belonged to the backup creator (sourceAgentUid matches)
+                // 2. OR the backup is legacy (null sourceAgentUid) AND the record is either blank OR already belongs to the target.
+                val isSourceOwner = when {
+                    backupData.sourceAgentUid != null -> house.agentUid == backupData.sourceAgentUid
+                    house.agentUid.isNotBlank() -> house.agentUid == targetUid 
+                    else -> true // Completely blank attribution (legacy simple backup)
+                }
+                
+                val finalAgentName = if (isSourceOwner || house.agentName.isBlank()) agentName else house.agentName
+                val finalAgentUid = if (isSourceOwner || house.agentUid.isBlank()) targetUid else house.agentUid
+
+                house.copy(
                     id = 0, 
-                    agentName = agentName,
-                    agentUid = targetUid,
-                    number = if (it.number.trim() == "0") "" else it.number.trim().uppercase(),
-                    sequence = if (it.sequence == 0) 0 else it.sequence,
-                    complement = if (it.complement == 0) 0 else it.complement,
-                    data = resolveDate ?: it.data.replace("/", "-"),
+                    agentName = finalAgentName,
+                    agentUid = finalAgentUid,
+                    number = if (house.number.trim() == "0") "" else house.number.trim().uppercase(),
+                    sequence = if (house.sequence == 0) 0 else house.sequence,
+                    complement = if (house.complement == 0) 0 else house.complement,
+                    data = resolveDate ?: house.data.replace("/", "-"),
                     isSynced = false,
                     lastUpdated = System.currentTimeMillis()
                 ) 
             }
-            val normalizedActivities = importedActivities.map { 
-                it.copy(
-                    agentName = agentName,
-                    agentUid = targetUid,
-                    date = resolveDate ?: it.date.replace("/", "-"),
+            val normalizedActivities = importedActivities.map { activity ->
+                val isSourceOwner = when {
+                    backupData.sourceAgentUid != null -> activity.agentUid == backupData.sourceAgentUid
+                    activity.agentUid.isNotBlank() -> activity.agentUid == targetUid
+                    else -> true
+                }
+                val finalAgentName = if (isSourceOwner || activity.agentName.isBlank()) agentName else activity.agentName
+                val finalAgentUid = if (isSourceOwner || activity.agentUid.isBlank()) targetUid else activity.agentUid
+
+                activity.copy(
+                    agentName = finalAgentName,
+                    agentUid = finalAgentUid,
+                    date = resolveDate ?: activity.date.replace("/", "-"),
                     isSynced = false,
                     lastUpdated = System.currentTimeMillis()
                 ) 

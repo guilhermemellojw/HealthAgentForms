@@ -222,7 +222,7 @@ fun HomeScreen(
             },
             text = { 
                 Text(
-                    "Atenção: Você está tentando reabrir um dia anterior a uma semana.\n\nFazer alterações pode afetar relatórios históricos e dados de produtividade já consolidados.\n\nDeseja continuar?",
+                    "Atenção: Você está tentando reabrir um dia histórico.\n\nFazer alterações pode afetar relatórios consolidados e estatísticas de produtividade.\n\nDeseja continuar?",
                     style = if (uiState.isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
                 ) 
             },
@@ -877,7 +877,7 @@ fun HomeScreen(
                     state = listState,
                     modifier = Modifier.weight(1f),
                     contentPadding = PaddingValues(bottom = 80.dp), // Space for FAB
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.Top
                 ) {
                 item(key = "header") {
                     Column {
@@ -923,11 +923,18 @@ fun HomeScreen(
                 // Empty State
                 if (uiHouses.isEmpty()) {
                     item {
-                        com.antigravity.healthagent.ui.components.EmptyStateView(
-                            message = "Nenhum imóvel adicionado",
-                            subMessage = "Toque no + para iniciar a produção de hoje",
-                            icon = Icons.Default.Assignment
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                            Spacer(Modifier.height(16.dp))
+                            if (!isSearchActive && !uiState.isDayClosed && (!uiState.isSupervisor || uiState.isAdmin)) {
+                                AddBetweenButton(onClick = { viewModel.addNewHouseAt(-1) })
+                                Spacer(Modifier.height(16.dp))
+                            }
+                            com.antigravity.healthagent.ui.components.EmptyStateView(
+                                message = "Nenhum imóvel adicionado",
+                                subMessage = "Toque no + para iniciar a produção de hoje",
+                                icon = Icons.Default.Assignment
+                            )
+                        }
                     }
                 }
 
@@ -937,6 +944,17 @@ fun HomeScreen(
                     key = { _, state -> state.house.id },
                     contentType = { _, _ -> "house" }
                 ) { index, houseState ->
+                    if (index == 0 && !isSearchActive && !uiState.isDayClosed && (!uiState.isSupervisor || uiState.isAdmin)) {
+                        Spacer(Modifier.height(8.dp))
+                        AddBetweenButton(
+                            onClick = { viewModel.addNewHouseAt(-1) },
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    } else if (index == 0) {
+                        Spacer(Modifier.height(10.dp))
+                    }
+
                     val house = houseState.house
                     val isDragging = house.id == draggingHouse?.house?.id
                     
@@ -1060,6 +1078,17 @@ fun HomeScreen(
                         enabled = if (uiState.isSupervisor) uiState.isAdmin else (!uiState.isDayClosed || uiState.isManualUnlock)
                     )
                     }
+
+                    if (!isSearchActive && !uiState.isDayClosed && (!uiState.isSupervisor || uiState.isAdmin)) {
+                        Spacer(Modifier.height(8.dp))
+                        AddBetweenButton(
+                            onClick = { viewModel.addNewHouseAt(houseState.house.id) },
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    } else {
+                        Spacer(Modifier.height(10.dp))
+                    }
                 }
                 }
             }
@@ -1102,6 +1131,28 @@ fun HomeScreen(
             }
         }
         }
+    }
+}
+
+@Composable
+fun AddBetweenButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            Icons.Default.Add,
+            contentDescription = "Inserir Imóvel Aqui",
+            modifier = Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+        )
     }
 }
 

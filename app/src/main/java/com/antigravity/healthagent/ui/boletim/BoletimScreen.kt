@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
 
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -55,7 +57,7 @@ import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.utils.formatStreetName
 
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun BoletimScreen(
     viewModel: HomeViewModel = hiltViewModel(),
@@ -286,23 +288,26 @@ fun BoletimScreen(
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.Top
                         ) {
                             // Date (Primary Title)
                             Text(
                                 text = summary.date,
                                 style = if (uiState.isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 2.dp)
                             )
 
-                            // Agent Name in Top-Right
+                            // Agent Name in Top-Right - Added weight and padding to prevent overlap
                             if (summary.agentName.isNotBlank()) {
                                 Text(
                                     text = summary.agentName.uppercase(),
                                     style = if (uiState.isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = FontWeight.Black
+                                    fontWeight = FontWeight.Black,
+                                    textAlign = TextAlign.End,
+                                    modifier = Modifier.weight(1f).padding(start = 12.dp)
                                 )
                             }
                         }
@@ -343,23 +348,27 @@ fun BoletimScreen(
                                          
                                          Spacer(Modifier.height(4.dp))
                                          
-                                         // Inline Stats per Block
-                                         Row(verticalAlignment = Alignment.CenterVertically) {
+                                         // Inline Stats per Block - Uses FlowRow to prevent squashed text on narrow screens
+                                         FlowRow(
+                                             modifier = Modifier.fillMaxWidth(),
+                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                             verticalArrangement = Arrangement.spacedBy(4.dp)
+                                         ) {
                                              Text(
                                                  text = "Trabalhados: ${block.totalHouses}",
                                                  style = if (uiState.isEasyMode) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.labelMedium,
                                                  color = MaterialTheme.colorScheme.primary,
                                                  fontWeight = FontWeight.Bold
                                              )
-                                             Text(" • ", color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                                             
                                              Text(
                                                  text = "Visitas: ${block.totalVisits}",
                                                  style = if (uiState.isEasyMode) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.labelMedium,
                                                  color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                  fontWeight = FontWeight.Bold
                                              )
+                                             
                                              if (block.focos > 0) {
-                                                 Text(" • ", color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                                                  Text(
                                                      text = "Focos: ${block.focos}",
                                                      style = if (uiState.isEasyMode) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.labelMedium,

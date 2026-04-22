@@ -53,22 +53,52 @@ class DayManagementUseCase @Inject constructor(
         return activity?.isClosed == true
     }
 
-    fun canSafelyUnlock(currentDate: String): Boolean {
+    suspend fun canSafelyUnlock(currentDate: String, agentName: String, agentUid: String? = null, isAdmin: Boolean = false): Boolean {
         try {
-            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
-            val dateObj = sdf.parse(currentDate)
+            // Admins can ALWAYS unlock without confirmation
+            if (isAdmin) return true
             
-            if (dateObj != null) {
-                val todayStr = sdf.format(Date())
-                // If it's not today, we might warn used (handled by ViewModel via return val?) 
-                // Usecase just answers if it's "safe" without warning.
-                // Logic in VM was: if (currentDate != todayStr) showWarning
-                return currentDate == todayStr
-            }
+            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+            val todayStr = sdf.format(Date())
+            
+            // 1. Today is always safe
+            if (currentDate == todayStr) return true
+            
+            // 2. The last workday is also safe (silent unlock)
+            val lastWorkday = getPreviousWorkDay(agentName, agentUid)
+            if (currentDate == lastWorkday) return true
+            
         } catch (e: Exception) {
             // Ignore parse errors
         }
-        return true
+        return false
+    }
+
+    suspend fun getPreviousWorkDay(agentName: String, agentUid: String?): String? {
+        return try {
+            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+            val todayStr = sdf.format(Date())
+            val todayObj = sdf.parse(todayStr) ?: return null
+            
+            val activities = repository.getAllDayActivitiesOnce(agentName, agentUid ?: "")
+            
+            // Find the most recent activity that is BEFORE today
+            activities
+                .mapNotNull { activity ->
+                    try {
+                        // FIX: Normalize date to prevent parsing failure if it contains '/'
+                        val normalizedDate = activity.date.replace("/", "-")
+                        val dateObj = sdf.parse(normalizedDate)
+                        if (dateObj != null && dateObj.before(todayObj)) {
+                            dateObj to normalizedDate
+                        } else null
+                    } catch (e: Exception) { null }
+                }
+                .maxByOrNull { it.first.time }
+                ?.second
+        } catch (e: Exception) {
+            null
+        }
     }
 
     suspend fun getNextBusinessDay(date: String, agentName: String, agentUid: String? = null): String {

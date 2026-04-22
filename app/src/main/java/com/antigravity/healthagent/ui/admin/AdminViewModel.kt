@@ -47,6 +47,9 @@ class AdminViewModel @Inject constructor(
     private val _users = MutableStateFlow<List<AuthUser>>(emptyList())
     val users: StateFlow<List<AuthUser>> = _users.asStateFlow()
 
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
     private val _uiEvent = MutableSharedFlow<String>()
     val uiEvent: SharedFlow<String> = _uiEvent
 
@@ -224,13 +227,14 @@ class AdminViewModel @Inject constructor(
     }
 
     fun refreshAll() {
-        _uiState.value = AdminUiState.Loading
         viewModelScope.launch {
+            _isLoading.value = true
             loadAgentsData(_selectedYear.value, _selectedMonth.value)
             loadUsers()
             loadAgentNames()
             loadBairros()
             loadSystemSettings()
+            _isLoading.value = false
         }
     }
 
@@ -270,6 +274,11 @@ class AdminViewModel @Inject constructor(
         } else {
             val monthStr = String.format("%02d", month + 1)
             "-$monthStr-$year"
+        }
+
+        // Avoid resetting Success state to Loading if we already have data to prevent flicker
+        if (_uiState.value !is AdminUiState.Success) {
+            _uiState.value = AdminUiState.Loading
         }
 
         val result = agentRepository.fetchAllAgentsData(datePattern = datePattern)
@@ -440,7 +449,34 @@ class AdminViewModel @Inject constructor(
         }
     }
 
+    fun remoteWipeAgentData(uid: String) {
+        viewModelScope.launch {
+            if (!authRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            try {
+                // 1. Purge cloud data (houses and activities)
+                val cloudResult = agentRepository.deleteAgent(uid)
+                
+                // 2. Set flag to force local device to clear database on next sync
+                authRepository.updateUserProfile(uid, mapOf("requireDataReset" to true))
+                
+                if (cloudResult.isSuccess) {
+                    _uiEvent.emit("Wipe remoto concluído (Nuvem e Local)")
+                } else {
+                    _uiEvent.emit("Wipe local agendado, mas houve erro na nuvem")
+                }
+                
+                loadAgentsData(_selectedYear.value, _selectedMonth.value)
+            } catch (e: Exception) {
+                _uiEvent.emit("Erro no wipe remoto: ${e.message}")
+            }
+        }
+    }
+
     // --- Super Admin Settings ---
+
 
     private suspend fun loadBairros() {
         val result = localizationRepository.fetchBairros()

@@ -277,27 +277,28 @@ class SupervisorViewModel @Inject constructor(
         cal.set(year, month, 1, 0, 0, 0)
         cal.set(Calendar.MILLISECOND, 0)
         
-        val maxDay = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+        // Find the Sunday that starts the week containing the 1st of the month
+        while (cal.get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) {
+            cal.add(Calendar.DAY_OF_MONTH, -1)
+        }
+        
+        val maxDayOfMonth = Calendar.getInstance().apply { set(year, month, 1) }.getActualMaximum(Calendar.DAY_OF_MONTH)
+        val endOfMonth = Calendar.getInstance().apply {
+            set(year, month, maxDayOfMonth, 23, 59, 59)
+            set(Calendar.MILLISECOND, 999)
+        }
+
         val sdf = SimpleDateFormat("dd/MM", Locale.US)
         val now = Calendar.getInstance().timeInMillis
 
         var weekNum = 1
-        while (cal.get(Calendar.DAY_OF_MONTH) <= maxDay) {
-            // Find Monday of this week (or 1st of month if 1st is not Monday)
-            // Actually, we'll just group by 7 days or use standard week logic.
-            // Let's use 1-7, 8-14... simplified as desired for reports
+        while (cal.timeInMillis <= endOfMonth.timeInMillis) {
             val start = cal.time
-            
-            // But we must NOT allow weeks that start in the future
             if (start.time > now) break
             
             val weekEnd = Calendar.getInstance().apply {
                 time = start
                 add(Calendar.DAY_OF_MONTH, 6)
-                if (get(Calendar.MONTH) != month) {
-                    set(Calendar.MONTH, month)
-                    set(Calendar.DAY_OF_MONTH, maxDay)
-                }
                 set(Calendar.HOUR_OF_DAY, 23)
                 set(Calendar.MINUTE, 59)
                 set(Calendar.SECOND, 59)
@@ -307,7 +308,10 @@ class SupervisorViewModel @Inject constructor(
             
             cal.time = weekEnd.time
             cal.add(Calendar.DAY_OF_MONTH, 1)
-            if (cal.get(Calendar.MONTH) != month || cal.get(Calendar.DAY_OF_MONTH) > maxDay) break
+            cal.set(Calendar.HOUR_OF_DAY, 0)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            
             weekNum++
         }
         return weeks
@@ -374,12 +378,19 @@ class SupervisorViewModel @Inject constructor(
     private fun calculateAggregateSummary(agents: List<AgentData>, weekStart: Date?, weekEnd: Date?): AggregateSummary {
         val sdfPattern = SimpleDateFormat("dd-MM-yyyy", Locale.US)
         
+        // Optimize: Convert Date boundaries to Long once for faster comparison
+        val startT = weekStart?.time ?: 0L
+        val endT = weekEnd?.time ?: Long.MAX_VALUE
+        
         // Define the date filter if week range is provided
         val dateFilter: (String) -> Boolean = if (weekStart != null && weekEnd != null) {
             { dateStr ->
                 try {
-                    val date = sdfPattern.parse(dateStr.replace("/", "-"))
-                    date != null && !date.before(weekStart) && !date.after(weekEnd)
+                    // Try to avoid full parse if possible by normalizing string and then parsing
+                    val normalizedDate = dateStr.replace("/", "-")
+                    val date = sdfPattern.parse(normalizedDate)
+                    val time = date?.time ?: 0L
+                    time in startT..endT
                 } catch (e: Exception) { false }
             }
         } else { { true } }
@@ -410,46 +421,48 @@ class SupervisorViewModel @Inject constructor(
                 if (summary.totalHouses > 0 || summary.daysWorked > 0) {
                     activeAgentsCount++
                     
+                    val displayName = pickBestDisplayName(agent.agentName, agent.email)
+                    
                     val visitCount = summary.totalHouses
                     if (visitCount > 0) {
                         totalVisits += visitCount
-                        visitsDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, visitCount, agent.photoUrl))
+                        visitsDetails.add(StatDetail(displayName, agent.email, agent.uid, visitCount, agent.photoUrl))
                     }
 
                     val workedCount = (summary.situationCounts["NONE"] ?: 0) + (summary.situationCounts["EMPTY"] ?: 0)
                     if (workedCount > 0) {
                         totalWorked += workedCount
-                        housesDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, workedCount, agent.photoUrl))
+                        housesDetails.add(StatDetail(displayName, agent.email, agent.uid, workedCount, agent.photoUrl))
                     }
                     
                     val fociCount = summary.focusCount
                     if (fociCount > 0) {
                         totalFoci += fociCount
-                        fociDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, fociCount, agent.photoUrl))
+                        fociDetails.add(StatDetail(displayName, agent.email, agent.uid, fociCount, agent.photoUrl))
                     }
                     
                     val treatedCount = summary.treatedCount
                     if (treatedCount > 0) {
                         totalTratados += treatedCount
-                        tratadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, treatedCount, agent.photoUrl))
+                        tratadosDetails.add(StatDetail(displayName, agent.email, agent.uid, treatedCount, agent.photoUrl))
                     }
 
                     val closedCount = summary.situationCounts["F"] ?: 0
                     if (closedCount > 0) {
                         totalFechados += closedCount
-                        fechadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, closedCount, agent.photoUrl))
+                        fechadosDetails.add(StatDetail(displayName, agent.email, agent.uid, closedCount, agent.photoUrl))
                     }
 
                     val abandonedCount = summary.situationCounts["A"] ?: 0
                     if (abandonedCount > 0) {
                         totalAbandonados += abandonedCount
-                        abandonadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, abandonedCount, agent.photoUrl))
+                        abandonadosDetails.add(StatDetail(displayName, agent.email, agent.uid, abandonedCount, agent.photoUrl))
                     }
 
-                    val recusedCount = summary.situationCounts["REC"] ?: 0
-                    if (recusedCount > 0) {
-                        totalRecusados += recusedCount
-                        recusadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, recusedCount, agent.photoUrl))
+                    val recusadosCount = summary.situationCounts["REC"] ?: 0
+                    if (recusadosCount > 0) {
+                        totalRecusados += recusadosCount
+                        recusadosDetails.add(StatDetail(displayName, agent.email, agent.uid, recusadosCount, agent.photoUrl))
                     }
                 }
             } else {
@@ -459,11 +472,12 @@ class SupervisorViewModel @Inject constructor(
                 
                 if (periodActivities.isNotEmpty() || periodHouses.isNotEmpty()) {
                     activeAgentsCount++
+                    val displayName = pickBestDisplayName(agent.agentName, agent.email)
                     
                     val visitCount = periodHouses.size
                     if (visitCount > 0) {
                         totalVisits += visitCount
-                        visitsDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, visitCount, agent.photoUrl))
+                        visitsDetails.add(StatDetail(displayName, agent.email, agent.uid, visitCount, agent.photoUrl))
                     }
 
                     val workedCount = periodHouses.count { 
@@ -472,13 +486,13 @@ class SupervisorViewModel @Inject constructor(
                     }
                     if (workedCount > 0) {
                         totalWorked += workedCount
-                        housesDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, workedCount, agent.photoUrl))
+                        housesDetails.add(StatDetail(displayName, agent.email, agent.uid, workedCount, agent.photoUrl))
                     }
                     
                     val fociCount = periodHouses.count { it.comFoco }
                     if (fociCount > 0) {
                         totalFoci += fociCount
-                        fociDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, fociCount, agent.photoUrl))
+                        fociDetails.add(StatDetail(displayName, agent.email, agent.uid, fociCount, agent.photoUrl))
                     }
                     
                     val treatedCount = periodHouses.count { house ->
@@ -487,25 +501,25 @@ class SupervisorViewModel @Inject constructor(
                     }
                     if (treatedCount > 0) {
                         totalTratados += treatedCount
-                        tratadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, treatedCount, agent.photoUrl))
+                        tratadosDetails.add(StatDetail(displayName, agent.email, agent.uid, treatedCount, agent.photoUrl))
                     }
 
                     val closedCount = periodHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }
                     if (closedCount > 0) {
                         totalFechados += closedCount
-                        fechadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, closedCount, agent.photoUrl))
+                        fechadosDetails.add(StatDetail(displayName, agent.email, agent.uid, closedCount, agent.photoUrl))
                     }
 
                     val abandonedCount = periodHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
                     if (abandonedCount > 0) {
                         totalAbandonados += abandonedCount
-                        abandonadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, abandonedCount, agent.photoUrl))
+                        abandonadosDetails.add(StatDetail(displayName, agent.email, agent.uid, abandonedCount, agent.photoUrl))
                     }
 
                     val recusedCount = periodHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }
                     if (recusedCount > 0) {
                         totalRecusados += recusedCount
-                        recusadosDetails.add(StatDetail(agent.agentName ?: agent.email, agent.email, agent.uid, recusedCount, agent.photoUrl))
+                        recusadosDetails.add(StatDetail(displayName, agent.email, agent.uid, recusedCount, agent.photoUrl))
                     }
                 }
             }
@@ -529,5 +543,14 @@ class SupervisorViewModel @Inject constructor(
             activeAgents = activeAgentsCount,
             totalAgents = agents.size
         )
+    }
+
+    private fun pickBestDisplayName(name: String?, email: String): String {
+        val n = name?.trim() ?: ""
+        return if (n.isBlank() || n.contains("@")) {
+            email.substringBefore("@").uppercase()
+        } else {
+            n.uppercase()
+        }
     }
 }

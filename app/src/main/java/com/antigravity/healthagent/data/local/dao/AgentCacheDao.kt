@@ -24,6 +24,15 @@ interface AgentCacheDao {
     @Upsert
     suspend fun upsertSummaries(summaries: List<CachedAgentSummary>)
 
+    @Query("DELETE FROM cached_agents WHERE uid = :uid")
+    suspend fun deleteAgentCache(uid: String)
+
+    @Query("DELETE FROM cached_agent_summaries WHERE agentUid = :uid")
+    suspend fun deleteAgentSummaries(uid: String)
+
+    @Query("DELETE FROM cached_agent_summaries WHERE agentUid = :uid AND monthYear = :monthYear")
+    suspend fun deleteAgentSummary(uid: String, monthYear: String)
+
     @Query("DELETE FROM cached_agents")
     suspend fun clearAgents()
 

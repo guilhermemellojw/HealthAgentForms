@@ -16,15 +16,17 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.text.SimpleDateFormat
-import java.util.*
-import com.antigravity.healthagent.data.util.*
+import com.antigravity.healthagent.utils.*
 import com.antigravity.healthagent.utils.withRetry
 import javax.inject.Inject
 import javax.inject.Singleton
+import dagger.hilt.android.qualifiers.ApplicationContext
+import android.content.Context
+import android.content.pm.PackageInfo
 
 @Singleton
 class SyncRepositoryImpl @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
     private val houseDao: com.antigravity.healthagent.data.local.dao.HouseDao,
@@ -49,13 +51,27 @@ class SyncRepositoryImpl @Inject constructor(
         targetUid: String?,
         shouldReplace: Boolean
     ): Result<Unit> {
-        val result = withTimeoutOrNull(60000L) {
+        val result = withTimeoutOrNull(180000L) {
             syncMutex.withLock {
                 try {
                     val uid = targetUid ?: auth.currentUser?.uid ?: return@withLock Result.failure(Exception("User not authenticated"))
+                    
+                    // --- WIPE SAFETY CHECK ---
+                    // Prevent "data resurrection": if a remote wipe is pending OR the agent doc was purged
+                    // but the devices still has sync history, we block pushes to force a local wipe.
+                    val userDocSnapshot = try { firestore.collection("users").document(uid).get().await() } catch(e: Exception) { null }
+                    val agentDocExists = try { firestore.collection("agents").document(uid).get().await().exists() } catch(e: Exception) { true }
+                    val hasSyncHistory = settingsManager.lastSyncTimestamp.first() > 0
+
+                    if (targetUid == null && (userDocSnapshot?.getBoolean("requireDataReset") == true || (hasSyncHistory && !agentDocExists))) {
+                        android.util.Log.w("SyncRepository", "Push blocked for $uid: Remote wipe pending or data purged.")
+                        return@withLock Result.failure(Exception("Sincronização bloqueada: Uma limpeza de dados foi solicitada. Por favor, realize um 'Receber Dados' primeiro."))
+                    }
+
                     val userDocRef = firestore.collection("agents").document(uid)
             
             // Fetch existing cloud metadata
+
             val existingDoc = try { userDocRef.get().await() } catch(e: Exception) { null }
             val existingEmail = existingDoc?.getString("email")
             val existingAgentName = existingDoc?.getString("agentName") ?: ""
@@ -96,9 +112,12 @@ class SyncRepositoryImpl @Inject constructor(
 
 
             // Prepare Operations
+            val pInfo = try { context.packageManager.getPackageInfo(context.packageName, 0) } catch (e: Exception) { null }
             val metadata = mutableMapOf<String, Any>(
                 "lastSyncTime" to System.currentTimeMillis(),
-                "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                "appVersionCode" to (pInfo?.versionCode ?: 0),
+                "appVersionName" to (pInfo?.versionName ?: "Unknown")
             )
 
             if (shouldReplace) {
@@ -144,6 +163,15 @@ class SyncRepositoryImpl @Inject constructor(
                 metadata["deleted_house_ids"] = com.google.firebase.firestore.FieldValue.delete()
                 metadata["deleted_activity_dates"] = com.google.firebase.firestore.FieldValue.delete()
             }
+
+            // --- ADMIN RESTORE TRIGGER ---
+            // If an administrator is performing a "Replace All" (shouldReplace) for a target user,
+            // we signal the target device to reset its local database on the next sync.
+            if (shouldReplace && targetUid != null && targetUid != auth.currentUser?.uid) {
+                metadata["requireDataReset"] = true
+                android.util.Log.i("SyncRepository", "Admin Restore: Signalling target device ($uid) for local reset.")
+            }
+
             if (targetUid == null || (existingEmail.isNullOrBlank() && userEmail != "Remote Sync")) {
                 metadata["email"] = userEmail
             }
@@ -196,12 +224,54 @@ class SyncRepositoryImpl @Inject constructor(
 
             // 2. HOUSES
             if (housesToPush.isNotEmpty()) {
+                // --- CLOUD DEDUPLICATION (KEY-SHIFT PROTECTION) ---
+                // For incremental sync, we actively clean up shifted keys for the dates we are touching.
+                // This prevents "ghost" duplicates in Firestore after visitSegment recalculations.
+                if (!shouldReplace) {
+                    val affectedDates = housesToPush.map { it.data.replace("/", "-") }.toSet()
+                    for (date in affectedDates) {
+                        try {
+                            val cloudSnapshot = userDocRef.collection("houses")
+                                .whereEqualTo("data", date)
+                                .get().await()
+                            
+                            val localHousesForDate = houseDao.getHousesByDateAndAgent(date, officialAgentName, uid)
+                            val localKeys = localHousesForDate.map { it.generateNaturalKey() }.toSet()
+                            val localIdentities = localHousesForDate.map { it.generateIdentityKey() }.toSet()
+                            
+                            val toDelete = cloudSnapshot.documents.filter { doc ->
+                                val cloudHouse = doc.toHouseSafe(uid, officialAgentName) ?: return@filter false
+                                val cloudKey = doc.id
+                                val cloudIdentity = cloudHouse.generateIdentityKey()
+                                
+                                // Delete if: 1. Key is stale locally AND 2. Identity still exists locally (Shifted)
+                                cloudKey !in localKeys && cloudIdentity in localIdentities
+                            }
+                            
+                            if (toDelete.isNotEmpty()) {
+                                android.util.Log.i("SyncRepository", "Cloud Deduplication: Purging ${toDelete.size} ghost records for $date")
+                                toDelete.chunked(400).forEach { chunk ->
+                                    val delBatch = firestore.batch()
+                                    chunk.forEach { delBatch.delete(it.reference) }
+                                    delBatch.commit().await()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("SyncRepository", "Cloud Deduplication context skip for $date: ${e.message}")
+                        }
+                    }
+                }
+
                 housesToPush.chunked(400).forEach { chunk ->
                     val batch = firestore.batch()
                     val pushedKeys = mutableListOf<String>()
                     
                     chunk.forEach { house ->
-                        val officialHouse = house.copy(agentName = officialAgentName ?: house.agentName)
+                        val isAdminPush = shouldReplace && targetUid != null && targetUid != auth.currentUser?.uid
+                        val officialHouse = house.copy(
+                            agentName = officialAgentName ?: house.agentName,
+                            editedByAdmin = isAdminPush || house.editedByAdmin
+                        )
                         val houseData = officialHouse.toFirestoreMap()
                         val key = officialHouse.generateNaturalKey()
                         batch.set(userDocRef.collection("houses").document(key), houseData, com.google.firebase.firestore.SetOptions.merge())
@@ -231,7 +301,13 @@ class SyncRepositoryImpl @Inject constructor(
                     val pushedDates = mutableListOf<String>()
                     
                     chunk.forEach { activity ->
-                        val activityData = activity.copy(agentName = officialAgentName, agentUid = uid).toFirestoreMap()
+                        val isAdminPush = shouldReplace && targetUid != null && targetUid != auth.currentUser?.uid
+                        val officialActivity = activity.copy(
+                            agentName = officialAgentName, 
+                            agentUid = uid,
+                            editedByAdmin = isAdminPush || activity.editedByAdmin
+                        )
+                        val activityData = officialActivity.toFirestoreMap()
                         val dateKey = activity.date.replace("/", "-")
                         batch.set(userDocRef.collection("day_activities").document(dateKey), activityData, com.google.firebase.firestore.SetOptions.merge())
                         pushedDates.add(dateKey)
@@ -253,7 +329,11 @@ class SyncRepositoryImpl @Inject constructor(
             }
 
             // 4. SUMMARY AGGREGATION (Recalculate from local ground truth for accuracy)
-            val allAffectedDates = (housesToPush.map { it.data } + activitiesToPush.map { it.date }).map { it.replace("/", "-") }
+            val allAffectedDates = (
+                housesToPush.map { it.data } + 
+                activitiesToPush.map { it.date } + 
+                tombstones.map { it.dataDate }.filter { it.isNotBlank() }
+            ).map { it.replace("/", "-") }.distinct()
             val monthsToUpdate = allAffectedDates.map { it.split("-").let { if(it.size >= 3) "${it[1]}-${it[2]}" else "" } }
                 .filter { it.isNotBlank() }
                 .toSet()
@@ -261,16 +341,37 @@ class SyncRepositoryImpl @Inject constructor(
             for (monthYear in monthsToUpdate) {
                 val isProxyPush = targetUid != null && targetUid != auth.currentUser?.uid
                 
-                val housesInMonth = if (isProxyPush && shouldReplace) {
+                val todayStr = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
+                val todayInt = todayStr.toInt()
+                
+                val housesInMonthRaw = if (isProxyPush && shouldReplace) {
                     housesToPush.filter { it.data.replace("/", "-").endsWith(monthYear) }
                 } else {
                     houseDao.getHousesByMonth(officialAgentName ?: "", uid, monthYear)
                 }
                 
-                val activitiesInMonth = if (isProxyPush && shouldReplace) {
+                val housesInMonth = housesInMonthRaw.filter { house ->
+                    try {
+                        val parts = house.data.replace("/", "-").split("-")
+                        if (parts.size == 3) {
+                            String.format("%04d%02d%02d", parts[2].toInt(), parts[1].toInt(), parts[0].toInt()).toInt() <= todayInt
+                        } else true
+                    } catch(e: Exception) { true }
+                }
+                
+                val activitiesInMonthRaw = if (isProxyPush && shouldReplace) {
                     activitiesToPush.filter { it.date.replace("/", "-").endsWith(monthYear) }
                 } else {
                     dayActivityDao.getDayActivitiesByMonth(officialAgentName ?: "", uid, monthYear)
+                }
+                
+                val activitiesInMonth = activitiesInMonthRaw.filter { activity ->
+                    try {
+                        val parts = activity.date.replace("/", "-").split("-")
+                        if (parts.size == 3) {
+                            String.format("%04d%02d%02d", parts[2].toInt(), parts[1].toInt(), parts[0].toInt()).toInt() <= todayInt
+                        } else true
+                    } catch(e: Exception) { true }
                 }
                 
                 val summary = mapOf(
@@ -310,7 +411,7 @@ class SyncRepositoryImpl @Inject constructor(
 
 
     override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> {
-        val result = withTimeoutOrNull(90000L) {
+        val result = withTimeoutOrNull(180000L) {
             syncMutex.withLock {
                 withContext(Dispatchers.IO) {
                     try {
@@ -324,16 +425,38 @@ class SyncRepositoryImpl @Inject constructor(
             val profileDisplayName = userDoc.getString("displayName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
             val finalAgentName = profileAgentName ?: profileDisplayName ?: email.substringBefore("@").uppercase()
             
-            // --- REMOTE WIPE CHECK (Data Transfer Safety) ---
-            val requireReset = userDoc.getBoolean("requireDataReset") ?: false
+            // --- VERSION SAFETY CHECK ---
+            val sysSettings = fetchSystemSettings().getOrDefault(emptyMap())
+            val minVersion = (sysSettings["minAppVersion"] as? Number)?.toInt() ?: AppConstants.MIN_VERSION_CODE
+            val pInfo = try { context.packageManager.getPackageInfo(context.packageName, 0) } catch (e: Exception) { null }
+            val currentVersion = pInfo?.versionCode ?: 0
+            
+            if (currentVersion < minVersion) {
+                android.util.Log.e("SyncRepository", "Version Enforcement: App version ($currentVersion) is below minimum required ($minVersion)")
+                return@withContext Result.failure(Exception("Versão do aplicativo desatualizada. Por favor, atualize o 'Eu ACE' na Play Store para continuar sincronizando seus dados."))
+            }
+            
+            // --- REMOTE WIPE CHECK (Multi-device Safety) ---
+            val requireResetFromFlag = userDoc.getBoolean("requireDataReset") ?: false
+            
+            // If the primary agent document in cloud is missing but we have local sync history,
+            // it means an Admin likely performed a 'Remote Wipe'. We must reset local state.
+            val hasSyncHistory = settingsManager.lastSyncTimestamp.first() > 0
+            val agentDocExists = try { firestore.collection("agents").document(uid).get().await().exists() } catch(e: Exception) { true }
+            
+            val requireReset = requireResetFromFlag || (hasSyncHistory && !agentDocExists)
+
             if (requireReset) {
                 android.util.Log.w("SyncRepository", "Remote Wipe Triggered for UID: $uid")
-                val wipeResult = clearLocalData() // Wipes local SQLite
+                // CRITICAL: Call internal version to avoid re-acquiring syncMutex (Deadlock)
+                val wipeResult = clearLocalDataInternal() 
                 if (wipeResult.isSuccess) {
                     // Reset flag in Firestore ONLY if wipe succeeded
                     firestore.collection("users").document(uid).update("requireDataReset", false)
                 } else {
                     android.util.Log.e("SyncRepository", "Remote Wipe Failed: ${wipeResult.exceptionOrNull()?.message}")
+                    // We return early to prevent pushing/pulling on top of dirty state that should have been wiped
+                    return@withContext Result.failure(wipeResult.exceptionOrNull() ?: Exception("Falha ao realizar wipe local"))
                 }
             }
 
@@ -458,15 +581,11 @@ class SyncRepositoryImpl @Inject constructor(
                 val dateKey = "${house.data.replace("/", "-")}|${house.agentName.uppercase()}"
                 
                 if (key in cloudDeletedHouses || dateKey in cloudDeletedActivities) {
-                    val fifteenMinutesAgo = System.currentTimeMillis() - 900000L // 15 mins
                     if (house.isSynced) true
-                    else if (house.lastUpdated < fifteenMinutesAgo) true
                     else {
-                        // ZOMBIE PREVENTION: If we decide NOT to delete it (because it's fresh/unsynced),
-                        // we MUST mark it as 'isSynced = true' locally so that it doesn't get pushed back 
-                        // to the cloud on the next cycle, effectively "re-creating" the deleted record.
-                        android.util.Log.i("SyncRepository", "Zombie Prevention: Silencing unsynced record ${house.id} to respect cloud deletion intent.")
-                        houseDao.markAsSyncedWithTimestamp(house.id, house.lastUpdated)
+                        // AGENT PRIORITY: Protect all unsynced work regardless of age.
+                        // This prevents unauthorized deletions of historical or failed-sync data.
+                        android.util.Log.i("SyncRepository", "Agent Priority: Preserving unsynced house ${house.id} despite cloud deletion.")
                         false
                     }
                 } else false
@@ -487,10 +606,11 @@ class SyncRepositoryImpl @Inject constructor(
                 val dateKey = "${activity.date}|${activity.agentName.uppercase()}"
                 
                 if (dateKey in cloudDeletedActivities) {
-                    val fifteenMinutesAgo = System.currentTimeMillis() - 900000L // 15 mins
                     if (activity.isSynced) true
-                    else if (activity.lastUpdated < fifteenMinutesAgo) true
-                    else (System.currentTimeMillis() - activity.lastUpdated > 3600000L) // 1h ghost check
+                    else {
+                        android.util.Log.i("SyncRepository", "Agent Priority: Preserving unsynced activity ${activity.date} despite cloud deletion.")
+                        false
+                    }
                 } else false
             }
 
@@ -517,24 +637,24 @@ class SyncRepositoryImpl @Inject constructor(
                 }
 
                 // Upsert Houses
-                // OPTIMIZATION: Index all local houses by a "Partial Identity Key" (Data + Number + Bairro)
+                // OPTIMIZATION: Index all local houses by their Logical Identity Key
                 // for O(1) identity healing lookup instead of O(N) searching.
-                val localIdentityMap = allLocalHouses.groupBy { h ->
-                    "${h.data}_${h.blockNumber.uppercase()}_${h.number.uppercase()}_${h.sequence}_${h.complement}_${h.bairro.uppercase()}"
-                }
+                val localIdentityMap = allLocalHouses.groupBy { it.generateIdentityKey() }
 
                 val housesToUpsert = housesDelta.mapNotNull { cloudHouse ->
                     val key = cloudHouse.generateNaturalKey()
                     var existing = localHouses[key]?.firstOrNull()
                     
                     // --- IDENTITY HEALING (KEY-SHIFT PROTECTION) ---
-                    // If no direct natural key match, try a partial match to identify corrections (street rename, etc.)
+                    // If no direct natural key match, try an identity match to detect corrections (street rename, segment shift, etc.)
                     if (existing == null) {
-                        val identityKey = "${cloudHouse.data}_${cloudHouse.blockNumber.uppercase()}_${cloudHouse.number.uppercase()}_${cloudHouse.sequence}_${cloudHouse.complement}_${cloudHouse.bairro.uppercase()}"
+                        val identityKey = cloudHouse.generateIdentityKey()
+                        // IDENTITY HEALING: Protect against Key-Shifts (e.g. street renames).
+                        // If no direct natural key match, we correlate via logical identity.
                         existing = localIdentityMap[identityKey]?.find { it.agentUid == cloudHouse.agentUid }
                         
                         if (existing != null) {
-                            android.util.Log.i("SyncRepository", "Identity Healing: Found indexed record correlation for house ${existing.id} ($key)")
+                            android.util.Log.i("SyncRepository", "Identity Healing: Stabilized key shift for house ${existing.id} ($key)")
                         }
                     }
 
@@ -615,8 +735,12 @@ class SyncRepositoryImpl @Inject constructor(
 
             // 5. Update local sync tracking
             if (!isTargetDifferentUser) {
-                // BUG FIX: Subtract 1 minute safety buffer to account for clock skew/latency
-                settingsManager.setLastSyncTimestamp(serverTime - 60000L)
+                // BUG FIX: Use 10-minute safety buffer (instead of 1min) to account for significant clock skew.
+                // A larger buffer prevents permanent record skipping if the device clock is ahead of Firestore.
+                val maxObservedTime = (cloudHouses.map { it.lastUpdated } + cloudDayActivities.map { it.lastUpdated }).maxOrNull() ?: 0L
+                val safetyAnchor = serverTime - 600000L // 10 mins buffer
+                
+                settingsManager.setLastSyncTimestamp(maxOf(maxObservedTime, safetyAnchor))
             }
 
                 Result.success(Unit)
@@ -630,22 +754,30 @@ class SyncRepositoryImpl @Inject constructor(
 }
 
 
-    override suspend fun clearLocalData(): Result<Unit> {
-        return withTimeoutOrNull(10000L) {
-            syncMutex.withLock {
-                try {
-                    runInTransactionWithRetry {
-                        houseDao.deleteAll()
-                        dayActivityDao.deleteAll()
-                        tombstoneDao.deleteAll()
-                    }
-                    settingsManager.setLastSyncTimestamp(0L)
-                    Result.success(Unit)
-                } catch (e: Exception) {
-                    Result.failure(e)
-                }
+    private suspend fun clearLocalDataInternal(): Result<Unit> {
+        return try {
+            runInTransactionWithRetry {
+                houseDao.deleteAll()
+                dayActivityDao.deleteAll()
+                tombstoneDao.deleteAll()
+                database.customStreetDao().deleteAll()
+                database.agentCacheDao().clearAgents()
+                database.agentCacheDao().clearSummaries()
             }
-        } ?: Result.success(Unit) // If timeout, we proceed anyway but log would be better
+            settingsManager.setLastSyncTimestamp(0L)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            android.util.Log.e("SyncRepository", "Internal Wipe Failed: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun clearLocalData(): Result<Unit> {
+        return withTimeoutOrNull(15000L) {
+            syncMutex.withLock {
+                clearLocalDataInternal()
+            }
+        } ?: Result.failure(Exception("Tempo esgotado ao tentar limpar dados locais (Database busy)"))
     }
 
     override suspend fun performDataCleanup(): Result<Unit> {
@@ -661,32 +793,35 @@ class SyncRepositoryImpl @Inject constructor(
         val finalUid = agentUid ?: ""
         return try {
             runInTransactionWithRetry {
-                // Deduplicate Houses locally to prevent auto-generated ID duplicates.
-                // We group by the natural key and store a mutable list of existing IDs 
-                // to ensure a 1-to-1 mapping during restoration.
-                val localHouses = houseDao.getAllHouses(agentName, finalUid).first()
-                val localHouseGroups = localHouses.groupBy { it.generateNaturalKey() }
-                    .mapValues { (_, houses) -> houses.toMutableList() }
+                // 1. Identify all dates being restored (normalized)
+                val restoredDatesList = (houses.map { it.data.replace("/", "-") } + activities.map { it.date.replace("/", "-") }).distinct()
                 
+                // 2. Perform Atomic CLEANUP of local data for these dates FIRST
+                // This ensures a true "Full Replace" and prevents casing-based duplicates ("John Doe" vs "JOHN DOE")
+                // while avoiding self-deletion bugs.
+                if (restoredDatesList.isNotEmpty()) {
+                    android.util.Log.i("SyncRepository", "Restoration: Atomic purge of ${restoredDatesList.size} dates for $agentName")
+                    houseDao.deleteByAgentAndDates(agentName, finalUid, restoredDatesList)
+                    dayActivityDao.deleteByAgentAndDates(agentName, finalUid, restoredDatesList)
+                }
+
+                // 3. Normalize and Prepare Data
                 val normalizedActivities = activities.map { 
                     val finalAgentName = if (it.agentName.isNotBlank()) it.agentName else agentName
                     val normalized = it.copy(
                         agentName = finalAgentName.uppercase(),
                         agentUid = finalUid,
-                        date = it.date.replace("/", "-")
+                        date = it.date.replace("/", "-"),
+                        isSynced = false,
+                        lastUpdated = System.currentTimeMillis()
                     ) 
-                    // CRITICAL: Clear local tombstone for restored activity
+                    // Clear local tombstone for restored activity
                     tombstoneDao.deleteByNaturalKey("${normalized.date}|${normalized.agentName}", normalized.agentName, normalized.agentUid)
                     normalized
                 }
-                val housesToUpsert = mutableListOf<House>()
 
-                houses.forEach { restoredHouse ->
-                    val key = restoredHouse.generateNaturalKey()
-                    // 1-to-1 Mapping: Consume an existing ID if available for this specific key.
-                    // This prevents multiple houses from the backup overwriting the same local record.
+                val housesToUpsert = houses.map { restoredHouse ->
                     val finalAgentName = if (restoredHouse.agentName.isNotBlank()) restoredHouse.agentName else agentName
-                    val existingId = localHouseGroups[key]?.removeFirstOrNull()?.id ?: 0
                     
                     // Healing logic: Default EMPTY to NONE (Aberto) for restored data
                     val finalSituation = if (restoredHouse.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
@@ -694,38 +829,24 @@ class SyncRepositoryImpl @Inject constructor(
                     } else restoredHouse.situation
 
                     val finalHouse = restoredHouse.copy(
-                        id = existingId,
+                        id = 0, // Reset ID to allow auto-generation and prevent collision with unrelated local records
                         agentName = finalAgentName.uppercase(),
                         agentUid = finalUid,
                         data = restoredHouse.data.replace("/", "-"),
-                        situation = finalSituation
+                        situation = finalSituation,
+                        isSynced = false,
+                        lastUpdated = System.currentTimeMillis()
                     )
                     
-                    // CRITICAL: Clear local tombstone for restored house
+                    // Clear local tombstone for restored house
                     tombstoneDao.deleteByNaturalKey(finalHouse.generateNaturalKey(), finalHouse.agentName, finalHouse.agentUid)
                     
-                    housesToUpsert.add(finalHouse)
+                    finalHouse
                 }
 
+                // 4. Upsert Data
                 houseDao.upsertHouses(housesToUpsert)
                 dayActivityDao.upsertDayActivities(normalizedActivities)
-                
-                // Cleanup ghosts ONLY for the dates being restored
-                val restoredDates = (housesToUpsert.map { it.data.replace("/", "-") } + normalizedActivities.map { it.date.replace("/", "-") }).toSet()
-                
-                for ((key, matches) in localHouseGroups) {
-                    val houseDate = matches.firstOrNull()?.data?.replace("/", "-") ?: continue
-                    if (houseDate in restoredDates) {
-                        if (matches.isNotEmpty()) {
-                            val keptId = housesToUpsert.find { it.generateNaturalKey() == key }?.id
-                            for (house in matches) {
-                                if (house.id != keptId && house.id != 0) {
-                                    houseDao.deleteHouse(house)
-                                }
-                            }
-                        }
-                    }
-                }
             }
             
             Result.success(Unit)
@@ -737,7 +858,7 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun fetchSystemSettings(): Result<Map<String, Any>> {
         return try {
-            val snapshot = withTimeoutOrNull(1500) {
+            val snapshot = withTimeoutOrNull(5000) {
                 firestore.collection("metadata").document("settings")
                     .get().await()
             }
@@ -1078,4 +1199,41 @@ class SyncRepositoryImpl @Inject constructor(
         }
     }
     
+}
+
+private fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String): House? {
+    return try {
+        val house = this.toObject(House::class.java) ?: return null
+        // CRITICAL: Manually extract lastUpdated because it is @Excluded in the data model
+        // to prevent local timestamps from being pushed to Firestore.
+        val firestoreLastUpdated = this.getTimestamp("lastUpdated")?.toDate()?.time ?: house.lastUpdated
+        
+        house.copy(
+            agentUid = agentUid,
+            agentName = agentName.uppercase(),
+            data = (this.getString("data") ?: house.data).replace("/", "-"),
+            lastUpdated = firestoreLastUpdated
+        )
+    } catch (e: Exception) {
+        android.util.Log.e("SyncRepository", "toHouseSafe error for doc ${this.id}: ${e.message}")
+        null
+    }
+}
+
+private fun DocumentSnapshot.toDayActivitySafe(agentUid: String, agentName: String): DayActivity? {
+    return try {
+        val activity = this.toObject(DayActivity::class.java) ?: return null
+        // CRITICAL: Manually extract lastUpdated to bypass @Exclude
+        val firestoreLastUpdated = this.getTimestamp("lastUpdated")?.toDate()?.time ?: activity.lastUpdated
+        
+        activity.copy(
+            agentUid = agentUid,
+            agentName = agentName.uppercase(),
+            date = (this.getString("date") ?: activity.date).replace("/", "-"),
+            lastUpdated = firestoreLastUpdated
+        )
+    } catch (e: Exception) {
+        android.util.Log.e("SyncRepository", "toDayActivitySafe error for doc ${this.id}: ${e.message}")
+        null
+    }
 }

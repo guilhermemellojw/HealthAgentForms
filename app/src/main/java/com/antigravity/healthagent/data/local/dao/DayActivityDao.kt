@@ -58,7 +58,7 @@ interface DayActivityDao {
     @Query("DELETE FROM day_activities WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
     suspend fun deleteByAgent(agentName: String, agentUid: String)
 
-    @Query("DELETE FROM day_activities WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(date, '/', '-') IN (:dates)")
+    @Query("DELETE FROM day_activities WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(date, '/', '-') IN (:dates) AND isSynced = 1")
     suspend fun deleteByAgentAndDates(agentName: String, agentUid: String, dates: List<String>)
 
     @Query("SELECT COUNT(*) FROM day_activities WHERE isClosed = 0 AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
@@ -69,6 +69,9 @@ interface DayActivityDao {
 
     @Query("UPDATE day_activities SET agentName = :newName, isSynced = 0, lastUpdated = :now WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:oldName)))")
     suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE day_activities SET agentName = :properName, isSynced = 0, lastUpdated = :now WHERE agentUid = :uid AND agentName LIKE '%@%'")
+    suspend fun fixEmailNamesForUid(uid: String, properName: String, now: Long = System.currentTimeMillis())
 
     @Query("SELECT * FROM day_activities WHERE agentUid = '' OR agentUid IS NULL")
     suspend fun getAllOrphanActivities(): List<DayActivity>

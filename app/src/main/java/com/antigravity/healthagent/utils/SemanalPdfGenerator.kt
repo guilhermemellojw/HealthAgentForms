@@ -38,7 +38,7 @@ object SemanalPdfGenerator {
         val canvas = page.canvas
 
         // Hoist bitmap decoding
-        val logoVigilancia = try { BitmapFactory.decodeResource(context.resources, R.drawable.logo_vigilancia) } catch (e: Exception) { null }
+        val logoVigilancia = try { BitmapFactory.decodeResource(context.resources, R.drawable.logo_vigilancia_ambiental) } catch (e: Exception) { null }
         val logoGoverno = try { BitmapFactory.decodeResource(context.resources, R.drawable.governo_rj_logo) } catch (e: Exception) { null }
 
         try {
@@ -145,14 +145,14 @@ object SemanalPdfGenerator {
         val rightEdge = MARGIN_LEFT + tableWidth
 
         // LEFT SIDE: Logo and Municipality Info
-        val logoH = 55f
+        val logoH = 38f
         // Bitmaps are passed as arguments to avoid redundant decoding
         val actualLogo = logoVigilancia ?: logoGoverno
         
         if (actualLogo != null) {
             val logoW = (actualLogo.width.toFloat() / actualLogo.height.toFloat() * logoH)
             val logoX = MARGIN_LEFT // Start at table left edge
-            val logoY = cursorY + 15f
+            val logoY = cursorY + 12f
             val destRect = Rect(logoX.toInt(), logoY.toInt(), (logoX + logoW).toInt(), (logoY + logoH).toInt())
             canvas.drawBitmap(actualLogo, null, destRect, null)
         }
@@ -164,8 +164,8 @@ object SemanalPdfGenerator {
         canvas.drawText(secText, MARGIN_LEFT, cursorY + 19f, smallBold)
 
         // RIGHT SIDE: Titles
-        val titlePaint = Paint(boldPaint).apply { textSize = 22f }
-        val subTitlePaint = Paint(boldPaint).apply { textSize = 28f }
+        val titlePaint = Paint(boldPaint).apply { textSize = 20f }
+        val subTitlePaint = Paint(boldPaint).apply { textSize = 26f }
         val headerText1 = "Programa Municipal de Controle da Dengue"
         val headerText2 = "PMCD"
         

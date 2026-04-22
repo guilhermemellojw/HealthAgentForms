@@ -232,7 +232,7 @@ class HouseRepositoryImpl @Inject constructor(
         ensureDayNotLocked(house.data, house.agentName, house.agentUid, force)
         runInTransactionWithRetry {
             houseDao.deleteHouse(house)
-            tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = house.generateNaturalKey(), agentName = house.agentName, agentUid = house.agentUid))
+            tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = house.generateNaturalKey(), agentName = house.agentName, agentUid = house.agentUid, dataDate = house.data))
         }
         syncSchedulerProvider.get().scheduleSync()
     }
@@ -299,65 +299,60 @@ class HouseRepositoryImpl @Inject constructor(
     override suspend fun restoreAgentData(agentName: String, houses: List<House>, activities: List<DayActivity>, agentUid: String?) {
         val finalUid = agentUid ?: ""
         runInTransactionWithRetry {
-            // Deduplicate Houses locally to prevent auto-generated ID duplicates.
-            // We group by the natural key and store a mutable list of existing IDs 
-            // to ensure a 1-to-1 mapping during restoration.
-            val localHouses = houseDao.getAllHouses(agentName, finalUid).first()
-            val localHouseGroups = localHouses.groupBy { it.generateNaturalKey() }
-                .mapValues { (_, houses) -> houses.toMutableList() }
-            
-            val normalizedActivities = activities.map { 
-                it.copy(
-                    agentName = agentName.uppercase(),
-                    agentUid = finalUid,
-                    date = it.date.replace("/", "-")
-                ) 
+            // 1. Identify all dates being restored (normalized)
+            val restoredDatesList = (houses.map { it.data.replace("/", "-") } + activities.map { it.date.replace("/", "-") }).distinct()
+
+            // 2. Perform Atomic CLEANUP of local data for these dates FIRST
+            // This ensures a true "Full Replace" and prevents casing-based duplicates ("John Doe" vs "JOHN DOE")
+            // while avoiding self-deletion bugs.
+            if (restoredDatesList.isNotEmpty()) {
+                android.util.Log.i("HouseRepository", "Local Restoration: Atomic purge of ${restoredDatesList.size} dates for $agentName")
+                houseDao.deleteByAgentAndDates(agentName, finalUid, restoredDatesList)
+                dayActivityDao.deleteByAgentAndDates(agentName, finalUid, restoredDatesList)
             }
-            
-            // Restoration is a high-level repair operation. We bypass ensureDayNotLocked
-            // because if an admin or user is restoring a full backup, they intend to 
-            // overwrite the current local state regardless of its lock status.
-            // (Lock checks skipped intentionally for restoration)
 
-            val housesToUpsert = mutableListOf<House>()
+            // 3. Normalize and Prepare Data
+            val normalizedActivities = activities.map { 
+                val upperName = agentName.uppercase()
+                val normalized = it.copy(
+                    agentName = upperName,
+                    agentUid = finalUid,
+                    date = it.date.replace("/", "-"),
+                    isSynced = false,
+                    lastUpdated = System.currentTimeMillis()
+                ) 
+                // Clear local tombstone for restored activity
+                tombstoneDao.deleteByNaturalKey("${normalized.date}|${normalized.agentName}", normalized.agentName, normalized.agentUid)
+                normalized
+            }
 
-            houses.forEach { restoredHouse ->
-                val key = restoredHouse.generateNaturalKey()
-                // 1-to-1 Mapping: Consume an existing ID if available for this specific key.
-                // This prevents multiple houses from the backup overwriting the same local record.
-                val existingId = localHouseGroups[key]?.removeFirstOrNull()?.id ?: 0
+            val housesToUpsert = houses.map { restoredHouse ->
+                val upperName = agentName.uppercase()
                 
                 // Healing logic: Default EMPTY to NONE (Aberto) for restored data
                 val finalSituation = if (restoredHouse.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
                     com.antigravity.healthagent.data.local.model.Situation.NONE
                 } else restoredHouse.situation
 
-                housesToUpsert.add(restoredHouse.copy(
-                    id = existingId,
-                    agentName = agentName.uppercase(),
+                val finalHouse = restoredHouse.copy(
+                    id = 0, // Reset ID to allow auto-generation and prevent collision with unrelated local records
+                    agentName = upperName,
                     agentUid = finalUid,
                     data = restoredHouse.data.replace("/", "-"),
                     situation = finalSituation,
-                    isSynced = false, // Force re-sync after restoration
+                    isSynced = false,
                     lastUpdated = System.currentTimeMillis()
-                ))
+                )
+                
+                // Clear local tombstone for restored house
+                tombstoneDao.deleteByNaturalKey(finalHouse.generateNaturalKey(), finalHouse.agentName, finalHouse.agentUid)
+                
+                finalHouse
             }
 
+            // 4. Upsert Data
             houseDao.upsertHouses(housesToUpsert)
             dayActivityDao.upsertDayActivities(normalizedActivities)
-            
-            // Cleanup ghosts ONLY for the dates being restored
-            val restoredDates = (housesToUpsert.map { it.data.replace("/", "-") } + normalizedActivities.map { it.date.replace("/", "-") }).toSet()
-
-            for ((key, matches) in localHouseGroups) {
-                val houseDate = matches.firstOrNull()?.data?.replace("/", "-") ?: continue
-                if (houseDate in restoredDates) {
-                    if (matches.isNotEmpty()) {
-                        val keptId = housesToUpsert.find { it.generateNaturalKey() == key }?.id
-                        matches.forEach { house -> if (house.id != keptId && house.id != 0) houseDao.deleteHouse(house) }
-                    }
-                }
-            }
         }
         syncSchedulerProvider.get().scheduleSync()
     }
@@ -396,9 +391,9 @@ class HouseRepositoryImpl @Inject constructor(
         runInTransactionWithRetry {
             // 1. Get all houses and activities for these dates to record tombstones
             val housesToDelete = houseDao.getHousesByAgentAndDates(upperName, finalUid, dates)
-            val houseTombstones = housesToDelete.map { Tombstone(type = TombstoneType.HOUSE, naturalKey = it.generateNaturalKey(), agentName = it.agentName, agentUid = it.agentUid) }
+            val houseTombstones = housesToDelete.map { Tombstone(type = TombstoneType.HOUSE, naturalKey = it.generateNaturalKey(), agentName = it.agentName, agentUid = it.agentUid, dataDate = it.data) }
             
-            val activityTombstones = dates.map { Tombstone(type = TombstoneType.ACTIVITY, naturalKey = "$it|$upperName", agentName = upperName, agentUid = finalUid) }
+            val activityTombstones = dates.map { Tombstone(type = TombstoneType.ACTIVITY, naturalKey = "$it|$upperName", agentName = upperName, agentUid = finalUid, dataDate = it) }
             
             // 2. Perform Deletions
             dayActivityDao.deleteByAgentAndDates(upperName, finalUid, dates)
@@ -469,7 +464,14 @@ class HouseRepositoryImpl @Inject constructor(
             try {
                 // 0. If current name is email prefix and we have a better name, migrate local records
                 val emailPrefix = email.substringBefore("@").uppercase()
-                val properName = agentName.trim().uppercase().ifBlank { emailPrefix }
+                val properName = agentName.trim().ifBlank { emailPrefix }.uppercase()
+                
+                // CRITICAL IMPROVEMENT: Fix any records that have an email as agentName if we have a proper name (Bug Fix #11)
+                if (properName.isNotBlank() && !properName.contains("@")) {
+                    houseDao.fixEmailNamesForUid(targetUid, properName)
+                    dayActivityDao.fixEmailNamesForUid(targetUid, properName)
+                }
+
                 if (properName.isNotBlank() && properName != emailPrefix) {
                     houseDao.updateAgentNameForAll(emailPrefix, properName, targetUid)
                     dayActivityDao.updateAgentNameForAll(emailPrefix, properName, targetUid)
@@ -529,6 +531,15 @@ class HouseRepositoryImpl @Inject constructor(
             } catch (e: Exception) {
                 android.util.Log.e("HouseRepository", "Error during migration", e)
             }
+        }
+    }
+
+    override suspend fun fixEmailNamesForUid(uid: String, properName: String) {
+        if (uid.isBlank() || properName.isBlank()) return
+        runInTransactionWithRetry {
+            val upperName = properName.trim().uppercase()
+            houseDao.fixEmailNamesForUid(uid, upperName)
+            dayActivityDao.fixEmailNamesForUid(uid, upperName)
         }
     }
 

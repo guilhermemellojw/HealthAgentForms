@@ -17,7 +17,11 @@ data class BackupData(
     @SerializedName("houses")
     val houses: List<House>,
     @SerializedName("dayActivities", alternate = ["day_activities"])
-    val dayActivities: List<DayActivity> = emptyList()
+    val dayActivities: List<DayActivity> = emptyList(),
+    @SerializedName("sourceAgentUid")
+    val sourceAgentUid: String? = null,
+    @SerializedName("sourceAgentName")
+    val sourceAgentName: String? = null
 )
 
 class BackupManager @Inject constructor() {
@@ -95,7 +99,7 @@ class BackupManager @Inject constructor() {
                         val sanitizedHouses = sanitizeHouses(rawHouses)
                         val sanitizedActivities = sanitizeActivities(rawActivities)
                         
-                        BackupData(sanitizedHouses, sanitizedActivities)
+                        BackupData(sanitizedHouses, sanitizedActivities, backupData?.sourceAgentUid, backupData?.sourceAgentName)
                     }
                     '[' -> {
                         val typeList = object : TypeToken<List<House>>() {}.type

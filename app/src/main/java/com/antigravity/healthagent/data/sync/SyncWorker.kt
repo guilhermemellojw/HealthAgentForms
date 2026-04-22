@@ -61,6 +61,13 @@ class SyncWorker @AssistedInject constructor(
                 return Result.success()
             }
 
+            // Perform a background PULL before PUSH to ensure local state is reconciled with cloud edits
+            // (e.g. supervisor corrections) before we push our own updates.
+            val pullResult = syncRepository.pullCloudDataToLocal(uid)
+            if (pullResult.isFailure) {
+                Log.w("SyncWorker", "Background pull failed: ${pullResult.exceptionOrNull()?.message}. Proceeding with push anyway.")
+            }
+
             val result = syncRepository.pushLocalDataToCloud(houses, activities, uid)
             
             if (result.isSuccess) {

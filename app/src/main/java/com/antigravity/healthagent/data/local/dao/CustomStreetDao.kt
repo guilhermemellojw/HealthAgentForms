@@ -14,4 +14,7 @@ interface CustomStreetDao {
 
     @Delete
     suspend fun deleteCustomStreet(street: CustomStreet)
+
+    @Query("DELETE FROM custom_streets")
+    suspend fun deleteAll()
 }
