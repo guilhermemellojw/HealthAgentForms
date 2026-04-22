@@ -944,152 +944,153 @@ fun HomeScreen(
                     key = { _, state -> state.house.id },
                     contentType = { _, _ -> "house" }
                 ) { index, houseState ->
-                    if (index == 0 && !isSearchActive && !uiState.isDayClosed && (!uiState.isSupervisor || uiState.isAdmin)) {
-                        Spacer(Modifier.height(8.dp))
-                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            AddBetweenButton(
-                                onClick = { viewModel.addNewHouseAt(-1) }
-                            )
+                    Column {
+                        if (index == 0 && !isSearchActive && !uiState.isDayClosed && (!uiState.isSupervisor || uiState.isAdmin)) {
+                            Spacer(Modifier.height(8.dp))
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                AddBetweenButton(
+                                    onClick = { viewModel.addNewHouseAt(-1) }
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        } else if (index == 0) {
+                            Spacer(Modifier.height(10.dp))
                         }
-                        Spacer(Modifier.height(8.dp))
-                    } else if (index == 0) {
-                        Spacer(Modifier.height(10.dp))
-                    }
 
-                    val house = houseState.house
-                    val isDragging = house.id == draggingHouse?.house?.id
-                    
-                    Box(
-                        modifier = Modifier
-                            .let {
-                                if (isReorderMode) it.animateItemPlacement() else it
-                            }
-                            .graphicsLayer {
-                                alpha = if (isDragging) 0f else 1f
-                            }
-                            .let {
-                                if (!uiState.isEasyMode && !uiState.isDayClosed) {
-                                    it.pointerInput(house.id) {
-                                        detectDragGesturesAfterLongPress(
-                                            onDragStart = { offset ->
-                                                val visibleItems = listState.layoutInfo.visibleItemsInfo
-                                                val currentHouse = uiHouses.find { it.house.id == house.id }
-                                                val index = if (currentHouse != null) uiHouses.indexOf(currentHouse) + 1 else -1
-                                                val itemInfo = visibleItems.find { it.index == index }
-                                                
-                                                if (itemInfo != null && currentHouse != null) {
-                                                    draggingHouse = currentHouse
-                                                    isReorderMode = true
-                                                    initialTouchY = offset.y
-                                                    ghostY = itemInfo.offset.toFloat()
-                                                }
-                                            },
-                                            onDrag = { change, dragAmount ->
-                                                change.consume()
-                                                ghostY += dragAmount.y
-                                                checkForOverScroll(ghostY)
-                                                val visibleItems = listState.layoutInfo.visibleItemsInfo
-                                                visibleItems.forEach { candidate ->
-                                                    if (candidate.index == 0) return@forEach
-                                                    val fingerY = ghostY + initialTouchY
-                                                    val triggerZoneTop = candidate.offset
-                                                    val triggerZoneBottom = candidate.offset + candidate.size
-                                                    if (fingerY > triggerZoneTop && fingerY < triggerZoneBottom) {
-                                                        val candidateIndexInList = candidate.index - 1
-                                                        val currentHouse = uiHouses.find { it.house.id == house.id }
-                                                        if (currentHouse != null) {
-                                                            val currentIndex = uiHouses.indexOf(currentHouse)
-                                                            if (currentIndex != -1 && candidateIndexInList != currentIndex && candidateIndexInList in uiHouses.indices) {
-                                                                uiHouses.removeAt(currentIndex)
-                                                                uiHouses.add(candidateIndexInList, currentHouse)
+                        val house = houseState.house
+                        val isDragging = house.id == draggingHouse?.house?.id
+                        
+                        Box(
+                            modifier = Modifier
+                                .let {
+                                    if (isReorderMode) it.animateItemPlacement() else it
+                                }
+                                .graphicsLayer {
+                                    alpha = if (isDragging) 0f else 1f
+                                }
+                                .let {
+                                    if (!uiState.isEasyMode && !uiState.isDayClosed) {
+                                        it.pointerInput(house.id) {
+                                            detectDragGesturesAfterLongPress(
+                                                onDragStart = { offset ->
+                                                    val visibleItems = listState.layoutInfo.visibleItemsInfo
+                                                    val currentHouse = uiHouses.find { it.house.id == house.id }
+                                                    val index = if (currentHouse != null) uiHouses.indexOf(currentHouse) + 1 else -1
+                                                    val itemInfo = visibleItems.find { it.index == index }
+                                                    
+                                                    if (itemInfo != null && currentHouse != null) {
+                                                        draggingHouse = currentHouse
+                                                        isReorderMode = true
+                                                        initialTouchY = offset.y
+                                                        ghostY = itemInfo.offset.toFloat()
+                                                    }
+                                                },
+                                                onDrag = { change, dragAmount ->
+                                                    change.consume()
+                                                    ghostY += dragAmount.y
+                                                    checkForOverScroll(ghostY)
+                                                    val visibleItems = listState.layoutInfo.visibleItemsInfo
+                                                    visibleItems.forEach { candidate ->
+                                                        if (candidate.index == 0) return@forEach
+                                                        val fingerY = ghostY + initialTouchY
+                                                        val triggerZoneTop = candidate.offset
+                                                        val triggerZoneBottom = candidate.offset + candidate.size
+                                                        if (fingerY > triggerZoneTop && fingerY < triggerZoneBottom) {
+                                                            val candidateIndexInList = candidate.index - 1
+                                                            val currentHouse = uiHouses.find { it.house.id == house.id }
+                                                            if (currentHouse != null) {
+                                                                val currentIndex = uiHouses.indexOf(currentHouse)
+                                                                if (currentIndex != -1 && candidateIndexInList != currentIndex && candidateIndexInList in uiHouses.indices) {
+                                                                    uiHouses.removeAt(currentIndex)
+                                                                    uiHouses.add(candidateIndexInList, currentHouse)
+                                                                }
                                                             }
                                                         }
                                                     }
+                                                },
+                                                onDragEnd = {
+                                                    draggingHouse = null
+                                                    ghostY = 0f
+                                                    overscrollJob?.cancel()
+                                                    viewModel.persistListOrder(uiHouses.map { it.house }.toList())
+                                                },
+                                                onDragCancel = {
+                                                    draggingHouse = null
+                                                    ghostY = 0f
+                                                    overscrollJob?.cancel()
+                                                    uiHouses.clear()
+                                                    uiHouses.addAll(uiState.houses)
                                                 }
-                                            },
-                                            onDragEnd = {
-                                                draggingHouse = null
-                                                ghostY = 0f
-                                                overscrollJob?.cancel()
-                                                viewModel.persistListOrder(uiHouses.map { it.house }.toList())
-                                            },
-                                            onDragCancel = {
-                                                draggingHouse = null
-                                                ghostY = 0f
-                                                overscrollJob?.cancel()
-                                                uiHouses.clear()
-                                                uiHouses.addAll(uiState.houses)
-                                            }
-                                        )
-                                    }
-                                } else it
-                            }
-                    ) {
-                    Box {
-                    val onUpdate = remember(viewModel, house.id) { { h: House -> viewModel.updateHouse(h); Unit } }
-                    val onDelete = remember(viewModel, house.id) {
-                        { h: House ->
-                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                            viewModel.deleteHouse(h)
-                            scope.launch {
-                                val result = snackbarHostState.showSnackbar(
-                                    message = "Imóvel removido",
-                                    actionLabel = "Desfazer",
-                                    duration = SnackbarDuration.Short
-                                )
-                                if (result == SnackbarResult.ActionPerformed) {
-                                    viewModel.restoreDeletedHouse()
+                                            )
+                                        }
+                                    } else it
                                 }
+                        ) {
+                        val onUpdate = remember(viewModel, house.id) { { h: House -> viewModel.updateHouse(h); Unit } }
+                        val onDelete = remember(viewModel, house.id) {
+                            { h: House ->
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                viewModel.deleteHouse(h)
+                                scope.launch {
+                                    val result = snackbarHostState.showSnackbar(
+                                        message = "Imóvel removido",
+                                        actionLabel = "Desfazer",
+                                        duration = SnackbarDuration.Short
+                                    )
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        viewModel.restoreDeletedHouse()
+                                    }
+                                }
+                                Unit
                             }
-                            Unit
                         }
-                    }
-                    val onMoveUp = remember(viewModel, house.id) { { viewModel.moveHouse(house, moveUp = true); Unit } }
-                    val onMoveDown = remember(viewModel, house.id) { { viewModel.moveHouse(house, moveUp = false); Unit } }
-                    val onEnableReorder = remember(viewModel, uiState.isEasyMode, house.id) {
-                        {
-                            isReorderMode = !isReorderMode
-                            if (isReorderMode) haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                            Unit
+                        val onMoveUp = remember(viewModel, house.id) { { viewModel.moveHouse(house, moveUp = true); Unit } }
+                        val onMoveDown = remember(viewModel, house.id) { { viewModel.moveHouse(house, moveUp = false); Unit } }
+                        val onEnableReorder = remember(viewModel, uiState.isEasyMode, house.id) {
+                            {
+                                isReorderMode = !isReorderMode
+                                if (isReorderMode) haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                Unit
+                            }
                         }
-                    }
-                    val onMoveDate = remember(viewModel, house.id) {
-                        {
-                            houseToMove = house
-                            showMoveDatePicker = true
-                            Unit
+                        val onMoveDate = remember(viewModel, house.id) {
+                            {
+                                houseToMove = house
+                                showMoveDatePicker = true
+                                Unit
+                            }
                         }
-                    }
-                    
-                    val focusRequester = remember(house.id) { focusRequesters.getOrPut(house.id) { androidx.compose.ui.focus.FocusRequester() } }
-                    HouseRowItem(
-                        houseState = houseState,
-                        onUpdate = onUpdate,
-                        onDelete = onDelete,
-                        isReorderMode = isReorderMode,
-                        onMoveUp = onMoveUp,
-                        onMoveDown = onMoveDown,
-                        onEnableReorder = onEnableReorder,
-                        onMoveDate = onMoveDate,
-                        streetSuggestions = streetSuggestions,
-                        isEasyMode = uiState.isEasyMode,
-                        isSolarMode = uiState.isSolarMode,
-                        focusRequester = focusRequester,
-                        onGetLocation = onGetLocation,
-                        enabled = if (uiState.isSupervisor) uiState.isAdmin else (!uiState.isDayClosed || uiState.isManualUnlock)
-                    )
-                    }
+                        
+                        val focusRequester = remember(house.id) { focusRequesters.getOrPut(house.id) { androidx.compose.ui.focus.FocusRequester() } }
+                        HouseRowItem(
+                            houseState = houseState,
+                            onUpdate = onUpdate,
+                            onDelete = onDelete,
+                            isReorderMode = isReorderMode,
+                            onMoveUp = onMoveUp,
+                            onMoveDown = onMoveDown,
+                            onEnableReorder = onEnableReorder,
+                            onMoveDate = onMoveDate,
+                            streetSuggestions = streetSuggestions,
+                            isEasyMode = uiState.isEasyMode,
+                            isSolarMode = uiState.isSolarMode,
+                            focusRequester = focusRequester,
+                            onGetLocation = onGetLocation,
+                            enabled = if (uiState.isSupervisor) uiState.isAdmin else (!uiState.isDayClosed || uiState.isManualUnlock)
+                        )
+                        }
 
-                    if (!isSearchActive && !uiState.isDayClosed && (!uiState.isSupervisor || uiState.isAdmin)) {
-                        Spacer(Modifier.height(8.dp))
-                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            AddBetweenButton(
-                                onClick = { viewModel.addNewHouseAt(houseState.house.id) }
-                            )
+                        if (!isSearchActive && !uiState.isDayClosed && (!uiState.isSupervisor || uiState.isAdmin)) {
+                            Spacer(Modifier.height(8.dp))
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                AddBetweenButton(
+                                    onClick = { viewModel.addNewHouseAt(houseState.house.id) }
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        } else {
+                            Spacer(Modifier.height(10.dp))
                         }
-                        Spacer(Modifier.height(8.dp))
-                    } else {
-                        Spacer(Modifier.height(10.dp))
                     }
                 }
                 }
@@ -1131,7 +1132,6 @@ fun HomeScreen(
                     haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                 }
             }
-        }
         }
     }
 }
