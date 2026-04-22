@@ -102,9 +102,10 @@ data class House(
         val normalizedBlockSeq = blockSequence.normalize()
         val normalizedNumber = number.normalize()
         
-        // Identity is Agent + Day + Block + BlockSeq + Number + Seq + Complement + Bairro + Segment.
+        // Identity is Agent + Day + Block + BlockSeq + Number + Seq + Complement + Bairro.
         // We include municipio and categoria to further stabilize the identity across corrections.
-        return "${agentUid}_${normalizedDate}_${normalizedBlock}_${normalizedBlockSeq}_${normalizedNumber}_${sequence}_${complement}_${normalizedBairro}_${visitSegment}_${municipio.normalize()}_${categoria.normalize()}".uppercase()
+        // NOTE: visitSegment is intentionally excluded to allow identity healing across segment recalculations.
+        return "${agentUid}_${normalizedDate}_${normalizedBlock}_${normalizedBlockSeq}_${normalizedNumber}_${sequence}_${complement}_${normalizedBairro}_${municipio.normalize()}_${categoria.normalize()}".uppercase()
     }
 
 

@@ -244,6 +244,7 @@ fun SettingsScreen(
 
     val isEasyMode by viewModel.easyMode.collectAsState()
     val isSolarMode by viewModel.solarMode.collectAsState()
+    val isEditingToolsEnabled by viewModel.editingToolsMode.collectAsState()
     
     val itemContainerColor = if (isSolarMode) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
     val itemBorderColor = if (isSolarMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
@@ -466,6 +467,33 @@ fun SettingsScreen(
                                 Switch(
                                     checked = isSolarMode,
                                     onCheckedChange = { viewModel.updateSolarMode(it) },
+                                    modifier = Modifier.scale(0.8f)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        // Ferramentas de Edição card
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().clickable { viewModel.updateEditingToolsMode(!isEditingToolsEnabled) },
+                            color = itemContainerColor,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, itemBorderColor)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Outlined.Edit, null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Ferramentas de Edição", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                                    Text("Habilitar botões de inserção rápida entre imóveis", style = MaterialTheme.typography.bodySmall)
+                                }
+                                Switch(
+                                    checked = isEditingToolsEnabled,
+                                    onCheckedChange = { viewModel.updateEditingToolsMode(it) },
                                     modifier = Modifier.scale(0.8f)
                                 )
                             }

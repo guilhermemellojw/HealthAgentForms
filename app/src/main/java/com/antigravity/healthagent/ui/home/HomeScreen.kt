@@ -9,18 +9,15 @@ import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -33,12 +30,9 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.model.LatLng
 import com.antigravity.healthagent.data.local.model.House
-import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.ui.components.*
 import com.antigravity.healthagent.ui.home.components.*
-import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.ui.components.ProductionProgressBar
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.*
 import androidx.compose.animation.AnimatedContent
@@ -119,11 +113,8 @@ fun HomeScreen(
     val validationErrors by viewModel.validationErrorDetails.collectAsState()
     val scrollToHouseId by viewModel.scrollToHouseId.collectAsState()
     
-    // Logic: Only show error dialogs if App Mode is selected
-    // This prevents errors from interrupting the onboarding flow
-    val areDialogsAllowed = (uiState.isAppModeSelected == true)
  
-    if (areDialogsAllowed && integrityDialogMessage != null) {
+    if (integrityDialogMessage != null) {
         ValidationErrorsDialog(
             errors = validationErrors,
             onHouseClick = { id -> viewModel.onHouseClick(id) },
@@ -132,7 +123,7 @@ fun HomeScreen(
         )
     }
  
-    if (areDialogsAllowed && showMultiDayErrorDialog) {
+    if (showMultiDayErrorDialog) {
         MultiDayErrorDialog(
             daysWithErrors = daysWithErrors,
             onNavigateToDay = { viewModel.navigateToErroneousDay(it) },
@@ -925,7 +916,7 @@ fun HomeScreen(
                     item {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                             Spacer(Modifier.height(16.dp))
-                            if (!isSearchActive && !uiState.isDayClosed && (!uiState.isSupervisor || uiState.isAdmin)) {
+                            if (!isSearchActive && uiState.isEditingToolsEnabled && (uiState.isAdmin || (!uiState.isDayClosed || uiState.isManualUnlock) && !uiState.isSupervisor)) {
                                 AddBetweenButton(onClick = { viewModel.addNewHouseAt(-1) })
                                 Spacer(Modifier.height(16.dp))
                             }
@@ -945,7 +936,7 @@ fun HomeScreen(
                     contentType = { _, _ -> "house" }
                 ) { index, houseState ->
                     Column {
-                        if (index == 0 && !isSearchActive && !uiState.isDayClosed && (!uiState.isSupervisor || uiState.isAdmin)) {
+                        if (index == 0 && !isSearchActive && uiState.isEditingToolsEnabled && (uiState.isAdmin || (!uiState.isDayClosed || uiState.isManualUnlock) && !uiState.isSupervisor)) {
                             Spacer(Modifier.height(8.dp))
                             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 AddBetweenButton(
@@ -1080,7 +1071,7 @@ fun HomeScreen(
                         )
                         }
 
-                        if (!isSearchActive && !uiState.isDayClosed && (!uiState.isSupervisor || uiState.isAdmin)) {
+                        if (!isSearchActive && uiState.isEditingToolsEnabled && (uiState.isAdmin || (!uiState.isDayClosed || uiState.isManualUnlock) && !uiState.isSupervisor)) {
                             Spacer(Modifier.height(8.dp))
                             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 AddBetweenButton(

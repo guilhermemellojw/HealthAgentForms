@@ -236,14 +236,6 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
             )
         }
 
-        val isAppModeSelected by homeViewModel.isAppModeSelected.collectAsState()
-        if (isAppModeSelected == false && !isSupervisor) {
-            com.antigravity.healthagent.ui.components.AppModeSelectionDialog(
-                onModeSelected = { isEasy ->
-                    homeViewModel.selectAppMode(isEasy)
-                }
-            )
-        }
 
         Scaffold(
             topBar = {

@@ -64,6 +64,7 @@ data class HomeUiState(
     val rgBairros: List<String> = emptyList(),
     val isEasyMode: Boolean = false,
     val isSolarMode: Boolean = false,
+    val isEditingToolsEnabled: Boolean = false,
     val maxOpenHouses: Int = 25,
     val syncStatus: SyncStatus = SyncStatus(),
     val backupConfirmation: BackupConfirmation? = null,

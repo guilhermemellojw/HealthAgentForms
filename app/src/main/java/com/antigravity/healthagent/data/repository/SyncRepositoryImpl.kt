@@ -249,7 +249,8 @@ class SyncRepositoryImpl @Inject constructor(
                             }
                             
                             if (toDelete.isNotEmpty()) {
-                                android.util.Log.i("SyncRepository", "Cloud Deduplication: Purging ${toDelete.size} ghost records for $date")
+                                val purgedKeys = toDelete.joinToString { it.id }
+                                android.util.Log.i("SyncRepository", "Cloud Deduplication: Purging ${toDelete.size} ghost records for $date. Keys: $purgedKeys")
                                 toDelete.chunked(400).forEach { chunk ->
                                     val delBatch = firestore.batch()
                                     chunk.forEach { delBatch.delete(it.reference) }
@@ -570,8 +571,18 @@ class SyncRepositoryImpl @Inject constructor(
                 } catch (e: Exception) { emptySet() }
             } else emptySet()
 
+            // Create a set of Identity Keys from cloudDeletedHouses to catch shifted "ghost" keys
+            val cloudDeletedIdentities = cloudDeletedHouses.mapNotNull { deletedKey ->
+                val parts = deletedKey.split("|")
+                if (parts.size >= 10) {
+                    // Identity Key format: DATE|BAIRRO|BLOCK|BSEQ|STREET|NUM|SEQ|COMP
+                    "${parts[0]}|${parts[8]}|${parts[2]}|${parts[3]}|${parts[4]}|${parts[5]}|${parts[6]}|${parts[7]}"
+                } else null
+            }.toSet()
+
             val housesToDelete = allLocalHouses.filter { house ->
                 val key = house.generateNaturalKey()
+                val identityKey = house.generateIdentityKey()
                 
                 // BUG FIX: Only delete local houses if they are already marked as synced. 
                 // EXCEPTION 1: If the house is in cloudDeletedHouses and the local lastUpdated is significantly
@@ -580,12 +591,16 @@ class SyncRepositoryImpl @Inject constructor(
                 // was last updated more than 15 minutes ago, we assume the Admin has priority and delete it even if unsynced.
                 val dateKey = "${house.data.replace("/", "-")}|${house.agentName.uppercase()}"
                 
-                if (key in cloudDeletedHouses || dateKey in cloudDeletedActivities) {
-                    if (house.isSynced) true
-                    else {
-                        // AGENT PRIORITY: Protect all unsynced work regardless of age.
-                        // This prevents unauthorized deletions of historical or failed-sync data.
-                        android.util.Log.i("SyncRepository", "Agent Priority: Preserving unsynced house ${house.id} despite cloud deletion.")
+                if (key in cloudDeletedHouses || identityKey in cloudDeletedIdentities || dateKey in cloudDeletedActivities) {
+                    val timeSinceLastUpdate = System.currentTimeMillis() - house.lastUpdated
+                    if (house.isSynced) {
+                        true
+                    } else if (timeSinceLastUpdate > 900000L) { // 15 mins (Admin Authority / Ghost Cleanup)
+                        android.util.Log.i("SyncRepository", "Admin Authority / Ghost Cleanup: Deleting unsynced house ${house.id} due to cloud deletion.")
+                        true
+                    } else {
+                        // AGENT PRIORITY: Protect actively typed unsynced work.
+                        android.util.Log.i("SyncRepository", "Agent Priority: Preserving actively typed house ${house.id} despite cloud deletion.")
                         false
                     }
                 } else false
@@ -606,9 +621,14 @@ class SyncRepositoryImpl @Inject constructor(
                 val dateKey = "${activity.date}|${activity.agentName.uppercase()}"
                 
                 if (dateKey in cloudDeletedActivities) {
-                    if (activity.isSynced) true
-                    else {
-                        android.util.Log.i("SyncRepository", "Agent Priority: Preserving unsynced activity ${activity.date} despite cloud deletion.")
+                    val timeSinceLastUpdate = System.currentTimeMillis() - activity.lastUpdated
+                    if (activity.isSynced) {
+                        true
+                    } else if (timeSinceLastUpdate > 900000L) { // 15 mins
+                        android.util.Log.i("SyncRepository", "Admin Authority / Ghost Cleanup: Deleting unsynced activity ${activity.date} due to cloud deletion.")
+                        true
+                    } else {
+                        android.util.Log.i("SyncRepository", "Agent Priority: Preserving actively typed activity ${activity.date} despite cloud deletion.")
                         false
                     }
                 } else false
@@ -624,15 +644,41 @@ class SyncRepositoryImpl @Inject constructor(
             runInTransactionWithRetry {
                 // Delete Houses
                 if (housesToDelete.isNotEmpty()) {
+                    val tombstonesToInsert = mutableListOf<com.antigravity.healthagent.data.local.model.Tombstone>()
                     for (house in housesToDelete) {
                         houseDao.deleteHouse(house)
+                        tombstonesToInsert.add(
+                            com.antigravity.healthagent.data.local.model.Tombstone(
+                                type = com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE,
+                                naturalKey = house.generateNaturalKey(),
+                                agentName = house.agentName,
+                                agentUid = house.agentUid,
+                                dataDate = house.data
+                            )
+                        )
+                    }
+                    if (tombstonesToInsert.isNotEmpty()) {
+                        tombstoneDao.insertTombstones(tombstonesToInsert)
                     }
                 }
 
                 // Delete Activities
                 if (activitiesToDelete.isNotEmpty()) {
+                    val tombstonesToInsert = mutableListOf<com.antigravity.healthagent.data.local.model.Tombstone>()
                     for (activity in activitiesToDelete) {
                         dayActivityDao.deleteDayActivity(activity.date, activity.agentName, activity.agentUid)
+                        tombstonesToInsert.add(
+                            com.antigravity.healthagent.data.local.model.Tombstone(
+                                type = com.antigravity.healthagent.data.local.model.TombstoneType.ACTIVITY,
+                                naturalKey = "${activity.date.replace("/", "-")}|${activity.agentName.uppercase()}",
+                                agentName = activity.agentName,
+                                agentUid = activity.agentUid,
+                                dataDate = activity.date
+                            )
+                        )
+                    }
+                    if (tombstonesToInsert.isNotEmpty()) {
+                        tombstoneDao.insertTombstones(tombstonesToInsert)
                     }
                 }
 
@@ -655,15 +701,35 @@ class SyncRepositoryImpl @Inject constructor(
                         
                         if (existing != null) {
                             android.util.Log.i("SyncRepository", "Identity Healing: Stabilized key shift for house ${existing.id} ($key)")
+                        } else {
+                            // DAY-LOCK ENFORCEMENT
+                            // If it's a completely new house (no natural key, no identity key match),
+                            // we must check if the day is locked locally. If it is, we block the pull
+                            // to prevent "zombie" or duplicate ghost houses from reappearing on finished days,
+                            // UNLESS the pull is triggered by an Admin (shouldReplace = true).
+                            val normalizedDate = cloudHouse.data.replace("/", "-")
+                            val dateKey = "$normalizedDate|$finalAgentName"
+                            val dayActivity = localActivities[dateKey]?.firstOrNull()
+                            val cloudActivity = activitiesDelta.find { it.date.replace("/", "-") == normalizedDate }
+                            
+                            val isCloudUnlocked = cloudActivity?.isManualUnlock == true
+                            val isLocallyClosed = dayActivity?.isClosed == true && dayActivity.isManualUnlock != true
+                            
+                            // Multi-device safety: If the day is locked locally but was UNLOCKED in the cloud (e.g. from another device), allow the pull.
+                            if (isLocallyClosed && !isCloudUnlocked && !cloudHouse.editedByAdmin && !isTargetDifferentUser) {
+                                android.util.Log.w("SyncRepository", "Blocked Pull: Prevented creation of new house ($key) because day $normalizedDate is LOCKED locally and not unlocked in cloud.")
+                                return@mapNotNull null
+                            }
                         }
                     }
 
                     // CONFLICT RESOLUTION: Last Side to Change Wins (LWW)
                     if (existing != null && !existing.isSynced) {
-                        // Priority 1: Admin Authority. 
-                        // If cloud record was edited by admin, it OVERWRITES local change immediately 
-                        // unless the local record was also edited by an Admin and is newer.
-                        val isAdminOverride = cloudHouse.editedByAdmin && (!existing.editedByAdmin || cloudHouse.lastUpdated > existing.lastUpdated)
+                        // Priority 1: Admin Authority with Typing Protection. 
+                        // If cloud record was edited by admin, it OVERWRITES local change 
+                        // UNLESS the agent typed within the last 2 minutes.
+                        val isAdminOverride = cloudHouse.editedByAdmin && !existing.editedByAdmin && 
+                            (System.currentTimeMillis() - existing.lastUpdated > 120000L) // 2 mins typing protection
 
                         if (isAdminOverride) {
                             android.util.Log.i("SyncRepository", "Admin Authority: Priority overwrite for house ${existing.id} ($key)")

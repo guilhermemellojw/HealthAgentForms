@@ -35,6 +35,7 @@ class SettingsManager @Inject constructor(
     private val WARNING_SOUND_KEY = stringPreferencesKey("warning_sound")
     private val EASY_MODE_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("easy_mode")
     private val SOLAR_MODE_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("solar_mode")
+    private val EDITING_TOOLS_MODE_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("editing_tools_mode")
     private val REMOTE_AGENT_UID_KEY = stringPreferencesKey("remote_agent_uid")
     private val LAST_SYNC_TIMESTAMP_KEY = androidx.datastore.preferences.core.longPreferencesKey("last_sync_timestamp")
     
@@ -105,6 +106,12 @@ class SettingsManager @Inject constructor(
         .catch { emit(androidx.datastore.preferences.core.emptyPreferences()) }
         .map { preferences ->
             preferences[SOLAR_MODE_KEY] ?: false
+        }
+
+    val editingToolsMode: Flow<Boolean> = context.dataStore.data
+        .catch { emit(androidx.datastore.preferences.core.emptyPreferences()) }
+        .map { preferences ->
+            preferences[EDITING_TOOLS_MODE_KEY] ?: false
         }
 
     val themeMode: Flow<String> = context.dataStore.data
@@ -201,21 +208,16 @@ class SettingsManager @Inject constructor(
         }
     }
 
-
-
-    private val IS_APP_MODE_SELECTED_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("is_app_mode_selected_v3")
-
-    val isAppModeSelected: Flow<Boolean> = context.dataStore.data
-        .catch { emit(androidx.datastore.preferences.core.emptyPreferences()) }
-        .map { preferences ->
-            preferences[IS_APP_MODE_SELECTED_KEY] ?: false
-        }
-
-    suspend fun setAppModeSelected(selected: Boolean) {
+    suspend fun setEditingToolsMode(enabled: Boolean) {
         context.dataStore.edit { preferences ->
-            preferences[IS_APP_MODE_SELECTED_KEY] = selected
+            preferences[EDITING_TOOLS_MODE_KEY] = enabled
         }
     }
+
+
+
+
+
 
     val remoteAgentUid: Flow<String?> = context.dataStore.data
         .catch { emit(emptyPreferences()) }
@@ -287,7 +289,6 @@ class SettingsManager @Inject constructor(
             preferences.remove(CACHED_USER_AGENT_NAME_KEY)
 
             // Reset other temporary session state if any
-            preferences[IS_APP_MODE_SELECTED_KEY] = false 
         }
     }
 }

@@ -172,13 +172,12 @@ class HomeViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val solarMode: StateFlow<Boolean> = settingsManager.solarMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val editingToolsMode: StateFlow<Boolean> = settingsManager.editingToolsMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val maxOpenHouses: StateFlow<Int> = settingsManager.maxOpenHouses
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 25)
     val backupFrequency: StateFlow<com.antigravity.healthagent.data.backup.BackupFrequency> = settingsManager.backupFrequency
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.antigravity.healthagent.data.backup.BackupFrequency.DAILY)
-    val isAppModeSelected: StateFlow<Boolean?> = settingsManager.isAppModeSelected
-        .map { it as Boolean? }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val themeMode: StateFlow<String?> = settingsManager.themeMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -472,6 +471,19 @@ class HomeViewModel @Inject constructor(
 
 
     init {
+        // Load initial state from SettingsManager
+        viewModelScope.launch {
+            settingsManager.cachedUser.first()?.let { user ->
+                val name = user.agentName?.uppercase()?.ifBlank { null }
+                    ?: user.email?.substringBefore("@")?.uppercase()
+                    ?: "DESCONHECIDO"
+                _agentName.value = name
+                _currentUserUid.value = user.uid
+                _isSupervisor.value = user.role == UserRole.SUPERVISOR
+                _isAdmin.value = user.role == UserRole.ADMIN
+            }
+        }
+
         // Validation observer: Clear errors immediately on date change
         viewModelScope.launch {
             _data.collect { 
@@ -568,12 +580,13 @@ class HomeViewModel @Inject constructor(
             latestHouses, _data, _agentName, _searchQuery, _isSupervisor, 
             _municipio, _bairro, _categoria, _zona, _ciclo, _tipo, _atividade,
             _selectedRgBairro, _rgYear, _currentWeekStart, allHousesFlow,
-            _currentBlock, _currentBlockSequence, _currentStreet, isAppModeSelected,
+            _currentBlock, _currentBlockSequence, _currentStreet,
             rgFilteredList, _selectedRgBlock, availableYears, activityOptions,
             weekRangeText, customActivities, settingsManager.easyMode, settingsManager.solarMode,
             settingsManager.maxOpenHouses, rgBlocks, weeklySummary, boletimList,
             bairrosList, rgBairros, _syncStatus, weeklySummaryTotals, isDayClosed, isWorkdayManualUnlock,
-            weeklyObservations, _backupConfirmation, _isAdmin, _recentlyEditedHouseIds, _highlightedHouseId
+            weeklyObservations, _backupConfirmation, _isAdmin, _recentlyEditedHouseIds, _highlightedHouseId,
+            settingsManager.editingToolsMode
         ) { args ->
             val h = args[0] as List<House>
             val d = args[1] as String
@@ -584,8 +597,8 @@ class HomeViewModel @Inject constructor(
             val rgY = args[13] as String
             val weekStart = args[14] as Calendar
             val allH = args[15] as List<House>
-            val recentlyEdited = args[41] as Map<Int, Long>
-            val highlightedId = args[42] as Int?
+            val recentlyEdited = args[40] as Map<Int, Long>
+            val highlightedId = args[41] as Int?
             
             val dayHouses = h.filter { it.data == d }
             
@@ -648,11 +661,11 @@ class HomeViewModel @Inject constructor(
                     dashboardTotals = totals,
                     data = d,
                     agentName = name,
-                    isDayClosed = args[36] as Boolean,
-                    isManualUnlock = args[37] as Boolean,
+                    isDayClosed = args[35] as Boolean,
+                    isManualUnlock = args[36] as Boolean,
                     searchQuery = q,
                     isSupervisor = supervisor,
-                    isAdmin = args[40] as Boolean,
+                    isAdmin = args[39] as Boolean,
                     municipality = args[5] as String,
                     neighborhood = args[6] as String,
                     category = args[7] as String,
@@ -660,30 +673,30 @@ class HomeViewModel @Inject constructor(
                     cycle = args[9] as String,
                     type = args[10] as Int,
                     activity = args[11] as Int,
-                    rgBlocks = args[29] as List<BlockSegment>,
-                    weeklySummary = args[30] as List<DaySummary>,
-                    weeklyObservations = args[38] as List<House>,
-                    boletimList = args[31] as List<BoletimSummary>,
-                    bairrosList = args[32] as List<String>,
+                    rgBlocks = args[28] as List<BlockSegment>,
+                    weeklySummary = args[29] as List<DaySummary>,
+                    weeklyObservations = args[37] as List<House>,
+                    boletimList = args[30] as List<BoletimSummary>,
+                    bairrosList = args[31] as List<String>,
                     currentBlock = args[16] as String,
                     currentBlockSequence = args[17] as String,
                     currentStreet = args[18] as String,
-                    isAppModeSelected = args[19] as Boolean?,
                     selectedRgBairro = rgB,
-                    selectedRgBlock = args[21] as String,
-                    rgFilteredList = args[20] as List<House>,
+                    selectedRgBlock = args[20] as String,
+                    rgFilteredList = args[19] as List<House>,
                     rgYear = rgY,
-                    availableYears = args[22] as List<String>,
-                    activityOptions = args[23] as List<String>,
-                    weekRangeText = args[24] as String,
-                    customActivities = args[25] as Set<String>,
-                    isEasyMode = args[26] as Boolean,
-                    isSolarMode = args[27] as Boolean,
-                    maxOpenHouses = args[28] as Int,
-                    rgBairros = args[33] as List<String>,
-                    syncStatus = args[34] as SyncStatus,
-                    weeklySummaryTotals = args[35] as WeeklySummaryTotals,
-                    backupConfirmation = args[39] as BackupConfirmation?,
+                    availableYears = args[21] as List<String>,
+                    activityOptions = args[22] as List<String>,
+                    weekRangeText = args[23] as String,
+                    customActivities = args[24] as Set<String>,
+                    isEasyMode = args[25] as Boolean,
+                    isSolarMode = args[26] as Boolean,
+                    isEditingToolsEnabled = args[42] as Boolean,
+                    maxOpenHouses = args[27] as Int,
+                    rgBairros = args[32] as List<String>,
+                    syncStatus = args[33] as SyncStatus,
+                    weeklySummaryTotals = args[34] as WeeklySummaryTotals,
+                    backupConfirmation = args[38] as BackupConfirmation?,
                     isDuplicateIds = duplicates,
                     pendingCount = workedCount,
                     strictPendingCount = errorsCount
@@ -1093,15 +1106,9 @@ class HomeViewModel @Inject constructor(
     fun selectAppMode(enableEasyMode: Boolean) {
         viewModelScope.launch {
             settingsManager.setEasyMode(enableEasyMode)
-            settingsManager.setAppModeSelected(true)
         }
     }
 
-    fun updateSolarMode(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsManager.setSolarMode(enabled)
-        }
-    }
 
 
     fun toggleDayLock() {
@@ -1220,29 +1227,30 @@ class HomeViewModel @Inject constructor(
         val targetUid = _remoteAgentUid.value
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // 1. Push local data to cloud
-                _syncStatus.value = SyncStatus(SyncStage.UPLOADING, 0.3f, "Enviando dados para a nuvem...")
-                val currentName = _agentName.value
-                val houses = repository.getAllHousesOnce(currentName, targetUid ?: "")
-                val activities = repository.getAllDayActivitiesOnce(currentName, targetUid ?: "")
-                val pushResult = syncRepository.pushLocalDataToCloud(houses, activities, targetUid)
+                // 1. Pull cloud data to local FIRST (Applies Admin Authority exclusions)
+                _syncStatus.value = SyncStatus(SyncStage.DOWNLOADING, 0.3f, "Baixando dados atualizados...")
+                val pullResult = syncRepository.pullCloudDataToLocal(targetUid)
                 
-                if (pushResult.isSuccess) {
-                    // 2. Pull cloud data to local
-                    _syncStatus.value = SyncStatus(SyncStage.DOWNLOADING, 0.6f, "Baixando dados atualizados...")
-                    val pullResult = syncRepository.pullCloudDataToLocal(targetUid)
-                    if (pullResult.isSuccess) {
+                if (pullResult.isSuccess) {
+                    // 2. Push local data to cloud
+                    _syncStatus.value = SyncStatus(SyncStage.UPLOADING, 0.6f, "Enviando dados para a nuvem...")
+                    val currentName = _agentName.value
+                    val houses = repository.getAllHousesOnce(currentName, targetUid ?: "")
+                    val activities = repository.getAllDayActivitiesOnce(currentName, targetUid ?: "")
+                    val pushResult = syncRepository.pushLocalDataToCloud(houses, activities, targetUid)
+                    
+                    if (pushResult.isSuccess) {
                         _syncStatus.value = SyncStatus(SyncStage.SUCCESS, 1.0f, "Sincronização concluída!")
                         _uiEvent.value = "Sincronização completa com sucesso."
                         delay(2000) // Show success for a bit
                     } else {
-                        _syncStatus.value = SyncStatus(SyncStage.ERROR, 1.0f, "Erro ao baixar: ${pullResult.exceptionOrNull()?.message}")
-                        _uiEvent.value = "Dados enviados, mas houve erro ao baixar: ${pullResult.exceptionOrNull()?.message}"
+                        _syncStatus.value = SyncStatus(SyncStage.ERROR, 1.0f, "Erro ao enviar: ${pushResult.exceptionOrNull()?.message}")
+                        _uiEvent.value = "Dados recebidos, mas houve erro ao enviar: ${pushResult.exceptionOrNull()?.message}"
                         delay(3000)
                     }
                 } else {
-                    _syncStatus.value = SyncStatus(SyncStage.ERROR, 0.3f, "Falha ao enviar: ${pushResult.exceptionOrNull()?.message}")
-                    _uiEvent.value = "Falha ao enviar dados: ${pushResult.exceptionOrNull()?.message}"
+                    _syncStatus.value = SyncStatus(SyncStage.ERROR, 0.3f, "Falha ao baixar: ${pullResult.exceptionOrNull()?.message}")
+                    _uiEvent.value = "Falha ao iniciar sincronização: ${pullResult.exceptionOrNull()?.message}"
                     delay(3000)
                 }
             } catch (e: Exception) {
@@ -1392,6 +1400,11 @@ class HomeViewModel @Inject constructor(
         isAddingHouse = true
         lastAddClickTime = currentTime
 
+        if (_agentName.value.isBlank()) {
+            _uiEvent.value = "Aguardando carregamento do perfil..."
+            return
+        }
+
         viewModelScope.launch {
             try {
                 val isUnlocked = isWorkdayManualUnlock.value
@@ -1519,6 +1532,11 @@ class HomeViewModel @Inject constructor(
         
         isAddingHouse = true
         lastAddClickTime = currentTime
+
+        if (_agentName.value.isBlank()) {
+            _uiEvent.value = "Aguardando carregamento do perfil..."
+            return
+        }
 
         // Immediately mark '0' as recently edited to suppress error labels 
         // for the in-flight card while it's being inserted.
@@ -3023,9 +3041,15 @@ class HomeViewModel @Inject constructor(
     }
 
     fun updateEasyMode(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsManager.setEasyMode(enabled)
-        }
+        viewModelScope.launch { settingsManager.setEasyMode(enabled) }
+    }
+
+    fun updateSolarMode(enabled: Boolean) {
+        viewModelScope.launch { settingsManager.setSolarMode(enabled) }
+    }
+
+    fun updateEditingToolsMode(enabled: Boolean) {
+        viewModelScope.launch { settingsManager.setEditingToolsMode(enabled) }
     }
 
     fun updateThemeMode(mode: String) {

@@ -152,7 +152,7 @@ object SemanalPdfGenerator {
         if (actualLogo != null) {
             val logoW = (actualLogo.width.toFloat() / actualLogo.height.toFloat() * logoH)
             val logoX = MARGIN_LEFT // Start at table left edge
-            val logoY = cursorY + 12f
+            val logoY = cursorY + 24f // Moved down to avoid overlapping text
             val destRect = Rect(logoX.toInt(), logoY.toInt(), (logoX + logoW).toInt(), (logoY + logoH).toInt())
             canvas.drawBitmap(actualLogo, null, destRect, null)
         }
@@ -176,7 +176,7 @@ object SemanalPdfGenerator {
         // Center headerText2 within the width of headerText1
         canvas.drawText(headerText2, (rightEdge - title1W) + (title1W - title2W) / 2f, cursorY + 55f, subTitlePaint)
 
-        cursorY += logoH + 25f
+        cursorY += logoH + 30f // Increased slightly to maintain spacing after logo
 
         // Metadata Header
         val uniqueWeekBairros = allHouses.filter { weekDates.contains(it.data) }.map { it.bairro.trim().uppercase() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }
@@ -378,34 +378,41 @@ object SemanalPdfGenerator {
         val dash = "—"
 
         // --- O(N) Pre-calculations ---
-        val housesByDate = allHouses.groupBy { it.data }
-        val allBlockCompletions = mutableListOf<Pair<String, String>>() // List of (BlockDisplayName, Date)
+        val allHousesSorted = allHouses.sortedBy { it.listOrder }
+        val blockToLastIndex = mutableMapOf<String, Int>()
+        allHousesSorted.forEachIndexed { index, h ->
+            val key = "${h.blockNumber}|${h.blockSequence}|${h.bairro.trim().uppercase()}"
+            blockToLastIndex[key] = index
+        }
+
+        val housesByDate = allHousesSorted.groupBy { it.data }
+        val allBlockCompletions = mutableListOf<Triple<String, String, String>>() // (BlockDisplayName, Bairro, Date)
 
         weekDates.forEach { date ->
             val dayHouses = housesByDate[date] ?: return@forEach
+            val dayHouseIds = dayHouses.map { it.id }.toSet()
             
             // 1. Identify all unique blocks worked on this day
             val dayBlocks = dayHouses.map { Triple(it.blockNumber, it.blockSequence, it.bairro.trim().uppercase()) }.distinct()
-            
-            // 2. Pre-sort day houses by listOrder once
-            val dayHousesSorted = dayHouses.sortedBy { it.listOrder }
-            val housesByBlock = dayHouses.groupBy { "${it.blockNumber}|${it.blockSequence}|${it.bairro.trim().uppercase()}" }
 
             dayBlocks.forEach { (bNum, bSeq, bairro) ->
-                val blockKey = "$bNum|$bSeq|$bairro"
-                val blockHousesInDay = housesByBlock[blockKey] ?: emptyList()
+                val blockHousesInDay = dayHouses.filter { it.blockNumber == bNum && it.blockSequence == bSeq && it.bairro.trim().uppercase() == bairro }
                 
                 val hasManual = blockHousesInDay.any { it.quarteiraoConcluido }
                 val hasBairroManual = blockHousesInDay.any { it.localidadeConcluida }
                 
-                // Auto-concluded: The LAST house of this block in THIS daily list has a successor in the same daily list
-                val lastInBlockOnDay = blockHousesInDay.maxByOrNull { it.listOrder }
-                val indexOfLast = if (lastInBlockOnDay != null) dayHousesSorted.indexOfFirst { it.id == lastInBlockOnDay.id } else -1
-                val hasSuccessorOnSameDay = indexOfLast != -1 && indexOfLast < dayHousesSorted.size - 1
+                val key = "$bNum|$bSeq|$bairro"
+                val lastIndexInFull = blockToLastIndex[key] ?: -1
+                val lastHouseInFull = if (lastIndexInFull != -1) allHousesSorted[lastIndexInFull] else null
+                
+                val isLastHouseInDay = lastHouseInFull != null && dayHouseIds.contains(lastHouseInFull.id)
+                val hasSuccessor = lastIndexInFull != -1 && lastIndexInFull < allHousesSorted.size - 1
 
-                if (hasManual || hasBairroManual || hasSuccessorOnSameDay) {
+                val autoConcluido = isLastHouseInDay && hasSuccessor
+
+                if (hasManual || hasBairroManual || autoConcluido) {
                     val displayName = if (bSeq.isNotBlank()) "$bNum/$bSeq" else bNum
-                    allBlockCompletions.add(displayName to date)
+                    allBlockCompletions.add(Triple(displayName, bairro, date))
                 }
             }
         }
@@ -496,10 +503,8 @@ object SemanalPdfGenerator {
                         totDeps[i] += dists[i]
                     }
                     
-                    val dayCompletedBlocks = allBlockCompletions.filter { it.second == date }
-                        .map { it.first }
-                        .distinct()
-                        .sorted()
+                    val dayCompletions = allBlockCompletions.filter { it.third == date }
+                    val dayCompletedBlocks = dayCompletions.map { it.first }.distinct().sorted()
                     
                     val blocksStr = if (dayCompletedBlocks.isEmpty()) dash else dayCompletedBlocks.joinToString("   ")
                     totCompletedBlocks.addAll(dayCompletedBlocks)
@@ -523,10 +528,7 @@ object SemanalPdfGenerator {
                     }
                     
                     // Neighborhoods for completed blocks
-                    val concludedBairrosToday = dayHouses.filter { h -> 
-                        val matchId = if (h.blockSequence.isNotBlank()) "${h.blockNumber}/${h.blockSequence}" else h.blockNumber
-                        dayCompletedBlocks.contains(matchId)
-                    }.map { it.bairro.trim().uppercase() }.distinct().sorted()
+                    val concludedBairrosToday = dayCompletions.map { it.second }.distinct().sorted()
 
                     if (concludedBairrosToday.isNotEmpty()) {
                         val labelPaint = Paint(textPaint).apply { textSize = 7f }
