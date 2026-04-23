@@ -439,6 +439,11 @@ class SyncRepositoryImpl @Inject constructor(
             val profileAgentName = agentDocSnapshot.getString("agentName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
                 ?: userDoc.getString("agentName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
             val profileDisplayName = userDoc.getString("displayName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+            
+            // BUG FIX: If we have multiple possible emails (raw vs lowercase), use them all in discovery
+            val authEmail = auth.currentUser?.email?.trim() ?: ""
+            val discoveryEmails = setOf(email, authEmail, email.lowercase(), authEmail.lowercase()).filter { it.isNotBlank() }
+
             val finalAgentName = profileAgentName ?: profileDisplayName ?: email.substringBefore("@").uppercase()
             
             // --- VERSION SAFETY CHECK ---
@@ -464,8 +469,9 @@ class SyncRepositoryImpl @Inject constructor(
             val requireReset = requireResetFromUser || requireResetFromAgent || (hasSyncHistory && !agentDocExists)
 
             // --- OPTIMIZATION: Incremental vs Full Sync logic ---
-            // BUG FIX: Force Full Sync if a reset was triggered to ensure email-based discovery runs.
-            val isIncremental = !force && !isTargetDifferentUser && !requireReset && settingsManager.lastSyncTimestamp.first() > 0
+            // BUG FIX: Force Full Sync if a reset was triggered OR if we have no local houses (Fresh start/Vinicius case).
+            val localCount = houseDao.count()
+            val isIncremental = !force && !isTargetDifferentUser && !requireReset && settingsManager.lastSyncTimestamp.first() > 0 && localCount > 0
 
             if (requireReset) {
                 android.util.Log.w("SyncRepository", "Remote Wipe Triggered for UID: $uid")
@@ -494,19 +500,33 @@ class SyncRepositoryImpl @Inject constructor(
             // OPTIMIZATION: Skip email-based discovery on incremental syncs to save network round-trips.
             val possibleAgentDocs = mutableListOf(firestore.collection("agents").document(uid))
             
-            if (!isIncremental && email.isNotBlank()) {
-                try {
-                    val matchingEmailDocs = firestore.collection("agents")
-                        .whereEqualTo("email", email)
-                        .get().await()
-                    
-                    matchingEmailDocs.documents.forEach { doc ->
-                        if (doc.id != uid) {
-                            possibleAgentDocs.add(doc.reference)
+            if (!isIncremental) {
+                discoveryEmails.forEach { dEmail ->
+                    try {
+                        val matchingEmailDocs = firestore.collection("agents")
+                            .whereEqualTo("email", dEmail)
+                            .get().await()
+                        
+                        matchingEmailDocs.documents.forEach { doc ->
+                            if (doc.id != uid) {
+                                possibleAgentDocs.add(doc.reference)
+                                
+                                // IDENTITY HEALING: If current profile has no agentName but legacy one does, adopt it
+                                val legacyName = doc.getString("agentName")
+                                if (profileAgentName == null && !legacyName.isNullOrBlank()) {
+                                    android.util.Log.i("SyncRepository", "Identity Healing: Adopting legacy agentName '$legacyName' from ${doc.id} for $uid")
+                                    try {
+                                        firestore.collection("agents").document(uid).update("agentName", legacyName)
+                                        firestore.collection("users").document(uid).update("agentName", legacyName)
+                                    } catch (e: Exception) {
+                                        android.util.Log.w("SyncRepository", "Identity Healing failed to update cloud profile: ${e.message}")
+                                    }
+                                }
+                            }
                         }
+                    } catch (e: Exception) {
+                        android.util.Log.w("SyncRepository", "Failed to search legacy agent docs for $dEmail", e)
                     }
-                } catch (e: Exception) {
-                    android.util.Log.w("SyncRepository", "Failed to search legacy agent docs", e)
                 }
             }
 
@@ -1327,37 +1347,119 @@ private class HouseWithKeys(
 
 private fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String): House? {
     return try {
-        val house = this.toObject(House::class.java) ?: return null
-        // CRITICAL: Manually extract lastUpdated because it is @Excluded in the data model
-        // to prevent local timestamps from being pushed to Firestore.
-        val firestoreLastUpdated = this.getTimestamp("lastUpdated")?.toDate()?.time ?: house.lastUpdated
+        // 1. Try standard Firestore mapping first
+        val house = try { this.toObject(House::class.java) } catch (e: Exception) { null }
         
-        house.copy(
+        // 2. Manually extract critical metadata to bypass @Exclude and handle mismatches
+        val firestoreLastUpdated = this.getTimestamp("lastUpdated")?.toDate()?.time ?: 0L
+        val rawData = (this.getString("data") ?: house?.data ?: "").replace("/", "-")
+        val rawAgentName = this.getString("agentName")?.uppercase() ?: agentName.uppercase()
+        
+        // 3. Robust Construction: Fallback to manual field extraction if toObject failed
+        val baseHouse = house ?: House(
+            blockNumber = this.getString("blockNumber") ?: "",
+            streetName = this.getString("streetName") ?: "",
+            number = this.getString("number") ?: "",
+            sequence = (this.get("sequence") as? Number)?.toInt() ?: 0,
+            complement = (this.get("complement") as? Number)?.toInt() ?: 0,
+            municipio = this.getString("municipio") ?: "Bom Jardim",
+            bairro = this.getString("bairro") ?: "",
+            categoria = this.getString("categoria") ?: "BRR",
+            zona = this.getString("zona") ?: "URB",
+            tipo = (this.get("tipo") as? Number)?.toInt() ?: 2,
+            ciclo = this.getString("ciclo") ?: "1º",
+            atividade = (this.get("atividade") as? Number)?.toInt() ?: 4,
+            a1 = (this.get("a1") as? Number)?.toInt() ?: 0,
+            a2 = (this.get("a2") as? Number)?.toInt() ?: 0,
+            b = (this.get("b") as? Number)?.toInt() ?: 0,
+            c = (this.get("c") as? Number)?.toInt() ?: 0,
+            d1 = (this.get("d1") as? Number)?.toInt() ?: 0,
+            d2 = (this.get("d2") as? Number)?.toInt() ?: 0,
+            e = (this.get("e") as? Number)?.toInt() ?: 0,
+            eliminados = (this.get("eliminados") as? Number)?.toInt() ?: 0,
+            larvicida = (this.get("larvicida") as? Number)?.toDouble() ?: 0.0,
+            comFoco = this.getBoolean("comFoco") ?: false,
+            localidadeConcluida = this.getBoolean("localidadeConcluida") ?: false,
+            blockSequence = this.getString("blockSequence") ?: "",
+            quarteiraoConcluido = this.getBoolean("quarteiraoConcluido") ?: false,
+            listOrder = (this.get("listOrder") as? Number)?.toLong() ?: 0L,
+            visitSegment = (this.get("visitSegment") as? Number)?.toInt() ?: 0,
+            observation = this.getString("observation") ?: "",
+            latitude = this.get("latitude") as? Double,
+            longitude = this.get("longitude") as? Double,
+            focusCaptureTime = (this.get("focusCaptureTime") as? Number)?.toLong(),
+            editedByAdmin = this.getBoolean("editedByAdmin") ?: false
+        )
+
+        // 4. Force synchronization of identity fields and coerce enums
+        baseHouse.copy(
             agentUid = agentUid,
-            agentName = agentName.uppercase(),
-            data = (this.getString("data") ?: house.data).replace("/", "-"),
-            lastUpdated = firestoreLastUpdated
+            agentName = rawAgentName,
+            data = rawData,
+            lastUpdated = firestoreLastUpdated,
+            propertyType = coercePropertyType(this.getString("propertyType") ?: house?.propertyType?.name),
+            situation = coerceSituation(this.getString("situation") ?: house?.situation?.name)
         )
     } catch (e: Exception) {
-        android.util.Log.e("SyncRepository", "toHouseSafe error for doc ${this.id}: ${e.message}")
+        android.util.Log.e("SyncRepository", "toHouseSafe CRITICAL error for doc ${this.id}: ${e.message}")
         null
     }
 }
 
-private fun DocumentSnapshot.toDayActivitySafe(agentUid: String, agentName: String): DayActivity? {
+private fun DocumentSnapshot.toDayActivitySafe(agentUid: String, agentName: String): com.antigravity.healthagent.data.local.model.DayActivity? {
     return try {
-        val activity = this.toObject(DayActivity::class.java) ?: return null
-        // CRITICAL: Manually extract lastUpdated to bypass @Exclude
-        val firestoreLastUpdated = this.getTimestamp("lastUpdated")?.toDate()?.time ?: activity.lastUpdated
+        val activity = try { this.toObject(com.antigravity.healthagent.data.local.model.DayActivity::class.java) } catch (e: Exception) { null }
+        val firestoreLastUpdated = this.getTimestamp("lastUpdated")?.toDate()?.time ?: 0L
+        val rawDate = (this.getString("date") ?: activity?.date ?: "").replace("/", "-")
         
-        activity.copy(
+        val baseActivity = activity ?: com.antigravity.healthagent.data.local.model.DayActivity(
+            status = this.getString("status") ?: "",
+            isClosed = this.getBoolean("isClosed") ?: false,
+            isManualUnlock = this.getBoolean("isManualUnlock") ?: false,
+            editedByAdmin = this.getBoolean("editedByAdmin") ?: false
+        )
+        
+        baseActivity.copy(
             agentUid = agentUid,
-            agentName = agentName.uppercase(),
-            date = (this.getString("date") ?: activity.date).replace("/", "-"),
+            agentName = this.getString("agentName")?.uppercase() ?: agentName.uppercase(),
+            date = rawDate,
             lastUpdated = firestoreLastUpdated
         )
     } catch (e: Exception) {
         android.util.Log.e("SyncRepository", "toDayActivitySafe error for doc ${this.id}: ${e.message}")
         null
+    }
+}
+
+private fun coercePropertyType(raw: String?): com.antigravity.healthagent.data.local.model.PropertyType {
+    if (raw == null) return com.antigravity.healthagent.data.local.model.PropertyType.EMPTY
+    return try {
+        com.antigravity.healthagent.data.local.model.PropertyType.valueOf(raw.uppercase())
+    } catch (e: Exception) {
+        // Fallback for legacy string descriptions
+        when (raw.uppercase()) {
+            "RESIDÊNCIA", "RESIDENCIA" -> com.antigravity.healthagent.data.local.model.PropertyType.R
+            "COMÉRCIO", "COMERCIO" -> com.antigravity.healthagent.data.local.model.PropertyType.C
+            "TERRENO BALDIO" -> com.antigravity.healthagent.data.local.model.PropertyType.TB
+            "OUTROS" -> com.antigravity.healthagent.data.local.model.PropertyType.O
+            "PONTO ESTRATÉGICO", "PONTO ESTRATEGICO" -> com.antigravity.healthagent.data.local.model.PropertyType.PE
+            else -> com.antigravity.healthagent.data.local.model.PropertyType.EMPTY
+        }
+    }
+}
+
+private fun coerceSituation(raw: String?): com.antigravity.healthagent.data.local.model.Situation {
+    if (raw == null) return com.antigravity.healthagent.data.local.model.Situation.EMPTY
+    return try {
+        com.antigravity.healthagent.data.local.model.Situation.valueOf(raw.uppercase())
+    } catch (e: Exception) {
+        when (raw.uppercase()) {
+            "FECHADO" -> com.antigravity.healthagent.data.local.model.Situation.F
+            "RECUSADO" -> com.antigravity.healthagent.data.local.model.Situation.REC
+            "ABANDONADO" -> com.antigravity.healthagent.data.local.model.Situation.A
+            "VAZIO" -> com.antigravity.healthagent.data.local.model.Situation.V
+            "ABERTO" -> com.antigravity.healthagent.data.local.model.Situation.EMPTY
+            else -> com.antigravity.healthagent.data.local.model.Situation.EMPTY
+        }
     }
 }
