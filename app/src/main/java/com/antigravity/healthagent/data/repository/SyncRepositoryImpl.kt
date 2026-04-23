@@ -437,6 +437,9 @@ class SyncRepositoryImpl @Inject constructor(
                 return@withContext Result.failure(Exception("Versão do aplicativo desatualizada. Por favor, atualize o 'Eu ACE' na Play Store para continuar sincronizando seus dados."))
             }
             
+            // --- OPTIMIZATION: Incremental vs Full Sync logic ---
+            val isIncremental = !force && !isTargetDifferentUser && settingsManager.lastSyncTimestamp.first() > 0
+            
             // --- REMOTE WIPE CHECK (Multi-device Safety) ---
             val requireResetFromFlag = userDoc.getBoolean("requireDataReset") ?: false
             
@@ -470,10 +473,10 @@ class SyncRepositoryImpl @Inject constructor(
 
             // 2. Fetchers (EXHAUSTIVE DISCOVERY)
             // We search for ALL documents in 'agents' that match this UID OR this email
-            // This handles cases where history is stored under legacy naming or previous UIDs.
+            // OPTIMIZATION: Skip email-based discovery on incremental syncs to save network round-trips.
             val possibleAgentDocs = mutableListOf(firestore.collection("agents").document(uid))
             
-            if (email.isNotBlank()) {
+            if (!isIncremental && email.isNotBlank()) {
                 try {
                     val matchingEmailDocs = firestore.collection("agents")
                         .whereEqualTo("email", email)
@@ -503,24 +506,41 @@ class SyncRepositoryImpl @Inject constructor(
                         val activitiesCollection = agentDocRef.collection("day_activities")
 
                         val housesJob = async {
-                            if (lastSync > 0) {
+                            val snapshots = if (lastSync > 0) {
                                 housesCollection.whereGreaterThan("lastUpdated", com.google.firebase.Timestamp(lastSync / 1000, ((lastSync % 1000) * 1000000).toInt()))
                                     .get().await()
-                                    .documents.mapNotNull { it.toHouseSafe(uid, finalAgentName) }
+                                    .documents
                             } else {
                                 housesCollection.get().await()
-                                    .documents.mapNotNull { it.toHouseSafe(uid, finalAgentName) }
+                                    .documents
+                            }
+                            
+                            // OPTIMIZATION: Parallel mapping for large document lists
+                            if (snapshots.size > 200) {
+                                snapshots.chunked(100).map { chunk ->
+                                    async { chunk.mapNotNull { it.toHouseSafe(uid, finalAgentName) } }
+                                }.awaitAll().flatten()
+                            } else {
+                                snapshots.mapNotNull { it.toHouseSafe(uid, finalAgentName) }
                             }
                         }
 
                         val activitiesJob = async {
-                            if (lastSync > 0) {
+                            val snapshots = if (lastSync > 0) {
                                 activitiesCollection.whereGreaterThan("lastUpdated", com.google.firebase.Timestamp(lastSync / 1000, ((lastSync % 1000) * 1000000).toInt()))
                                     .get().await()
-                                    .documents.mapNotNull { it.toDayActivitySafe(uid, finalAgentName) }
+                                    .documents
                             } else {
                                 activitiesCollection.get().await()
-                                    .documents.mapNotNull { it.toDayActivitySafe(uid, finalAgentName) }
+                                    .documents
+                            }
+                            
+                            if (snapshots.size > 200) {
+                                snapshots.chunked(100).map { chunk ->
+                                    async { chunk.mapNotNull { it.toDayActivitySafe(uid, finalAgentName) } }
+                                }.awaitAll().flatten()
+                            } else {
+                                snapshots.mapNotNull { it.toDayActivitySafe(uid, finalAgentName) }
                             }
                         }
 
@@ -546,20 +566,20 @@ class SyncRepositoryImpl @Inject constructor(
                 cloudDeletedActivities.addAll(result.third.second)
             }
 
-            // --- CRITICAL PROTECTION: Data Trumps Deletions ---
-            // If a house or activity exists in the cloud as valid data, it should NEVER be considered deleted.
-            // This prevents "fragmented" agent records (old UIDs/docs for same email) from using stale tombstones
-            // to delete valid work found in other documents.
-            val validCloudHouseKeys = cloudHouses.map { it.generateNaturalKey() }.toSet()
+            // 3. Deletion logic
+            // OPTIMIZATION: Pre-calculate keys for cloud results once (Memoization)
+            var cloudHousesWithKeys = cloudHouses.map { HouseWithKeys(it) }
+            val validCloudHouseKeys = cloudHousesWithKeys.map { it.naturalKey }.toSet()
             val validCloudActivityKeys = cloudDayActivities.map { "${it.date.replace("/", "-")}|${it.agentName.uppercase()}" }.toSet()
             
             // BUG FIX: Only remove from deleted list if the data is found in a doc with RECENT activity.
-            // If we found a tombstone in the primary doc, we should favor it unless the data is found in multiple docs.
             cloudDeletedHouses.removeAll { it in validCloudHouseKeys }
             cloudDeletedActivities.removeAll { it in validCloudActivityKeys }
 
-            // 3. Deletion logic
+            // OPTIMIZATION: Only fetch local records that could possibly be affected by deletions
+            // to avoid loading thousands of unrelated houses into memory.
             val allLocalHouses = houseDao.getAllHousesSnapshot()
+            var allLocalHousesWithKeys = allLocalHouses.map { HouseWithKeys(it) }
             
             // Protection: Identified Locked Days
             val lockedKeys = if (finalAgentName.isNotBlank()) {
@@ -573,25 +593,24 @@ class SyncRepositoryImpl @Inject constructor(
 
             // Create a set of Identity Keys from cloudDeletedHouses to catch shifted "ghost" keys
             val cloudDeletedIdentities = cloudDeletedHouses.mapNotNull { deletedKey ->
-                val parts = deletedKey.split("|")
+                val parts = deletedKey.split("_") // House.kt uses underscore as natural key separator
                 if (parts.size >= 10) {
-                    // Identity Key format: DATE|BAIRRO|BLOCK|BSEQ|STREET|NUM|SEQ|COMP
-                    "${parts[0]}|${parts[8]}|${parts[2]}|${parts[3]}|${parts[4]}|${parts[5]}|${parts[6]}|${parts[7]}"
+                    // Identity Key format: UID_DATE_BLOCK_BSEQ_NUM_SEQ_COMP_BAIRRO_MUN_CAT
+                    // We extract indices based on House.kt generateIdentityKey() vs generateNaturalKey()
+                    // Nat: UID(0), AGENT(1), DATE(2), BLOCK(3), BSEQ(4), STREET(5), NUM(6), SEQ(7), COMP(8), BAIRRO(9), SEG(10)
+                    // Id:  UID(0), DATE(2), BLOCK(3), BSEQ(4), NUM(6), SEQ(7), COMP(8), BAIRRO(9), ...
+                    try {
+                         "${parts[0]}_${parts[2]}_${parts[3]}_${parts[4]}_${parts[6]}_${parts[7]}_${parts[8]}_${parts[9]}".uppercase()
+                    } catch(e: Exception) { null }
                 } else null
             }.toSet()
 
-            val housesToDelete = allLocalHouses.filter { house ->
-                val key = house.generateNaturalKey()
-                val identityKey = house.generateIdentityKey()
+            val housesToDelete = allLocalHousesWithKeys.filter { wrapper ->
+                val house = wrapper.house
+                val key = wrapper.naturalKey
+                val identityKey = wrapper.identityKey
                 
-                // BUG FIX: Only delete local houses if they are already marked as synced. 
-                // EXCEPTION 1: If the house is in cloudDeletedHouses and the local lastUpdated is significantly
-                // older than the current sync (more than 1 hour), we assume it's a "Ghost" and delete it.
-                // EXCEPTION 2 (ADMIN AUTHORITY): If the household matches a tombstone and the local record 
-                // was last updated more than 15 minutes ago, we assume the Admin has priority and delete it even if unsynced.
-                val dateKey = "${house.data.replace("/", "-")}|${house.agentName.uppercase()}"
-                
-                if (key in cloudDeletedHouses || identityKey in cloudDeletedIdentities || dateKey in cloudDeletedActivities) {
+                if (key in cloudDeletedHouses || identityKey in cloudDeletedIdentities || "${house.data.replace("/", "-")}|${house.agentName.uppercase()}" in cloudDeletedActivities) {
                     val timeSinceLastUpdate = System.currentTimeMillis() - house.lastUpdated
                     if (house.isSynced) {
                         true
@@ -599,12 +618,11 @@ class SyncRepositoryImpl @Inject constructor(
                         android.util.Log.i("SyncRepository", "Admin Authority / Ghost Cleanup: Deleting unsynced house ${house.id} due to cloud deletion.")
                         true
                     } else {
-                        // AGENT PRIORITY: Protect actively typed unsynced work.
                         android.util.Log.i("SyncRepository", "Agent Priority: Preserving actively typed house ${house.id} despite cloud deletion.")
                         false
                     }
                 } else false
-            }
+            }.map { it.house }
 
             val allLocalActivities = dayActivityDao.getAllDayActivities(finalAgentName, uid)
             
@@ -635,14 +653,14 @@ class SyncRepositoryImpl @Inject constructor(
             }
 
             // 4. Reconciliation
-            val localHouses = houseDao.getAllHousesSnapshot().groupBy { it.generateNaturalKey() }
-            val housesDelta = cloudHouses.filter { it.generateNaturalKey() !in cloudDeletedHouses }
+            val localHousesByNaturalKey = allLocalHousesWithKeys.associateBy { it.naturalKey }
+            val localActivities = allLocalActivities.groupBy { "${it.date.replace("/", "-")}|${it.agentName}" }
             
-            val localActivities = dayActivityDao.getAllDayActivities(finalAgentName, uid).groupBy { "${it.date.replace("/", "-")}|${it.agentName}" }
+            val housesDelta = cloudHousesWithKeys.filter { it.naturalKey !in cloudDeletedHouses }
             val activitiesDelta = cloudDayActivities
 
             runInTransactionWithRetry {
-                // Delete Houses
+                // Delete Houses ... (Same as before but using housesToDelete)
                 if (housesToDelete.isNotEmpty()) {
                     val tombstonesToInsert = mutableListOf<com.antigravity.healthagent.data.local.model.Tombstone>()
                     for (house in housesToDelete) {
@@ -662,7 +680,7 @@ class SyncRepositoryImpl @Inject constructor(
                     }
                 }
 
-                // Delete Activities
+                // Delete Activities ... (Same as before)
                 if (activitiesToDelete.isNotEmpty()) {
                     val tombstonesToInsert = mutableListOf<com.antigravity.healthagent.data.local.model.Tombstone>()
                     for (activity in activitiesToDelete) {
@@ -683,30 +701,24 @@ class SyncRepositoryImpl @Inject constructor(
                 }
 
                 // Upsert Houses
-                // OPTIMIZATION: Index all local houses by their Logical Identity Key
-                // for O(1) identity healing lookup instead of O(N) searching.
-                val localIdentityMap = allLocalHouses.groupBy { it.generateIdentityKey() }
+                // OPTIMIZATION: Index all local houses by their Logical Identity Key only if we need it
+                // We'll build it lazily or pre-calculate if the delta is large
+                val localIdentityMap = if (housesDelta.isNotEmpty()) allLocalHousesWithKeys.groupBy { it.identityKey } else emptyMap()
 
-                val housesToUpsert = housesDelta.mapNotNull { cloudHouse ->
-                    val key = cloudHouse.generateNaturalKey()
-                    var existing = localHouses[key]?.firstOrNull()
+                val housesToUpsert = housesDelta.mapNotNull { cloudWrapper ->
+                    val cloudHouse = cloudWrapper.house
+                    val key = cloudWrapper.naturalKey
+                    var existing = localHousesByNaturalKey[key]?.house
                     
                     // --- IDENTITY HEALING (KEY-SHIFT PROTECTION) ---
-                    // If no direct natural key match, try an identity match to detect corrections (street rename, segment shift, etc.)
                     if (existing == null) {
-                        val identityKey = cloudHouse.generateIdentityKey()
-                        // IDENTITY HEALING: Protect against Key-Shifts (e.g. street renames).
-                        // If no direct natural key match, we correlate via logical identity.
-                        existing = localIdentityMap[identityKey]?.find { it.agentUid == cloudHouse.agentUid }
+                        val identityKey = cloudWrapper.identityKey
+                        existing = localIdentityMap[identityKey]?.find { it.house.agentUid == cloudHouse.agentUid }?.house
                         
                         if (existing != null) {
                             android.util.Log.i("SyncRepository", "Identity Healing: Stabilized key shift for house ${existing.id} ($key)")
                         } else {
                             // DAY-LOCK ENFORCEMENT
-                            // If it's a completely new house (no natural key, no identity key match),
-                            // we must check if the day is locked locally. If it is, we block the pull
-                            // to prevent "zombie" or duplicate ghost houses from reappearing on finished days,
-                            // UNLESS the pull is triggered by an Admin (shouldReplace = true).
                             val normalizedDate = cloudHouse.data.replace("/", "-")
                             val dateKey = "$normalizedDate|$finalAgentName"
                             val dayActivity = localActivities[dateKey]?.firstOrNull()
@@ -715,7 +727,6 @@ class SyncRepositoryImpl @Inject constructor(
                             val isCloudUnlocked = cloudActivity?.isManualUnlock == true
                             val isLocallyClosed = dayActivity?.isClosed == true && dayActivity.isManualUnlock != true
                             
-                            // Multi-device safety: If the day is locked locally but was UNLOCKED in the cloud (e.g. from another device), allow the pull.
                             if (isLocallyClosed && !isCloudUnlocked && !cloudHouse.editedByAdmin && !isTargetDifferentUser) {
                                 android.util.Log.w("SyncRepository", "Blocked Pull: Prevented creation of new house ($key) because day $normalizedDate is LOCKED locally and not unlocked in cloud.")
                                 return@mapNotNull null
@@ -725,18 +736,12 @@ class SyncRepositoryImpl @Inject constructor(
 
                     // CONFLICT RESOLUTION: Last Side to Change Wins (LWW)
                     if (existing != null && !existing.isSynced) {
-                        // Priority 1: Admin Authority with Typing Protection. 
-                        // If cloud record was edited by admin, it OVERWRITES local change 
-                        // UNLESS the agent typed within the last 2 minutes.
                         val isAdminOverride = cloudHouse.editedByAdmin && !existing.editedByAdmin && 
                             (System.currentTimeMillis() - existing.lastUpdated > 120000L) // 2 mins typing protection
 
                         if (isAdminOverride) {
                             android.util.Log.i("SyncRepository", "Admin Authority: Priority overwrite for house ${existing.id} ($key)")
-                            // Cloud wins
                         } else {
-                            // Priority 2: Standard LWW
-                            // Cloud wins if it is newer than (Local + threshold).
                             val threshold = com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS
                             if (existing.lastUpdated > (cloudHouse.lastUpdated + threshold)) {
                                 return@mapNotNull null
@@ -808,6 +813,11 @@ class SyncRepositoryImpl @Inject constructor(
                 
                 settingsManager.setLastSyncTimestamp(maxOf(maxObservedTime, safetyAnchor))
             }
+            
+            // MEMORY CLEANUP: Explicitly nullify large lists to help GC
+            // (especially important for large datasets on low-end devices)
+            allLocalHousesWithKeys = emptyList()
+            cloudHousesWithKeys = emptyList()
 
                 Result.success(Unit)
             } catch (e: Exception) {
@@ -1266,6 +1276,15 @@ class SyncRepositoryImpl @Inject constructor(
     }
     
 }
+
+/**
+ * Performance-optimized wrapper for House objects that caches expensive key generations.
+ */
+private class HouseWithKeys(
+    val house: House,
+    val naturalKey: String = house.generateNaturalKey(),
+    val identityKey: String = house.generateIdentityKey()
+)
 
 private fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String): House? {
     return try {

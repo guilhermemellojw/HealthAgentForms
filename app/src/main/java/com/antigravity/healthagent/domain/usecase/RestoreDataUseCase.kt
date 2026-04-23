@@ -21,7 +21,7 @@ class RestoreDataUseCase @Inject constructor(
         targetDate: String? = null,
         existingDates: List<String> = emptyList(),
         isSingleDayImport: Boolean = false
-    ): Result<Unit> = withContext(Dispatchers.IO) {
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             // 1. Get the agent name for this UID
             val usersResult = authRepository.fetchAllUsers()
@@ -153,7 +153,7 @@ class RestoreDataUseCase @Inject constructor(
                     activities = normalizedActivities,
                     agentUid = targetUid
                 )
-                if (result.isFailure) return@withContext result
+                if (result.isFailure) return@withContext Result.failure(result.exceptionOrNull() ?: Exception("Local restore failed"))
             }
 
             // 4. Push to cloud for the specified targetUid
@@ -163,6 +163,7 @@ class RestoreDataUseCase @Inject constructor(
                 targetUid = targetUid,
                 shouldReplace = true
             )
+            Result.success(backupData.isPartial)
         } catch (e: Exception) {
             Result.failure(e)
         }
