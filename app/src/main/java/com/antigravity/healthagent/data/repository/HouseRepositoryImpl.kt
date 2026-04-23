@@ -568,9 +568,7 @@ class HouseRepositoryImpl @Inject constructor(
             }
 
             if (toDelete.isNotEmpty()) {
-                val houseTombstones = toDelete.map { Tombstone(type = TombstoneType.HOUSE, naturalKey = it.generateNaturalKey(), agentName = it.agentName, agentUid = it.agentUid) }
                 toDelete.forEach { houseDao.deleteHouse(it) }
-                tombstoneDao.insertTombstones(houseTombstones)
                 syncSchedulerProvider.get().scheduleSync()
             }
         }

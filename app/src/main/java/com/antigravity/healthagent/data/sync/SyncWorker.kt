@@ -53,19 +53,18 @@ class SyncWorker @AssistedInject constructor(
             val agentName = withTimeoutOrNull(2000) { settingsManager.cachedUser.first()?.agentName } ?: ""
             val uid = currentUser.uid
 
+            // Perform background PULL first
+            val pullResult = syncRepository.pullCloudDataToLocal(uid)
+            if (pullResult.isFailure) {
+                Log.w("SyncWorker", "Background pull failed: ${pullResult.exceptionOrNull()?.message}")
+            }
+
             val houses = houseRepository.getAllHousesOnce(agentName, uid)
             val activities = houseRepository.getAllDayActivitiesOnce(agentName, uid)
             
             if (houses.isEmpty() && activities.isEmpty()) {
-                Log.d("SyncWorker", "No data to sync.")
+                Log.d("SyncWorker", "No data to push.")
                 return Result.success()
-            }
-
-            // Perform a background PULL before PUSH to ensure local state is reconciled with cloud edits
-            // (e.g. supervisor corrections) before we push our own updates.
-            val pullResult = syncRepository.pullCloudDataToLocal(uid)
-            if (pullResult.isFailure) {
-                Log.w("SyncWorker", "Background pull failed: ${pullResult.exceptionOrNull()?.message}. Proceeding with push anyway.")
             }
 
             val result = syncRepository.pushLocalDataToCloud(houses, activities, uid)

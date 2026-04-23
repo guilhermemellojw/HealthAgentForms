@@ -271,6 +271,7 @@ class SyncRepositoryImpl @Inject constructor(
                         val isAdminPush = shouldReplace && targetUid != null && targetUid != auth.currentUser?.uid
                         val officialHouse = house.copy(
                             agentName = officialAgentName ?: house.agentName,
+                            agentUid = uid, // FIX: Ensure UID matches destination agent document
                             editedByAdmin = isAdminPush || house.editedByAdmin
                         )
                         val houseData = officialHouse.toFirestoreMap()
@@ -281,6 +282,10 @@ class SyncRepositoryImpl @Inject constructor(
                     
                     // CRITICAL recovery: ensure re-added houses aren't in deleted_house_ids
                     if (!shouldReplace) {
+                        batch.update(userDocRef, "deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayRemove(*pushedKeys.toTypedArray()))
+                    } else {
+                        // SURGICAL RECOVERY: When replacing, only clear deleted markers for the dates we just pushed
+                        // This prevents historical deleted items for other dates from 'resurrecting'.
                         batch.update(userDocRef, "deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayRemove(*pushedKeys.toTypedArray()))
                     }
                     
@@ -315,6 +320,9 @@ class SyncRepositoryImpl @Inject constructor(
                     }
                     
                     if (!shouldReplace) {
+                        batch.update(userDocRef, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayRemove(*pushedDates.toTypedArray()))
+                    } else {
+                        // Surgical recovery for activities too
                         batch.update(userDocRef, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayRemove(*pushedDates.toTypedArray()))
                     }
                     
@@ -421,8 +429,15 @@ class SyncRepositoryImpl @Inject constructor(
             
             // 1. Basic Setup
             val userDoc = firestore.collection("users").document(uid).get().await()
-            val email = userDoc.getString("email") ?: auth.currentUser?.email ?: return@withContext Result.failure(Exception("User email not found"))
-            val profileAgentName = userDoc.getString("agentName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+            val agentDocSnapshot = firestore.collection("agents").document(uid).get().await()
+            
+            val email = userDoc.getString("email") 
+                ?: agentDocSnapshot.getString("email") 
+                ?: auth.currentUser?.email 
+                ?: return@withContext Result.failure(Exception("User email not found"))
+            
+            val profileAgentName = agentDocSnapshot.getString("agentName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+                ?: userDoc.getString("agentName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
             val profileDisplayName = userDoc.getString("displayName")?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
             val finalAgentName = profileAgentName ?: profileDisplayName ?: email.substringBefore("@").uppercase()
             
@@ -437,18 +452,20 @@ class SyncRepositoryImpl @Inject constructor(
                 return@withContext Result.failure(Exception("Versão do aplicativo desatualizada. Por favor, atualize o 'Eu ACE' na Play Store para continuar sincronizando seus dados."))
             }
             
-            // --- OPTIMIZATION: Incremental vs Full Sync logic ---
-            val isIncremental = !force && !isTargetDifferentUser && settingsManager.lastSyncTimestamp.first() > 0
-            
             // --- REMOTE WIPE CHECK (Multi-device Safety) ---
-            val requireResetFromFlag = userDoc.getBoolean("requireDataReset") ?: false
+            val requireResetFromUser = userDoc.getBoolean("requireDataReset") ?: false
+            val requireResetFromAgent = agentDocSnapshot.getBoolean("requireDataReset") ?: false
             
             // If the primary agent document in cloud is missing but we have local sync history,
             // it means an Admin likely performed a 'Remote Wipe'. We must reset local state.
             val hasSyncHistory = settingsManager.lastSyncTimestamp.first() > 0
-            val agentDocExists = try { firestore.collection("agents").document(uid).get().await().exists() } catch(e: Exception) { true }
+            val agentDocExists = agentDocSnapshot.exists()
             
-            val requireReset = requireResetFromFlag || (hasSyncHistory && !agentDocExists)
+            val requireReset = requireResetFromUser || requireResetFromAgent || (hasSyncHistory && !agentDocExists)
+
+            // --- OPTIMIZATION: Incremental vs Full Sync logic ---
+            // BUG FIX: Force Full Sync if a reset was triggered to ensure email-based discovery runs.
+            val isIncremental = !force && !isTargetDifferentUser && !requireReset && settingsManager.lastSyncTimestamp.first() > 0
 
             if (requireReset) {
                 android.util.Log.w("SyncRepository", "Remote Wipe Triggered for UID: $uid")
@@ -456,7 +473,8 @@ class SyncRepositoryImpl @Inject constructor(
                 val wipeResult = clearLocalDataInternal() 
                 if (wipeResult.isSuccess) {
                     // Reset flag in Firestore ONLY if wipe succeeded
-                    firestore.collection("users").document(uid).update("requireDataReset", false)
+                    if (requireResetFromUser) firestore.collection("users").document(uid).update("requireDataReset", false)
+                    if (requireResetFromAgent) firestore.collection("agents").document(uid).update("requireDataReset", false)
                 } else {
                     android.util.Log.e("SyncRepository", "Remote Wipe Failed: ${wipeResult.exceptionOrNull()?.message}")
                     // We return early to prevent pushing/pulling on top of dirty state that should have been wiped
@@ -507,7 +525,9 @@ class SyncRepositoryImpl @Inject constructor(
 
                         val housesJob = async {
                             val snapshots = if (lastSync > 0) {
-                                housesCollection.whereGreaterThan("lastUpdated", com.google.firebase.Timestamp(lastSync / 1000, ((lastSync % 1000) * 1000000).toInt()))
+                                // BUG FIX: Add 5-minute safety margin (300000ms) to account for clock skew between device and server.
+                                val safetyLastSync = maxOf(0L, lastSync - 300000L)
+                                housesCollection.whereGreaterThan("lastUpdated", com.google.firebase.Timestamp(safetyLastSync / 1000, ((safetyLastSync % 1000) * 1000000).toInt()))
                                     .get().await()
                                     .documents
                             } else {
@@ -527,7 +547,8 @@ class SyncRepositoryImpl @Inject constructor(
 
                         val activitiesJob = async {
                             val snapshots = if (lastSync > 0) {
-                                activitiesCollection.whereGreaterThan("lastUpdated", com.google.firebase.Timestamp(lastSync / 1000, ((lastSync % 1000) * 1000000).toInt()))
+                                val safetyLastSync = maxOf(0L, lastSync - 300000L)
+                                activitiesCollection.whereGreaterThan("lastUpdated", com.google.firebase.Timestamp(safetyLastSync / 1000, ((safetyLastSync % 1000) * 1000000).toInt()))
                                     .get().await()
                                     .documents
                             } else {
@@ -802,6 +823,24 @@ class SyncRepositoryImpl @Inject constructor(
 
                 houseDao.upsertHouses(housesToUpsert)
                 dayActivityDao.upsertDayActivities(activitiesToUpsert)
+
+                // CRITICAL: Clear local tombstones for successfully pulled items (Bug Fix)
+                // This prevents 'Zombie Tombstones' from re-deleting items in the cloud on the next push.
+                housesToUpsert.forEach { house ->
+                    tombstoneDao.deleteByNaturalKey(house.generateNaturalKey(), house.agentName, house.agentUid)
+                }
+                activitiesToUpsert.forEach { activity ->
+                    tombstoneDao.deleteByNaturalKey("${activity.date}|${activity.agentName.uppercase()}", activity.agentName, activity.agentUid)
+                }
+
+                // HEALING: Delete redundant local duplicates
+                housesToUpsert.forEach { pulledHouse ->
+                    val key = pulledHouse.generateNaturalKey()
+                    val localMatches = allLocalHousesWithKeys.filter { it.naturalKey == key && it.house.id != pulledHouse.id && it.house.id != 0 }
+                    localMatches.forEach { match ->
+                        houseDao.deleteHouse(match.house)
+                    }
+                }
             }
 
             // 5. Update local sync tracking

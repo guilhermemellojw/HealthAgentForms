@@ -228,12 +228,16 @@ class HomeViewModel @Inject constructor(
             _agentName.value = selectedName
             _remoteAgent.value = selectedName
             _remoteAgentUid.value = agent.uid
+            _pendingUpdateDrafts.value = emptyMap()
+            _housesInFlight.value = emptyList()
         } else {
             // Restoring local state
             _localAgentNameBackup?.let { _agentName.value = it }
             _localAgentNameBackup = null
             _remoteAgent.value = null
             _remoteAgentUid.value = null
+            _pendingUpdateDrafts.value = emptyMap()
+            _housesInFlight.value = emptyList()
         }
         
         // Persist for background processes

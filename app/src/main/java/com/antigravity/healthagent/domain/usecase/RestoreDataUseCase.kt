@@ -122,7 +122,8 @@ class RestoreDataUseCase @Inject constructor(
                     complement = if (house.complement == 0) 0 else house.complement,
                     data = resolveDate ?: house.data.replace("/", "-"),
                     isSynced = false,
-                    lastUpdated = System.currentTimeMillis()
+                    lastUpdated = System.currentTimeMillis(),
+                    editedByAdmin = true
                 ) 
             }
             val normalizedActivities = importedActivities.map { activity ->
@@ -139,7 +140,8 @@ class RestoreDataUseCase @Inject constructor(
                     agentUid = finalAgentUid,
                     date = resolveDate ?: activity.date.replace("/", "-"),
                     isSynced = false,
-                    lastUpdated = System.currentTimeMillis()
+                    lastUpdated = System.currentTimeMillis(),
+                    editedByAdmin = true
                 ) 
             }
  
