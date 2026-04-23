@@ -164,8 +164,6 @@ interface HouseDao {
     @Query("SELECT * FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(data, '/', '-') LIKE '%-' || :monthYearSuffix")
     suspend fun getHousesByMonth(agentName: String, agentUid: String, monthYearSuffix: String): List<House>
 
-    @Query("DELETE FROM houses WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
-    suspend fun deleteByAgent(agentName: String, agentUid: String)
 
     @Query("DELETE FROM houses WHERE id = :id")
     suspend fun deleteHouseById(id: Long)

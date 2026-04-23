@@ -477,7 +477,7 @@ class HouseRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun migrateLocalData(agentName: String, email: String, targetUid: String) {
+    override suspend fun migrateLocalData(agentName: String, email: String, targetUid: String, isCurrentAgent: Boolean) {
         if (targetUid.isBlank()) return
         runInTransactionWithRetry {
             try {
@@ -499,11 +499,10 @@ class HouseRepositoryImpl @Inject constructor(
                 // 1. Standardize Houses (Lenient/Aggressive migration)
                 val allOrphans = houseDao.getAllOrphanHouses()
                 allOrphans.forEach { house ->
-                    val isPossibleMatch = house.agentName.isBlank() || 
-                        house.agentName.equals("AGENTE", true) ||
-                        house.agentName.equals(agentName, true) ||
+                    val isPossibleMatch = house.agentName.equals(agentName, true) ||
                         house.agentName.equals(email, true) ||
-                        house.agentName.equals(emailPrefix, true)
+                        house.agentName.equals(emailPrefix, true) ||
+                        (isCurrentAgent && (house.agentName.isBlank() || house.agentName.equals("AGENTE", true)))
 
                     if (isPossibleMatch) {
                         val hasClash = houseDao.checkClash(
@@ -522,11 +521,10 @@ class HouseRepositoryImpl @Inject constructor(
                 // 2. Smarter DayActivity Migration
                 val orphanActivities = dayActivityDao.getAllOrphanActivities()
                 orphanActivities.forEach { local ->
-                    val isPossibleMatch = local.agentName.isBlank() || 
-                        local.agentName.equals("AGENTE", true) ||
-                        local.agentName.equals(agentName, true) ||
+                    val isPossibleMatch = local.agentName.equals(agentName, true) ||
                         local.agentName.equals(email, true) ||
-                        local.agentName.equals(emailPrefix, true)
+                        local.agentName.equals(emailPrefix, true) ||
+                        (isCurrentAgent && (local.agentName.isBlank() || local.agentName.equals("AGENTE", true)))
 
                     if (isPossibleMatch) {
                         val conflict = getDayActivity(local.date, agentName, targetUid)

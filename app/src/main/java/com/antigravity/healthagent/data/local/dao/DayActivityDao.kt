@@ -6,13 +6,13 @@ import androidx.room.*
 
 @Dao
 interface DayActivityDao {
-    @Query("SELECT * FROM day_activities WHERE REPLACE(date, '/', '-') = REPLACE(:date, '/', '-') AND (UPPER(agentName) = UPPER(:agentName) OR (agentUid != '' AND agentUid = :agentUid))")
+    @Query("SELECT * FROM day_activities WHERE REPLACE(date, '/', '-') = REPLACE(:date, '/', '-') AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
     suspend fun getDayActivity(date: String, agentName: String, agentUid: String? = ""): DayActivity?
 
-    @Query("SELECT * FROM day_activities WHERE REPLACE(date, '/', '-') IN (:dates) AND (UPPER(agentName) = UPPER(:agentName) OR (agentUid != '' AND agentUid = :agentUid))")
+    @Query("SELECT * FROM day_activities WHERE REPLACE(date, '/', '-') IN (:dates) AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
     fun getDayActivities(dates: List<String>, agentName: String, agentUid: String? = ""): Flow<List<DayActivity>>
 
-    @Query("SELECT * FROM day_activities WHERE REPLACE(date, '/', '-') = REPLACE(:date, '/', '-') AND (UPPER(agentName) = UPPER(:agentName) OR (agentUid != '' AND agentUid = :agentUid))")
+    @Query("SELECT * FROM day_activities WHERE REPLACE(date, '/', '-') = REPLACE(:date, '/', '-') AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
     fun getDayActivityFlow(date: String, agentName: String, agentUid: String? = ""): Flow<DayActivity?>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

@@ -475,8 +475,18 @@ class SyncRepositoryImpl @Inject constructor(
 
             if (requireReset) {
                 android.util.Log.w("SyncRepository", "Remote Wipe Triggered for UID: $uid")
-                // CRITICAL: Call internal version to avoid re-acquiring syncMutex (Deadlock)
-                val wipeResult = clearLocalDataInternal() 
+                // SURGICAL WIPE: Only clear data for the target agent to prevent Admin data loss
+                val wipeResult = runInTransactionWithRetry {
+                    houseDao.deleteByAgent(finalAgentName, uid)
+                    dayActivityDao.deleteByAgent(finalAgentName, uid)
+                    tombstoneDao.deleteByAgent(finalAgentName, uid)
+                    
+                    // Reset sync state ONLY if this is the current authenticated user
+                    if (!isTargetDifferentUser) {
+                        settingsManager.setLastSyncTimestamp(0L)
+                    }
+                    Result.success(Unit)
+                }
                 if (wipeResult.isSuccess) {
                     // Reset flag in Firestore ONLY if wipe succeeded
                     if (requireResetFromUser) firestore.collection("users").document(uid).update("requireDataReset", false)

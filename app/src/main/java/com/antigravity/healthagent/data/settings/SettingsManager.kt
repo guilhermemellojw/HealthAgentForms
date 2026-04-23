@@ -37,6 +37,7 @@ class SettingsManager @Inject constructor(
     private val SOLAR_MODE_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("solar_mode")
     private val EDITING_TOOLS_MODE_KEY = androidx.datastore.preferences.core.booleanPreferencesKey("editing_tools_mode")
     private val REMOTE_AGENT_UID_KEY = stringPreferencesKey("remote_agent_uid")
+    private val REMOTE_AGENT_NAME_KEY = stringPreferencesKey("remote_agent_name")
     private val LAST_SYNC_TIMESTAMP_KEY = androidx.datastore.preferences.core.longPreferencesKey("last_sync_timestamp")
     
     // User Profile Cache for Offline Support
@@ -235,6 +236,22 @@ class SettingsManager @Inject constructor(
         }
     }
 
+    val remoteAgentName: Flow<String?> = context.dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { preferences ->
+            preferences[REMOTE_AGENT_NAME_KEY]
+        }
+
+    suspend fun setRemoteAgentName(name: String?) {
+        context.dataStore.edit { preferences ->
+            if (name == null) {
+                preferences.remove(REMOTE_AGENT_NAME_KEY)
+            } else {
+                preferences[REMOTE_AGENT_NAME_KEY] = name
+            }
+        }
+    }
+
     val lastSyncTimestamp: Flow<Long> = context.dataStore.data
         .catch { emit(emptyPreferences()) }
         .map { preferences ->
@@ -278,6 +295,7 @@ class SettingsManager @Inject constructor(
     suspend fun clearSessionSettings() {
         context.dataStore.edit { preferences ->
             preferences.remove(REMOTE_AGENT_UID_KEY)
+            preferences.remove(REMOTE_AGENT_NAME_KEY)
             preferences.remove(LAST_SYNC_TIMESTAMP_KEY)
             
             // Clear cached user on logout to ensure safety

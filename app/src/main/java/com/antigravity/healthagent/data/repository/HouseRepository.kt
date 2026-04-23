@@ -40,7 +40,7 @@ interface HouseRepository {
     suspend fun closeAllDays(agentName: String, agentUid: String? = null)
     suspend fun clearAllData()
     suspend fun clearAgentData(agentName: String, agentUid: String)
-    suspend fun migrateLocalData(agentName: String, email: String, targetUid: String)
+    suspend fun migrateLocalData(agentName: String, email: String, targetUid: String, isCurrentAgent: Boolean = false)
     suspend fun deduplicateAgentData(agentName: String, agentUid: String)
     suspend fun normalizeLocalDates()
     suspend fun fixEmailNamesForUid(uid: String, properName: String)

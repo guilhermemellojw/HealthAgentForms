@@ -33,9 +33,10 @@ class QuarteiroesViewModel @Inject constructor(
     
     val focusHouses: StateFlow<List<House>> = combine(
         settingsManager.cachedUser,
-        settingsManager.remoteAgentUid
-    ) { user, remoteUid ->
-        val name = user?.agentName ?: user?.email ?: ""
+        settingsManager.remoteAgentUid,
+        settingsManager.remoteAgentName
+    ) { user, remoteUid, remoteName ->
+        val name = remoteName ?: user?.agentName ?: user?.email ?: ""
         val uid = remoteUid ?: user?.uid ?: ""
         name to uid
     }.flatMapLatest { (name, uid) ->

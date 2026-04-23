@@ -243,11 +243,12 @@ class HomeViewModel @Inject constructor(
         // Persist for background processes
         viewModelScope.launch(Dispatchers.IO) {
             settingsManager.setRemoteAgentUid(agent?.uid)
+            settingsManager.setRemoteAgentName(agent?.agentName ?: agent?.email?.substringBefore("@"))
             if (agent != null) {
                 try {
                     // Force normalization of all local data for this agent
                     val name = agent.agentName?.takeIf { it.isNotBlank() } ?: agent.email.substringBefore("@")
-                    repository.migrateLocalData(name, agent.email, agent.uid)
+                    repository.migrateLocalData(name, agent.email, agent.uid, isCurrentAgent = false)
                     
                     // Specific cleanup if name was just an email
                     if (agent.agentName?.isNotBlank() == true && !agent.agentName.contains("@")) {
@@ -264,6 +265,12 @@ class HomeViewModel @Inject constructor(
 
     fun finishEditSession(onComplete: () -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
+            val remoteAgent = _remoteAgent.value
+            if (remoteAgent == null) {
+                onComplete()
+                return@launch
+            }
+            
             _syncStatus.value = SyncStatus(SyncStage.STARTING, 0.1f, "Finalizando edição...")
             
             try {
@@ -996,7 +1003,7 @@ class HomeViewModel @Inject constructor(
                 if (name.isNotBlank() && uid.isNotBlank()) {
                     val currentUser = settingsManager.cachedUser.first()
                     val email = currentUser?.email ?: ""
-                    repository.migrateLocalData(name, email, uid)
+                    repository.migrateLocalData(name, email, uid, isCurrentAgent = true)
                     
                     // RECONCILIATION: If we have a proper name but records are still using email, fix them.
                     if (name.isNotBlank() && !name.contains("@")) {
@@ -1111,7 +1118,7 @@ class HomeViewModel @Inject constructor(
                     if (remote == null && (uidChanged || shouldUpdate)) {
                         viewModelScope.launch(Dispatchers.IO) {
                             try {
-                                repository.migrateLocalData(name, user.email ?: "", uid)
+                                repository.migrateLocalData(name, user.email ?: "", uid, isCurrentAgent = true)
                             } catch (e: Exception) {
                                 android.util.Log.e("HomeViewModel", "Error migrating UID", e)
                             }
@@ -2957,7 +2964,7 @@ class HomeViewModel @Inject constructor(
         try {
             val targetUid = _remoteAgentUid.value ?: _currentUserUid.value
             val targetDate = _data.value
-            val existingDates = repository.getHousesByAgentSnapshot(name, uid).map { it.data }.distinct()
+            val existingDates = repository.getHousesByAgentSnapshot(_agentName.value, targetUid).map { it.data }.distinct()
 
             val result = restoreDataUseCase(
                 context = context,
