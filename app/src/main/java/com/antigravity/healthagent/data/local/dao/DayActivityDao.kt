@@ -21,6 +21,9 @@ interface DayActivityDao {
     @Query("SELECT * FROM day_activities")
     suspend fun getAllDayActivitiesSnapshot(): List<DayActivity>
 
+    @Query("SELECT * FROM day_activities WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    suspend fun getDayActivitiesByAgentSnapshot(agentName: String, agentUid: String): List<DayActivity>
+
     @Query("SELECT COUNT(*) FROM day_activities")
     suspend fun count(): Int
 

@@ -12,6 +12,12 @@ interface HouseDao {
     @Query("SELECT * FROM houses ORDER BY listOrder ASC, id ASC")
     fun getAllHousesSnapshotFlow(): Flow<List<House>>
 
+    @Query("SELECT * FROM houses WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)) ORDER BY listOrder ASC, id ASC")
+    suspend fun getHousesByAgentSnapshot(agentName: String, agentUid: String): List<House>
+
+    @Query("SELECT * FROM houses WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)) ORDER BY listOrder ASC, id ASC")
+    fun getHousesByAgentSnapshotFlow(agentName: String, agentUid: String): Flow<List<House>>
+
     @Query("SELECT COUNT(*) FROM houses")
     suspend fun count(): Int
 
@@ -114,7 +120,7 @@ interface HouseDao {
 
     @Query("""
         SELECT COUNT(*) FROM houses 
-        WHERE agentUid = :uid AND UPPER(agentName) = UPPER(:name) AND data = :date 
+        WHERE ((agentUid != '' AND agentUid = :uid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:name))) AND data = :date 
         AND UPPER(blockNumber) = UPPER(:blockNum) AND UPPER(blockSequence) = UPPER(:blockSeq) 
         AND UPPER(streetName) = UPPER(:street) AND UPPER(number) = UPPER(:num) AND sequence = :seq 
         AND complement = :compl AND UPPER(bairro) = UPPER(:bairro) AND visitSegment = :segment
@@ -131,8 +137,7 @@ interface HouseDao {
         SELECT COUNT(*) FROM houses 
         WHERE id != :excludeId 
         AND data = :date 
-        AND UPPER(agentName) = UPPER(:agentName) 
-        AND agentUid = :agentUid
+        AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))
         AND UPPER(blockNumber) = UPPER(:blockNumber) 
         AND UPPER(blockSequence) = UPPER(:blockSequence) 
         AND UPPER(streetName) = UPPER(:streetName) 
@@ -158,4 +163,10 @@ interface HouseDao {
     ): Int
     @Query("SELECT * FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(data, '/', '-') LIKE '%-' || :monthYearSuffix")
     suspend fun getHousesByMonth(agentName: String, agentUid: String, monthYearSuffix: String): List<House>
+
+    @Query("DELETE FROM houses WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
+    suspend fun deleteByAgent(agentName: String, agentUid: String)
+
+    @Query("DELETE FROM houses WHERE id = :id")
+    suspend fun deleteHouseById(id: Long)
 }

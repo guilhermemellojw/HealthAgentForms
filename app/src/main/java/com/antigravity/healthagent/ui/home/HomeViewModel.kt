@@ -276,10 +276,13 @@ class HomeViewModel @Inject constructor(
                 val result = syncDataUseCase.pushData(houses, activities, uid)
                 
                 if (result.isSuccess) {
-                    // 2. Clear state and local DB
+                    // 2. Clear state and local DB surgically
                     _syncStatus.value = SyncStatus(SyncStage.SUCCESS, 1.0f, "Sincronizado com sucesso!")
+                    
+                    // CRITICAL: We clear the remote agent's data BUT PRESERVE the admin's local data
+                    syncRepository.clearAgentData(agentName, uid)
+                    
                     setRemoteAgent(null)
-                    syncRepository.clearLocalData()
                     _uiEvent.value = "Edição finalizada e sincronizada!"
                     delay(1500)
                     onComplete()
@@ -310,7 +313,17 @@ class HomeViewModel @Inject constructor(
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Global list for RG view (all agents)
-    private val globalHousesFlow = repository.getAllHousesSnapshotFlow()
+    private val globalHousesFlow = combine(_agentName, _remoteAgentUid, _currentUserUid) { name, remoteUid, currentUid ->
+        val isAdmin = name == "Admin" || name == "Supervisor"
+        val effectiveUid = remoteUid ?: currentUid
+        Triple(isAdmin, name, effectiveUid)
+    }.flatMapLatest { (isAdmin, name, uid) ->
+        if (isAdmin) {
+            repository.getAllHousesSnapshotFlow()
+        } else {
+            repository.getHousesByAgentSnapshotFlow(name, uid)
+        }
+    }
 
 
     val isDayClosed: StateFlow<Boolean> = combine(_data, _agentName, _remoteAgentUid, _currentUserUid) { date, name, remoteUid, currentUid ->
@@ -819,9 +832,11 @@ class HomeViewModel @Inject constructor(
     }.flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val streetSuggestions: StateFlow<List<String>> = _bairro.flatMapLatest { currentB ->
-        streetRepository.getStreetSuggestions(currentB)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val streetSuggestions: StateFlow<List<String>> = combine(_bairro, _agentName, _remoteAgentUid, _currentUserUid) { currentB, name, remoteUid, currentUid ->
+        val uid = remoteUid ?: currentUid
+        streetRepository.getStreetSuggestions(currentB, name, uid)
+    }.flatMapLatest { it }
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
 
 
@@ -2942,7 +2957,7 @@ class HomeViewModel @Inject constructor(
         try {
             val targetUid = _remoteAgentUid.value ?: _currentUserUid.value
             val targetDate = _data.value
-            val existingDates = repository.getAllHousesSnapshot().map { it.data }.distinct()
+            val existingDates = repository.getHousesByAgentSnapshot(name, uid).map { it.data }.distinct()
 
             val result = restoreDataUseCase(
                 context = context,

@@ -27,6 +27,7 @@ interface SyncRepository {
      * Clears all local Room data (Houses, DayActivities).
      */
     suspend fun clearLocalData(): Result<Unit>
+    suspend fun clearAgentData(agentName: String, agentUid: String): Result<Unit>
 
     /**
      * Performs a one-time cleanup of corrupted data (e.g., '0' in number/sequence/complement).

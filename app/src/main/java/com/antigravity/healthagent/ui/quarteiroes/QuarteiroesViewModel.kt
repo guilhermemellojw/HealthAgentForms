@@ -39,9 +39,14 @@ class QuarteiroesViewModel @Inject constructor(
         val uid = remoteUid ?: user?.uid ?: ""
         name to uid
     }.flatMapLatest { (name, uid) ->
-        if (name == "Admin" || name == "Supervisor") {
+        val isAdmin = name == "Admin" || name == "Supervisor"
+        val hasRemoteAgent = uid != authRepository.getCurrentUserUid()
+        
+        if (isAdmin && !hasRemoteAgent) {
+            // Truly global view for admin with no specific agent selected
             houseRepository.getAllHousesSnapshotFlow()
         } else if (name.isNotBlank()) {
+            // Strict filtering for regular agents OR admin inspecting a specific agent
             houseRepository.getAllHouses(name, uid)
         } else {
             flowOf(emptyList())

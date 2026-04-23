@@ -20,8 +20,8 @@ class StreetRepository @Inject constructor(
      * Combines the static Bom Jardim street database with historical street names
      * from the local database.
      */
-    fun getStreetSuggestions(bairro: String): Flow<List<String>> {
-        val housesFlow = houseDao.getAllHousesSnapshotFlow()
+    fun getStreetSuggestions(bairro: String, agentName: String, agentUid: String): Flow<List<String>> {
+        val housesFlow = houseDao.getHousesByAgentSnapshotFlow(agentName, agentUid)
         val customStreetsFlow = customStreetDao.getAllCustomStreets()
 
         return combine(housesFlow, customStreetsFlow) { houses, customStreets ->

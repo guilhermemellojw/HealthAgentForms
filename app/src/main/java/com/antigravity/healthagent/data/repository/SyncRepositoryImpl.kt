@@ -619,7 +619,8 @@ class SyncRepositoryImpl @Inject constructor(
 
             // OPTIMIZATION: Only fetch local records that could possibly be affected by deletions
             // to avoid loading thousands of unrelated houses into memory.
-            val allLocalHouses = houseDao.getAllHousesSnapshot()
+            // BUG FIX: Only fetch records for the target agent to prevent data leakage/accidental deletion of Admin's own records.
+            val allLocalHouses = houseDao.getHousesByAgentSnapshot(finalAgentName, uid)
             var allLocalHousesWithKeys = allLocalHouses.map { HouseWithKeys(it) }
             
             // Protection: Identified Locked Days
@@ -913,6 +914,23 @@ class SyncRepositoryImpl @Inject constructor(
                 clearLocalDataInternal()
             }
         } ?: Result.failure(Exception("Tempo esgotado ao tentar limpar dados locais (Database busy)"))
+    }
+
+    override suspend fun clearAgentData(agentName: String, agentUid: String): Result<Unit> {
+        return withTimeoutOrNull(15000L) {
+            syncMutex.withLock {
+                try {
+                    runInTransactionWithRetry {
+                        houseDao.deleteByAgent(agentName, agentUid)
+                        dayActivityDao.deleteByAgent(agentName, agentUid)
+                    }
+                    Result.success(Unit)
+                } catch (e: Exception) {
+                    android.util.Log.e("SyncRepository", "Surgical Wipe Failed for $agentName: ${e.message}")
+                    Result.failure(e)
+                }
+            }
+        } ?: Result.failure(Exception("Tempo esgotado ao tentar limpar dados do agente (Database busy)"))
     }
 
     override suspend fun performDataCleanup(): Result<Unit> {

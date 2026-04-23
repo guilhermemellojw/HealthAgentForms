@@ -11,7 +11,9 @@ interface HouseRepository {
     suspend fun getHouseById(id: Long): House?
     suspend fun getAllHousesOnce(agentName: String, agentUid: String): List<House> // Snapshot for isolated backup
     suspend fun getAllHousesSnapshot(): List<House> // Full snapshot for auto-backup
+    suspend fun getHousesByAgentSnapshot(agentName: String, agentUid: String): List<House>
     fun getAllHousesSnapshotFlow(): Flow<List<House>>
+    fun getHousesByAgentSnapshotFlow(agentName: String, agentUid: String): Flow<List<House>>
     suspend fun insertHouse(house: House, force: Boolean = false): Long
     suspend fun updateHouse(house: House, force: Boolean = false)
     suspend fun updateHouses(houses: List<House>, force: Boolean = false)
@@ -29,6 +31,7 @@ interface HouseRepository {
     suspend fun getDayActivity(date: String, agentName: String, agentUid: String? = null): DayActivity?
     suspend fun getAllDayActivitiesOnce(agentName: String, agentUid: String): List<DayActivity>
     suspend fun getAllDayActivitiesSnapshot(): List<DayActivity>
+    suspend fun getDayActivitiesByAgentSnapshot(agentName: String, agentUid: String): List<DayActivity>
     suspend fun replaceAllDayActivities(activities: List<DayActivity>)
     suspend fun restoreAgentData(agentName: String, houses: List<House>, activities: List<DayActivity>, agentUid: String? = null)
     suspend fun deleteProduction(date: String, agentName: String, agentUid: String? = null, force: Boolean = false) 
@@ -36,6 +39,7 @@ interface HouseRepository {
     suspend fun countOpenDays(agentName: String, agentUid: String? = null): Int
     suspend fun closeAllDays(agentName: String, agentUid: String? = null)
     suspend fun clearAllData()
+    suspend fun clearAgentData(agentName: String, agentUid: String)
     suspend fun migrateLocalData(agentName: String, email: String, targetUid: String)
     suspend fun deduplicateAgentData(agentName: String, agentUid: String)
     suspend fun normalizeLocalDates()

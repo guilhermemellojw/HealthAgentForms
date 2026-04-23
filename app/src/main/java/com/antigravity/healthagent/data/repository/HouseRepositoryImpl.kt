@@ -62,8 +62,16 @@ class HouseRepositoryImpl @Inject constructor(
         return houseDao.getAllHousesSnapshot()
     }
 
+    override suspend fun getHousesByAgentSnapshot(agentName: String, agentUid: String): List<House> {
+        return houseDao.getHousesByAgentSnapshot(agentName, agentUid)
+    }
+
     override fun getAllHousesSnapshotFlow(): Flow<List<House>> {
         return houseDao.getAllHousesSnapshotFlow()
+    }
+
+    override fun getHousesByAgentSnapshotFlow(agentName: String, agentUid: String): Flow<List<House>> {
+        return houseDao.getHousesByAgentSnapshotFlow(agentName, agentUid)
     }
 
     override suspend fun insertHouse(house: House, force: Boolean): Long {
@@ -291,6 +299,10 @@ class HouseRepositoryImpl @Inject constructor(
         return dayActivityDao.getAllDayActivitiesSnapshot()
     }
 
+    override suspend fun getDayActivitiesByAgentSnapshot(agentName: String, agentUid: String): List<DayActivity> {
+        return dayActivityDao.getDayActivitiesByAgentSnapshot(agentName, agentUid)
+    }
+
     override suspend fun replaceAllDayActivities(activities: List<DayActivity>) {
         dayActivityDao.replaceDayActivities(activities)
         syncSchedulerProvider.get().scheduleSync()
@@ -455,6 +467,13 @@ class HouseRepositoryImpl @Inject constructor(
         runInTransactionWithRetry {
             houseDao.deleteAll()
             dayActivityDao.deleteAll()
+        }
+    }
+
+    override suspend fun clearAgentData(agentName: String, agentUid: String) {
+        runInTransactionWithRetry {
+            houseDao.deleteByAgent(agentName, agentUid)
+            dayActivityDao.deleteByAgent(agentName, agentUid)
         }
     }
 
