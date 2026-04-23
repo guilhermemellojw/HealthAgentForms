@@ -38,6 +38,8 @@ class AdminViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val restoreDataUseCase: RestoreDataUseCase,
     private val syncDataUseCase: SyncDataUseCase,
+    private val getTimelineUseCase: com.antigravity.healthagent.domain.usecase.GetTimelineUseCase,
+    private val restoreFromTimelineUseCase: com.antigravity.healthagent.domain.usecase.RestoreFromTimelineUseCase,
     private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager
 ) : ViewModel() {
 
@@ -646,6 +648,46 @@ class AdminViewModel @Inject constructor(
 
     fun getCurrentUserUid(): String? {
         return authRepository.getCurrentUserUid()
+    }
+
+    // --- Timeline Backup Shift ---
+
+    private val _timeline = MutableStateFlow<List<com.antigravity.healthagent.domain.repository.BackupMetadata>>(emptyList())
+    val timeline: StateFlow<List<com.antigravity.healthagent.domain.repository.BackupMetadata>> = _timeline.asStateFlow()
+
+    private val _isTimelineLoading = MutableStateFlow(false)
+    val isTimelineLoading: StateFlow<Boolean> = _isTimelineLoading.asStateFlow()
+
+    fun loadTimeline(uid: String) {
+        viewModelScope.launch {
+            _isTimelineLoading.value = true
+            val result = getTimelineUseCase(uid)
+            if (result.isSuccess) {
+                _timeline.value = result.getOrNull() ?: emptyList()
+            } else {
+                _uiEvent.emit("Erro ao carregar timeline: ${result.exceptionOrNull()?.message}")
+            }
+            _isTimelineLoading.value = false
+        }
+    }
+
+    fun restoreFromTimeline(agentUid: String, storagePath: String) {
+        viewModelScope.launch {
+            if (!authRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            _isTimelineLoading.value = true
+            val result = restoreFromTimelineUseCase(agentUid, storagePath)
+            if (result.isSuccess) {
+                _uiEvent.emit("Restauração concluída com sucesso")
+                loadTimeline(agentUid) // Refresh metadata (like agentName update if it changed)
+                loadAgentsData(_selectedYear.value, _selectedMonth.value) // Refresh dashboard
+            } else {
+                _uiEvent.emit("Erro na restauração: ${result.exceptionOrNull()?.message}")
+            }
+            _isTimelineLoading.value = false
+        }
     }
 }
 

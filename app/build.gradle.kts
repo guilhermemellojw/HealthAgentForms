@@ -118,6 +118,7 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-storage")
     
     // Auth (Google Sign-In via Credential Manager)
     implementation("androidx.credentials:credentials:1.2.1")

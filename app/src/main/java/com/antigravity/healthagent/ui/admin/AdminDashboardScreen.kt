@@ -363,6 +363,9 @@ fun AdminDashboardScreen(
     var showWipeDialog by remember { mutableStateOf(false) }
     var userForWipe by remember { mutableStateOf<UnifiedProfile?>(null) }
 
+    var showTimelineForUid by remember { mutableStateOf<String?>(null) }
+    var showTimelineForName by remember { mutableStateOf("") }
+
     val snackbarHostState = remember { SnackbarHostState() }
 
     val context = LocalContext.current
@@ -629,6 +632,10 @@ fun AdminDashboardScreen(
                                                     onRemoteWipe = {
                                                         userForWipe = profile
                                                         showWipeDialog = true
+                                                    },
+                                                    onOpenTimeline = { uid, name ->
+                                                        showTimelineForUid = uid
+                                                        showTimelineForName = name
                                                     }
                                                 )
                                             }
@@ -642,6 +649,15 @@ fun AdminDashboardScreen(
                     }
                     }
                 }
+            }
+
+            if (showTimelineForUid != null) {
+                AdminTimelineScreen(
+                    agentUid = showTimelineForUid!!,
+                    agentName = showTimelineForName,
+                    viewModel = viewModel,
+                    onNavigateBack = { showTimelineForUid = null }
+                )
             }
         }
     }
@@ -980,7 +996,8 @@ fun UnifiedProfileCard(
     onClearSyncError: () -> Unit,
     onMigrateData: () -> Unit,
     onTransferData: () -> Unit,
-    onRemoteWipe: () -> Unit
+    onRemoteWipe: () -> Unit,
+    onOpenTimeline: (String, String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     var expandedRole by remember { mutableStateOf(false) }
@@ -1292,6 +1309,10 @@ fun UnifiedProfileCard(
                         
                         if (agent != null) {
                             ActionButton(Icons.Default.QueryStats, "Analisar", onClick = onEditAgent)
+                        }
+
+                        if (profile.uid != null) {
+                            ActionButton(Icons.Default.History, "Timeline", onClick = { onOpenTimeline(profile.uid, profile.agentName ?: profile.email ?: "") })
                         }
                     }
                 }

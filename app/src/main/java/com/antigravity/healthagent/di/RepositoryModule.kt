@@ -35,4 +35,10 @@ abstract class RepositoryModule {
     abstract fun bindMapRepository(
         mapRepositoryImpl: com.antigravity.healthagent.data.repository.MapRepositoryImpl
     ): com.antigravity.healthagent.domain.repository.MapRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindBackupRepository(
+        backupRepositoryImpl: com.antigravity.healthagent.data.repository.BackupRepositoryImpl
+    ): com.antigravity.healthagent.domain.repository.BackupRepository
 }

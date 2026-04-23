@@ -34,6 +34,7 @@ class SyncRepositoryImpl @Inject constructor(
     private val tombstoneDao: com.antigravity.healthagent.data.local.dao.TombstoneDao,
     private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager,
     private val database: com.antigravity.healthagent.data.local.AppDatabase,
+    private val backupRepository: com.antigravity.healthagent.domain.repository.BackupRepository,
     private val syncSchedulerProvider: javax.inject.Provider<com.antigravity.healthagent.data.sync.SyncScheduler>
 ) : SyncRepository {
 
@@ -402,12 +403,30 @@ class SyncRepositoryImpl @Inject constructor(
                 userDocRef.collection("monthly_summaries").document(monthYear).set(summary).await()
             }
 
-            // 5. METADATA (Final Step)
             userDocRef.update(metadata + mapOf(
                 "lastSyncTime" to System.currentTimeMillis(),
                 "lastSyncError" to com.google.firebase.firestore.FieldValue.delete()
             )).await()
 
+            // 6. TIMELINE BACKUP (Chronological Snapshot)
+            // Automated snapshot after successful sync to ensure data safety on the cloud.
+            // We trigger this for ANY data push to an agent's account (Self or Admin-Proxy).
+            if (uid.isNotEmpty()) {
+                try {
+                    val allHouses = houseDao.getHousesByAgentSnapshot(officialAgentName, uid)
+                    val allActivities = dayActivityDao.getAllDayActivities(officialAgentName, uid)
+                    val backupData = com.antigravity.healthagent.data.backup.BackupData(
+                        houses = allHouses,
+                        dayActivities = allActivities,
+                        sourceAgentUid = uid,
+                        sourceAgentName = officialAgentName
+                    )
+                    backupRepository.uploadTimelineBackup(uid, backupData)
+                    android.util.Log.i("SyncRepository", "Timeline Backup uploaded for $uid")
+                } catch (e: Exception) {
+                    android.util.Log.w("SyncRepository", "Timeline Backup failed (non-critical): ${e.message}")
+                }
+            }
 
             Result.success(Unit)
         } catch (e: Exception) {
