@@ -45,7 +45,7 @@ fun RGHouseRow(
             
             // Number
             Text(
-                text = house.number.ifBlank { "—" },
+                text = if (house.number.isBlank() || house.number == "0") "—" else house.number,
                 style = basicStyle,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.width(numberWidth)
@@ -55,7 +55,7 @@ fun RGHouseRow(
             
             // Sequence
             Text(
-                text = house.sequence?.toString() ?: "—",
+                text = if (house.sequence == 0) "—" else house.sequence.toString(),
                 style = basicStyle,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.width(seqWidth)
@@ -65,7 +65,7 @@ fun RGHouseRow(
             
             // Complement
             Text(
-                text = house.complement?.toString() ?: "—",
+                text = if (house.complement == 0) "—" else house.complement.toString(),
                 style = basicStyle,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.width(seqWidth)
