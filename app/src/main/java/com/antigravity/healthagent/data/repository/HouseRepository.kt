@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.Flow
 
 interface HouseRepository {
     fun getAllHouses(agentName: String, agentUid: String): Flow<List<House>>
+    val allActivitiesFlow: Flow<List<DayActivity>>
     fun getDistinctAgentNames(): Flow<List<String>>
     fun getAllHousesOrderedByBlock(agentName: String, agentUid: String): Flow<List<House>>
     suspend fun getHouseById(id: Long): House?
@@ -42,6 +43,7 @@ interface HouseRepository {
     suspend fun clearAgentData(agentName: String, agentUid: String)
     suspend fun migrateLocalData(agentName: String, email: String, targetUid: String, isCurrentAgent: Boolean = false)
     suspend fun deduplicateAgentData(agentName: String, agentUid: String)
+    suspend fun cleanMisattributedData(inspectedUid: String, adminUid: String)
     suspend fun normalizeLocalDates()
     suspend fun fixEmailNamesForUid(uid: String, properName: String)
 }

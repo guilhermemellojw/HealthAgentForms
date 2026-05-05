@@ -46,18 +46,14 @@ class LogoutWorker @AssistedInject constructor(
             android.util.Log.i("LogoutWorker", "Wiping local database...")
             syncRepository.clearLocalData()
 
-            // 3. FIREBASE SIGN OUT
-            android.util.Log.i("LogoutWorker", "Signing out of Firebase...")
-            auth.signOut()
-
+            // 3. WIPE SUCCESSFUL
             android.util.Log.i("LogoutWorker", "Cleanup completed successfully.")
             return Result.success()
         } catch (e: Exception) {
             android.util.Log.e("LogoutWorker", "Cleanup failed: ${e.message}")
-            // Even if sync fails, we MUST try to wipe data and sign out
+            // Even if sync fails, we MUST try to wipe data
             try {
                 syncRepository.clearLocalData()
-                auth.signOut()
             } catch (e2: Exception) {}
             return Result.failure()
         }

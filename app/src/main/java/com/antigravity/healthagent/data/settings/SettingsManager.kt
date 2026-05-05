@@ -53,25 +53,25 @@ class SettingsManager @Inject constructor(
     val popSound: Flow<String> = context.dataStore.data
         .catch { emit(androidx.datastore.preferences.core.emptyPreferences()) }
         .map { preferences ->
-            preferences[POP_SOUND_KEY] ?: "SYSTEM_NOTIFICATION_1"
+            preferences[POP_SOUND_KEY] ?: "SILENT"
         }
 
     val successSound: Flow<String> = context.dataStore.data
         .catch { emit(androidx.datastore.preferences.core.emptyPreferences()) }
         .map { preferences ->
-            preferences[SUCCESS_SOUND_KEY] ?: "SYSTEM_NOTIFICATION_1"
+            preferences[SUCCESS_SOUND_KEY] ?: "SILENT"
         }
 
     val celebrationSound: Flow<String> = context.dataStore.data
         .catch { emit(androidx.datastore.preferences.core.emptyPreferences()) }
         .map { preferences ->
-            preferences[CELEBRATION_SOUND_KEY] ?: "SYSTEM_ALARM"
+            preferences[CELEBRATION_SOUND_KEY] ?: "SILENT"
         }
 
     val warningSound: Flow<String> = context.dataStore.data
         .catch { emit(androidx.datastore.preferences.core.emptyPreferences()) }
         .map { preferences ->
-            preferences[WARNING_SOUND_KEY] ?: "SYSTEM_NOTIFICATION_2"
+            preferences[WARNING_SOUND_KEY] ?: "SILENT"
         }
 
     val maxOpenHouses: Flow<Int> = context.dataStore.data

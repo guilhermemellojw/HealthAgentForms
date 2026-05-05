@@ -27,7 +27,8 @@ class GetBoletimSummaryUseCase @Inject constructor() {
 
             effectiveGroup.map { (agentName, groupHouses) ->
                 val activity = activities.find { it.date == date && (it.agentUid == agentUid || (it.agentUid.isEmpty() && it.agentName.uppercase() == agentName)) }
-                val dayHousesSorted = groupHouses.sortedBy { it.listOrder }
+                // Stability: Sort by listOrder and fallback to createdAt to maintain chronological order
+                val dayHousesSorted = groupHouses.sortedWith(compareBy({ it.listOrder }, { it.createdAt }))
                 
                 val blockMap = dayHousesSorted.groupBy { 
                     Triple(it.bairro.trim().uppercase(), it.blockNumber, it.blockSequence) 

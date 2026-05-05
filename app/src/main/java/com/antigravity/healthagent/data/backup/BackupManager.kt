@@ -156,9 +156,11 @@ class BackupManager @Inject constructor() {
                     jsonReader.beginObject()
                     while (jsonReader.hasNext()) {
                         val name = try { jsonReader.nextName() } catch (e: Exception) { 
+                            android.util.Log.e("BackupManager", "JSON Truncated at root name: ${e.message}")
                             wasTruncated = true
                             break 
                         }
+                        android.util.Log.i("BackupManager", "Importing section: $name")
                         when (name) {
                             "houses" -> {
                                 jsonReader.beginArray()
@@ -168,9 +170,8 @@ class BackupManager @Inject constructor() {
                                         parsedHouses.add(house)
                                     }
                                 } catch (e: Exception) {
-                                    e.printStackTrace()
+                                    android.util.Log.e("BackupManager", "JSON Truncated in houses array: ${e.message}")
                                     wasTruncated = true
-                                    // Drain the reader if possible or just stop
                                 }
                                 try { if (jsonReader.peek() != JsonToken.END_ARRAY) wasTruncated = true else jsonReader.endArray() } catch (e: Exception) { wasTruncated = true }
                             }
@@ -182,7 +183,7 @@ class BackupManager @Inject constructor() {
                                         parsedActivities.add(activity)
                                     }
                                 } catch (e: Exception) {
-                                    e.printStackTrace()
+                                    android.util.Log.e("BackupManager", "JSON Truncated in activities array: ${e.message}")
                                     wasTruncated = true
                                 }
                                 try { if (jsonReader.peek() != JsonToken.END_ARRAY) wasTruncated = true else jsonReader.endArray() } catch (e: Exception) { wasTruncated = true }
@@ -202,7 +203,7 @@ class BackupManager @Inject constructor() {
                             parsedHouses.add(house)
                         }
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        android.util.Log.e("BackupManager", "JSON Truncated in legacy houses array: ${e.message}")
                         wasTruncated = true
                     }
                     try { if (jsonReader.peek() != JsonToken.END_ARRAY) wasTruncated = true else jsonReader.endArray() } catch (e: Exception) { wasTruncated = true }

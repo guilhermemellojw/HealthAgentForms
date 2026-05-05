@@ -33,8 +33,8 @@ interface HouseDao {
     @Query("SELECT * FROM houses WHERE isSynced = 0 AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
     suspend fun getUnsyncedHouses(agentName: String, agentUid: String): List<House>
 
-    @Query("UPDATE houses SET isSynced = 1 WHERE id = :id AND lastUpdated = :timestamp")
-    suspend fun markAsSyncedWithTimestamp(id: Int, timestamp: Long)
+    @Query("UPDATE OR REPLACE houses SET isSynced = 1, agentUid = :agentUid, agentName = :agentName WHERE id = :id AND lastUpdated = :timestamp")
+    suspend fun markAsSyncedWithTimestamp(id: Int, timestamp: Long, agentUid: String, agentName: String)
 
     @Query("SELECT DISTINCT data FROM houses WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
     suspend fun getDistinctDates(agentName: String, agentUid: String): List<String>
@@ -57,7 +57,7 @@ interface HouseDao {
     @Delete
     suspend fun deleteHouse(house: House)
 
-    @Query("UPDATE houses SET data = :newDate, isSynced = 0, lastUpdated = :now WHERE REPLACE(data, '/', '-') = REPLACE(:oldDate, '/', '-') AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
+    @Query("UPDATE OR REPLACE houses SET data = :newDate, isSynced = 0, lastUpdated = :now WHERE REPLACE(data, '/', '-') = REPLACE(:oldDate, '/', '-') AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
     suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String, now: Long = System.currentTimeMillis())
 
 
@@ -93,7 +93,7 @@ interface HouseDao {
     suspend fun getHousesByAgentAndDates(agentName: String, agentUid: String, dates: List<String>): List<House>
 
     @Query("""
-        UPDATE houses 
+        UPDATE OR REPLACE houses 
         SET number = CASE WHEN number = '0' THEN '' ELSE number END,
             sequence = CASE WHEN sequence = 0 THEN NULL ELSE sequence END,
             complement = CASE WHEN complement = 0 THEN NULL ELSE complement END
@@ -101,19 +101,14 @@ interface HouseDao {
     """)
     suspend fun cleanupZeroValues()
 
-    @Query("UPDATE houses SET agentName = :newName, isSynced = 0, lastUpdated = :now WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:oldName)))")
+    @Query("UPDATE OR REPLACE houses SET agentName = :newName, isSynced = 0, lastUpdated = :now WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:oldName)))")
     suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String, now: Long = System.currentTimeMillis())
 
-    @Query("UPDATE houses SET agentName = :properName, isSynced = 0, lastUpdated = :now WHERE agentUid = :uid AND agentName LIKE '%@%'")
+    @Query("UPDATE OR REPLACE houses SET agentName = :properName, isSynced = 0, lastUpdated = :now WHERE agentUid = :uid AND agentName LIKE '%@%'")
     suspend fun fixEmailNamesForUid(uid: String, properName: String, now: Long = System.currentTimeMillis())
 
-    @Query("""
-        SELECT * FROM houses 
-        WHERE (agentUid = '' OR agentUid = :targetUid) 
-        AND UPPER(agentName) != UPPER(:properName) 
-        AND (UPPER(agentName) = UPPER(:email) OR UPPER(agentName) = UPPER(:emailPrefix))
-    """)
-    suspend fun getOrphanHouses(email: String, emailPrefix: String, targetUid: String, properName: String): List<House>
+    @Query("SELECT * FROM houses WHERE agentUid != :targetUid AND (UPPER(agentName) = UPPER(:email) OR UPPER(agentName) = UPPER(:prefix) OR UPPER(agentName) = UPPER(:properName) OR (agentUid = '' AND UPPER(agentName) = 'AGENTE'))")
+    suspend fun getHousesToReclaim(email: String, prefix: String, targetUid: String, properName: String): List<House>
 
     @Query("SELECT * FROM houses WHERE agentUid = '' OR agentUid IS NULL")
     suspend fun getAllOrphanHouses(): List<House>
@@ -130,7 +125,7 @@ interface HouseDao {
     @Query("DELETE FROM houses WHERE id = :id")
     suspend fun deleteHouseById(id: Int)
 
-    @Query("UPDATE houses SET agentUid = :uid, agentName = :name WHERE id = :id")
+    @Query("UPDATE OR REPLACE houses SET agentUid = :uid, agentName = :name WHERE id = :id")
     suspend fun updateHouseIdentity(id: Int, uid: String, name: String)
 
     @Query("""
@@ -164,6 +159,9 @@ interface HouseDao {
     @Query("SELECT * FROM houses WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(data, '/', '-') LIKE '%-' || :monthYearSuffix")
     suspend fun getHousesByMonth(agentName: String, agentUid: String, monthYearSuffix: String): List<House>
 
+
+    @Query("SELECT * FROM houses WHERE agentUid = :uid")
+    suspend fun getHousesByUidOnly(uid: String): List<House>
 
     @Query("DELETE FROM houses WHERE id = :id")
     suspend fun deleteHouseById(id: Long)

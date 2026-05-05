@@ -14,6 +14,7 @@ import com.antigravity.healthagent.data.local.dao.TombstoneDao
 import com.antigravity.healthagent.data.local.model.Tombstone
 import com.antigravity.healthagent.data.local.model.TombstoneType
 import com.antigravity.healthagent.utils.withRetry
+import com.antigravity.healthagent.utils.normalize
 
 class HouseRepositoryImpl @Inject constructor(
     private val houseDao: HouseDao,
@@ -45,6 +46,8 @@ class HouseRepositoryImpl @Inject constructor(
     override fun getDistinctAgentNames(): Flow<List<String>> {
         return houseDao.getDistinctAgentNames()
     }
+
+    override val allActivitiesFlow: Flow<List<DayActivity>> = dayActivityDao.getAllDayActivitiesFlow()
 
     override fun getAllHousesOrderedByBlock(agentName: String, agentUid: String): Flow<List<House>> {
         return houseDao.getAllHousesOrderedByBlock(agentName, agentUid)
@@ -498,11 +501,21 @@ class HouseRepositoryImpl @Inject constructor(
 
                 // 1. Standardize Houses (Lenient/Aggressive migration)
                 val allOrphans = houseDao.getAllOrphanHouses()
+                val normalizedTargetName = agentName.normalize()
+                val normalizedEmail = email.normalize()
+                val normalizedPrefix = emailPrefix.normalize()
+
                 allOrphans.forEach { house ->
-                    val isPossibleMatch = house.agentName.equals(agentName, true) ||
-                        house.agentName.equals(email, true) ||
-                        house.agentName.equals(emailPrefix, true) ||
-                        (isCurrentAgent && (house.agentName.isBlank() || house.agentName.equals("AGENTE", true)))
+                    val houseNameNormalized = house.agentName.normalize()
+                    
+                    val isPossibleMatch = if (isCurrentAgent) {
+                        houseNameNormalized == normalizedTargetName ||
+                        houseNameNormalized == normalizedEmail ||
+                        houseNameNormalized == normalizedPrefix ||
+                        house.agentName.isBlank() || houseNameNormalized == "AGENTE"
+                    } else {
+                        houseNameNormalized == normalizedTargetName && houseNameNormalized.isNotBlank()
+                    }
 
                     if (isPossibleMatch) {
                         val hasClash = houseDao.checkClash(
@@ -518,13 +531,41 @@ class HouseRepositoryImpl @Inject constructor(
                     }
                 }
 
+                // 1.5 SURGICAL RECLAMATION: If this is the current user (Admin), 
+                // look for any records that have a WRONG UID but match our identity.
+                // This fixes the "leaked production" issue where Admin work was tagged as Vinicius.
+                if (isCurrentAgent) {
+                    val recordsToReclaim = houseDao.getHousesToReclaim(email, emailPrefix, targetUid, properName)
+                    if (recordsToReclaim.isNotEmpty()) {
+                        android.util.Log.i("HouseRepository", "Surgical Reclamation: Restoring ${recordsToReclaim.size} misattributed records to UID $targetUid")
+                        recordsToReclaim.forEach { house ->
+                            val hasClash = houseDao.checkClash(
+                                targetUid, properName, house.data, house.blockNumber, house.blockSequence, 
+                                house.streetName, house.number, house.sequence, house.complement, house.bairro, house.visitSegment
+                            ) > 0
+                            
+                            if (hasClash) {
+                                houseDao.deleteHouseById(house.id)
+                            } else {
+                                houseDao.updateHouseIdentity(house.id, targetUid, properName)
+                            }
+                        }
+                    }
+                }
+
                 // 2. Smarter DayActivity Migration
                 val orphanActivities = dayActivityDao.getAllOrphanActivities()
                 orphanActivities.forEach { local ->
-                    val isPossibleMatch = local.agentName.equals(agentName, true) ||
-                        local.agentName.equals(email, true) ||
-                        local.agentName.equals(emailPrefix, true) ||
-                        (isCurrentAgent && (local.agentName.isBlank() || local.agentName.equals("AGENTE", true)))
+                    val localNameNormalized = local.agentName.normalize()
+                    
+                    val isPossibleMatch = if (isCurrentAgent) {
+                        localNameNormalized == normalizedTargetName ||
+                        localNameNormalized == normalizedEmail ||
+                        localNameNormalized == normalizedPrefix ||
+                        local.agentName.isBlank() || localNameNormalized == "AGENTE"
+                    } else {
+                        localNameNormalized == normalizedTargetName && localNameNormalized.isNotBlank()
+                    }
 
                     if (isPossibleMatch) {
                         val conflict = getDayActivity(local.date, agentName, targetUid)
@@ -539,6 +580,20 @@ class HouseRepositoryImpl @Inject constructor(
                             }
                         } else {
                             dayActivityDao.insertDayActivity(local.copy(agentName = properName, agentUid = targetUid))
+                        }
+                    }
+                }
+
+                // 2.5 ACTIVITY RECLAMATION
+                if (isCurrentAgent) {
+                    val activitiesToReclaim = dayActivityDao.getActivitiesToReclaim(email, emailPrefix, targetUid, properName)
+                    if (activitiesToReclaim.isNotEmpty()) {
+                        android.util.Log.i("HouseRepository", "Surgical Reclamation: Restoring ${activitiesToReclaim.size} activities to UID $targetUid")
+                        activitiesToReclaim.forEach { activity ->
+                            val conflict = getDayActivity(activity.date, agentName, targetUid)
+                            if (conflict == null) {
+                                dayActivityDao.insertDayActivity(activity.copy(agentName = properName, agentUid = targetUid, isSynced = false, lastUpdated = System.currentTimeMillis()))
+                            }
                         }
                     }
                 }
@@ -586,6 +641,42 @@ class HouseRepositoryImpl @Inject constructor(
 
             if (toDelete.isNotEmpty()) {
                 toDelete.forEach { houseDao.deleteHouse(it) }
+                syncSchedulerProvider.get().scheduleSync()
+            }
+        }
+    }
+
+    override suspend fun cleanMisattributedData(inspectedUid: String, adminUid: String) {
+        runInTransactionWithRetry {
+            // Fetch full local state to allow cross-UID comparison
+            val allHouses = houseDao.getAllHousesSnapshot()
+            val inspectedHouses = allHouses.filter { it.agentUid == inspectedUid }
+            val adminHouses = allHouses.filter { it.agentUid == adminUid }
+            
+            if (inspectedHouses.isEmpty() || adminHouses.isEmpty()) return@runInTransactionWithRetry
+            
+            val adminKeys = adminHouses.map { it.generateNaturalKey() }.toSet()
+            val toDelete = inspectedHouses.filter { it.generateNaturalKey() in adminKeys }
+            
+            if (toDelete.isNotEmpty()) {
+                android.util.Log.i("HouseRepository", "Surgical clean: removing ${toDelete.size} duplicates from $inspectedUid")
+                toDelete.forEach { houseDao.deleteHouse(it) }
+            }
+
+            // Also clean Activities
+            val allActivities = dayActivityDao.getAllDayActivitiesSnapshot()
+            val inspectedAct = allActivities.filter { it.agentUid == inspectedUid }
+            val adminAct = allActivities.filter { it.agentUid == adminUid }
+            
+            val adminActKeys = adminAct.map { it.date to it.status }.toSet()
+            val actToDelete = inspectedAct.filter { (it.date to it.status) in adminActKeys }
+            
+            if (actToDelete.isNotEmpty()) {
+                android.util.Log.i("HouseRepository", "Surgical clean: removing ${actToDelete.size} activities from $inspectedUid")
+                actToDelete.forEach { dayActivityDao.delete(it) }
+            }
+
+            if (toDelete.isNotEmpty() || actToDelete.isNotEmpty()) {
                 syncSchedulerProvider.get().scheduleSync()
             }
         }

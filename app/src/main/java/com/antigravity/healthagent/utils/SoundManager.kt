@@ -34,10 +34,10 @@ class SoundManager @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
 
     // Current sound selections
-    private var currentPopSound = "SYSTEM_NOTIFICATION_1"
-    private var currentSuccessSound = "SYSTEM_NOTIFICATION_1"
-    private var currentCelebrationSound = "SYSTEM_ALARM"
-    private var currentWarningSound = "SYSTEM_NOTIFICATION_2"
+    private var currentPopSound = "SILENT"
+    private var currentSuccessSound = "SILENT"
+    private var currentCelebrationSound = "SILENT"
+    private var currentWarningSound = "SILENT"
 
     init {
         try {

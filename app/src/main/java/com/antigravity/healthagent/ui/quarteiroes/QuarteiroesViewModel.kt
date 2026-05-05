@@ -38,10 +38,11 @@ class QuarteiroesViewModel @Inject constructor(
     ) { user, remoteUid, remoteName ->
         val name = remoteName ?: user?.agentName ?: user?.email ?: ""
         val uid = remoteUid ?: user?.uid ?: ""
-        name to uid
-    }.flatMapLatest { (name, uid) ->
-        val isAdmin = name == "Admin" || name == "Supervisor"
-        val hasRemoteAgent = uid != authRepository.getCurrentUserUid()
+        Triple(name, uid, user)
+    }.flatMapLatest { (name, uid, user) ->
+        val isAdmin = user?.role == com.antigravity.healthagent.domain.repository.UserRole.ADMIN || 
+                      user?.role == com.antigravity.healthagent.domain.repository.UserRole.SUPERVISOR
+        val hasRemoteAgent = uid.isNotBlank() && uid != authRepository.getCurrentUserUid()
         
         if (isAdmin && !hasRemoteAgent) {
             // Truly global view for admin with no specific agent selected

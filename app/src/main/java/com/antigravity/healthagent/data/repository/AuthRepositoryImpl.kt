@@ -140,17 +140,20 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun signOut() {
-        android.util.Log.i("AuthRepository", "SignOut requested - Canceling active syncs and triggering cleanup...")
+        android.util.Log.i("AuthRepository", "SignOut requested - Performing immediate session clear...")
         
-        // 0. CANCEL ACTIVE SYNC WORK
-        // Stop background workers from holding the database lock
+        // 1. CANCEL ACTIVE SYNC WORK
         workManager.cancelAllWorkByTag("sync")
         
-        // 1. CLEAR SESSION IMMEDIATELY (Instant UI transition)
+        // 2. IMMEDIATE FIREBASE SIGNOUT (Safety First)
+        // We sign out here to ensure that any subsequent login immediately sees a fresh context
+        auth.signOut()
+
+        // 3. CLEAR SESSION SETTINGS (UI Sync)
         settingsManager.clearSessionSettings()
         
-        // 2. ENQUEUE GUARANTEED CLEANUP
-        // We use WorkManager to ensure the final sync and wipe happen even if the process is killed.
+        // 4. ENQUEUE BACKGROUND DATABASE WIPE
+        // We still use LogoutWorker to ensure the database is wiped even if the app is killed.
         val logoutRequest = androidx.work.OneTimeWorkRequestBuilder<com.antigravity.healthagent.data.sync.LogoutWorker>()
             .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
@@ -444,9 +447,9 @@ class AuthRepositoryImpl @Inject constructor(
                 val emailPrefix = user.email?.substringBefore("@")?.uppercase() ?: ""
                 val properName = user.standardName
                 
-                // 1. House Migration
-                val orphanHouses = houseDao.getOrphanHouses(user.email ?: "", emailPrefix, user.uid, properName)
-                orphanHouses.forEach { house ->
+                // 1. House Migration & Reclamation
+                val misattributedHouses = houseDao.getHousesToReclaim(user.email ?: "", emailPrefix, user.uid, properName)
+                for (house in misattributedHouses) {
                     val hasClash = houseDao.checkClash(
                         user.uid, properName, house.data, house.blockNumber, house.blockSequence, 
                         house.streetName, house.number, house.sequence, house.complement, house.bairro, house.visitSegment
@@ -459,8 +462,15 @@ class AuthRepositoryImpl @Inject constructor(
                     }
                 }
 
-                // 2. Activity Migration (bulk is still okay as it handles conflicts internally)
-                activityDao.updateAgentUidForAll(properName, user.email ?: "", emailPrefix, user.uid)
+                // We already reclaimed houses above during the clash check.
+
+                // 2. Day Activity Migration & Reclamation
+                val activitiesToReclaim = activityDao.getActivitiesToReclaim(user.email ?: "", emailPrefix, user.uid, properName)
+                if (activitiesToReclaim.isNotEmpty()) {
+                    android.util.Log.i("AuthRepository", "Reclaiming ${activitiesToReclaim.size} activities for ${user.email}")
+                    activityDao.reclaimActivities(user.displayName ?: "", user.email ?: "", emailPrefix, user.uid)
+                }
+
             } catch (e: Exception) {
                 android.util.Log.e("AuthRepository", "Proactive migration failed", e)
             }
@@ -627,8 +637,8 @@ class AuthRepositoryImpl @Inject constructor(
             val properName = preAgentName?.trim()?.uppercase() ?: ""
 
             // 1. House Migration
-            val orphanHouses = houseDao.getOrphanHouses(email, emailPrefix, targetUid, properName)
-            orphanHouses.forEach { house ->
+            val housesToReclaim = houseDao.getHousesToReclaim(email, emailPrefix, targetUid, properName)
+            for (house in housesToReclaim) {
                 val hasClash = houseDao.checkClash(
                     targetUid, properName, house.data, house.blockNumber, house.blockSequence, 
                     house.streetName, house.number, house.sequence, house.complement, house.bairro, house.visitSegment
@@ -642,7 +652,7 @@ class AuthRepositoryImpl @Inject constructor(
             }
 
             // 2. Activity Migration
-            activityDao.updateAgentUidForAll(properName, email, emailPrefix, targetUid)
+            activityDao.reclaimActivities(properName, email, emailPrefix, targetUid)
         } catch (e: Exception) {
             android.util.Log.e("AuthRepository", "Local migration failed", e)
         }
