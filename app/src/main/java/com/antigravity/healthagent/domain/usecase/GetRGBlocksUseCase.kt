@@ -25,6 +25,14 @@ class GetRGBlocksUseCase @Inject constructor() {
     ): List<BlockSegment> {
         if (selectedBairro.isBlank()) return emptyList()
 
+        // 1. Pre-calculate global completion states exactly like Semanal/Boletim logic
+        val allHousesSorted = allHouses.sortedBy { it.listOrder }
+        val blockToLastIndex = mutableMapOf<String, Int>()
+        allHousesSorted.forEachIndexed { index, h ->
+            val key = "${h.blockNumber.trim().uppercase()}|${h.blockSequence.trim().uppercase()}|${h.bairro.trim().uppercase()}"
+            blockToLastIndex[key] = index
+        }
+
         val bairroHouses = allHouses.filter { it.bairro.equals(selectedBairro, ignoreCase = true) }
         
         // DEDUPLICATION: Ensure each physical house appears only once in the RG report.
@@ -45,15 +53,36 @@ class GetRGBlocksUseCase @Inject constructor() {
             val (bNum, bSeq) = key
             val blockHouses = groupedByBlock[key] ?: return@forEach 
             
-            val manualConcluded = blockHouses.any { it.quarteiraoConcluido }
+            val globalKey = "${bNum}|${bSeq}|${selectedBairro.trim().uppercase()}"
+            val lastIndexInFull = blockToLastIndex[globalKey] ?: -1
+            
+            // Get all raw visits for this block to check manual flags across history, not just deduplicated
+            val rawBlockVisits = bairroHouses.filter { 
+                it.blockNumber.trim().uppercase() == bNum &&
+                it.blockSequence.trim().uppercase() == bSeq
+            }
+            
+            val manualConcluded = rawBlockVisits.any { it.quarteiraoConcluido || it.localidadeConcluida }
+            val autoConcluido = lastIndexInFull != -1 && lastIndexInFull < allHousesSorted.size - 1
+            
+            val isConcluded = manualConcluded || autoConcluido
+            
+            val conclusionDate = if (isConcluded) {
+                if (manualConcluded) {
+                    rawBlockVisits.lastOrNull { it.quarteiraoConcluido || it.localidadeConcluida }?.data ?: blockHouses.lastOrNull()?.data
+                } else {
+                    val lastHouseInFull = if (lastIndexInFull != -1) allHousesSorted[lastIndexInFull] else null
+                    lastHouseInFull?.data ?: blockHouses.lastOrNull()?.data
+                }
+            } else null
             
             segments.add(BlockSegment(
                 blockNumber = bNum,
                 blockSequence = bSeq,
                 startDate = blockHouses.firstOrNull()?.data ?: "",
                 endDate = blockHouses.lastOrNull()?.data ?: "",
-                isConcluded = manualConcluded,
-                conclusionDate = if (manualConcluded) blockHouses.lastOrNull { it.quarteiraoConcluido }?.data ?: blockHouses.lastOrNull()?.data else null,
+                isConcluded = isConcluded,
+                conclusionDate = conclusionDate,
                 houses = blockHouses
             ))
         }
