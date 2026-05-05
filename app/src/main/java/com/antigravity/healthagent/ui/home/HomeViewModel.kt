@@ -1376,7 +1376,8 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val isAdmin = _isAdmin.value
-                dayManagementUseCase.closeDay(audit.date, _agentName.value, _remoteAgentUid.value, isAdmin)
+                val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value
+                dayManagementUseCase.closeDay(audit.date, _agentName.value, effectiveUid, isAdmin)
                 _showClosingAudit.value = null
                 if (audit.totalWorked >= maxOpenHouses.value && maxOpenHouses.value > 0) {
                     _showGoalReached.value = true
