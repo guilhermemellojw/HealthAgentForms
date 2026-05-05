@@ -101,143 +101,148 @@ class BackupManager @Inject constructor() {
     }
 
     fun importData(context: Context, uri: Uri): BackupData {
-        var rawContent = ""
         try {
             val inputStream = context.contentResolver.openInputStream(uri) 
                 ?: throw java.io.IOException("Falha ao abrir o arquivo: $uri")
 
-            val bytes = inputStream.use { it.readBytes() }
-            if (bytes.isEmpty()) throw Exception("O arquivo de backup está vazio.")
+            return inputStream.use { stream ->
+                // 1. Detect and skip BOM via PushbackInputStream
+                val pushbackStream = java.io.PushbackInputStream(stream, 3)
+                val bom = ByteArray(3)
+                val readCount = pushbackStream.read(bom, 0, 3)
+                
+                if (readCount == -1) throw Exception("O arquivo de backup está vazio.")
 
-            // 1. Detect and skip BOM
-            var offset = 0
-            if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) {
-                offset = 3 // UTF-8
-            } else if (bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte()) {
-                offset = 2 // UTF-16BE
-            } else if (bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte()) {
-                offset = 2 // UTF-16LE
-            }
+                var charset = java.nio.charset.StandardCharsets.UTF_8
+                if (readCount >= 3 && bom[0] == 0xEF.toByte() && bom[1] == 0xBB.toByte() && bom[2] == 0xBF.toByte()) {
+                    // UTF-8 BOM, do not unread these 3 bytes
+                } else if (readCount >= 2 && bom[0] == 0xFE.toByte() && bom[1] == 0xFF.toByte()) {
+                    charset = java.nio.charset.StandardCharsets.UTF_16BE
+                    if (readCount == 3) pushbackStream.unread(bom[2].toInt())
+                } else if (readCount >= 2 && bom[0] == 0xFF.toByte() && bom[1] == 0xFE.toByte()) {
+                    charset = java.nio.charset.StandardCharsets.UTF_16LE
+                    if (readCount == 3) pushbackStream.unread(bom[2].toInt())
+                } else if (readCount > 0) {
+                    pushbackStream.unread(bom, 0, readCount)
+                }
 
-            // 2. Decode content (Try UTF-8 first, fallback to Latin-1 for legacy Brazilian files)
-            rawContent = try {
-                val decoder = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
-                decoder.onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-                decoder.decode(java.nio.ByteBuffer.wrap(bytes, offset, bytes.size - offset)).toString()
-            } catch (e: Exception) {
-                // Fallback to ISO-8859-1 which never fails to decode bytes
-                String(bytes, offset, bytes.size - offset, java.nio.charset.Charset.forName("ISO-8859-1"))
-            }
-
-            // 3. Skip leading garbage (like whitespace or stray chars) until first JSON structural char
-            val startIndex = rawContent.indexOfAny(charArrayOf('{', '['))
-            if (startIndex == -1) {
-                val snippet = if (rawContent.length > 50) rawContent.take(50) + "..." else rawContent
-                throw Exception("Formato de arquivo inválido. O arquivo deve conter um objeto '{' ou lista '['. (Início: '$snippet')")
-            }
-            
-            val jsonToParse = rawContent.substring(startIndex).trim()
-            val firstChar = jsonToParse[0]
-
-            // 4. Parse using a resilient, item-by-item approach
-            val reader = java.io.StringReader(jsonToParse)
-            val jsonReader = JsonReader(reader)
-            jsonReader.isLenient = true
-
-            var parsedHouses = mutableListOf<House>()
-            var parsedActivities = mutableListOf<DayActivity>()
-            var sourceAgentUid: String? = null
-            var sourceAgentName: String? = null
-            var isCompleteInFile = false
-            var wasTruncated = false
-
-            try {
-                if (firstChar == '{') {
-                    jsonReader.beginObject()
-                    while (jsonReader.hasNext()) {
-                        val name = try { jsonReader.nextName() } catch (e: Exception) { 
-                            android.util.Log.e("BackupManager", "JSON Truncated at root name: ${e.message}")
-                            wasTruncated = true
-                            break 
-                        }
-                        android.util.Log.i("BackupManager", "Importing section: $name")
-                        when (name) {
-                            "houses" -> {
-                                jsonReader.beginArray()
-                                try {
-                                    while (jsonReader.hasNext()) {
-                                        val house: House = gson.fromJson(jsonReader, House::class.java)
-                                        parsedHouses.add(house)
-                                    }
-                                } catch (e: Exception) {
-                                    android.util.Log.e("BackupManager", "JSON Truncated in houses array: ${e.message}")
-                                    wasTruncated = true
-                                }
-                                try { if (jsonReader.peek() != JsonToken.END_ARRAY) wasTruncated = true else jsonReader.endArray() } catch (e: Exception) { wasTruncated = true }
-                            }
-                            "dayActivities", "day_activities" -> {
-                                jsonReader.beginArray()
-                                try {
-                                    while (jsonReader.hasNext()) {
-                                        val activity: DayActivity = gson.fromJson(jsonReader, DayActivity::class.java)
-                                        parsedActivities.add(activity)
-                                    }
-                                } catch (e: Exception) {
-                                    android.util.Log.e("BackupManager", "JSON Truncated in activities array: ${e.message}")
-                                    wasTruncated = true
-                                }
-                                try { if (jsonReader.peek() != JsonToken.END_ARRAY) wasTruncated = true else jsonReader.endArray() } catch (e: Exception) { wasTruncated = true }
-                            }
-                            "sourceAgentUid" -> sourceAgentUid = try { jsonReader.nextString() } catch(e: Exception) { wasTruncated = true; null }
-                            "sourceAgentName" -> sourceAgentName = try { jsonReader.nextString() } catch(e: Exception) { wasTruncated = true; null }
-                            "isComplete" -> isCompleteInFile = try { jsonReader.nextBoolean() } catch(e: Exception) { wasTruncated = true; false }
-                            else -> try { jsonReader.skipValue() } catch(e: Exception) { wasTruncated = true }
-                        }
+                // 2. Wrap in InputStreamReader. We will use default replacement char for invalid UTF-8
+                // which is fine since we are looking for JSON structure, and GSON handles it safely.
+                val baseReader = java.io.InputStreamReader(pushbackStream, charset)
+                
+                // 3. Skip leading garbage using PushbackReader
+                val pushbackReader = java.io.PushbackReader(baseReader, 1)
+                var firstChar = ' '
+                while (true) {
+                    val firstCharInt = pushbackReader.read()
+                    if (firstCharInt == -1) {
+                        throw Exception("Formato de arquivo inválido. O arquivo deve conter um objeto '{' ou lista '['.")
                     }
-                    try { jsonReader.endObject() } catch (e: Exception) { wasTruncated = true }
-                } else if (firstChar == '[') {
-                    jsonReader.beginArray()
-                    try {
+                    val c = firstCharInt.toChar()
+                    if (c == '{' || c == '[') {
+                        firstChar = c
+                        pushbackReader.unread(firstCharInt)
+                        break
+                    }
+                }
+
+                // 4. Parse using a resilient, item-by-item approach
+                val jsonReader = JsonReader(pushbackReader)
+                jsonReader.isLenient = true
+
+                var parsedHouses = mutableListOf<House>()
+                var parsedActivities = mutableListOf<DayActivity>()
+                var sourceAgentUid: String? = null
+                var sourceAgentName: String? = null
+                var isCompleteInFile = false
+                var wasTruncated = false
+
+                try {
+                    if (firstChar == '{') {
+                        jsonReader.beginObject()
                         while (jsonReader.hasNext()) {
-                            val house: House = gson.fromJson(jsonReader, House::class.java)
-                            parsedHouses.add(house)
+                            val name = try { jsonReader.nextName() } catch (e: Exception) { 
+                                android.util.Log.e("BackupManager", "JSON Truncated at root name: ${e.message}")
+                                wasTruncated = true
+                                break 
+                            }
+                            android.util.Log.i("BackupManager", "Importing section: $name")
+                            when (name) {
+                                "houses" -> {
+                                    jsonReader.beginArray()
+                                    try {
+                                        while (jsonReader.hasNext()) {
+                                            val house: House = gson.fromJson(jsonReader, House::class.java)
+                                            parsedHouses.add(house)
+                                        }
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("BackupManager", "JSON Truncated in houses array: ${e.message}")
+                                        wasTruncated = true
+                                    }
+                                    try { if (jsonReader.peek() != JsonToken.END_ARRAY) wasTruncated = true else jsonReader.endArray() } catch (e: Exception) { wasTruncated = true }
+                                }
+                                "dayActivities", "day_activities" -> {
+                                    jsonReader.beginArray()
+                                    try {
+                                        while (jsonReader.hasNext()) {
+                                            val activity: DayActivity = gson.fromJson(jsonReader, DayActivity::class.java)
+                                            parsedActivities.add(activity)
+                                        }
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("BackupManager", "JSON Truncated in activities array: ${e.message}")
+                                        wasTruncated = true
+                                    }
+                                    try { if (jsonReader.peek() != JsonToken.END_ARRAY) wasTruncated = true else jsonReader.endArray() } catch (e: Exception) { wasTruncated = true }
+                                }
+                                "sourceAgentUid" -> sourceAgentUid = try { jsonReader.nextString() } catch(e: Exception) { wasTruncated = true; null }
+                                "sourceAgentName" -> sourceAgentName = try { jsonReader.nextString() } catch(e: Exception) { wasTruncated = true; null }
+                                "isComplete" -> isCompleteInFile = try { jsonReader.nextBoolean() } catch(e: Exception) { wasTruncated = true; false }
+                                else -> try { jsonReader.skipValue() } catch(e: Exception) { wasTruncated = true }
+                            }
                         }
-                    } catch (e: Exception) {
-                        android.util.Log.e("BackupManager", "JSON Truncated in legacy houses array: ${e.message}")
-                        wasTruncated = true
+                        try { jsonReader.endObject() } catch (e: Exception) { wasTruncated = true }
+                    } else if (firstChar == '[') {
+                        jsonReader.beginArray()
+                        try {
+                            while (jsonReader.hasNext()) {
+                                val house: House = gson.fromJson(jsonReader, House::class.java)
+                                parsedHouses.add(house)
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("BackupManager", "JSON Truncated in legacy houses array: ${e.message}")
+                            wasTruncated = true
+                        }
+                        try { if (jsonReader.peek() != JsonToken.END_ARRAY) wasTruncated = true else jsonReader.endArray() } catch (e: Exception) { wasTruncated = true }
                     }
-                    try { if (jsonReader.peek() != JsonToken.END_ARRAY) wasTruncated = true else jsonReader.endArray() } catch (e: Exception) { wasTruncated = true }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    wasTruncated = true
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                wasTruncated = true
-            }
 
-            if (parsedHouses.isEmpty() && parsedActivities.isEmpty() && wasTruncated) {
-                throw Exception("O arquivo de backup está corrompido e nenhum dado pôde ser recuperado.")
-            }
-
-            val sanitizedHouses = sanitizeHouses(parsedHouses)
-            val sanitizedActivities = sanitizeActivities(parsedActivities)
-
-            return if (firstChar == '{') {
-                BackupData(sanitizedHouses, sanitizedActivities, sourceAgentUid, sourceAgentName, isCompleteInFile, wasTruncated)
-            } else {
-                val distinctDates = sanitizedHouses.map { it.data }.distinct()
-                val closedActivities = distinctDates.map { date ->
-                    DayActivity(date, "NORMAL", true)
+                if (parsedHouses.isEmpty() && parsedActivities.isEmpty() && wasTruncated) {
+                    throw Exception("O arquivo de backup está corrompido e nenhum dado pôde ser recuperado.")
                 }
-                BackupData(sanitizedHouses, closedActivities, isPartial = wasTruncated)
-            }
 
+                val sanitizedHouses = sanitizeHouses(parsedHouses)
+                val sanitizedActivities = sanitizeActivities(parsedActivities)
+
+                if (firstChar == '{') {
+                    BackupData(sanitizedHouses, sanitizedActivities, sourceAgentUid, sourceAgentName, isCompleteInFile, wasTruncated)
+                } else {
+                    val distinctDates = sanitizedHouses.map { it.data }.distinct()
+                    val closedActivities = distinctDates.map { date ->
+                        DayActivity(date, "NORMAL", true)
+                    }
+                    BackupData(sanitizedHouses, closedActivities, isPartial = wasTruncated)
+                }
+            }
         } catch (e: Exception) {
-            if (e is java.io.IOException || e.message?.contains("corrompido") == true) {
+            if (e is java.io.IOException || e.message?.contains("corrompido") == true || e.message?.contains("inválido") == true) {
                 throw e
             }
             e.printStackTrace()
-            val snippet = if (rawContent.length > 100) rawContent.take(100) + "..." else rawContent
             val errorMessage = e.message ?: "Erro desconhecido"
-            throw Exception("Erro de formato no arquivo: JSON inválido.\nDetalhes: $errorMessage\nInício do arquivo: $snippet", e)
+            throw Exception("Erro de formato no arquivo: JSON inválido.\nDetalhes: $errorMessage", e)
         }
     }
 
