@@ -297,7 +297,7 @@ class BackupManager @Inject constructor() {
                 zona = house.zona?.trim() ?: "URB",
                 tipo = house.tipo,
                 isSynced = false,
-                lastUpdated = System.currentTimeMillis()
+                lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
             )
         }
     }
@@ -329,7 +329,7 @@ class BackupManager @Inject constructor() {
                 isManualUnlock = activity.isManualUnlock,
                 editedByAdmin = activity.editedByAdmin,
                 isSynced = false,
-                lastUpdated = System.currentTimeMillis()
+                lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
             )
         }
     }

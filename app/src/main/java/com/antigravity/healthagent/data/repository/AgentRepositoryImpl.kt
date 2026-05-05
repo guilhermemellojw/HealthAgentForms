@@ -75,7 +75,7 @@ class AgentRepositoryImpl @Inject constructor(
             // IMPROVEMENT: Instead of deleting agentRef (the root doc), we clear its metadata 
             // except for identifying info, and set a tombstone/lastSync.
             val wipeMetadata = mapOf(
-                "lastSyncTime" to System.currentTimeMillis(),
+                "lastSyncTime" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
                 "deleted_house_ids" to com.google.firebase.firestore.FieldValue.delete(),
                 "deleted_activity_dates" to com.google.firebase.firestore.FieldValue.delete(),
                 "lastSyncError" to com.google.firebase.firestore.FieldValue.delete()
@@ -104,7 +104,7 @@ class AgentRepositoryImpl @Inject constructor(
     }
 
     override suspend fun fetchAgentNames(): Result<List<String>> {
-        val now = System.currentTimeMillis()
+        val now = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
         if (cachedNamesList != null && (now - lastNamesFetch) < NAMES_CACHE_TTL) {
             return Result.success(cachedNamesList!!)
         }
@@ -160,7 +160,7 @@ class AgentRepositoryImpl @Inject constructor(
 
     override suspend fun fetchAllAgentsData(sinceTimestamp: Long, untilTimestamp: Long, datePattern: String?): Result<List<AgentData>> = coroutineScope {
         try {
-            val startTime = System.currentTimeMillis()
+            val startTime = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
             
             // 1. LOAD FROM LOCAL CACHE FIRST
             val cachedAgents = agentCacheDao.getAllCachedAgents()
@@ -395,7 +395,7 @@ class AgentRepositoryImpl @Inject constructor(
             batch.update(agentRef, 
                 mapOf(
                     "deleted_house_ids" to com.google.firebase.firestore.FieldValue.arrayUnion(houseId),
-                    "lastSyncTime" to System.currentTimeMillis()
+                    "lastSyncTime" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                 )
             )
             
@@ -593,7 +593,7 @@ class AgentRepositoryImpl @Inject constructor(
                 uid = uid,
                 email = cached?.email ?: "",
                 agentName = cached?.agentName,
-                lastSyncTime = System.currentTimeMillis(),
+                lastSyncTime = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
                 houses = currentHouses.value,
                 activities = currentActivities.value,
                 photoUrl = cached?.photoUrl

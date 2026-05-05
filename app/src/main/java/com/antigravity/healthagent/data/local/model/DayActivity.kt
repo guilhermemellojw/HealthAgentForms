@@ -21,7 +21,7 @@ data class DayActivity(
      * Extraction must be handled manually in SyncRepositoryImpl.
      */
     @get:com.google.firebase.firestore.Exclude
-    @ColumnInfo(defaultValue = "0") val lastUpdated: Long = System.currentTimeMillis()
+    @ColumnInfo(defaultValue = "0") val lastUpdated: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
 ) {
     fun toFirestoreMap(): Map<String, Any?> {
         return mapOf(

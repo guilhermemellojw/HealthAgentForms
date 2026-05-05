@@ -58,7 +58,7 @@ interface HouseDao {
     suspend fun deleteHouse(house: House)
 
     @Query("UPDATE OR REPLACE houses SET data = :newDate, isSynced = 0, lastUpdated = :now WHERE REPLACE(data, '/', '-') = REPLACE(:oldDate, '/', '-') AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
-    suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String, now: Long = System.currentTimeMillis())
+    suspend fun updateHousesDate(oldDate: String, newDate: String, agentName: String, agentUid: String, now: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
 
 
     @Query("DELETE FROM houses WHERE REPLACE(data, '/', '-') = REPLACE(:date, '/', '-') AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
@@ -102,10 +102,10 @@ interface HouseDao {
     suspend fun cleanupZeroValues()
 
     @Query("UPDATE OR REPLACE houses SET agentName = :newName, isSynced = 0, lastUpdated = :now WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:oldName)))")
-    suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String, now: Long = System.currentTimeMillis())
+    suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String, now: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
 
     @Query("UPDATE OR REPLACE houses SET agentName = :properName, isSynced = 0, lastUpdated = :now WHERE agentUid = :uid AND agentName LIKE '%@%'")
-    suspend fun fixEmailNamesForUid(uid: String, properName: String, now: Long = System.currentTimeMillis())
+    suspend fun fixEmailNamesForUid(uid: String, properName: String, now: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
 
     @Query("SELECT * FROM houses WHERE agentUid != :targetUid AND (UPPER(agentName) = UPPER(:email) OR UPPER(agentName) = UPPER(:prefix) OR UPPER(agentName) = UPPER(:properName) OR (agentUid = '' AND UPPER(agentName) = 'AGENTE'))")
     suspend fun getHousesToReclaim(email: String, prefix: String, targetUid: String, properName: String): List<House>

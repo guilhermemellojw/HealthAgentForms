@@ -127,7 +127,7 @@ class SyncRepositoryImpl @Inject constructor(
                         // Prepare Operations
                         val pInfo = try { context.packageManager.getPackageInfo(context.packageName, 0) } catch (e: Exception) { null }
                         val metadata = mutableMapOf<String, Any>(
-                            "lastSyncTime" to System.currentTimeMillis(),
+                            "lastSyncTime" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
                             "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                             "appVersionCode" to (pInfo?.versionCode ?: 0),
                             "appVersionName" to (pInfo?.versionName ?: "Unknown")
@@ -370,14 +370,14 @@ class SyncRepositoryImpl @Inject constructor(
                                 "propertyTypeCounts" to housesInMonth.groupingBy { it.propertyType.name }.eachCount(),
                                 "totalHouses" to housesInMonth.size,
                                 "daysWorked" to activitiesInMonth.size,
-                                "lastUpdated" to System.currentTimeMillis()
+                                "lastUpdated" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                             )
                             
                             userDocRef.collection("monthly_summaries").document(monthYear).set(summary).await()
                         }
 
                         userDocRef.update(metadata + mapOf(
-                            "lastSyncTime" to System.currentTimeMillis(),
+                            "lastSyncTime" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
                             "lastSyncError" to com.google.firebase.firestore.FieldValue.delete()
                         )).await()
 
@@ -490,7 +490,7 @@ class SyncRepositoryImpl @Inject constructor(
                         }
 
                         val cachedLastSync = if (isTargetDifferentUser || force || requireReset) 0L else settingsManager.lastSyncTimestamp.first()
-                        val now = System.currentTimeMillis()
+                        val now = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                         val lastSync = if (cachedLastSync > now + 3600000L) 0L else cachedLastSync
                         val serverTime = now
 
@@ -655,7 +655,7 @@ class SyncRepositoryImpl @Inject constructor(
                             val identityKey = wrapper.identityKey
                             
                             if (key in cloudDeletedHouses || identityKey in cloudDeletedIdentities || "${house.data.replace("/", "-")}|${house.agentName.uppercase()}" in cloudDeletedActivities) {
-                                val timeSinceLastUpdate = System.currentTimeMillis() - house.lastUpdated
+                                val timeSinceLastUpdate = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis() - house.lastUpdated
                                 if (house.isSynced) {
                                     true
                                 } else if (timeSinceLastUpdate > 900000L) {
@@ -681,7 +681,7 @@ class SyncRepositoryImpl @Inject constructor(
                             val dateKey = "${activity.date}|${activity.agentName.uppercase()}"
                             
                             if (dateKey in cloudDeletedActivities) {
-                                val timeSinceLastUpdate = System.currentTimeMillis() - activity.lastUpdated
+                                val timeSinceLastUpdate = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis() - activity.lastUpdated
                                 if (activity.isSynced) {
                                     true
                                 } else if (timeSinceLastUpdate > 900000L) {
@@ -947,7 +947,7 @@ class SyncRepositoryImpl @Inject constructor(
                         agentUid = finalUid,
                         date = it.date.replace("/", "-"),
                         isSynced = false,
-                        lastUpdated = System.currentTimeMillis()
+                        lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                     ) 
                     // Clear local tombstone for restored activity
                     tombstoneDao.deleteByNaturalKey("${normalized.date}|${normalized.agentName}", normalized.agentName, normalized.agentUid)
@@ -969,7 +969,7 @@ class SyncRepositoryImpl @Inject constructor(
                         data = restoredHouse.data.replace("/", "-"),
                         situation = finalSituation,
                         isSynced = false,
-                        lastUpdated = System.currentTimeMillis()
+                        lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                     )
                     
                     // Clear local tombstone for restored house

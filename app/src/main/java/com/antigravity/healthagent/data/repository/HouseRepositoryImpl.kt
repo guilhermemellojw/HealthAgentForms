@@ -111,7 +111,7 @@ class HouseRepositoryImpl @Inject constructor(
                 situation = finalSituation,
                 isSynced = false, 
                 editedByAdmin = force,
-                lastUpdated = System.currentTimeMillis()
+                lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
             )
             
             houseDao.insertHouse(houseToInsert)
@@ -161,7 +161,7 @@ class HouseRepositoryImpl @Inject constructor(
                 situation = finalSituation,
                 isSynced = false, 
                 editedByAdmin = force,
-                lastUpdated = System.currentTimeMillis()
+                lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
             ))
         }
         syncSchedulerProvider.get().scheduleSync()
@@ -216,7 +216,7 @@ class HouseRepositoryImpl @Inject constructor(
                     situation = finalSituation,
                     isSynced = false, 
                     editedByAdmin = force,
-                    lastUpdated = System.currentTimeMillis()
+                    lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                 )
             }
             houseDao.upsertHouses(healedHouses)
@@ -276,7 +276,7 @@ class HouseRepositoryImpl @Inject constructor(
                 agentName = upperName,
                 isSynced = false, 
                 editedByAdmin = force,
-                lastUpdated = System.currentTimeMillis()
+                lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
             ))
         }
         syncSchedulerProvider.get().scheduleSync()
@@ -334,7 +334,7 @@ class HouseRepositoryImpl @Inject constructor(
                     agentUid = finalUid,
                     date = it.date.replace("/", "-"),
                     isSynced = false,
-                    lastUpdated = System.currentTimeMillis()
+                    lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                 ) 
                 // Clear local tombstone for restored activity
                 tombstoneDao.deleteByNaturalKey("${normalized.date}|${normalized.agentName}", normalized.agentName, normalized.agentUid)
@@ -356,7 +356,7 @@ class HouseRepositoryImpl @Inject constructor(
                     data = restoredHouse.data.replace("/", "-"),
                     situation = finalSituation,
                     isSynced = false,
-                    lastUpdated = System.currentTimeMillis()
+                    lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                 )
                 
                 // Clear local tombstone for restored house
@@ -447,7 +447,7 @@ class HouseRepositoryImpl @Inject constructor(
                         agentName = upperName, 
                         agentUid = finalUid, 
                         isSynced = false,
-                        lastUpdated = System.currentTimeMillis()
+                        lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                     ))
                 } else if (!activity.isClosed || activity.isManualUnlock) {
                     dayActivityDao.insertDayActivity(activity.copy(
@@ -457,7 +457,7 @@ class HouseRepositoryImpl @Inject constructor(
                         agentName = upperName, 
                         agentUid = finalUid, 
                         isSynced = false, 
-                        lastUpdated = System.currentTimeMillis()
+                        lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                     ))
                 }
             }
@@ -592,7 +592,7 @@ class HouseRepositoryImpl @Inject constructor(
                         activitiesToReclaim.forEach { activity ->
                             val conflict = getDayActivity(activity.date, agentName, targetUid)
                             if (conflict == null) {
-                                dayActivityDao.insertDayActivity(activity.copy(agentName = properName, agentUid = targetUid, isSynced = false, lastUpdated = System.currentTimeMillis()))
+                                dayActivityDao.insertDayActivity(activity.copy(agentName = properName, agentUid = targetUid, isSynced = false, lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()))
                             }
                         }
                     }
@@ -691,7 +691,7 @@ class HouseRepositoryImpl @Inject constructor(
                     it.copy(
                         data = it.data.replace("/", "-"),
                         isSynced = false,
-                        lastUpdated = System.currentTimeMillis()
+                        lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                     )
                 }
                 houseDao.upsertHouses(updated)
@@ -704,7 +704,7 @@ class HouseRepositoryImpl @Inject constructor(
                     val newActivity = activity.copy(
                         date = activity.date.replace("/", "-"),
                         isSynced = false,
-                        lastUpdated = System.currentTimeMillis()
+                        lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                     )
                     dayActivityDao.deleteDayActivity(activity.date, activity.agentName, activity.agentUid)
                     dayActivityDao.insertDayActivity(newActivity)

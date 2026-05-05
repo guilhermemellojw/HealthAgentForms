@@ -39,6 +39,9 @@ class SyncWorker @AssistedInject constructor(
         }
 
         return try {
+            // Sincroniza a hora local com a rede antes de iniciar qualquer operação
+            com.antigravity.healthagent.utils.TimeManager.synchronizeTime(applicationContext)
+
             // Check if we are in Admin Edit mode. Skip if so to prevent data mixing.
             val isEditing = withTimeoutOrNull(2000) {
                 settingsManager.remoteAgentUid.first()

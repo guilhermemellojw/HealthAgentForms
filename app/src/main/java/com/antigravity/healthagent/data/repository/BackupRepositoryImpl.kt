@@ -24,7 +24,7 @@ class BackupRepositoryImpl @Inject constructor(
 
     override suspend fun uploadTimelineBackup(uid: String, data: BackupData): Result<Unit> {
         return try {
-            val timestamp = System.currentTimeMillis()
+            val timestamp = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
             val fileName = "${timestamp}.json"
             val storagePath = "backups/$uid/$fileName"
             val tempFile = File(context.cacheDir, "temp_backup_$timestamp.json")
@@ -83,7 +83,7 @@ class BackupRepositoryImpl @Inject constructor(
 
     override suspend fun downloadBackup(storagePath: String): Result<BackupData> {
         return try {
-            val timestamp = System.currentTimeMillis()
+            val timestamp = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
             val tempFile = File(context.cacheDir, "dl_backup_$timestamp.json")
             val storageRef = storage.reference.child(storagePath)
             

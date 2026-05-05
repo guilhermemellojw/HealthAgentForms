@@ -12,7 +12,7 @@ data class Tombstone(
     @ColumnInfo(defaultValue = "''") val agentName: String = "",
     @ColumnInfo(defaultValue = "''") val agentUid: String = "",
     @ColumnInfo(defaultValue = "''") val dataDate: String = "", // Added to track which month summary needs recalculation
-    val deletedAt: Long = System.currentTimeMillis()
+    val deletedAt: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
 )
 
 enum class TombstoneType {

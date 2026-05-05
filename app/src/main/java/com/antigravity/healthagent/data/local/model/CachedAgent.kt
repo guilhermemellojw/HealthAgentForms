@@ -10,7 +10,7 @@ data class CachedAgent(
     val lastSyncTime: Long,
     val lastSyncError: String?,
     val photoUrl: String?,
-    val cachedAt: Long = System.currentTimeMillis()
+    val cachedAt: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
 )
 
 @Entity(

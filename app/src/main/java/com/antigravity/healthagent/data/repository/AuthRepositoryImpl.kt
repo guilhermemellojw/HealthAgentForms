@@ -212,7 +212,7 @@ class AuthRepositoryImpl @Inject constructor(
                             "displayName" to firebaseUser.displayName,
                             "role" to UserRole.ADMIN.name,
                             "isAuthorized" to true,
-                            "createdAt" to System.currentTimeMillis()
+                            "createdAt" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                         )
                         firestore.collection("users").document(uid).set(newUser).await()
                         // Ensure they also have an entry in 'agents' collection for sync consistency
@@ -376,7 +376,7 @@ class AuthRepositoryImpl @Inject constructor(
                     "role" to role.name,
                     "isAuthorized" to isAuthorized,
                     "photoUrl" to firebaseUser.photoUrl?.toString(),
-                    "createdAt" to System.currentTimeMillis()
+                    "createdAt" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                 )
                 
                 try {
@@ -722,7 +722,7 @@ class AuthRepositoryImpl @Inject constructor(
                 "role" to role.name,
                 "isAuthorized" to isAuthorized,
                 "agentName" to normalizedAgentName,
-                "createdAt" to System.currentTimeMillis(),
+                "createdAt" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
                 "isPreRegistered" to true
             )
             
@@ -773,7 +773,7 @@ class AuthRepositoryImpl @Inject constructor(
                         "displayName" to displayName,
                         "role" to UserRole.AGENT.name,
                         "isAuthorized" to false,
-                        "createdAt" to System.currentTimeMillis()
+                        "createdAt" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                     )
                     userRef.set(newUser).await()
                 }
@@ -789,7 +789,7 @@ class AuthRepositoryImpl @Inject constructor(
                 "email" to normalizedEmail,
                 "displayName" to displayName,
                 "requestedName" to normalizedName,
-                "timestamp" to System.currentTimeMillis(),
+                "timestamp" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
                 "status" to "PENDING"
             )
             firestore.collection("access_requests").document(uid).set(request).await()

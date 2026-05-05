@@ -51,7 +51,7 @@ data class House(
     @ColumnInfo(defaultValue = "0") val visitSegment: Int = 0, // To distinguish return trips to the same street
     @ColumnInfo(defaultValue = "''") val agentUid: String = "", // Crucial for multi-agent data isolation
     @ColumnInfo(defaultValue = "''") val observation: String = "", // Agent notes for the visit
-    @ColumnInfo(defaultValue = "0") val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val createdAt: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
     @ColumnInfo(defaultValue = "0") val isSynced: Boolean = false,
     @ColumnInfo(defaultValue = "0") val editedByAdmin: Boolean = false,
     val latitude: Double? = null,
@@ -68,7 +68,7 @@ data class House(
      * in SyncRepositoryImpl to ensure proper conflict resolution (Last-Write-Wins).
      */
     @get:com.google.firebase.firestore.Exclude
-    @ColumnInfo(defaultValue = "0") val lastUpdated: Long = System.currentTimeMillis()
+    @ColumnInfo(defaultValue = "0") val lastUpdated: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
 ) {
     @com.google.firebase.firestore.DocumentId
     @androidx.room.Ignore
@@ -137,7 +137,7 @@ data class House(
             "listOrder" to listOrder,
             "visitSegment" to visitSegment,
             "agentUid" to agentUid,
-            "lastSyncTime" to System.currentTimeMillis(),
+            "lastSyncTime" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
             "observation" to observation,
             "latitude" to latitude,
             "longitude" to longitude,

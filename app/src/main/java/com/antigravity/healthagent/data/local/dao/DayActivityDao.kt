@@ -74,13 +74,13 @@ interface DayActivityDao {
     suspend fun countOpenDays(agentName: String, agentUid: String): Int
 
     @Query("UPDATE OR REPLACE day_activities SET isClosed = 1, isManualUnlock = 0, isSynced = 0, lastUpdated = :now WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
-    suspend fun closeAllActivities(agentName: String, agentUid: String, now: Long = System.currentTimeMillis())
+    suspend fun closeAllActivities(agentName: String, agentUid: String, now: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
 
     @Query("UPDATE OR REPLACE day_activities SET agentName = :newName, isSynced = 0, lastUpdated = :now WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:oldName)))")
-    suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String, now: Long = System.currentTimeMillis())
+    suspend fun updateAgentNameForAll(oldName: String, newName: String, agentUid: String, now: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
 
     @Query("UPDATE OR REPLACE day_activities SET agentName = :properName, isSynced = 0, lastUpdated = :now WHERE agentUid = :uid AND agentName LIKE '%@%'")
-    suspend fun fixEmailNamesForUid(uid: String, properName: String, now: Long = System.currentTimeMillis())
+    suspend fun fixEmailNamesForUid(uid: String, properName: String, now: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
 
     @Query("SELECT * FROM day_activities WHERE agentUid = '' OR agentUid IS NULL")
     suspend fun getAllOrphanActivities(): List<DayActivity>
@@ -89,7 +89,7 @@ interface DayActivityDao {
     suspend fun getActivitiesToReclaim(email: String, prefix: String, targetUid: String, properName: String): List<DayActivity>
 
     @Query("UPDATE OR REPLACE day_activities SET agentUid = :targetUid, isSynced = 0, lastUpdated = :now WHERE agentUid != :targetUid AND (UPPER(agentName) = UPPER(:agentName) OR UPPER(agentName) = UPPER(:email) OR UPPER(agentName) = UPPER(:emailPrefix))")
-    suspend fun reclaimActivities(agentName: String, email: String, emailPrefix: String, targetUid: String, now: Long = System.currentTimeMillis())
+    suspend fun reclaimActivities(agentName: String, email: String, emailPrefix: String, targetUid: String, now: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
 
     @Query("SELECT * FROM day_activities WHERE ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))) AND REPLACE(date, '/', '-') LIKE '%-' || :monthYearSuffix")
     suspend fun getDayActivitiesByMonth(agentName: String, agentUid: String, monthYearSuffix: String): List<DayActivity>

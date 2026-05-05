@@ -38,6 +38,7 @@ class HealthAgentApp : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         com.antigravity.healthagent.context.AppContextHolder.setContext(this)
+        com.antigravity.healthagent.utils.TimeManager.initialize(this)
         FirebaseApp.initializeApp(this)
         com.google.firebase.firestore.FirebaseFirestore.setLoggingEnabled(true)
         
