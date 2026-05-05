@@ -384,18 +384,17 @@ class SyncRepositoryImpl @Inject constructor(
                         // 6. TIMELINE BACKUP
                         if (uid.isNotEmpty()) {
                             try {
-                                val allHouses = houseDao.getHousesByAgentSnapshot(officialAgentName, uid)
-                                val allActivities = dayActivityDao.getAllDayActivities(officialAgentName, uid)
-                                val backupData = com.antigravity.healthagent.data.backup.BackupData(
-                                    houses = allHouses,
-                                    dayActivities = allActivities,
-                                    sourceAgentUid = uid,
-                                    sourceAgentName = officialAgentName
+                                val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.antigravity.healthagent.data.backup.TimelineBackupWorker>()
+                                    .setInputData(androidx.work.workDataOf("uid" to uid, "officialAgentName" to officialAgentName))
+                                    .build()
+                                androidx.work.WorkManager.getInstance(context).enqueueUniqueWork(
+                                    "TimelineBackup_$uid", 
+                                    androidx.work.ExistingWorkPolicy.REPLACE, 
+                                    workRequest
                                 )
-                                backupRepository.uploadTimelineBackup(uid, backupData)
-                                android.util.Log.i("SyncRepository", "Timeline Backup uploaded for $uid")
+                                android.util.Log.i("SyncRepository", "Timeline Backup worker enqueued for $uid")
                             } catch (e: Exception) {
-                                android.util.Log.w("SyncRepository", "Timeline Backup failed (non-critical): ${e.message}")
+                                android.util.Log.w("SyncRepository", "Timeline Backup enqueue failed (non-critical): ${e.message}")
                             }
                         }
 
