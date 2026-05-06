@@ -614,7 +614,7 @@ class SupervisorViewModel @Inject constructor(
                     }
                 }
             }
-        }     }
+        }
 
         return AggregateSummary(
             totalWorked = totalWorked,
