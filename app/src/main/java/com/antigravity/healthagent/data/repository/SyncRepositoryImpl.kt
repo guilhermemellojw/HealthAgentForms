@@ -100,16 +100,30 @@ class SyncRepositoryImpl @Inject constructor(
 
                         // SURGICAL PROTECTION: Identity Isolation Guard
                         if (uid.isNotBlank()) {
+                            val isProxyPush = targetUid != null
+                            
                             val crossUidHouses = housesToPush.filter { it.agentUid.isNotBlank() && it.agentUid != uid }
                             if (crossUidHouses.isNotEmpty()) {
                                 android.util.Log.e("SyncRepository", "IDENTITY LEAK PREVENTED: Filtered out ${crossUidHouses.size} houses with mismatching UIDs.")
-                                housesToPush = housesToPush.filter { it.agentUid.isBlank() || it.agentUid == uid }
+                            }
+                            
+                            // BUG FIX: During proxy sessions, NEVER allow blank UIDs to leak into the agent's account.
+                            // Orphan data (blank UID) should only be allowed if we are pushing the Admin's own local production.
+                            housesToPush = if (isProxyPush) {
+                                housesToPush.filter { it.agentUid == uid }
+                            } else {
+                                housesToPush.filter { it.agentUid.isBlank() || it.agentUid == uid }
                             }
                             
                             val crossUidActivities = activitiesToPush.filter { it.agentUid.isNotBlank() && it.agentUid != uid }
                             if (crossUidActivities.isNotEmpty()) {
                                 android.util.Log.e("SyncRepository", "IDENTITY LEAK PREVENTED: Filtered out ${crossUidActivities.size} activities with mismatching UIDs.")
-                                activitiesToPush = activitiesToPush.filter { it.agentUid.isBlank() || it.agentUid == uid }
+                            }
+                            
+                            activitiesToPush = if (isProxyPush) {
+                                activitiesToPush.filter { it.agentUid == uid }
+                            } else {
+                                activitiesToPush.filter { it.agentUid.isBlank() || it.agentUid == uid }
                             }
                         }
 
@@ -330,14 +344,28 @@ class SyncRepositoryImpl @Inject constructor(
                             val housesInMonthRaw = if (isProxyPush) {
                                 // Proxy Pushes (Admin edits) lack the full month of data locally.
                                 // We must fetch the full month from the cloud to prevent zeroing out the summary.
-                                val allDays = (1..31).map { day -> String.format("%02d-%s", day, monthYear) }
-                                val chunk1 = allDays.take(30)
-                                val chunk2 = allDays.drop(30)
+                                // IMPROVEMENT: Generate correct number of days for the specific month.
+                                val monthParts = monthYear.split("-")
+                                val month = monthParts[0].toIntOrNull() ?: 1
+                                val year = monthParts[1].toIntOrNull() ?: 2024
                                 
-                                val docs1 = userDocRef.collection("houses").whereIn("data", chunk1).get().await().documents
-                                val docs2 = userDocRef.collection("houses").whereIn("data", chunk2).get().await().documents
+                                val calendar = java.util.Calendar.getInstance()
+                                calendar.set(year, month - 1, 1)
+                                val daysInMonth = calendar.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
                                 
-                                (docs1 + docs2).mapNotNull { it.toHouseSafe(uid, officialAgentName ?: "") }
+                                val allDays = (1..daysInMonth).map { day -> String.format("%02d-%s", day, monthYear) }
+                                
+                                // BUG FIX: Firestore 'whereIn' fails if the list is empty.
+                                // We use chunked(30) and flatMap to safely handle any number of days.
+                                val allDocs = allDays.chunked(30).flatMap { chunk ->
+                                    if (chunk.isNotEmpty()) {
+                                        userDocRef.collection("houses")
+                                            .whereIn("data", chunk)
+                                            .get().await().documents
+                                    } else emptyList()
+                                }
+                                
+                                allDocs.mapNotNull { it.toHouseSafe(uid, officialAgentName ?: "") }
                             } else {
                                 houseDao.getHousesByMonth(officialAgentName ?: "", uid, monthYear)
                             }

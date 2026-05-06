@@ -677,25 +677,27 @@ class HouseRepositoryImpl @Inject constructor(
             
             if (inspectedHouses.isEmpty() || adminHouses.isEmpty()) return@runInTransactionWithRetry
             
-            val adminKeys = adminHouses.map { it.generateNaturalKey() }.toSet()
-            val toDelete = inspectedHouses.filter { it.generateNaturalKey() in adminKeys }
+            // BUG FIX: naturalKey includes agentUid, so they will NEVER match between different users.
+            // We must use identityKey (Logical Identity) to detect cross-UID leaks.
+            val adminKeys = adminHouses.map { it.generateIdentityKey() }.toSet()
+            val toDelete = inspectedHouses.filter { it.generateIdentityKey() in adminKeys }
             
             if (toDelete.isNotEmpty()) {
-                android.util.Log.i("HouseRepository", "Surgical clean: removing ${toDelete.size} duplicates from $inspectedUid")
+                android.util.Log.i("HouseRepository", "Surgical clean: removing ${toDelete.size} identity duplicates from $inspectedUid")
                 toDelete.forEach { houseDao.deleteHouse(it) }
             }
 
-            // Also clean Activities
+            // Also clean Activities (Identity is date|agentName, but here we check for same date in different UIDs)
             val allActivities = dayActivityDao.getAllDayActivitiesSnapshot()
             val inspectedAct = allActivities.filter { it.agentUid == inspectedUid }
             val adminAct = allActivities.filter { it.agentUid == adminUid }
             
-            val adminActKeys = adminAct.map { it.date to it.status }.toSet()
-            val actToDelete = inspectedAct.filter { (it.date to it.status) in adminActKeys }
+            val adminDates = adminAct.map { it.date }.toSet()
+            val actToDelete = inspectedAct.filter { it.date in adminDates }
             
             if (actToDelete.isNotEmpty()) {
-                android.util.Log.i("HouseRepository", "Surgical clean: removing ${actToDelete.size} activities from $inspectedUid")
-                actToDelete.forEach { dayActivityDao.delete(it) }
+                android.util.Log.i("HouseRepository", "Surgical clean: removing ${actToDelete.size} activity dates from $inspectedUid")
+                actToDelete.forEach { dayActivityDao.deleteDayActivity(it.date, it.agentName, it.agentUid) }
             }
 
             if (toDelete.isNotEmpty() || actToDelete.isNotEmpty()) {

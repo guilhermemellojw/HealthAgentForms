@@ -301,16 +301,18 @@ class HomeViewModel @Inject constructor(
                 val result = syncDataUseCase.pushData(houses, activities, uid ?: "")
                 
                 if (result.isSuccess) {
-                    // 2. Clear state and local DB surgically
                     _syncStatus.value = SyncStatus(SyncStage.SUCCESS, 1.0f, "Sincronizado com sucesso!")
-                    
-                    // CRITICAL: We clear the remote agent's data BUT PRESERVE the admin's local data
-                    syncRepository.clearAgentData(agentName, uid ?: "")
-                    
-                    setRemoteAgent(null)
                     _uiEvent.value = "Edição finalizada e sincronizada!"
-                    delay(1500)
-                    onComplete()
+                    
+                    // BUG FIX: Navigate away FIRST to prevent the UI from flickering 
+                    // and briefly showing the Admin's production before the screen closes.
+                    withContext(Dispatchers.Main) { 
+                        onComplete() 
+                    }
+                    
+                    // Give the navigation some time to finish before swapping data context
+                    delay(1000)
+                    setRemoteAgent(null)
                 } else {
                     _syncStatus.value = SyncStatus(SyncStage.ERROR, 0.5f, "Falha: ${result.exceptionOrNull()?.message}")
                     _uiEvent.value = "Falha ao finalizar: ${result.exceptionOrNull()?.message}"
