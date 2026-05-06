@@ -77,7 +77,7 @@ fun AdminSettingsTab(viewModel: AdminViewModel) {
         PremiumCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 // Meta Diária
-                var tempMaxHouses by remember(maxHouses) { mutableFloatStateOf(maxHouses.toFloat()) }
+                var tempMaxHouses by remember(maxHouses) { mutableFloatStateOf(maxHouses.toFloat().coerceIn(25f, 35f)) }
                 Column {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -592,7 +592,7 @@ fun AdminDashboardScreen(
                                         }
                                     } else {
                                         LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
-                                            items(unifiedProfiles) { profile ->
+                                            items(unifiedProfiles, key = { it.uid ?: it.email ?: it.agentName ?: it.hashCode() }) { profile ->
                                                 UnifiedProfileCard(
                                                     profile = profile,
                                                     agentNamesList = agentNames,
@@ -1303,9 +1303,12 @@ fun UnifiedProfileCard(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        ActionButton(Icons.Default.SettingsBackupRestore, "Restauração", onClick = onRestore)
-                        ActionButton(Icons.Default.PostAdd, "Importar Dia", onClick = { onRestoreDay(profile.uid) })
-                        ActionButton(Icons.Default.DeleteSweep, "Wipe Remoto", tint = MaterialTheme.colorScheme.error, onClick = onRemoteWipe)
+                        // Only show data restoration/wipe for profiles that actually exist (have a UID)
+                        if (profile.uid != null) {
+                            ActionButton(Icons.Default.SettingsBackupRestore, "Restauração", onClick = onRestore)
+                            ActionButton(Icons.Default.PostAdd, "Importar Dia", onClick = { onRestoreDay(profile.uid) })
+                            ActionButton(Icons.Default.DeleteSweep, "Wipe Remoto", tint = MaterialTheme.colorScheme.error, onClick = onRemoteWipe)
+                        }
                         
                         if (agent != null) {
                             ActionButton(Icons.Default.QueryStats, "Analisar", onClick = onEditAgent)
@@ -1349,9 +1352,11 @@ fun UnifiedProfileCard(
                                     properties = PopupProperties(focusable = false),
                                     modifier = Modifier.fillMaxWidth(0.8f)
                                 ) {
-                                    val filteredNames = agentNamesList.filter { 
-                                        it.contains(nameInput, ignoreCase = true) 
-                                    }.take(5)
+                                    val filteredNames = remember(nameInput, agentNamesList) {
+                                        agentNamesList.filter { 
+                                            it.contains(nameInput, ignoreCase = true) 
+                                        }.take(5)
+                                    }
 
                                     filteredNames.forEach { name ->
                                         DropdownMenuItem(

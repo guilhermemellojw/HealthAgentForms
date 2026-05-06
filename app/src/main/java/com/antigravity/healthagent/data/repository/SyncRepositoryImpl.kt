@@ -642,26 +642,34 @@ class SyncRepositoryImpl @Inject constructor(
                         val validCloudActivityKeys = cloudDayActivities.map { "${it.date.replace("/", "-")}|${it.agentName.uppercase()}" }.toSet()
                         
                         // SELF-HEALING: Clean up zombie tombstones in Firestore
-                        if (!isIncremental) {
-                            val zombieActivities = cloudDeletedActivities.filter { it in validCloudActivityKeys }
-                            val zombieHouses = cloudDeletedHouses.filter { it in validCloudHouseKeys }
+                        // We run this on EVERY pull to ensure that if data is present in cloud, 
+                        // any conflicting deletion markers are permanently removed.
+                        val zombieActivities = cloudDeletedActivities.filter { tombstoneKey ->
+                            val datePart = tombstoneKey.split("|")[0].replace("/", "-")
+                            validCloudActivityKeys.any { it.startsWith(datePart) }
+                        }
+                        val zombieHouses = cloudDeletedHouses.filter { it in validCloudHouseKeys }
+                        
+                        if (zombieActivities.isNotEmpty() || zombieHouses.isNotEmpty()) {
+                            // CRITICAL FIX: Remove zombies from the local list immediately so they don't trigger local deletion
+                            cloudDeletedActivities.removeAll(zombieActivities.toSet())
+                            cloudDeletedHouses.removeAll(zombieHouses.toSet())
                             
-                            if (zombieActivities.isNotEmpty() || zombieHouses.isNotEmpty()) {
-                                try {
-                                    val batch = firestore.batch()
-                                    val docRef = firestore.collection("agents").document(uid)
-                                    if (zombieActivities.isNotEmpty()) {
-                                        val dateOnlyZombies = zombieActivities.map { it.split("|")[0] }
-                                        batch.update(docRef, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayRemove(*(zombieActivities + dateOnlyZombies).toTypedArray()))
-                                    }
-                                    if (zombieHouses.isNotEmpty()) {
-                                        batch.update(docRef, "deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayRemove(*zombieHouses.toTypedArray()))
-                                    }
-                                    batch.commit().await()
-                                    android.util.Log.i("SyncRepository", "Self-Healing: Removed ${zombieActivities.size} zombie activity tombstones and ${zombieHouses.size} house tombstones from Firestore.")
-                                } catch (e: Exception) {
-                                    android.util.Log.w("SyncRepository", "Self-Healing failed: ${e.message}")
+                            try {
+                                val batch = firestore.batch()
+                                val docRef = firestore.collection("agents").document(uid)
+                                if (zombieActivities.isNotEmpty()) {
+                                    // Remove both the specific piped key and any potential legacy date-only keys
+                                    val dateOnlyZombies = zombieActivities.map { it.split("|")[0] }
+                                    batch.update(docRef, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayRemove(*(zombieActivities + dateOnlyZombies).toTypedArray()))
                                 }
+                                if (zombieHouses.isNotEmpty()) {
+                                    batch.update(docRef, "deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayRemove(*zombieHouses.toTypedArray()))
+                                }
+                                batch.commit().await()
+                                android.util.Log.i("SyncRepository", "Self-Healing: Removed ${zombieActivities.size} zombie activity tombstones and ${zombieHouses.size} house tombstones from Firestore.")
+                            } catch (e: Exception) {
+                                android.util.Log.w("SyncRepository", "Self-Healing failed: ${e.message}")
                             }
                         }
 

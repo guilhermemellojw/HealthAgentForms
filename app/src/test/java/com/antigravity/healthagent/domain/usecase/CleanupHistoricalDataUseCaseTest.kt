@@ -92,6 +92,7 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun deleteAllCloudData(): Result<Unit> = Result.success(Unit)
         override suspend fun performDataCleanup(): Result<Unit> = Result.success(Unit)
         override suspend fun clearSyncError(uid: String): Result<Unit> = Result.success(Unit)
+        override suspend fun pruneOldTombstones(): Result<Unit> = Result.success(Unit)
     }
 
     private val mockAgentRepository = object : AgentRepository {

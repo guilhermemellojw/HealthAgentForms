@@ -101,25 +101,17 @@ class RestoreDataUseCase @Inject constructor(
             // Normalize and potentially shift dates
             val normalizedHouses = importedHouses.map { house ->
                 // SAFE ATTRIBUTION RULE:
-                // We only re-assign/normalize if:
-                // 1. The backup explicitly says this record belonged to the backup creator (sourceAgentUid matches)
-                // 2. OR the backup is legacy (null sourceAgentUid) AND the record is either blank OR already belongs to the target.
-                val isSourceOwner = when {
-                    backupData.sourceAgentUid != null -> house.agentUid == backupData.sourceAgentUid
-                    house.agentUid.isNotBlank() -> house.agentUid == targetUid 
-                    else -> true // Completely blank attribution (legacy simple backup)
-                }
-                
-                val finalAgentName = if (isSourceOwner || house.agentName.isBlank()) agentName else house.agentName
-                val finalAgentUid = if (isSourceOwner || house.agentUid.isBlank()) targetUid else house.agentUid
+                // We ALWAYS enforce the target identity during an Admin restore to ensure
+                // that legacy backups (which might have different or null names) don't 
+                // contaminate the new profile.
+                val finalAgentName = agentName.uppercase()
+                val finalAgentUid = targetUid
 
                 house.copy(
-                    id = 0, 
+                    id = 0, // Reset for local auto-increment
                     agentName = finalAgentName,
                     agentUid = finalAgentUid,
                     number = if (house.number.trim() == "0") "" else house.number.trim().uppercase(),
-                    sequence = if (house.sequence == 0) 0 else house.sequence,
-                    complement = if (house.complement == 0) 0 else house.complement,
                     data = resolveDate ?: house.data.replace("/", "-"),
                     isSynced = false,
                     lastUpdated = System.currentTimeMillis(),
@@ -127,13 +119,8 @@ class RestoreDataUseCase @Inject constructor(
                 ) 
             }
             val normalizedActivities = importedActivities.map { activity ->
-                val isSourceOwner = when {
-                    backupData.sourceAgentUid != null -> activity.agentUid == backupData.sourceAgentUid
-                    activity.agentUid.isNotBlank() -> activity.agentUid == targetUid
-                    else -> true
-                }
-                val finalAgentName = if (isSourceOwner || activity.agentName.isBlank()) agentName else activity.agentName
-                val finalAgentUid = if (isSourceOwner || activity.agentUid.isBlank()) targetUid else activity.agentUid
+                val finalAgentName = agentName.uppercase()
+                val finalAgentUid = targetUid
 
                 activity.copy(
                     agentName = finalAgentName,
