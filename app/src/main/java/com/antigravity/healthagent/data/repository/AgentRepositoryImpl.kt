@@ -384,7 +384,15 @@ class AgentRepositoryImpl @Inject constructor(
             // 1. Fetch house to identify month/year for summary invalidation
             val houseDoc = houseRef.get().await()
             val houseDate = houseDoc.getString("data")?.replace("/", "-")
-            val monthYear = if (houseDate != null && houseDate.length >= 10) houseDate.substring(3) else null
+            val monthYear = if (houseDate != null) {
+                val parts = houseDate.split("-")
+                if (parts.size == 3) {
+                    // Force zero-padding for month to ensure it matches Firestore document IDs (e.g. "05-2025")
+                    val mm = String.format("%02d", parts[1].toInt())
+                    val yyyy = parts[2]
+                    "$mm-$yyyy"
+                } else null
+            } else null
 
             val batch = firestore.batch()
             
@@ -433,7 +441,14 @@ class AgentRepositoryImpl @Inject constructor(
             batch.update(agentRef, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayUnion(dateKey))
             
             // Invalidate Monthly Summary for this activity
-            val monthYear = if (dateKey.length >= 10) dateKey.substring(3) else null
+            val monthYear = if (dateKey.isNotBlank()) {
+                val parts = dateKey.split("-")
+                if (parts.size == 3) {
+                    val mm = String.format("%02d", parts[1].toInt())
+                    val yyyy = parts[2]
+                    "$mm-$yyyy"
+                } else null
+            } else null
             if (monthYear != null) {
                 batch.delete(agentRef.collection("monthly_summaries").document(monthYear))
             }

@@ -83,14 +83,42 @@ fun SupervisorAgentsScreen(
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
                         isSolarMode = isSolarMode
                     ) {
+                        val searchQuery by viewModel.searchQuery.collectAsState()
+
                         Column(modifier = Modifier.padding(8.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.FilterList, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("FILTRAR PRODUÇÃO", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                Text("FILTRAR AGENTES E PRODUÇÃO", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                             }
                             
                             Spacer(modifier = Modifier.height(12.dp))
+
+                            // Search Field
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { viewModel.updateSearchQuery(it) },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Buscar por nome ou e-mail...", style = MaterialTheme.typography.bodyMedium) },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { viewModel.updateSearchQuery("") }) {
+                                            Icon(Icons.Default.Close, contentDescription = "Limpar")
+                                        }
+                                    }
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                    focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f)
+                                )
+                            )
+
+                            Spacer(modifier = Modifier.height(16.dp))
                             
                             // Year Selection
                             androidx.compose.foundation.lazy.LazyRow(
@@ -198,7 +226,9 @@ fun SupervisorAgentsScreen(
 
 @Composable
 fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSolarMode: Boolean = false) {
-    var expanded by remember { mutableStateOf(false) }
+    val expandedUids by viewModel.expandedUids.collectAsState()
+    val expanded = expandedUids.contains(agent.uid)
+    
     val liveAgent by viewModel.liveAgentData.collectAsState()
     val focusedUid by viewModel.focusedAgentUid.collectAsState()
     
@@ -215,6 +245,7 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
         if (expanded) {
             viewModel.startLiveInspection(agent.uid)
         } else if (focusedUid == agent.uid) {
+            // Only stop if we are the one who was focused
             viewModel.stopLiveInspection()
         }
     }
@@ -222,7 +253,7 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
     PremiumCard(
         modifier = Modifier.fillMaxWidth(),
         isSolarMode = isSolarMode,
-        onClick = { expanded = !expanded }
+        onClick = { viewModel.toggleAgentExpanded(agent.uid) }
     ) {
         Column {
             Row(

@@ -62,10 +62,39 @@ class SupervisorViewModel @Inject constructor(
     private val _focusedAgentUid = MutableStateFlow<String?>(null)
     private val _liveAgentData = MutableStateFlow<AgentData?>(null)
     private var liveJob: kotlinx.coroutines.Job? = null
+    
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery = _searchQuery.asStateFlow()
 
-    val agents: StateFlow<List<AgentData>> = _rawAgents
-        .map { filterFutureData(it) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _expandedUids = MutableStateFlow<Set<String>>(emptySet())
+    val expandedUids = _expandedUids.asStateFlow()
+
+    fun toggleAgentExpanded(uid: String) {
+        val current = _expandedUids.value
+        _expandedUids.value = if (current.contains(uid)) current - uid else current + uid
+    }
+
+    fun updateSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    val agents: StateFlow<List<AgentData>> = combine(_rawAgents, _searchQuery) { raw, query ->
+        val filteredByDate = filterFutureData(raw)
+        val filteredBySearch = if (query.isBlank()) filteredByDate
+        else filteredByDate.filter { 
+            it.agentName?.contains(query, ignoreCase = true) == true || 
+            it.email.contains(query, ignoreCase = true)
+        }
+        
+        // Locale-aware sorting (PT-BR)
+        val collator = java.text.Collator.getInstance(java.util.Locale("pt", "BR"))
+        filteredBySearch.sortedWith { a, b ->
+            collator.compare(a.agentName ?: a.email, b.agentName ?: b.email)
+        }
+    }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .distinctUntilChanged()
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -175,7 +204,7 @@ class SupervisorViewModel @Inject constructor(
             
             agentRepository.observeAgentProduction(uid, datePattern)
                 .collect { data ->
-                    _liveAgentData.value = data
+                    _liveAgentData.value = data?.let { filterFutureData(listOf(it)).firstOrNull() }
                 }
         }
     }
@@ -234,9 +263,16 @@ class SupervisorViewModel @Inject constructor(
     }
 
     private fun filterFutureData(agents: List<AgentData>): List<AgentData> {
-        val today = Calendar.getInstance()
-        val todayStr = SimpleDateFormat("yyyyMMdd", Locale.US).format(today.time)
-        val todayInt = todayStr.toInt()
+        val cal = Calendar.getInstance()
+        val hourOfDay = cal.get(Calendar.HOUR_OF_DAY)
+        
+        val filterCal = Calendar.getInstance()
+        if (hourOfDay < 12) {
+            filterCal.add(Calendar.DAY_OF_YEAR, -1) // Limit to yesterday
+        }
+        
+        val limitStr = SimpleDateFormat("yyyyMMdd", Locale.US).format(filterCal.time)
+        val limitInt = limitStr.toInt()
 
         return agents.map { agent ->
             val filteredHouses = agent.houses.filter { house ->
@@ -244,11 +280,10 @@ class SupervisorViewModel @Inject constructor(
                     val dateStr = house.data.replace("/", "-")
                     val parts = dateStr.split("-")
                     if (parts.size == 3) {
-                        // Bug Fix: Zero-pad day and month for correct string comparison
                         val houseDateStr = String.format("%04d%02d%02d", parts[2].toInt(), parts[1].toInt(), parts[0].toInt())
-                        houseDateStr.toInt() <= todayInt
-                    } else true 
-                } catch (e: Exception) { true }
+                        houseDateStr.toInt() <= limitInt
+                    } else false // Safe by default: hide malformed
+                } catch (e: Exception) { false } // Safe by default: hide error
             }
             
             val filteredActivities = agent.activities.filter { activity ->
@@ -257,15 +292,29 @@ class SupervisorViewModel @Inject constructor(
                     val parts = dateStr.split("-")
                     if (parts.size == 3) {
                         val activityDateStr = String.format("%04d%02d%02d", parts[2].toInt(), parts[1].toInt(), parts[0].toInt())
-                        activityDateStr.toInt() <= todayInt
-                    } else true
-                } catch (e: Exception) { true }
+                        activityDateStr.toInt() <= limitInt
+                    } else false // Safe by default
+                } catch (e: Exception) { false } // Safe by default
             }
             
-            // Smart Summary Preservation:
-            // Always preserve the summary as the source of truth for dashboarding.
-            // Our calculateAggregateSummary logic will decide whether to use it or fallback to raw data.
-            val updatedSummary = agent.summary
+            // Smart Summary Privacy:
+            // We only show the summary if it belongs to a PAST month.
+            // If it's the current month, we nullify it to force recalculation from raw data,
+            // ensuring the 12:00 PM embargo and future production filters are respected.
+            val now = Calendar.getInstance()
+            val cMonth = now.get(Calendar.MONTH) + 1
+            val cYear = now.get(Calendar.YEAR)
+            
+            val updatedSummary = agent.summary?.let { s ->
+                val parts = s.monthYear.split("-")
+                if (parts.size == 2) {
+                    val sMonth = parts[0].toInt()
+                    val sYear = parts[1].toInt()
+                    // Safe ONLY if year < current OR (year == current AND month < current)
+                    val isSafe = sYear < cYear || (sYear == cYear && sMonth < cMonth)
+                    if (isSafe) s else null
+                } else null
+            }
 
             agent.copy(houses = filteredHouses, activities = filteredActivities, summary = updatedSummary)
         }
@@ -382,18 +431,46 @@ class SupervisorViewModel @Inject constructor(
         val startT = weekStart?.time ?: 0L
         val endT = weekEnd?.time ?: Long.MAX_VALUE
         
-        // Define the date filter if week range is provided
-        val dateFilter: (String) -> Boolean = if (weekStart != null && weekEnd != null) {
-            { dateStr ->
-                try {
-                    // Try to avoid full parse if possible by normalizing string and then parsing
-                    val normalizedDate = dateStr.replace("/", "-")
-                    val date = sdfPattern.parse(normalizedDate)
-                    val time = date?.time ?: 0L
-                    time in startT..endT
-                } catch (e: Exception) { false }
-            }
-        } else { { true } }
+        // OPTIMIZATION: Calculate embargo limit ONCE outside the filter loop
+        val nowCal = Calendar.getInstance()
+        val hourOfDay = nowCal.get(Calendar.HOUR_OF_DAY)
+        val limitCal = Calendar.getInstance()
+        if (hourOfDay < 12) {
+            limitCal.add(Calendar.DAY_OF_YEAR, -1)
+        }
+        val limitNumeric = limitCal.get(Calendar.YEAR).toLong() * 10000 + (limitCal.get(Calendar.MONTH) + 1).toLong() * 100 + limitCal.get(Calendar.DAY_OF_MONTH).toLong()
+
+        // Cache weekly boundaries in numeric format for performance
+        val startNumeric = if (weekStart != null) {
+            val c = Calendar.getInstance().apply { time = Date(startT) }
+            c.get(Calendar.YEAR).toLong() * 10000 + (c.get(Calendar.MONTH) + 1).toLong() * 100 + c.get(Calendar.DAY_OF_MONTH).toLong()
+        } else 0L
+
+        val endNumeric = if (weekEnd != null) {
+            val c = Calendar.getInstance().apply { time = Date(endT) }
+            c.get(Calendar.YEAR).toLong() * 10000 + (c.get(Calendar.MONTH) + 1).toLong() * 100 + c.get(Calendar.DAY_OF_MONTH).toLong()
+        } else Long.MAX_VALUE
+
+        // Define the date filter
+        val dateFilter: (String) -> Boolean = { dateStr ->
+            try {
+                val normalized = dateStr.replace("/", "-")
+                val parts = normalized.split("-")
+                if (parts.size == 3) {
+                    val numericDate = parts[2].toLong() * 10000 + parts[1].toLong() * 100 + parts[0].toLong()
+                    
+                    // Filter out any data beyond the allowed limit (Safe by default: > limitNumeric is hidden)
+                    if (numericDate > limitNumeric) {
+                        false
+                    } else if (weekStart != null && weekEnd != null) {
+                        // If in weekly view, also check range
+                        numericDate in startNumeric..endNumeric
+                    } else {
+                        true // In monthly/yearly view, any date <= limit is fine
+                    }
+                } else false // Malformed date: hide it
+            } catch (e: Exception) { false } // Error parsing: hide it
+        }
 
         var totalWorked = 0
         var totalVisits = 0
@@ -411,16 +488,30 @@ class SupervisorViewModel @Inject constructor(
         val recusadosDetails = mutableListOf<StatDetail>()
         var activeAgentsCount = 0
 
+        val now = Calendar.getInstance()
+        val currentYear = now.get(Calendar.YEAR)
+        val currentMonth = now.get(Calendar.MONTH)
+        
         agents.forEach { agent ->
             val summary = agent.summary
-            // We use the pre-calculated summary if available and we're NOT in a specific week view
-            // This is crucial because raw houses/activities may be empty due to lazy loading optimizations.
-            val useSummary = summary != null && (weekStart == null || weekEnd == null)
+            // PRIVACY LOGIC: We can only use the cloud summary if the month is in the PAST.
+            // If the summary is for the current month (or a future one), we MUST recalculate 
+            // from raw data to respect the 12:00 PM embargo and hide future productions.
+            val isSummarySafe = if (summary != null) {
+                val parts = summary.monthYear.split("-")
+                if (parts.size == 2) {
+                    val sMonth = parts[0].toInt() - 1 // 0-based
+                    val sYear = parts[1].toInt()
+                    // Safe ONLY if year < current OR (year == current AND month < current)
+                    sYear < currentYear || (sYear == currentYear && sMonth < currentMonth)
+                } else false
+            } else false
+
+            val useSummary = summary != null && (weekStart == null || weekEnd == null) && isSummarySafe
             
             if (useSummary && summary != null) {
                 if (summary.totalHouses > 0 || summary.daysWorked > 0) {
                     activeAgentsCount++
-                    
                     val displayName = pickBestDisplayName(agent.agentName, agent.email)
                     
                     val visitCount = summary.totalHouses
@@ -435,22 +526,22 @@ class SupervisorViewModel @Inject constructor(
                         housesDetails.add(StatDetail(displayName, agent.email, agent.uid, workedCount, agent.photoUrl))
                     }
                     
-                    val fociCount = summary.focusCount
-                    if (fociCount > 0) {
-                        totalFoci += fociCount
-                        fociDetails.add(StatDetail(displayName, agent.email, agent.uid, fociCount, agent.photoUrl))
+                    val fCount = summary.focusCount
+                    if (fCount > 0) {
+                        totalFoci += fCount
+                        fociDetails.add(StatDetail(displayName, agent.email, agent.uid, fCount, agent.photoUrl))
                     }
                     
-                    val treatedCount = summary.treatedCount
-                    if (treatedCount > 0) {
-                        totalTratados += treatedCount
-                        tratadosDetails.add(StatDetail(displayName, agent.email, agent.uid, treatedCount, agent.photoUrl))
+                    val tCount = summary.treatedCount
+                    if (tCount > 0) {
+                        totalTratados += tCount
+                        tratadosDetails.add(StatDetail(displayName, agent.email, agent.uid, tCount, agent.photoUrl))
                     }
 
-                    val closedCount = summary.situationCounts["F"] ?: 0
-                    if (closedCount > 0) {
-                        totalFechados += closedCount
-                        fechadosDetails.add(StatDetail(displayName, agent.email, agent.uid, closedCount, agent.photoUrl))
+                    val fclosedCount = summary.situationCounts["F"] ?: 0
+                    if (fclosedCount > 0) {
+                        totalFechados += fclosedCount
+                        fechadosDetails.add(StatDetail(displayName, agent.email, agent.uid, fclosedCount, agent.photoUrl))
                     }
 
                     val abandonedCount = summary.situationCounts["A"] ?: 0
@@ -466,7 +557,7 @@ class SupervisorViewModel @Inject constructor(
                     }
                 }
             } else {
-                // FALLBACK TO RAW DATA (Required for Week views or when summary is missing)
+                // FALLBACK TO RAW DATA (Filtered by date to hide future productions)
                 val periodActivities = agent.activities.filter { dateFilter(it.date) }
                 val periodHouses = agent.houses.filter { dateFilter(it.data) }
                 
@@ -494,7 +585,7 @@ class SupervisorViewModel @Inject constructor(
                         totalFoci += fociCount
                         fociDetails.add(StatDetail(displayName, agent.email, agent.uid, fociCount, agent.photoUrl))
                     }
-                    
+
                     val treatedCount = periodHouses.count { house ->
                         (house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e + house.eliminados) > 0 ||
                         house.larvicida > 0.0 || house.comFoco
@@ -523,7 +614,7 @@ class SupervisorViewModel @Inject constructor(
                     }
                 }
             }
-        }
+        }     }
 
         return AggregateSummary(
             totalWorked = totalWorked,
