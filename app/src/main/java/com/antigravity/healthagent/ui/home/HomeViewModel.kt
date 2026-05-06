@@ -713,14 +713,15 @@ class HomeViewModel @Inject constructor(
             val duplicates = mutableSetOf<Int>()
             
             dayHouses.forEach { hh ->
-                // Identity key matching HouseUiStateMapper's criteria
-                val key = "${hh.bairro.uppercase()}|${hh.blockNumber.uppercase()}|${hh.blockSequence.uppercase()}|${hh.streetName.uppercase()}|${hh.number.uppercase()}|${hh.sequence}|${hh.complement}|${hh.visitSegment}"
+                // Identity key matching RG report's criteria: allowing same address if segments are different (Segmentation Rule)
+                // and using formatStreetName/normalize to catch variations like "R." vs "Rua".
+                val key = "${hh.bairro.normalize()}|${hh.blockNumber.normalize()}|${hh.blockSequence.normalize()}|${hh.streetName.formatStreetName()}|${hh.number.normalize()}|${hh.sequence}|${hh.complement}|${hh.visitSegment}".uppercase()
                 identityCounts[key] = (identityCounts[key] ?: 0) + 1
             }
             
             // Second pass for specific IDs
             dayHouses.forEach { hh ->
-                val key = "${hh.bairro.uppercase()}|${hh.blockNumber.uppercase()}|${hh.blockSequence.uppercase()}|${hh.streetName.uppercase()}|${hh.number.uppercase()}|${hh.sequence}|${hh.complement}|${hh.visitSegment}"
+                val key = "${hh.bairro.normalize()}|${hh.blockNumber.normalize()}|${hh.blockSequence.normalize()}|${hh.streetName.formatStreetName()}|${hh.number.normalize()}|${hh.sequence}|${hh.complement}|${hh.visitSegment}".uppercase()
                 if ((identityCounts[key] ?: 0) > 1) {
                     duplicates.add(hh.id)
                 }
@@ -730,10 +731,10 @@ class HomeViewModel @Inject constructor(
             
             // Map houses with O(N) duplicate detection and normalized search
             val mappedDayHouses = dayHouses.filter { 
-                it.streetName.normalize().contains(normalizedQ, true) || 
+                it.streetName.formatStreetName().contains(normalizedQ.formatStreetName(), true) || 
                 it.number.contains(q, true) 
             }.map { house ->
-                val key = "${house.bairro.uppercase()}|${house.blockNumber.uppercase()}|${house.blockSequence.uppercase()}|${house.streetName.uppercase()}|${house.number.uppercase()}|${house.sequence}|${house.complement}|${house.visitSegment}"
+                val key = "${house.bairro.normalize()}|${house.blockNumber.normalize()}|${house.blockSequence.normalize()}|${house.streetName.formatStreetName()}|${house.number.normalize()}|${house.sequence}|${house.complement}|${house.visitSegment}".uppercase()
                 val isDuplicate = (identityCounts[key] ?: 0) > 1
                 
                 // For in-flight houses (id 0), check if any are recently edited using ID 0
@@ -1577,14 +1578,13 @@ class HomeViewModel @Inject constructor(
                     it.data == houseToInsert.data && 
                     it.agentUid == houseToInsert.agentUid &&
                     it.agentName.equals(houseToInsert.agentName, ignoreCase = true) &&
-                    it.blockNumber.equals(houseToInsert.blockNumber, ignoreCase = true) &&
-                    it.blockSequence.equals(houseToInsert.blockSequence, ignoreCase = true) &&
-                    it.streetName.equals(houseToInsert.streetName, ignoreCase = true) &&
-                    it.number.equals(houseToInsert.number, ignoreCase = true) && 
+                    it.blockNumber.normalize() == houseToInsert.blockNumber.normalize() &&
+                    it.blockSequence.normalize() == houseToInsert.blockSequence.normalize() &&
+                    it.streetName.formatStreetName() == houseToInsert.streetName.formatStreetName() &&
+                    it.number.normalize() == houseToInsert.number.normalize() && 
                     it.sequence == finalSequence &&
                     it.complement == finalComplement &&
-                    it.bairro.equals(houseToInsert.bairro, ignoreCase = true)
-                    // visitSegment will be recalculated, but we assume the same for prediction
+                    it.bairro.normalize() == houseToInsert.bairro.normalize()
                 }) {
                     if (houseToInsert.complement > 0 || houseToInsert.number.isNotBlank()) {
                         finalComplement++
@@ -2173,6 +2173,7 @@ class HomeViewModel @Inject constructor(
             val updatedList = reorderedList.mapIndexed { index, h -> h.copy(listOrder = index.toLong()) }
             val recalculated = houseManagementUseCase.recalculateVisitSegments(updatedList)
             houseManagementUseCase.updateHouses(recalculated, adminBypass)
+            triggerDelayedValidation(500) // Trigger rapid validation after move
         }
     }
 

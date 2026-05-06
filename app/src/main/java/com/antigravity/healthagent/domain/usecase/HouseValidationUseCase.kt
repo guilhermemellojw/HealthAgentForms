@@ -3,6 +3,8 @@ package com.antigravity.healthagent.domain.usecase
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.utils.normalize
+import com.antigravity.healthagent.utils.formatStreetName
 import javax.inject.Inject
 
 class HouseValidationUseCase @Inject constructor() {
@@ -32,7 +34,7 @@ class HouseValidationUseCase @Inject constructor() {
 
         // 1. Duplicate Validation (Bairro + Address, ignore Segment)
         val duplicateGroups = currentHouses.groupBy { house ->
-            "${house.bairro.uppercase()}|${house.blockNumber.uppercase()}|${house.blockSequence.uppercase()}|${house.streetName.uppercase()}|${house.number.uppercase()}|${house.sequence}|${house.complement}|${house.visitSegment}"
+            "${house.bairro.normalize()}|${house.blockNumber.normalize()}|${house.blockSequence.normalize()}|${house.streetName.formatStreetName()}|${house.number.normalize()}|${house.sequence}|${house.complement}|${house.visitSegment}".uppercase()
         }.filter { it.value.size > 1 }
 
         duplicateGroups.forEach { (_, houses) ->
@@ -49,7 +51,7 @@ class HouseValidationUseCase @Inject constructor() {
                     houseId = house.id,
                     streetName = house.streetName,
                     location = location,
-                    description = "Endereço Duplicado (Tudo igual: Nº, Seq e Comp)",
+                    description = "Endereço Duplicado no mesmo segmento (Mova este imóvel ou altere o número)",
                     isDuplicate = true
                 ))
             }

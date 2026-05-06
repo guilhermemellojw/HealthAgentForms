@@ -1,8 +1,10 @@
 package com.antigravity.healthagent.domain.usecase
 
 import com.antigravity.healthagent.data.local.model.House
+import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.ui.home.BlockSegment
 import com.antigravity.healthagent.utils.normalize
+import com.antigravity.healthagent.utils.formatStreetName
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -11,12 +13,16 @@ class GetRGBlocksUseCase @Inject constructor() {
     private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
 
     private fun getTimestamp(date: String): Long {
-        return try {
-            dateFormatter.parse(date)?.time ?: 0L
-        } catch (e: Exception) {
-            0L
+        if (date.isBlank()) return 0L
+        return synchronized(dateFormatter) {
+            try {
+                dateFormatter.parse(date.replace("/", "-"))?.time ?: 0L
+            } catch (e: Exception) {
+                0L
+            }
         }
     }
+
 
     operator fun invoke(
         allHouses: List<House>,
@@ -29,58 +35,69 @@ class GetRGBlocksUseCase @Inject constructor() {
         val allHousesSorted = allHouses.sortedBy { it.listOrder }
         val blockToLastIndex = mutableMapOf<String, Int>()
         allHousesSorted.forEachIndexed { index, h ->
-            val key = "${h.blockNumber.trim().uppercase()}|${h.blockSequence.trim().uppercase()}|${h.bairro.trim().uppercase()}"
+            val key = "${h.blockNumber.normalize()}|${h.blockSequence.normalize()}|${h.bairro.normalize()}".uppercase()
             blockToLastIndex[key] = index
         }
 
         val bairroHouses = allHouses.filter { it.bairro.equals(selectedBairro, ignoreCase = true) }
         
-        // DEDUPLICATION: Ensure each physical house appears only once in the RG report.
-        // We keep the LATEST visit based on date and lastUpdated timestamp.
+        // PERFORMANCE FIX (O(N)): Pre-calculate multi-segment addresses per day
+        val dailyAddressSegments = bairroHouses.groupBy { 
+            "${it.data}|${it.bairro.normalize()}|${it.blockNumber.normalize()}|${it.blockSequence.normalize()}|${it.streetName.formatStreetName()}|${it.number.normalize()}|${it.sequence}|${it.complement}".uppercase()
+        }.mapValues { it.value.map { h -> h.visitSegment }.distinct().size > 1 }
+
+        // DEDUPLICATION: Use the O(N) map to quickly group houses
         val deduplicatedHouses = bairroHouses.groupBy { 
-            "${it.bairro.normalize()}|${it.blockNumber.normalize()}|${it.blockSequence.normalize()}|${it.streetName.normalize()}|${it.number.normalize()}|${it.sequence}|${it.complement}".uppercase()
+            val addrKey = "${it.data}|${it.bairro.normalize()}|${it.blockNumber.normalize()}|${it.blockSequence.normalize()}|${it.streetName.formatStreetName()}|${it.number.normalize()}|${it.sequence}|${it.complement}".uppercase()
+            val baseIdentity = "${it.bairro.normalize()}|${it.blockNumber.normalize()}|${it.blockSequence.normalize()}|${it.streetName.formatStreetName()}|${it.number.normalize()}|${it.sequence}|${it.complement}".uppercase()
+            
+            if (dailyAddressSegments[addrKey] == true) "$baseIdentity|${it.visitSegment}" 
+            else baseIdentity
         }.map { (_, entries) ->
             entries.sortedWith(compareByDescending<House> { getTimestamp(it.data) }.thenByDescending { it.lastUpdated }).first()
         }
 
         val segments = mutableListOf<BlockSegment>()
         
-        // Use listOrder for internal house sequence (supports manual reordering)
-        val sortedHouses = deduplicatedHouses.sortedWith(compareBy({ getTimestamp(it.data) }, { it.listOrder }))
+        // AGENT-DEFINED TIMELINE: Group by Date, then Agent, then their local construction order.
+        val sortedHouses = deduplicatedHouses.sortedWith(
+            compareBy<House> { getTimestamp(it.data) }
+                .thenBy { it.agentName }
+                .thenBy { it.listOrder }
+        )
+        
         val groupedByBlock = sortedHouses.groupBy { Pair(it.blockNumber.trim().uppercase(), it.blockSequence.trim().uppercase()) }
         
-        groupedByBlock.keys.sortedWith(compareBy({ it.first.padStart(10, '0') }, { it.second.padStart(10, '0') })).forEach { key ->
+        // Respect the order of blocks as they were visited
+        groupedByBlock.keys.forEach { key ->
             val (bNum, bSeq) = key
             val blockHouses = groupedByBlock[key] ?: return@forEach 
             
-            val globalKey = "${bNum}|${bSeq}|${selectedBairro.trim().uppercase()}"
-            val lastIndexInFull = blockToLastIndex[globalKey] ?: -1
-            
-            // Get all raw visits for this block to check manual flags across history, not just deduplicated
-            val rawBlockVisits = bairroHouses.filter { 
-                it.blockNumber.trim().uppercase() == bNum &&
-                it.blockSequence.trim().uppercase() == bSeq
+            val rawBlockVisits = allHouses.filter { 
+                it.blockNumber.trim().equals(bNum, ignoreCase = true) && 
+                it.blockSequence.trim().equals(bSeq, ignoreCase = true) 
             }
             
-            val manualConcluded = rawBlockVisits.any { it.quarteiraoConcluido || it.localidadeConcluida }
-            val autoConcluido = lastIndexInFull != -1 && lastIndexInFull < allHousesSorted.size - 1
+            // Completion Logic: A block is only concluded if ALL current houses are worked 
+            // AND the latest manual flag isn't "Open".
+            val autoConcluido = blockHouses.all { h ->
+                h.situation != Situation.NONE && h.situation != Situation.EMPTY
+            }
             
-            val isConcluded = manualConcluded || autoConcluido
+            val latestManualVisit = rawBlockVisits.maxByOrNull { getTimestamp(it.data) }
+            val manualConcluded = latestManualVisit?.quarteiraoConcluido == true || latestManualVisit?.localidadeConcluida == true
+            
+            val isConcluded = manualConcluded && autoConcluido
             
             val conclusionDate = if (isConcluded) {
-                if (manualConcluded) {
-                    rawBlockVisits.lastOrNull { it.quarteiraoConcluido || it.localidadeConcluida }?.data ?: blockHouses.lastOrNull()?.data
-                } else {
-                    val lastHouseInFull = if (lastIndexInFull != -1) allHousesSorted[lastIndexInFull] else null
-                    lastHouseInFull?.data ?: blockHouses.lastOrNull()?.data
-                }
+                latestManualVisit?.data ?: blockHouses.maxByOrNull { getTimestamp(it.data) }?.data
             } else null
             
             segments.add(BlockSegment(
                 blockNumber = bNum,
                 blockSequence = bSeq,
-                startDate = blockHouses.firstOrNull()?.data ?: "",
-                endDate = blockHouses.lastOrNull()?.data ?: "",
+                startDate = blockHouses.minOfOrNull { getTimestamp(it.data) }?.let { Date(it) }?.let { dateFormatter.format(it) } ?: "",
+                endDate = blockHouses.maxOfOrNull { getTimestamp(it.data) }?.let { Date(it) }?.let { dateFormatter.format(it) } ?: "",
                 isConcluded = isConcluded,
                 conclusionDate = conclusionDate,
                 houses = blockHouses

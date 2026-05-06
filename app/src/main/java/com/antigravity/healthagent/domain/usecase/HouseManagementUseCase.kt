@@ -169,7 +169,7 @@ class HouseManagementUseCase @Inject constructor(
         var lastStreet = ""
         
         return houses.sortedBy { it.listOrder }.map { house ->
-            val street = house.streetName.trim().uppercase()
+            val street = house.streetName.formatStreetName()
             if (lastStreet.isNotEmpty() && street != lastStreet) {
                 currentSegment++
             }

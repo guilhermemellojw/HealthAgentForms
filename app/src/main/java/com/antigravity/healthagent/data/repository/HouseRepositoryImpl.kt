@@ -125,6 +125,7 @@ class HouseRepositoryImpl @Inject constructor(
     override suspend fun updateHouse(house: House, force: Boolean) {
         ensureDayNotLocked(house.data, house.agentName, house.agentUid, force)
         runInTransactionWithRetry {
+            // Check for potential clashes, but don't block manual correction (allow temporary duplicates to be flagged in UI)
             val clashCount = houseDao.checkNaturalKeyConflict(
                 excludeId = house.id,
                 date = house.data,
@@ -139,8 +140,8 @@ class HouseRepositoryImpl @Inject constructor(
                 bairro = house.bairro,
                 visitSegment = house.visitSegment
             )
-            if (clashCount > 0 && !force) {
-                throw IllegalStateException("Alteração impedida: o endereço (${house.streetName}, ${house.number}) já pertence a outro registro neste quarteirão. Use o botão de Mesclar se desejar unir os dados.")
+            if (clashCount > 0) {
+                android.util.Log.w("HouseRepository", "Manual update created an address conflict for house ${house.id}. UI will flag this.")
             }
 
             val existing = houseDao.getHouseById(house.id.toLong())
@@ -180,6 +181,7 @@ class HouseRepositoryImpl @Inject constructor(
         
         runInTransactionWithRetry {
             houses.forEach { house ->
+                // Check for potential clashes, but don't block the update in batch mode (allow temporary duplicates during reordering)
                 val clashCount = houseDao.checkNaturalKeyConflict(
                     excludeId = house.id,
                     date = house.data,
@@ -194,8 +196,9 @@ class HouseRepositoryImpl @Inject constructor(
                     bairro = house.bairro,
                     visitSegment = house.visitSegment
                 )
-                if (clashCount > 0 && !force) {
-                    throw IllegalStateException("Erro ao atualizar lote: conflito de endereço para o imóvel ID ${house.id}.")
+                // We log it but don't throw, letting the UI validation (Red Highlight) handle the user notification.
+                if (clashCount > 0) {
+                    android.util.Log.w("HouseRepository", "Batch update created a temporary address conflict for house ${house.id}")
                 }
 
                 val existing = houseDao.getHouseById(house.id.toLong())
