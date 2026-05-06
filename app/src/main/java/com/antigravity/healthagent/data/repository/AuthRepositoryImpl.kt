@@ -36,7 +36,7 @@ class AuthRepositoryImpl @Inject constructor(
     private val workManager: androidx.work.WorkManager
 ) : AuthRepository {
 
-    private val BOOTSTRAP_ADMINS = listOf("guigomelo9@gmail.com")
+    private val BOOTSTRAP_ADMINS = listOf("guigomelo9@gmail.com", "gmellobkp@gmail.com")
 
     init {
         // Explicitly enable network to ensure Firestore doesn't stay in offline mode

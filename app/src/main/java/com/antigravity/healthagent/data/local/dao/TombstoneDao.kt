@@ -24,6 +24,9 @@ interface TombstoneDao {
     @Query("DELETE FROM tombstones WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
     suspend fun deleteByAgent(agentName: String, agentUid: String)
 
+    @Query("DELETE FROM tombstones WHERE deletedAt < :threshold")
+    suspend fun deleteOldTombstones(threshold: Long)
+
     @Query("DELETE FROM tombstones")
     suspend fun deleteAll()
 }

@@ -102,10 +102,11 @@ data class House(
         val normalizedBlockSeq = blockSequence.normalize()
         val normalizedNumber = number.normalize()
         
-        // Identity is Agent + Day + Block + BlockSeq + Number + Seq + Complement + Bairro.
-        // We include municipio and categoria to further stabilize the identity across corrections.
-        // NOTE: visitSegment is intentionally excluded to allow identity healing across segment recalculations.
-        return "${agentUid}_${normalizedDate}_${normalizedBlock}_${normalizedBlockSeq}_${normalizedNumber}_${sequence}_${complement}_${normalizedBairro}_${municipio.normalize()}_${categoria.normalize()}".uppercase()
+        // Identity is Agent(UID) + Day + Block + BlockSeq + Number + Seq + Complement + Bairro.
+        // municipio and categoria are intentionally excluded because they are not present in the naturalKey (Doc ID),
+        // making it impossible to reconstruct this identity from a deleted cloud ID.
+        // visitSegment is also excluded to allow identity healing across segment recalculations.
+        return "${agentUid}_${normalizedDate}_${normalizedBlock}_${normalizedBlockSeq}_${normalizedNumber}_${sequence}_${complement}_${normalizedBairro}".uppercase()
     }
 
 

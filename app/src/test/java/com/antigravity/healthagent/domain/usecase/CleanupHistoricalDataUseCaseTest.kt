@@ -20,6 +20,7 @@ class CleanupHistoricalDataUseCaseTest {
 
     private val mockHouseRepository = object : HouseRepository {
         override fun getAllHouses(agentName: String, agentUid: String): Flow<List<House>> = flowOf(emptyList())
+        override val allActivitiesFlow: Flow<List<DayActivity>> = flowOf(emptyList())
         override fun getDistinctAgentNames(): Flow<List<String>> = flowOf(emptyList())
         override fun getAllHousesOrderedByBlock(agentName: String, agentUid: String): Flow<List<House>> = flowOf(emptyList())
         override suspend fun getHouseById(id: Long): House? = null
@@ -60,17 +61,23 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun countOpenDays(agentName: String, agentUid: String?): Int = 0
         override suspend fun closeAllDays(agentName: String, agentUid: String?) {}
         override suspend fun clearAllData() {}
-        override suspend fun migrateLocalData(agentName: String, email: String, targetUid: String) {}
+        override suspend fun clearAgentData(agentName: String, agentUid: String) {}
+        override suspend fun migrateLocalData(agentName: String, email: String, targetUid: String, isCurrentAgent: Boolean) {}
         override suspend fun deduplicateAgentData(agentName: String, agentUid: String) {}
+        override suspend fun cleanMisattributedData(inspectedUid: String, adminUid: String) {}
         override suspend fun normalizeLocalDates() {}
         override suspend fun getHousesByDateAndAgent(date: String, agentName: String, agentUid: String): List<House> = emptyList()
         override suspend fun fixEmailNamesForUid(uid: String, properName: String) {}
+        override suspend fun getHousesByAgentSnapshot(agentName: String, agentUid: String): List<House> = emptyList()
+        override fun getHousesByAgentSnapshotFlow(agentName: String, agentUid: String): Flow<List<House>> = flowOf(emptyList())
+        override suspend fun getDayActivitiesByAgentSnapshot(agentName: String, agentUid: String): List<DayActivity> = emptyList()
     }
 
     private val mockSyncRepository = object : SyncRepository {
         override suspend fun pushLocalDataToCloud(houses: List<House>, activities: List<DayActivity>, targetUid: String?, shouldReplace: Boolean): Result<Unit> = Result.success(Unit)
         override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> = Result.success(Unit)
         override suspend fun clearLocalData(): Result<Unit> = Result.success(Unit)
+        override suspend fun clearAgentData(agentName: String, agentUid: String): Result<Unit> = Result.success(Unit)
         override suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>, agentUid: String?): Result<Unit> = Result.success(Unit)
         override suspend fun fetchSystemSettings(): Result<Map<String, Any>> = Result.success(emptyMap())
         override suspend fun updateSystemSetting(key: String, value: Any): Result<Unit> = Result.success(Unit)

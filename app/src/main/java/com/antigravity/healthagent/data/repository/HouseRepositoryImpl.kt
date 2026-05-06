@@ -21,7 +21,8 @@ class HouseRepositoryImpl @Inject constructor(
     private val dayActivityDao: DayActivityDao,
     private val tombstoneDao: TombstoneDao,
     private val database: com.antigravity.healthagent.data.local.AppDatabase,
-    private val syncSchedulerProvider: javax.inject.Provider<SyncScheduler>
+    private val syncSchedulerProvider: javax.inject.Provider<SyncScheduler>,
+    private val soundManager: com.antigravity.healthagent.utils.SoundManager
 ) : HouseRepository {
 
     private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
@@ -116,6 +117,7 @@ class HouseRepositoryImpl @Inject constructor(
             
             houseDao.insertHouse(houseToInsert)
         }
+        soundManager.vibrateTick()
         syncSchedulerProvider.get().scheduleSync()
         return id
     }
@@ -245,6 +247,7 @@ class HouseRepositoryImpl @Inject constructor(
             houseDao.deleteHouse(house)
             tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = house.generateNaturalKey(), agentName = house.agentName, agentUid = house.agentUid, dataDate = house.data))
         }
+        soundManager.vibrateTick()
         syncSchedulerProvider.get().scheduleSync()
     }
 
@@ -592,7 +595,26 @@ class HouseRepositoryImpl @Inject constructor(
                         activitiesToReclaim.forEach { activity ->
                             val conflict = getDayActivity(activity.date, agentName, targetUid)
                             if (conflict == null) {
-                                dayActivityDao.insertDayActivity(activity.copy(agentName = properName, agentUid = targetUid, isSynced = false, lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()))
+                                // Important: reset isSynced and update lastUpdated so it gets pushed to cloud
+                                dayActivityDao.insertDayActivity(activity.copy(
+                                    agentName = properName, 
+                                    agentUid = targetUid, 
+                                    isSynced = false, 
+                                    lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
+                                ))
+                                dayActivityDao.deleteDayActivity(activity.date, activity.agentName, activity.agentUid)
+                            } else {
+                                // Conflict exists on the target UID: Keep the one with better status or just cleanup the misattributed one
+                                if (activity.status != "NORMAL" && (conflict.status == "NORMAL" || conflict.status.isBlank())) {
+                                    dayActivityDao.deleteDayActivity(conflict.date, conflict.agentName, conflict.agentUid)
+                                    dayActivityDao.insertDayActivity(activity.copy(
+                                        agentName = properName, 
+                                        agentUid = targetUid, 
+                                        isSynced = false, 
+                                        lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
+                                    ))
+                                }
+                                dayActivityDao.deleteDayActivity(activity.date, activity.agentName, activity.agentUid)
                             }
                         }
                     }

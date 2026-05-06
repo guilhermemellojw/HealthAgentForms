@@ -327,8 +327,17 @@ class SyncRepositoryImpl @Inject constructor(
                             val isProxyPush = targetUid != null && targetUid != auth.currentUser?.uid
                             val todayInt = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date()).toInt()
                             
-                            val housesInMonthRaw = if (isProxyPush && shouldReplace) {
-                                housesToPush.filter { it.data.replace("/", "-").endsWith(monthYear) }
+                            val housesInMonthRaw = if (isProxyPush) {
+                                // Proxy Pushes (Admin edits) lack the full month of data locally.
+                                // We must fetch the full month from the cloud to prevent zeroing out the summary.
+                                val allDays = (1..31).map { day -> String.format("%02d-%s", day, monthYear) }
+                                val chunk1 = allDays.take(30)
+                                val chunk2 = allDays.drop(30)
+                                
+                                val docs1 = userDocRef.collection("houses").whereIn("data", chunk1).get().await().documents
+                                val docs2 = userDocRef.collection("houses").whereIn("data", chunk2).get().await().documents
+                                
+                                (docs1 + docs2).mapNotNull { it.toHouseSafe(uid, officialAgentName ?: "") }
                             } else {
                                 houseDao.getHousesByMonth(officialAgentName ?: "", uid, monthYear)
                             }
@@ -342,8 +351,15 @@ class SyncRepositoryImpl @Inject constructor(
                                 } catch(e: Exception) { true }
                             }
                             
-                            val activitiesInMonthRaw = if (isProxyPush && shouldReplace) {
-                                activitiesToPush.filter { it.date.replace("/", "-").endsWith(monthYear) }
+                            val activitiesInMonthRaw = if (isProxyPush) {
+                                val allDays = (1..31).map { day -> String.format("%02d-%s", day, monthYear) }
+                                val chunk1 = allDays.take(30)
+                                val chunk2 = allDays.drop(30)
+                                
+                                val docs1 = userDocRef.collection("day_activities").whereIn("date", chunk1).get().await().documents
+                                val docs2 = userDocRef.collection("day_activities").whereIn("date", chunk2).get().await().documents
+                                
+                                (docs1 + docs2).mapNotNull { it.toDayActivitySafe(uid, officialAgentName ?: "") }
                             } else {
                                 dayActivityDao.getDayActivitiesByMonth(officialAgentName ?: "", uid, monthYear)
                             }
@@ -580,6 +596,22 @@ class SyncRepositoryImpl @Inject constructor(
                                     val houses = housesJob.await()
                                     val activities = activitiesJob.await()
 
+                                    // CLOCK SKEW DETECTION:
+                                    // If we received records with a 'lastUpdated' significantly in the future,
+                                    // the device clock is likely behind.
+                                    val currentDeviceTime = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
+                                    var maxCloudTime = 0L
+                                    houses.forEach { if (it.lastUpdated > maxCloudTime) maxCloudTime = it.lastUpdated }
+                                    activities.forEach { if (it.lastUpdated > maxCloudTime) maxCloudTime = it.lastUpdated }
+                                    
+                                    val skew = maxCloudTime - currentDeviceTime
+                                    if (kotlin.math.abs(skew) > 120000) { // 2 minute threshold
+                                        settingsManager.setClockSkewMs(skew)
+                                        android.util.Log.w("SyncRepository", "Clock Skew: Device is ${if(skew < 0) "AHEAD" else "BEHIND"} by ${kotlin.math.abs(skew)} ms.")
+                                    } else {
+                                        settingsManager.setClockSkewMs(0L)
+                                    }
+
                                     @Suppress("UNCHECKED_CAST")
                                     val deletedHouses = (agentDoc?.get("deleted_house_ids") as? List<String> ?: emptyList())
                                         .map { it.replace("/", "-") }
@@ -643,8 +675,11 @@ class SyncRepositoryImpl @Inject constructor(
                             val parts = deletedKey.split("_")
                             if (parts.size >= 10) {
                                 try {
-                                     "${parts[0]}_${parts[2]}_${parts[3]}_${parts[4]}_${parts[6]}_${parts[7]}_${parts[8]}_${parts[9]}".uppercase()
-                                } catch(e: Exception) { null }
+                                    // WARNING: This derivation MUST exactly match House.generateIdentityKey().
+                                    // It reconstructs the logical identity from the document ID (naturalKey) parts.
+                                    // Parts: 0:uid, 2:date, 3:block, 4:blockSeq, 6:number, 7:seq, 8:compl, 9:bairro
+                                    "${parts[0]}_${parts[2]}_${parts[3]}_${parts[4]}_${parts[6]}_${parts[7]}_${parts[8]}_${parts[9]}".uppercase()
+                                } catch (e: Exception) { null }
                             } else null
                         }.toSet()
 
@@ -1457,6 +1492,16 @@ class SyncRepositoryImpl @Inject constructor(
                 "ABERTO" -> com.antigravity.healthagent.data.local.model.Situation.EMPTY
                 else -> com.antigravity.healthagent.data.local.model.Situation.EMPTY
             }
+        }
+    }
+
+    override suspend fun pruneOldTombstones(): Result<Unit> {
+        return try {
+            val thirtyDaysAgo = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
+            tombstoneDao.deleteOldTombstones(thirtyDaysAgo)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 }

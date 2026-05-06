@@ -128,6 +128,11 @@ dependencies {
     // Testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("io.mockk:mockk:1.13.8")
+    testImplementation("org.robolectric:robolectric:4.11.1")
+    testImplementation("androidx.room:room-testing:$roomVersion")
+    testImplementation("androidx.test:core:1.5.0")
+    testImplementation("androidx.test.ext:junit:1.1.5")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
     androidTestImplementation(platform("androidx.compose:compose-bom:2023.08.00"))
@@ -148,3 +153,17 @@ dependencies {
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("com.google.android.material:material:1.11.0")
 }
+    // Custom task for data audit (local export + comparison)
+    val exportLocalDb by tasks.registering(Exec::class) {
+        commandLine("bash", "./scripts/export_local_db.sh")
+    }
+
+    val compareDatasets by tasks.registering(Exec::class) {
+        commandLine("python3", "../scripts/compare_datasets.py", "guigomelo9@gmail.com")
+    }
+
+    tasks.register("auditData") {
+        dependsOn(exportLocalDb, compareDatasets)
+        group = "verification"
+        description = "Exports local DB, runs comparison for agent guigomelo9@gmail.com. Run FirestoreExport in app first to generate cloud CSVs."
+    }

@@ -534,7 +534,8 @@ fun HomeScreen(
 
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
 
-    Scaffold(
+    CompositionLocalProvider(LocalHomeUiState provides uiState) {
+        Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             val titleText = if (isSearchActive) "Buscar Logradouro" 
@@ -1124,6 +1125,7 @@ fun HomeScreen(
                 }
             }
         }
+    }
     }
 }
 

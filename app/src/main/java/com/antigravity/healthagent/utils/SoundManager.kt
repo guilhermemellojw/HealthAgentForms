@@ -171,4 +171,36 @@ class SoundManager @Inject constructor(
         mediaPlayer?.release()
         mediaPlayer = null
     }
+
+    /**
+     * Subtle haptic feedback for data entry.
+     */
+    fun vibrateTick() {
+        try {
+            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                vibrator.vibrate(android.os.VibrationEffect.createOneShot(10, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                vibrator.vibrate(10)
+            }
+        } catch (e: Exception) {
+            // Haptics not critical
+        }
+    }
+
+    /**
+     * More noticeable haptic feedback for success.
+     */
+    fun vibrateSuccess() {
+        try {
+            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                vibrator.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 30, 50, 30), -1))
+            } else {
+                vibrator.vibrate(100)
+            }
+        } catch (e: Exception) {
+            // Haptics not critical
+        }
+    }
 }

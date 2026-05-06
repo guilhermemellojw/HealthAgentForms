@@ -94,10 +94,8 @@ interface HouseDao {
 
     @Query("""
         UPDATE OR REPLACE houses 
-        SET number = CASE WHEN number = '0' THEN '' ELSE number END,
-            sequence = CASE WHEN sequence = 0 THEN NULL ELSE sequence END,
-            complement = CASE WHEN complement = 0 THEN NULL ELSE complement END
-        WHERE number = '0' OR sequence = 0 OR complement = 0
+        SET number = CASE WHEN number = '0' THEN '' ELSE number END
+        WHERE number = '0'
     """)
     suspend fun cleanupZeroValues()
 
@@ -125,8 +123,8 @@ interface HouseDao {
     @Query("DELETE FROM houses WHERE id = :id")
     suspend fun deleteHouseById(id: Int)
 
-    @Query("UPDATE OR REPLACE houses SET agentUid = :uid, agentName = :name WHERE id = :id")
-    suspend fun updateHouseIdentity(id: Int, uid: String, name: String)
+    @Query("UPDATE OR REPLACE houses SET agentUid = :uid, agentName = :name, isSynced = 0, lastUpdated = :now WHERE id = :id")
+    suspend fun updateHouseIdentity(id: Int, uid: String, name: String, now: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
 
     @Query("""
         SELECT COUNT(*) FROM houses 

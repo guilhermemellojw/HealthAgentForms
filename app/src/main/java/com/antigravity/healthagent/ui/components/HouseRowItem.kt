@@ -199,7 +199,7 @@ fun HouseRowItem(
                 }
             }
 
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .drawBehind {
@@ -210,9 +210,41 @@ fun HouseRowItem(
                             )
                         }
                     }
-                    .padding(start = 18.dp, end = 12.dp, bottom = 12.dp, top = 6.dp),
-                verticalAlignment = Alignment.Top
             ) {
+                if (!enabled) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 4.dp, horizontal = 18.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Lock,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp),
+                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "DIA BLOQUEADO / LEITURA",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                    }
+                    Divider(color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 18.dp, end = 12.dp, bottom = 12.dp, top = 6.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -509,8 +541,40 @@ fun EasyHouseCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
         ) {
+            if (!enabled) {
+                Surface(
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Lock,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = Color.White
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "DIA BLOQUEADO - SOMENTE LEITURA",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Black,
+                            color = Color.White,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
             // --- HEADER ---
             Row(
                 modifier = Modifier.fillMaxWidth(),

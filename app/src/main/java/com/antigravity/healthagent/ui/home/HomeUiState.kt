@@ -9,7 +9,9 @@ enum class SyncStage { IDLE, STARTING, UPLOADING, DOWNLOADING, SUCCESS, ERROR }
 data class SyncStatus(
     val stage: SyncStage = SyncStage.IDLE,
     val progress: Float = 0f,
-    val message: String? = null
+    val message: String? = null,
+    val lastSyncTimestamp: Long = 0L,
+    val clockSkewMs: Long = 0L
 )
 
 data class BackupConfirmation(
@@ -69,5 +71,8 @@ data class HomeUiState(
     val syncStatus: SyncStatus = SyncStatus(),
     val backupConfirmation: BackupConfirmation? = null,
     val isDuplicateIds: Set<Int> = emptySet(),
-    val highlightedHouseId: Int? = null
+    val highlightedHouseId: Int? = null,
+    val isTestUser: Boolean = false
 )
+
+val LocalHomeUiState = androidx.compose.runtime.compositionLocalOf { HomeUiState() }

@@ -56,7 +56,8 @@ class HomeViewModel @Inject constructor(
     private val getRGBlocksUseCase: GetRGBlocksUseCase,
     private val cleanupHistoricalDataUseCase: CleanupHistoricalDataUseCase,
     private val restoreDataUseCase: RestoreDataUseCase,
-    private val backupManager: BackupManager
+    private val backupManager: BackupManager,
+    private val generateTestDataUseCase: GenerateTestDataUseCase
 ) : ViewModel() {
 
     // --- State Definitions ---
@@ -324,6 +325,43 @@ class HomeViewModel @Inject constructor(
             }
         }
     }
+    
+    fun generateMockData() {
+        viewModelScope.launch {
+            val email = settingsManager.cachedUser.firstOrNull()?.email
+            if (email != "gmellobkp@gmail.com") return@launch // Double security layer
+            
+            _syncStatus.value = SyncStatus(SyncStage.STARTING, 0.1f, "Gerando 100 casas de teste...")
+            val agent = _agentName.value
+            val uid = _currentUserUid.value ?: return@launch
+            val date = _data.value
+            
+            val result = generateTestDataUseCase(
+                agentName = agent,
+                agentUid = uid,
+                currentDate = date,
+                numberOfBlocks = 5,
+                housesPerBlock = 20
+            )
+            
+            if (result.isSuccess) {
+                _syncStatus.value = SyncStatus(SyncStage.SUCCESS, 1.0f, "Dados gerados! Sincronizando...")
+                delay(1000)
+                try {
+                    val housesToPush = repository.getAllHousesOnce(agent, uid)
+                    val activitiesToPush = repository.getAllDayActivitiesOnce(agent, uid)
+                    syncRepository.pushLocalDataToCloud(housesToPush, activitiesToPush, uid)
+                } catch(e: Exception) {
+                    _syncStatus.value = SyncStatus(SyncStage.ERROR, 1.0f, "Erro no push: ${e.message}")
+                }
+            } else {
+                _syncStatus.value = SyncStatus(SyncStage.ERROR, 0.0f, "Erro: ${result.exceptionOrNull()?.message}")
+            }
+            
+            delay(2000)
+            _syncStatus.value = SyncStatus(SyncStage.IDLE)
+        }
+    }
 
 
     private val allHousesFlow = combine(_agentName, _remoteAgentUid, _currentUserUid) { name, remoteUid, currentUid -> 
@@ -546,6 +584,18 @@ class HomeViewModel @Inject constructor(
                 _validationErrorDetails.value = emptyList()
                 _isDuplicateIds.value = emptySet()
                 _integrityDialogMessage.value = null // Aggressively clear any stuck dialog
+            }
+        }
+
+        // Observer for Sync Info (Metadata)
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(
+                settingsManager.lastSyncTimestamp,
+                settingsManager.clockSkewMs
+            ) { lastSync, skew ->
+                lastSync to skew
+            }.collect { (lastSync, skew) ->
+                _syncStatus.update { it.copy(lastSyncTimestamp = lastSync, clockSkewMs = skew) }
             }
         }
 
@@ -1302,6 +1352,9 @@ class HomeViewModel @Inject constructor(
                     val pushResult = syncRepository.pushLocalDataToCloud(houses, activities, targetUid)
                     
                     if (pushResult.isSuccess) {
+                        syncRepository.pruneOldTombstones()
+                        settingsManager.setLastSyncTimestamp(com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
+                        soundManager.vibrateSuccess()
                         _syncStatus.value = SyncStatus(SyncStage.SUCCESS, 1.0f, "Sincronização concluída!")
                         _uiEvent.value = "Sincronização completa com sucesso."
                         delay(2000) // Show success for a bit
@@ -1336,6 +1389,8 @@ class HomeViewModel @Inject constructor(
                 _syncStatus.value = SyncStatus(SyncStage.DOWNLOADING, 0.5f, "Baixando dados da nuvem...")
                 val result = syncRepository.pullCloudDataToLocal(targetUid)
                 if (result.isSuccess) {
+                    settingsManager.setLastSyncTimestamp(com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
+                    soundManager.vibrateSuccess()
                     _syncStatus.value = SyncStatus(SyncStage.SUCCESS, 1.0f, "Download concluído!")
                     _uiEvent.value = "Dados baixados com sucesso."
                     delay(2000)

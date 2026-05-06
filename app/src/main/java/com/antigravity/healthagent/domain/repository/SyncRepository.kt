@@ -60,5 +60,10 @@ interface SyncRepository {
      * Clears the sync error message for a specific agent.
      */
     suspend fun clearSyncError(uid: String): Result<Unit>
+
+    /**
+     * Removes tombstones older than 30 days to optimize performance.
+     */
+    suspend fun pruneOldTombstones(): Result<Unit>
 }
 
