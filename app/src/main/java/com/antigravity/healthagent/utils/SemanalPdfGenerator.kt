@@ -147,7 +147,7 @@ object SemanalPdfGenerator {
         // LEFT SIDE: Logo and Municipality Info
         val logoH = 38f
         // Bitmaps are passed as arguments to avoid redundant decoding
-        val actualLogo = logoVigilancia ?: logoGoverno
+        val actualLogo = logoGoverno ?: logoVigilancia
         
         if (actualLogo != null) {
             val logoW = (actualLogo.width.toFloat() / actualLogo.height.toFloat() * logoH)

@@ -83,12 +83,19 @@ class GetRGBlocksUseCase @Inject constructor() {
             val blockHouses = blockGroups[bNum to bSeq] ?: emptyList()
             val lastHouse = blockHouses.lastOrNull()
             
+            // Implicit Conclusion Logic (Boletim Parity):
+            // A block is concluded if it has a manual flag OR if it was "left behind" 
+            // (i.e., its last house is not the last house of the entire sorted production).
+            val lastHouseId = lastHouse?.id ?: -1
+            val indexOfLastInGlobal = sortedVisits.indexOfLast { it.id == lastHouseId }
+            val isImplicitlyConcluded = indexOfLastInGlobal != -1 && indexOfLastInGlobal < sortedVisits.lastIndex
+
             BlockSegment(
                 blockNumber = bNum,
                 blockSequence = bSeq,
                 startDate = blockHouses.firstOrNull()?.data ?: "",
                 endDate = lastHouse?.data ?: "",
-                isConcluded = blockHouses.any { it.quarteiraoConcluido || it.localidadeConcluida },
+                isConcluded = blockHouses.any { it.quarteiraoConcluido || it.localidadeConcluida } || isImplicitlyConcluded,
                 // The date of the report is the date of the LAST house in the list
                 conclusionDate = lastHouse?.data ?: "",
                 houses = blockHouses,

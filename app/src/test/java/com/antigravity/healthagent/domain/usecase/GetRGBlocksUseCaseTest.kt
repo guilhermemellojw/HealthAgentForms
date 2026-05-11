@@ -115,4 +115,44 @@ class GetRGBlocksUseCaseTest {
         // Block date must be the date of the LAST house
         assertEquals("02/05/2026", result.first().conclusionDate)
     }
+
+    @Test
+    fun `invoke - should implicitly conclude block if it is not the last one in percurso`() {
+        // Given:
+        // Agent does Block 1 -> Block 2
+        val h1 = House(id = 1, data = "01/05/2026", blockNumber = "1", bairro = bairro, listOrder = 1)
+        val h2 = House(id = 2, data = "01/05/2026", blockNumber = "2", bairro = bairro, listOrder = 2)
+        
+        val houses = listOf(h1, h2)
+
+        // When
+        val result = useCase(houses, bairro, "2026")
+
+        // Then
+        assertEquals(2, result.size)
+        
+        val block1 = result.find { it.blockNumber == "1" }!!
+        val block2 = result.find { it.blockNumber == "2" }!!
+        
+        assertEquals(true, block1.isConcluded) // Should be concluded because it was followed by Block 2
+        assertEquals(false, block2.isConcluded) // Should be open because it's the last one
+    }
+
+    @Test
+    fun `invoke - should NOT conclude block if it is the last one even if worked on multiple days`() {
+        // Given:
+        // Day 1: Block 1
+        // Day 2: Block 1 (Continuation)
+        val h1 = House(id = 1, data = "01/05/2026", blockNumber = "1", bairro = bairro, listOrder = 1)
+        val h2 = House(id = 2, data = "02/05/2026", blockNumber = "1", bairro = bairro, listOrder = 1)
+        
+        val houses = listOf(h1, h2)
+
+        // When
+        val result = useCase(houses, bairro, "2026")
+
+        // Then
+        assertEquals(1, result.size)
+        assertEquals(false, result.first().isConcluded)
+    }
 }
