@@ -139,6 +139,7 @@ data class House(
             "visitSegment" to visitSegment,
             "agentUid" to agentUid,
             "lastSyncTime" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
+            "createdAt" to createdAt,
             "observation" to observation,
             "latitude" to latitude,
             "longitude" to longitude,

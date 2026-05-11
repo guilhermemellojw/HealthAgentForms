@@ -54,6 +54,7 @@ import com.antigravity.healthagent.ui.components.CompactDropdown
 import com.antigravity.healthagent.ui.components.MeshGradient
 import com.antigravity.healthagent.ui.components.SyncStatusOverlay
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
+import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
 import com.antigravity.healthagent.utils.formatStreetName
 
 
@@ -272,7 +273,7 @@ fun BoletimScreen(
             com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(12.dp),
+                contentPadding = PaddingValues(top = 60.dp, start = 12.dp, end = 12.dp, bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
             itemsIndexed(uiState.boletimList, key = { _, summary -> "${summary.date}|${summary.agentName}" }) { index, summary ->
@@ -528,22 +529,34 @@ fun BoletimScreen(
                                         }
                                     )
                                 }
-                            }
                         }
                     }
                 }
             }
+            }
 
             if (uiState.boletimList.isEmpty()) {
-                item {
-                    com.antigravity.healthagent.ui.components.EmptyStateView(
-                        message = "Nenhum registro encontrado",
-                        subMessage = "Não há boletins de produção para exibir. Inicie um novo dia na tela inicial para começar.",
-                        icon = Icons.Default.DateRange
-                    )
+                    item {
+                        com.antigravity.healthagent.ui.components.EmptyStateView(
+                            message = "Nenhum registro encontrado",
+                            subMessage = "Não há boletins de produção para exibir. Inicie um novo dia na tela inicial para começar.",
+                            icon = Icons.Default.DateRange
+                        )
+                    }
                 }
             }
-            }
+
+            // Floating Sync Status Balloon at the top (Persistent)
+            SyncFloatingBalloon(
+                syncStatus = uiState.syncStatus,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
+            )
+
+            // Sync Status Overlay (Feedback for Pull-to-Refresh)
+            SyncStatusOverlay(
+                syncStatus = uiState.syncStatus,
+                isEasyMode = uiState.isEasyMode
+            )
         }
     }
 }

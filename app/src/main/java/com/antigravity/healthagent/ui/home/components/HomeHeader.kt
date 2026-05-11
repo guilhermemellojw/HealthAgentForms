@@ -109,43 +109,27 @@ fun HomeHeader(
                 }
             }
 
-            // Sync Status & Health Warning
+            // Health Warning only (Sync date moved to Boletim Screen)
             val syncStatus = com.antigravity.healthagent.ui.home.LocalHomeUiState.current.syncStatus
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (syncStatus.lastSyncTimestamp > 0) {
-                    val timeStr = java.text.SimpleDateFormat("HH:mm", java.util.Locale("pt", "BR"))
-                        .format(java.util.Date(syncStatus.lastSyncTimestamp))
-                    val dateStr = java.text.SimpleDateFormat("dd/MM", java.util.Locale("pt", "BR"))
-                        .format(java.util.Date(syncStatus.lastSyncTimestamp))
-                    
-                    Text(
-                        text = "Sincronizado: $dateStr às $timeStr",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        fontWeight = FontWeight.Medium
+            if (syncStatus.clockSkewMs > 120000) { // 2 minutes skew
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.error
                     )
-                }
-
-                if (syncStatus.clockSkewMs > 120000) { // 2 minutes skew
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.Warning,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            "HORA ERRADA",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "HORA ERRADA",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
             

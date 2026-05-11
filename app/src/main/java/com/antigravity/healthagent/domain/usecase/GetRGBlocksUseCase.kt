@@ -4,11 +4,19 @@ import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.ui.home.BlockSegment
 import com.antigravity.healthagent.utils.normalize
-import com.antigravity.healthagent.utils.formatStreetName
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
 
+/**
+ * GetRGBlocksUseCase
+ * Refactored to follow the "Field Path" (Boletim) logic.
+ * 
+ * Rules:
+ * 1. Identity: street + number + sequence + complement.
+ * 2. Deduplication: Prioritize worked houses (situation != NONE) over empty ones.
+ * 3. Sorting: Use createdAt to interleave multiple agents and days in chronological order.
+ */
 class GetRGBlocksUseCase @Inject constructor() {
     private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
 
@@ -23,7 +31,6 @@ class GetRGBlocksUseCase @Inject constructor() {
         }
     }
 
-
     operator fun invoke(
         allHouses: List<House>,
         selectedBairro: String,
@@ -31,92 +38,60 @@ class GetRGBlocksUseCase @Inject constructor() {
     ): List<BlockSegment> {
         if (selectedBairro.isBlank()) return emptyList()
 
-        // 1. Pre-calculate global completion states exactly like Semanal/Boletim logic
-        val allHousesSorted = allHouses.sortedBy { it.listOrder }
-        val blockToLastIndex = mutableMapOf<String, Int>()
-        allHousesSorted.forEachIndexed { index, h ->
-            val key = "${h.blockNumber.normalize()}|${h.blockSequence.normalize()}|${h.bairro.normalize()}".uppercase()
-            blockToLastIndex[key] = index
-        }
+        val normalizedSelectedBairro = selectedBairro.normalize()
 
-        val bairroHouses = allHouses.filter { it.bairro.equals(selectedBairro, ignoreCase = true) }
-        
-        // PERFORMANCE FIX (O(N)): Pre-calculate multi-segment addresses per day
-        val dailyAddressSegments = bairroHouses.groupBy { 
-            "${it.data}|${it.bairro.normalize()}|${it.blockNumber.normalize()}|${it.blockSequence.normalize()}|${it.streetName.formatStreetName()}|${it.number.normalize()}|${it.sequence}|${it.complement}".uppercase()
-        }.mapValues { it.value.map { h -> h.visitSegment }.distinct().size > 1 }
-
-        // DEDUPLICATION: Use the O(N) map to quickly group houses
-        val deduplicatedHouses = bairroHouses.groupBy { 
-            val addrKey = "${it.data}|${it.bairro.normalize()}|${it.blockNumber.normalize()}|${it.blockSequence.normalize()}|${it.streetName.formatStreetName()}|${it.number.normalize()}|${it.sequence}|${it.complement}".uppercase()
-            val baseIdentity = "${it.bairro.normalize()}|${it.blockNumber.normalize()}|${it.blockSequence.normalize()}|${it.streetName.formatStreetName()}|${it.number.normalize()}|${it.sequence}|${it.complement}".uppercase()
-            
-            if (dailyAddressSegments[addrKey] == true) "$baseIdentity|${it.visitSegment}" 
-            else baseIdentity
-        }.map { (_, entries) ->
-            entries.sortedWith(compareByDescending<House> { getTimestamp(it.data) }.thenByDescending { it.lastUpdated }).first()
-        }
-
-        val segments = mutableListOf<BlockSegment>()
-        
-        // AGENT-DEFINED TIMELINE: Group by Date, then Agent, then their local construction order.
-        val sortedHouses = deduplicatedHouses.sortedWith(
-            compareBy<House> { getTimestamp(it.data) }
-                .thenBy { it.agentName }
-                .thenBy { it.listOrder }
-        )
-        
-        val groupedByBlock = sortedHouses.groupBy { Pair(it.blockNumber.trim().uppercase(), it.blockSequence.trim().uppercase()) }
-        
-        // Respect the order of blocks as they were visited
-        groupedByBlock.keys.forEach { key ->
-            val (bNum, bSeq) = key
-            val blockHouses = groupedByBlock[key] ?: return@forEach 
-            
-            val rawBlockVisits = allHouses.filter { 
-                it.blockNumber.trim().equals(bNum, ignoreCase = true) && 
-                it.blockSequence.trim().equals(bSeq, ignoreCase = true) 
-            }
-            
-            // Completion Logic: A block is only concluded if ALL current houses are worked 
-            // AND the latest manual flag isn't "Open".
-            val autoConcluido = blockHouses.all { h ->
-                h.situation != Situation.NONE && h.situation != Situation.EMPTY
-            }
-            
-            val latestManualVisit = rawBlockVisits.maxByOrNull { getTimestamp(it.data) }
-            val manualConcluded = latestManualVisit?.quarteiraoConcluido == true || latestManualVisit?.localidadeConcluida == true
-            
-            val isConcluded = manualConcluded && autoConcluido
-            
-            val conclusionDate = if (isConcluded) {
-                latestManualVisit?.data ?: blockHouses.maxByOrNull { getTimestamp(it.data) }?.data
-            } else null
-            
-            segments.add(BlockSegment(
-                blockNumber = bNum,
-                blockSequence = bSeq,
-                startDate = blockHouses.minOfOrNull { getTimestamp(it.data) }?.let { Date(it) }?.let { dateFormatter.format(it) } ?: "",
-                endDate = blockHouses.maxOfOrNull { getTimestamp(it.data) }?.let { Date(it) }?.let { dateFormatter.format(it) } ?: "",
-                isConcluded = isConcluded,
-                conclusionDate = conclusionDate,
-                houses = blockHouses
-            ))
-        }
-        
-        // Filter by the selected Year
-        return if (selectedYear.isBlank()) segments
-        else {
-            segments.filter { seg ->
-                val dateToCheck = seg.conclusionDate ?: seg.endDate
-                try {
-                    val cal = Calendar.getInstance()
-                    dateFormatter.parse(dateToCheck)?.let { cal.time = it }
-                    cal.get(Calendar.YEAR).toString() == selectedYear
-                } catch (e: Exception) {
-                    dateToCheck.endsWith(selectedYear)
+        // 1. EARLY FILTERING: Focus only on the selected neighborhood and year
+        val initialFiltered = allHouses.filter { house ->
+            val matchesBairro = house.bairro.normalize() == normalizedSelectedBairro
+            val matchesYear = if (selectedYear.isBlank()) true else {
+                synchronized(dateFormatter) {
+                    try {
+                        val cal = Calendar.getInstance()
+                        dateFormatter.parse(house.data.replace("/", "-"))?.let { cal.time = it }
+                        cal.get(Calendar.YEAR).toString() == selectedYear
+                    } catch (e: Exception) {
+                        house.data.contains(selectedYear)
+                    }
                 }
             }
+            matchesBairro && matchesYear
+        }
+
+        if (initialFiltered.isEmpty()) return emptyList()
+
+        // 2. PRODUCTION-FAITHFUL SORTING
+        // We mirror the Production Screen sorting logic: Date first, then listOrder, then id.
+        // NO DEDUPLICATION: Every visit in the production/bulletin must appear in the RG.
+        val sortedVisits = initialFiltered
+            .sortedWith(compareBy(
+                { getTimestamp(it.data) }, // Primary: Production Date
+                { it.listOrder },           // Secondary: Manual Percurso Order
+                { it.id }                  // Tertiary: Database ID (Tie-breaker)
+            ))
+
+        // 3. GROUP BY BLOCK & CREATE SEGMENTS
+        val blockGroups = sortedVisits.groupBy { 
+            it.blockNumber.normalize() to it.blockSequence.normalize() 
+        }
+
+        val blockOrder = sortedVisits.map { 
+            it.blockNumber.normalize() to it.blockSequence.normalize() 
+        }.distinct()
+
+        return blockOrder.map { (bNum, bSeq) ->
+            val blockHouses = blockGroups[bNum to bSeq] ?: emptyList()
+            val lastHouse = blockHouses.lastOrNull()
+            
+            BlockSegment(
+                blockNumber = bNum,
+                blockSequence = bSeq,
+                startDate = blockHouses.firstOrNull()?.data ?: "",
+                endDate = lastHouse?.data ?: "",
+                isConcluded = blockHouses.any { it.quarteiraoConcluido || it.localidadeConcluida },
+                // The date of the report is the date of the LAST house in the list
+                conclusionDate = lastHouse?.data ?: "",
+                houses = blockHouses
+            )
         }
     }
 }
