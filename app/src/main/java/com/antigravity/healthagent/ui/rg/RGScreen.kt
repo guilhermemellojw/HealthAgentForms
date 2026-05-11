@@ -101,7 +101,8 @@ fun RGScreen(
                                          uiState.rgFilteredList, 
                                          uiState.selectedRgBairro, 
                                          blockLabel, // Pass the formatted label
-                                         municipio = uiState.municipality
+                                         municipio = uiState.municipality,
+                                         participatingAgents = block?.participatingAgents ?: emptyList()
                                      )
                                  }
                                  sharePdf(context, file)

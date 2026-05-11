@@ -468,7 +468,10 @@ class HomeViewModel @Inject constructor(
         // Use allHousesFlow instead of 'houses' to ensure strict agent filtering for Admins
         combine(allHousesFlow, activitiesFlow) { all: List<House>, activities: List<DayActivity> ->
             dates.map { date ->
-                val dayHouses = all.filter { it.data == date }
+                // ISOLATION: Weekly summary strictly filters by Agent Identity
+                val dayHouses = all.filter { 
+                    it.data == date && (it.agentUid == uid || (it.agentUid.isEmpty() && it.agentName.uppercase() == agent))
+                }
                 val activity = activities.find { it.date == date }
                 val visitedHousesCount = dayHouses.size
                 val inspectedHousesCount = dayHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
@@ -479,8 +482,11 @@ class HomeViewModel @Inject constructor(
     .flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val weeklySummaryTotals: StateFlow<WeeklySummaryTotals> = combine(allHousesFlow, currentWeekDates) { list, dates ->
-        val weekHouses = list.filter { dates.contains(it.data) }
+    val weeklySummaryTotals: StateFlow<WeeklySummaryTotals> = combine(allHousesFlow, currentWeekDates, _agentName, _currentUserUid, _remoteAgentUid) { list, dates, name, currentUid, remoteUid ->
+        val uid = remoteUid ?: currentUid
+        val weekHouses = list.filter { 
+            dates.contains(it.data) && (it.agentUid == uid || (it.agentUid.isEmpty() && it.agentName.uppercase() == name))
+        }
         WeeklySummaryTotals(
             totalHouses = weekHouses.size,
             totalTratados = weekHouses.count { house ->
@@ -505,9 +511,11 @@ class HomeViewModel @Inject constructor(
         val effectiveUid = remoteUid ?: currentUid
         Triple(h, name, effectiveUid) 
     }.flatMapLatest { (h: List<House>, name: String, uid: String?) ->
-            val dates = h.map { it.data }.distinct()
+            // ISOLATION: Bulletin strictly filters by Agent Identity
+            val personalHouses = h.filter { it.agentUid == uid || (it.agentUid.isEmpty() && it.agentName.uppercase() == name) }
+            val dates = personalHouses.map { it.data }.distinct()
             repository.getDayActivities(dates, name, uid).map { activities ->
-                getBoletimSummaryUseCase(h, activities)
+                getBoletimSummaryUseCase(personalHouses, activities)
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -885,8 +893,11 @@ class HomeViewModel @Inject constructor(
         mergedList.filter { it.data == date && (query.isBlank() || it.streetName.contains(query, ignoreCase = true) || it.blockNumber.contains(query, ignoreCase = true)) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val filteredHousesUiState: StateFlow<List<HouseUiState>> = combine(filteredHouses, _isDuplicateIds, recentlyEditedHouseIds) { list, dups, editing ->
-        list.map { HouseUiStateMapper.map(it, houseValidationUseCase, dups.contains(it.id), editing.contains(it.id)) }
+    val filteredHousesUiState: StateFlow<List<HouseUiState>> = combine(filteredHouses, _isDuplicateIds, recentlyEditedHouseIds, _currentUserUid) { list, dups, editing, myUid ->
+        list.map { 
+            val isMine = it.agentUid.isBlank() || it.agentUid == myUid
+            HouseUiStateMapper.map(it, houseValidationUseCase, dups.contains(it.id), editing.contains(it.id), isMine = isMine) 
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val pendingHousesCount: StateFlow<Int> = filteredHouses.map { list ->

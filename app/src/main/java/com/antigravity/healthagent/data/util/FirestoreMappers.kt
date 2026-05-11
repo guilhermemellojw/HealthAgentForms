@@ -24,7 +24,10 @@ fun DocumentSnapshot.toHouseSafe(uid: String, agentName: String = ""): House? {
         val finalSequence = (this.get("sequence") as? Long)?.toInt() ?: house.sequence
         val finalComplement = (this.get("complement") as? Long)?.toInt() ?: house.complement
 
-        val sourceName = if (agentName.isNotBlank()) agentName else (house.agentName.ifBlank { "" })
+        // Identity Preservation: Prioritize fields from the document/object if present.
+        // This ensures teamwork data (from other agents) isn't misattributed to the current user.
+        val finalAgentUid = house.agentUid.ifBlank { uid }
+        val sourceName = house.agentName.ifBlank { agentName }
         val finalAgentName = normalizeAgentName(sourceName)
         
         val finalMunicipio = if (house.municipio.isBlank()) "BOM JARDIM" else house.municipio
@@ -41,7 +44,7 @@ fun DocumentSnapshot.toHouseSafe(uid: String, agentName: String = ""): House? {
             data = house.data.replace("/", "-"),
             createdAt = createdAt, 
             lastUpdated = lastUpdated, 
-            agentUid = uid, 
+            agentUid = finalAgentUid, 
             agentName = finalAgentName,
             municipio = finalMunicipio,
             bairro = finalBairro,

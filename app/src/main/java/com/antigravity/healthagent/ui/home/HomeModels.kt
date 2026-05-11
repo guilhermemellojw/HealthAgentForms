@@ -92,6 +92,7 @@ data class HouseUiState(
     val observation: String = "",
     val isRecentlyEdited: Boolean = false,
     val isHighlighted: Boolean = false,
+    val isMine: Boolean = true,
     val fullIdDisplay: String = "",
     val errorLabels: List<String> = emptyList()
 )
@@ -103,7 +104,8 @@ data class BlockSegment(
     val endDate: String,
     val isConcluded: Boolean,
     val conclusionDate: String?,
-    val houses: List<com.antigravity.healthagent.data.local.model.House>
+    val houses: List<com.antigravity.healthagent.data.local.model.House>,
+    val participatingAgents: List<String> = emptyList()
 ) {
     val label: String
         get() {

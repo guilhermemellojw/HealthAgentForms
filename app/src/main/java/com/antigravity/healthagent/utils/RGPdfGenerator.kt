@@ -32,7 +32,8 @@ object RGPdfGenerator {
         block: String,
         municipio: String = "Bom Jardim",
         supervisor: String = "",
-        gerente: String = ""
+        gerente: String = "",
+        participatingAgents: List<String> = emptyList()
     ): File {
         val pdfDocument = PdfDocument()
         val paint = Paint()
@@ -67,6 +68,7 @@ object RGPdfGenerator {
                 municipio = municipio,
                 supervisor = supervisor,
                 gerente = gerente,
+                participatingAgents = participatingAgents,
                 pageNumber = i + 1,
                 totalPages = totalPages
             )
@@ -98,6 +100,7 @@ object RGPdfGenerator {
         municipio: String,
         supervisor: String,
         gerente: String,
+        participatingAgents: List<String>,
         pageNumber: Int,
         totalPages: Int
     ) {
@@ -412,14 +415,17 @@ object RGPdfGenerator {
             fy += fh + 12
             
             // --- Signatures ---
-            // Collect all distinct agent names found on THIS page
-            val rawAgentName = pageHouses
-                .mapNotNull { it.agentName }
-                .filter { it.isNotBlank() }
-                .distinct()
-                .let {
-                    if (it.isNotEmpty()) it.joinToString(" / ").uppercase() else ""
-                }
+            // Use the provided participatingAgents list (TEAMWORK EVOLUTION)
+            // If empty, fallback to local page discovery for compatibility
+            val rawAgentName = if (participatingAgents.isNotEmpty()) {
+                participatingAgents.joinToString(" / ").uppercase()
+            } else {
+                pageHouses
+                    .mapNotNull { it.agentName }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .joinToString(" / ").uppercase()
+            }
             
             val sigH = 20f
             val totalSigWidth = PAGE_WIDTH - 2 * MARGIN

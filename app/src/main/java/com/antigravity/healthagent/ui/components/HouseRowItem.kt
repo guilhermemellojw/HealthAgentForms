@@ -210,8 +210,9 @@ fun HouseRowItem(
                     }
             ) {
                 if (!enabled) {
+                    val isTeamworkProtection = houseState.isMine.not() && !houseState.highlightErrors // Only show as teamwork if it's not a lock due to Day Closed
                     Surface(
-                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+                        color = if (isTeamworkProtection) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -219,22 +220,22 @@ fun HouseRowItem(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                Icons.Default.Lock,
+                                if (isTeamworkProtection) Icons.Default.People else Icons.Default.Lock,
                                 contentDescription = null,
                                 modifier = Modifier.size(12.dp),
-                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
+                                tint = if (isTeamworkProtection) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                "DIA BLOQUEADO / LEITURA",
+                                if (isTeamworkProtection) "CASA DO COLEGA - SOMENTE LEITURA" else "DIA BLOQUEADO / LEITURA",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
+                                color = if (isTeamworkProtection) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
                                 letterSpacing = 0.5.sp
                             )
                         }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
+                    HorizontalDivider(color = if (isTeamworkProtection) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
                 }
 
                 Row(
@@ -288,8 +289,10 @@ fun HouseRowItem(
                                     }
                                     Spacer(Modifier.width(4.dp))
                                 }
+                                val displayStreet = if (houseState.isMine) houseState.formattedStreet 
+                                                    else "${houseState.formattedStreet} • ${house.agentName}"
                                 Text(
-                                    text = houseState.formattedStreet,
+                                    text = displayStreet,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = if (isMissingStreet) FontWeight.Bold else FontWeight.Black,
                                     color = if (highlightErrors && (isMissingStreet || houseState.invalidFields.isEmpty() && houseState.treatmentShortSummary.isEmpty() && houseState.errorLabels.contains("DUPLICADO"))) MaterialTheme.colorScheme.error

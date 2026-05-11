@@ -53,29 +53,36 @@ class GetRGBlocksUseCaseTest {
     }
 
     @Test
-    fun `invoke - should interleave teamwork houses by id when LO is same`() {
+    fun `invoke - should group teamwork houses by agent when LO is same`() {
         // Scenario: Agent A and Agent B working together on same day.
-        // If they both have listOrder 0, we sort by ID (the order they were saved).
+        // Even if they have same listOrder, we group by name (A first, then B).
         
-        val h1A = House(id = 10, data = "01/05/2026", agentUid = "A", number = "1", blockNumber = "1", bairro = bairro, createdAt = 1000, listOrder = 1)
-        val h1B = House(id = 11, data = "01/05/2026", agentUid = "B", number = "2", blockNumber = "1", bairro = bairro, createdAt = 1200, listOrder = 1)
+        val h1A = House(id = 10, data = "01/05/2026", agentName = "AGENTE A", number = "1", blockNumber = "1", bairro = bairro, createdAt = 1000, listOrder = 1)
+        val h1B = House(id = 11, data = "01/05/2026", agentName = "AGENTE B", number = "2", blockNumber = "1", bairro = bairro, createdAt = 1200, listOrder = 1)
         
-        val h2A = House(id = 20, data = "01/05/2026", agentUid = "A", number = "3", blockNumber = "1", bairro = bairro, createdAt = 1100, listOrder = 2)
-        val h2B = House(id = 21, data = "01/05/2026", agentUid = "B", number = "4", blockNumber = "1", bairro = bairro, createdAt = 1300, listOrder = 2)
-
+        val h2A = House(id = 20, data = "01/05/2026", agentName = "AGENTE A", number = "3", blockNumber = "1", bairro = bairro, createdAt = 1100, listOrder = 2)
+        val h2B = House(id = 21, data = "01/05/2026", agentName = "AGENTE B", number = "4", blockNumber = "1", bairro = bairro, createdAt = 1300, listOrder = 2)
+ 
         val houses = listOf(h2B, h1B, h2A, h1A) // Shuffled
-
+ 
         // When
         val result = useCase(houses, bairro, "2026")
-
+ 
         // Then
         val blockHouses = result.first().houses
         assertEquals(4, blockHouses.size)
         
-        assertEquals(10, blockHouses[0].id) // LO 1, ID 10
-        assertEquals(11, blockHouses[1].id) // LO 1, ID 11
-        assertEquals(20, blockHouses[2].id) // LO 2, ID 20
-        assertEquals(21, blockHouses[3].id) // LO 2, ID 21
+        // Grouped by Agent A first
+        assertEquals("AGENTE A", blockHouses[0].agentName)
+        assertEquals(10, blockHouses[0].id)
+        assertEquals("AGENTE A", blockHouses[1].agentName)
+        assertEquals(20, blockHouses[1].id)
+        
+        // Then Agent B
+        assertEquals("AGENTE B", blockHouses[2].agentName)
+        assertEquals(11, blockHouses[2].id)
+        assertEquals("AGENTE B", blockHouses[3].agentName)
+        assertEquals(21, blockHouses[3].id)
     }
 
     @Test

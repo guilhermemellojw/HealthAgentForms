@@ -65,8 +65,9 @@ class GetRGBlocksUseCase @Inject constructor() {
         val sortedVisits = initialFiltered
             .sortedWith(compareBy(
                 { getTimestamp(it.data) }, // Primary: Production Date
-                { it.listOrder },           // Secondary: Manual Percurso Order
-                { it.id }                  // Tertiary: Database ID (Tie-breaker)
+                { it.agentName },           // Secondary: Group by Agent to avoid interleaving
+                { it.listOrder },           // Tertiary: Manual Percurso Order
+                { it.id }                  // Quaternary: Database ID (Tie-breaker)
             ))
 
         // 3. GROUP BY BLOCK & CREATE SEGMENTS
@@ -90,7 +91,8 @@ class GetRGBlocksUseCase @Inject constructor() {
                 isConcluded = blockHouses.any { it.quarteiraoConcluido || it.localidadeConcluida },
                 // The date of the report is the date of the LAST house in the list
                 conclusionDate = lastHouse?.data ?: "",
-                houses = blockHouses
+                houses = blockHouses,
+                participatingAgents = blockHouses.map { it.agentName }.distinct().filter { it.isNotBlank() }
             )
         }
     }

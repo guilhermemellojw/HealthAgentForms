@@ -664,6 +664,48 @@ class SyncRepositoryImpl @Inject constructor(
                             }
                         }
 
+                        // --- PHASE 2: TEAMWORK SYNC (AUTOMATIC) ---
+                        // We pull production from other agents for the blocks currently active on this device.
+                        // This ensures the RG is complete even when fieldwork is distributed among a team.
+                        if (!isTargetDifferentUser) {
+                            try {
+                                val activeBlocks = houseDao.getActiveBlockNumbers()
+                                if (activeBlocks.isNotEmpty()) {
+                                    val currentCiclo = cloudHouses.firstOrNull()?.ciclo ?: "1º"
+                                    
+                                    // Fetch all houses for these blocks across all agents
+                                    val teamHouses = activeBlocks.chunked(10).flatMap { blockChunk ->
+                                        firestore.collectionGroup("houses")
+                                            .whereIn("blockNumber", blockChunk)
+                                            .whereEqualTo("ciclo", currentCiclo)
+                                            .get().await().documents
+                                    }.mapNotNull { it.toHouseSafe(it.getString("agentUid") ?: "", it.getString("agentName") ?: "") }
+                                    
+                                    // Identify foreign houses (not mine)
+                                    val remoteForeignHouses = teamHouses.filter { it.agentUid != uid }
+                                    
+                                    // IDENTIFY TEAM DELETIONS: 
+                                    // If a foreign house is in our local DB for these blocks but NOT in the cloud,
+                                    // it means the colleague deleted it. We must remove it locally too.
+                                    val localTeamHouses = houseDao.getHousesByBlocks(activeBlocks).filter { it.agentUid != uid }
+                                    val remoteKeys = remoteForeignHouses.map { it.generateNaturalKey() }.toSet()
+                                    
+                                    val housesDeletedByTeam = localTeamHouses.filter { it.generateNaturalKey() !in remoteKeys }
+                                    if (housesDeletedByTeam.isNotEmpty()) {
+                                        android.util.Log.i("SyncRepository", "Team Sync: Deleting ${housesDeletedByTeam.size} houses removed by colleagues.")
+                                        runInTransactionWithRetry {
+                                            housesDeletedByTeam.forEach { houseDao.deleteHouse(it) }
+                                        }
+                                    }
+                                    
+                                    // Add foreign houses to the main list for reconciliation/upsert
+                                    cloudHouses.addAll(remoteForeignHouses)
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.w("SyncRepository", "Teamwork sync failed (skipping): ${e.message}")
+                            }
+                        }
+
                         // 3. Deletion logic
                         var cloudHousesWithKeys = cloudHouses.map { HouseWithKeys(it) }
                         val validCloudHouseKeys = cloudHousesWithKeys.map { it.naturalKey }.toSet()

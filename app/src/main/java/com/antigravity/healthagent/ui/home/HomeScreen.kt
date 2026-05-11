@@ -1054,6 +1054,7 @@ fun HomeScreen(
                         }
                         
                         val focusRequester = remember(house.id) { focusRequesters.getOrPut(house.id) { androidx.compose.ui.focus.FocusRequester() } }
+                        val isBaseEnabled = if (uiState.isSupervisor) uiState.isAdmin else (!uiState.isDayClosed || uiState.isManualUnlock)
                         HouseRowItem(
                             houseState = houseState,
                             onUpdate = onUpdate,
@@ -1068,11 +1069,11 @@ fun HomeScreen(
                             isSolarMode = uiState.isSolarMode,
                             focusRequester = focusRequester,
                             onGetLocation = onGetLocation,
-                            enabled = if (uiState.isSupervisor) uiState.isAdmin else (!uiState.isDayClosed || uiState.isManualUnlock)
+                            enabled = isBaseEnabled && houseState.isMine
                         )
                         }
 
-                        if (!isSearchActive && uiState.isEditingToolsEnabled && (uiState.isAdmin || (!uiState.isDayClosed || uiState.isManualUnlock) && !uiState.isSupervisor)) {
+                        if (!isSearchActive && uiState.isEditingToolsEnabled && (uiState.isAdmin || (!uiState.isDayClosed || uiState.isManualUnlock) && !uiState.isSupervisor) && houseState.isMine) {
                             Spacer(Modifier.height(8.dp))
                             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 AddBetweenButton(

@@ -158,8 +158,14 @@ interface HouseDao {
     suspend fun getHousesByMonth(agentName: String, agentUid: String, monthYearSuffix: String): List<House>
 
 
+    @Query("SELECT DISTINCT blockNumber FROM houses WHERE blockNumber != ''")
+    suspend fun getActiveBlockNumbers(): List<String>
+
     @Query("SELECT * FROM houses WHERE agentUid = :uid")
     suspend fun getHousesByUidOnly(uid: String): List<House>
+
+    @Query("SELECT * FROM houses WHERE blockNumber IN (:blocks)")
+    suspend fun getHousesByBlocks(blocks: List<String>): List<House>
 
     @Query("DELETE FROM houses WHERE id = :id")
     suspend fun deleteHouseById(id: Long)

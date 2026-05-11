@@ -102,6 +102,16 @@ fun RGBlockCard(
                     style = if (isEasyMode) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                
+                if (segment.participatingAgents.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Equipe: ${segment.participatingAgents.joinToString(" / ")}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
             
             // Count Badge
