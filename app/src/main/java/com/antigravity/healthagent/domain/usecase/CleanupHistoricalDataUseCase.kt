@@ -56,8 +56,8 @@ class CleanupHistoricalDataUseCase @Inject constructor(
             // LOCAL CLEANUP (Current Agent)
             if (agentName.isNotBlank()) {
                 // repository.getAllHousesOnce and getAllDayActivitiesOnce are now isolated by default
-                val allLocalHouses = houseRepository.getAllHousesOnce(agentName, agentUid)
-                val allLocalActivities = houseRepository.getAllDayActivitiesOnce(agentName, agentUid)
+                val allLocalHouses = houseRepository.getAllHousesOnce(agentUid)
+                val allLocalActivities = houseRepository.getAllDayActivitiesOnce(agentUid)
 
                 val localHousesToRemove = allLocalHouses.filter {
                     val d = try { sdf.parse(it.data.replace("/", "-")) } catch (e: Exception) { null }
@@ -73,7 +73,7 @@ class CleanupHistoricalDataUseCase @Inject constructor(
                     val datesToDelete = (localHousesToRemove.map { it.data } + localActivitiesToRemove.map { it.date }).distinct()
                     
                     if (datesToDelete.isNotEmpty()) {
-                        houseRepository.deleteByAgentAndDates(agentName, datesToDelete, agentUid)
+                        houseRepository.deleteByAgentAndDates(datesToDelete, agentUid)
                     }
                 }
             }

@@ -34,7 +34,7 @@ class LogoutWorker @AssistedInject constructor(
 
                 // 1. FINAL SYNC (Best Effort)
                 if (agentName.isNotBlank()) {
-                    val houses = houseDao.getUnsyncedHouses(agentName, uid)
+                    val houses = houseDao.getUnsyncedHouses(uid)
                     if (houses.isNotEmpty()) {
                         android.util.Log.i("LogoutWorker", "Performing final sync for $agentName (${houses.size} houses)...")
                         syncRepository.pushLocalDataToCloud(houses, emptyList(), uid)

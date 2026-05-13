@@ -137,7 +137,6 @@ class RestoreDataUseCase @Inject constructor(
             val currentUserUid = authRepository.getCurrentUserUid()
             if (targetUid == currentUserUid) {
                 val result = syncRepository.restoreLocalData(
-                    agentName = agentName,
                     houses = normalizedHouses,
                     activities = normalizedActivities,
                     agentUid = targetUid

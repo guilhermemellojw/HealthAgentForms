@@ -21,7 +21,7 @@ class StreetRepository @Inject constructor(
      * from the local database.
      */
     fun getStreetSuggestions(bairro: String, agentName: String, agentUid: String): Flow<List<String>> {
-        val housesFlow = houseDao.getHousesByAgentSnapshotFlow(agentName, agentUid)
+        val housesFlow = houseDao.getHousesByAgentSnapshotFlow(agentUid)
         val customStreetsFlow = customStreetDao.getAllCustomStreets()
 
         return combine(housesFlow, customStreetsFlow) { houses, customStreets ->

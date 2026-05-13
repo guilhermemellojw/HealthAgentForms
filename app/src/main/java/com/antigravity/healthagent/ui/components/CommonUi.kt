@@ -118,7 +118,8 @@ fun CompactInputBox(
                     style = androidx.compose.ui.graphics.drawscope.Stroke(width = animatedBorderWidth.toPx())
                 )
             }
-            .padding(vertical = if (isEasyMode) 8.dp else 4.dp, horizontal = 8.dp),
+            .padding(vertical = if (isEasyMode) 8.dp else 4.dp, horizontal = 8.dp)
+            .then(if (enabled && onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -138,8 +139,7 @@ fun CompactInputBox(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(if (isEasyMode) 64.dp else 40.dp)
-                    .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
+                    .height(if (isEasyMode) 64.dp else 40.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -149,7 +149,9 @@ fun CompactInputBox(
                         fontSize = if (isEasyMode) 22.sp else 15.sp, 
                         fontWeight = FontWeight.ExtraBold
                     ),
-                    color = (if (isEasyMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface).copy(alpha = contentAlpha)
+                    color = (if (isEasyMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface).copy(alpha = contentAlpha),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
         } else {

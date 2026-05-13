@@ -82,7 +82,7 @@ class HouseDaoTest {
         }
 
         // 2. Verificar se todas foram inseridas
-        val retrievedHouses = houseDao.getHousesByAgentSnapshot(agentName, agentUid)
+        val retrievedHouses = houseDao.getHousesByAgentSnapshot(agentUid)
         assertEquals("Deve haver 100 casas inseridas", 100, retrievedHouses.size)
 
         // 3. Tentar inserir uma casa duplicada exata (deve conflitar pelo unique index do AppDatabase)
@@ -90,7 +90,6 @@ class HouseDaoTest {
         
         val clashCount = houseDao.checkClash(
             uid = duplicatedHouse.agentUid,
-            name = duplicatedHouse.agentName,
             date = duplicatedHouse.data,
             blockNum = duplicatedHouse.blockNumber,
             blockSeq = duplicatedHouse.blockSequence,

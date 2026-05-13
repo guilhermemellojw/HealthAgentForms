@@ -36,10 +36,10 @@ class RestoreDataUseCaseTest {
             agentName = "AGENT MASTER"
         )
         val houses = listOf(
-            House(agentName = "OLD NAME", data = "15-03-2026"),
+            House(agentUid = targetUid, agentName = "OLD NAME", data = "15-03-2026"),
         )
         val activities = listOf(
-            DayActivity(date = "15-03-2026", agentName = "OLD NAME"),
+            DayActivity(agentUid = targetUid, date = "15-03-2026", agentName = "OLD NAME"),
         )
         val backupData = BackupData(houses = houses, dayActivities = activities)
 
@@ -72,7 +72,7 @@ class RestoreDataUseCaseTest {
     }
 
     @Test
-    fun `invoke should preserve original agent name when house belongs to a different agent than backup owner`() = runBlocking {
+    fun `invoke should filter out cross-agent data during restore to maintain isolation`() = runBlocking {
         // Arrange
         val targetUid = "restorer-uid"
         val backupOwnerUid = "restorer-uid"
@@ -113,8 +113,7 @@ class RestoreDataUseCaseTest {
         }
 
         val restoredHouses = houseSlot.captured
-        assertEquals("Own house should be re-assigned/normalized", targetUid, restoredHouses[0].agentUid)
-        assertEquals("Other agent's house should be PRESERVED", otherAgentUid, restoredHouses[1].agentUid)
-        assertEquals("Other agent's name should be PRESERVED", "OTHER AGENT", restoredHouses[1].agentName)
+        assertEquals("Only one house should be restored (isolation filter)", 1, restoredHouses.size)
+        assertEquals("Own house should be preserved", targetUid, restoredHouses[0].agentUid)
     }
 }

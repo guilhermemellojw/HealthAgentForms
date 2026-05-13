@@ -65,8 +65,8 @@ class HouseManagementUseCase @Inject constructor(
         }
     }
 
-    suspend fun deleteProduction(date: String, agentName: String, force: Boolean = false) {
-        repository.deleteProduction(date, agentName, null, force)
+    suspend fun deleteProduction(date: String, agentUid: String, force: Boolean = false) {
+        repository.deleteProduction(date, agentUid, force)
     }
 
     suspend fun updateHouseWithContext(
@@ -393,10 +393,10 @@ class HouseManagementUseCase @Inject constructor(
                  // Since date is part of primary key, we might need a special transaction or delete/insert
                  // Repository doesn't have a direct 'updatePrimaryKey' but SyncRepositoryImpl does some similar stuff.
                  // In Room, for primary key changes, usually we delete and re-insert.
-                 repository.runInTransaction {
-                     repository.deleteProduction(activity.date, activity.agentName, activity.agentUid, force = true)
-                     repository.updateDayActivity(activity.copy(date = newDate))
-                 }
+                  repository.runInTransaction {
+                      repository.deleteProduction(activity.date, activity.agentUid, force = true)
+                      repository.updateDayActivity(activity.copy(date = newDate))
+                  }
              }
         }
     }

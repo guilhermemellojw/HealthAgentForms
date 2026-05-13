@@ -62,8 +62,8 @@ class SyncWorker @AssistedInject constructor(
                 Log.w("SyncWorker", "Background pull failed: ${pullResult.exceptionOrNull()?.message}")
             }
 
-            val houses = houseRepository.getAllHousesOnce(agentName, uid)
-            val activities = houseRepository.getAllDayActivitiesOnce(agentName, uid)
+            val houses = houseRepository.getAllHousesOnce(uid)
+            val activities = houseRepository.getAllDayActivitiesOnce(uid)
             
             if (houses.isEmpty() && activities.isEmpty()) {
                 Log.d("SyncWorker", "No data to push.")

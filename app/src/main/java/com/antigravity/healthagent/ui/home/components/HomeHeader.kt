@@ -146,12 +146,12 @@ fun HomeHeader(
                                 onUpdateMunicipio(it.uppercase())
                             },
                             label = "Município",
-                            modifier = Modifier.weight(1.2f),
+                            modifier = Modifier.weight(1f),
                             enabled = !isDayClosed && (municipio.isBlank())
                         )
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1.2f)
+                            modifier = Modifier.weight(1.5f)
                         ) {
                             IconButton(
                                 onClick = onMoveDateBackward,

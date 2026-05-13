@@ -68,6 +68,7 @@ fun BoletimScreen(
     onSwitchAccount: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val boletimList by viewModel.boletimList.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -276,7 +277,7 @@ fun BoletimScreen(
                 contentPadding = PaddingValues(top = 60.dp, start = 12.dp, end = 12.dp, bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-            itemsIndexed(uiState.boletimList, key = { _, summary -> "${summary.date}|${summary.agentName}" }) { index, summary ->
+            itemsIndexed(boletimList, key = { _, summary -> "${summary.date}|${summary.agentName}" }) { index, summary ->
                 PremiumCard(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { viewModel.navigateToDate(summary.date) },
@@ -535,7 +536,7 @@ fun BoletimScreen(
             }
             }
 
-            if (uiState.boletimList.isEmpty()) {
+            if (boletimList.isEmpty()) {
                     item {
                         com.antigravity.healthagent.ui.components.EmptyStateView(
                             message = "Nenhum registro encontrado",
@@ -546,17 +547,6 @@ fun BoletimScreen(
                 }
             }
 
-            // Floating Sync Status Balloon at the top (Persistent)
-            SyncFloatingBalloon(
-                syncStatus = uiState.syncStatus,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
-            )
-
-            // Sync Status Overlay (Feedback for Pull-to-Refresh)
-            SyncStatusOverlay(
-                syncStatus = uiState.syncStatus,
-                isEasyMode = uiState.isEasyMode
-            )
         }
     }
 }

@@ -6,8 +6,8 @@ import com.antigravity.healthagent.data.local.model.TombstoneType
 
 @Dao
 interface TombstoneDao {
-    @Query("SELECT * FROM tombstones WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
-    suspend fun getAllTombstones(agentName: String, agentUid: String): List<Tombstone>
+    @Query("SELECT * FROM tombstones WHERE agentUid = :agentUid")
+    suspend fun getAllTombstones(agentUid: String): List<Tombstone>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTombstone(tombstone: Tombstone)
@@ -18,11 +18,11 @@ interface TombstoneDao {
     @Query("DELETE FROM tombstones WHERE id IN (:ids)")
     suspend fun deleteTombstones(ids: List<Int>)
 
-    @Query("DELETE FROM tombstones WHERE naturalKey = :key AND ((agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)))")
-    suspend fun deleteByNaturalKey(key: String, agentName: String, agentUid: String)
+    @Query("DELETE FROM tombstones WHERE naturalKey = :key AND agentUid = :agentUid")
+    suspend fun deleteByNaturalKey(key: String, agentUid: String)
 
-    @Query("DELETE FROM tombstones WHERE (agentUid != '' AND agentUid = :agentUid) OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName))")
-    suspend fun deleteByAgent(agentName: String, agentUid: String)
+    @Query("DELETE FROM tombstones WHERE agentUid = :agentUid")
+    suspend fun deleteByAgent(agentUid: String)
 
     @Query("DELETE FROM tombstones WHERE deletedAt < :threshold")
     suspend fun deleteOldTombstones(threshold: Long)

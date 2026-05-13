@@ -49,7 +49,7 @@ class QuarteiroesViewModel @Inject constructor(
             houseRepository.getAllHousesSnapshotFlow()
         } else if (name.isNotBlank()) {
             // Strict filtering for regular agents OR admin inspecting a specific agent
-            houseRepository.getAllHouses(name, uid)
+            houseRepository.getAllHouses(uid)
         } else {
             flowOf(emptyList())
         }

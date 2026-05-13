@@ -27,8 +27,8 @@ class TimelineBackupWorker @AssistedInject constructor(
         Log.d("TimelineBackupWorker", "Starting timeline backup for $uid ($officialAgentName) in background...")
 
         return try {
-            val allHouses = houseDao.getHousesByAgentSnapshot(officialAgentName, uid)
-            val allActivities = dayActivityDao.getAllDayActivities(officialAgentName, uid)
+            val allHouses = houseDao.getHousesByAgentSnapshot(uid)
+            val allActivities = dayActivityDao.getDayActivitiesByAgentSnapshot(uid)
             
             val backupData = BackupData(
                 houses = allHouses,

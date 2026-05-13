@@ -109,7 +109,7 @@ class SyncRestoreTest {
         )
 
         // Simulação da lógica de reconciliação do SyncRepositoryImpl
-        val existing = houseDao.getHousesByAgentSnapshot(agentName, agentUid).firstOrNull()
+        val existing = houseDao.getHousesByAgentSnapshot(agentUid).firstOrNull()
         
         // Lógica: Se local é mais recente que cloud + threshold, ignoramos a cloud para não sobrescrever trabalho pendente
         val threshold = 10000L // SYNC_CONFLICT_THRESHOLD_MS
@@ -122,7 +122,7 @@ class SyncRestoreTest {
         }
 
         // Verificação: A casa local deve ter sido preservada
-        val finalHouse = houseDao.getHousesByAgentSnapshot(agentName, agentUid).first()
+        val finalHouse = houseDao.getHousesByAgentSnapshot(agentUid).first()
         assertEquals("A casa local mais recente deve ser preservada", now, finalHouse.lastUpdated)
         assertEquals(false, finalHouse.isSynced)
     }
@@ -163,7 +163,7 @@ class SyncRestoreTest {
         )
 
         // Simulação da lógica de reconciliação
-        val existing = houseDao.getHousesByAgentSnapshot(agentName, agentUid).firstOrNull()
+        val existing = houseDao.getHousesByAgentSnapshot(agentUid).firstOrNull()
         
         val isAdminOverride = cloudHouse.editedByAdmin && (existing?.editedByAdmin == false)
         val threshold = 10000L
@@ -177,7 +177,7 @@ class SyncRestoreTest {
         }
 
         // Verificação: A casa da nuvem (Admin) deve ter sobrescrito a local
-        val finalHouse = houseDao.getHousesByAgentSnapshot(agentName, agentUid).first()
+        val finalHouse = houseDao.getHousesByAgentSnapshot(agentUid).first()
         assertEquals("A edição do Admin deve prevalecer", true, finalHouse.editedByAdmin)
         assertEquals(true, finalHouse.isSynced)
     }
@@ -204,13 +204,13 @@ class SyncRestoreTest {
         val cloudDeletedHouses = setOf(localHouse.generateNaturalKey())
 
         // Simulação da lógica de reconciliação para deleção
-        val allLocalHouses = houseDao.getHousesByAgentSnapshot(agentName, agentUid)
+        val allLocalHouses = houseDao.getHousesByAgentSnapshot(agentUid)
         val housesToDelete = allLocalHouses.filter { it.generateNaturalKey() in cloudDeletedHouses }
         
         housesToDelete.forEach { houseDao.deleteHouse(it) }
 
         // Verificação: A casa deve ter sido removida localmente
-        val finalHouses = houseDao.getHousesByAgentSnapshot(agentName, agentUid)
+        val finalHouses = houseDao.getHousesByAgentSnapshot(agentUid)
         assertEquals("A casa deve ter sido deletada localmente devido ao tombstone na nuvem", 0, finalHouses.size)
     }
 }

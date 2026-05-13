@@ -72,7 +72,8 @@ data class HomeUiState(
     val backupConfirmation: BackupConfirmation? = null,
     val isDuplicateIds: Set<Int> = emptySet(),
     val highlightedHouseId: Int? = null,
-    val isTestUser: Boolean = false
+    val isTestUser: Boolean = false,
+    val hasMisattributedData: Boolean = false
 )
 
 val LocalHomeUiState = androidx.compose.runtime.compositionLocalOf { HomeUiState() }

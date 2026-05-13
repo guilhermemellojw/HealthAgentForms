@@ -54,6 +54,9 @@ fun SemanalScreen(
     onOpenSettings: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val weeklySummary by viewModel.weeklySummary.collectAsState()
+    val weeklySummaryTotals by viewModel.weeklySummaryTotals.collectAsState()
+    val weekRangeText by viewModel.weekRangeText.collectAsState()
     val uiEvent by viewModel.uiEvent.collectAsState()
     var showAddActivityDialog by remember { mutableStateOf(false) }
     var newActivityName by remember { mutableStateOf("") }
@@ -214,7 +217,7 @@ fun SemanalScreen(
                                     fontSize = if (uiState.isEasyMode) 12.sp else 10.sp
                                 )
                                 Text(
-                                    text = uiState.weekRangeText,
+                                    text = weekRangeText,
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Black,
                                     color = MaterialTheme.colorScheme.onSurface,
@@ -258,11 +261,11 @@ fun SemanalScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceEvenly
                             ) {
-                                CompactStatItem("ABERTOS", uiState.weeklySummaryTotals.totalWorked.toString(), Icons.Default.Home, isEasyMode = uiState.isEasyMode)
-                                CompactStatItem("TRATADOS", uiState.weeklySummaryTotals.totalTratados.toString(), Icons.Default.WaterDrop, isEasyMode = uiState.isEasyMode)
-                                CompactStatItem("COM FOCO", uiState.weeklySummaryTotals.totalFoci.toString(), Icons.Default.Warning, color = if (uiState.weeklySummaryTotals.totalFoci > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, isEasyMode = uiState.isEasyMode)
-                                CompactStatItem("FECHADOS", uiState.weeklySummaryTotals.totalFechados.toString(), Icons.Default.DoorFront, isEasyMode = uiState.isEasyMode)
-                                CompactStatItem("RECUSADOS", uiState.weeklySummaryTotals.totalRecusados.toString(), Icons.Default.Block, isEasyMode = uiState.isEasyMode)
+                                CompactStatItem("ABERTOS", weeklySummaryTotals.totalWorked.toString(), Icons.Default.Home, isEasyMode = uiState.isEasyMode)
+                                CompactStatItem("TRATADOS", weeklySummaryTotals.totalTratados.toString(), Icons.Default.WaterDrop, isEasyMode = uiState.isEasyMode)
+                                CompactStatItem("COM FOCO", weeklySummaryTotals.totalFoci.toString(), Icons.Default.Warning, color = if (weeklySummaryTotals.totalFoci > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, isEasyMode = uiState.isEasyMode)
+                                CompactStatItem("FECHADOS", weeklySummaryTotals.totalFechados.toString(), Icons.Default.DoorFront, isEasyMode = uiState.isEasyMode)
+                                CompactStatItem("RECUSADOS", weeklySummaryTotals.totalRecusados.toString(), Icons.Default.Block, isEasyMode = uiState.isEasyMode)
                             }
                         }
                     }
@@ -284,7 +287,7 @@ fun SemanalScreen(
                             )
                         }
 
-                        itemsIndexed(uiState.weeklySummary, key = { _, day -> day.date }) { _, day ->
+                        itemsIndexed(weeklySummary, key = { _, day -> day.date }) { _, day ->
                             WeeklyDayRow(
                                 day = day,
                                 options = uiState.activityOptions,

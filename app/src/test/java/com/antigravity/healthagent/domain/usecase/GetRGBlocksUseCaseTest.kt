@@ -155,4 +155,26 @@ class GetRGBlocksUseCaseTest {
         assertEquals(1, result.size)
         assertEquals(false, result.first().isConcluded)
     }
+
+    @Test
+    fun `invoke - should implicitly conclude block if agent moved to another bairro`() {
+        // Given:
+        // Agent does Block 1 in "Bairro A"
+        // THEN Agent does Block 2 in "Bairro B"
+        val h1 = House(id = 1, data = "01/05/2026", blockNumber = "1", bairro = "BAIRRO A", listOrder = 1)
+        val h2 = House(id = 2, data = "01/05/2026", blockNumber = "2", bairro = "BAIRRO B", listOrder = 2)
+        
+        val houses = listOf(h1, h2)
+
+        // When
+        // We look at "BAIRRO A"
+        val result = useCase(houses, "BAIRRO A", "2026")
+
+        // Then
+        assertEquals(1, result.size)
+        val block1 = result.find { it.blockNumber == "1" }!!
+        
+        // Block 1 should be concluded because it's not the LAST visit globally (H2 follows it)
+        assertEquals(true, block1.isConcluded)
+    }
 }

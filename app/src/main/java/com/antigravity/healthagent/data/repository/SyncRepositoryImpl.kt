@@ -84,9 +84,9 @@ class SyncRepositoryImpl @Inject constructor(
                         var officialAgentName = existingAgentName.uppercase()
 
                         // 1. Fetch Local Data and Tombstones
-                        val unsyncedHouses = houseDao.getUnsyncedHouses(officialAgentName, uid)
-                        val unsyncedActivities = dayActivityDao.getUnsyncedActivities(officialAgentName, uid)
-                        val tombstones = tombstoneDao.getAllTombstones(officialAgentName, uid)
+                        val unsyncedHouses = houseDao.getUnsyncedHouses(uid)
+                        val unsyncedActivities = dayActivityDao.getUnsyncedActivities(uid)
+                        val tombstones = tombstoneDao.getAllTombstones(uid)
 
                         // Optimistic return if nothing to do (and not a forced replacement)
                         if (unsyncedHouses.isEmpty() && unsyncedActivities.isEmpty() && tombstones.isEmpty() && !shouldReplace) {
@@ -244,7 +244,7 @@ class SyncRepositoryImpl @Inject constructor(
                                             .whereEqualTo("data", date)
                                             .get().await()
                                         
-                                        val localHousesForDate = houseDao.getHousesByDateAndAgent(date, officialAgentName, uid)
+                                        val localHousesForDate = houseDao.getHousesByDateAndAgent(date, uid)
                                         val localKeys = localHousesForDate.map { it.generateNaturalKey() }.toSet()
                                         val localIdentities = localHousesForDate.map { it.generateIdentityKey() }.toSet()
                                         
@@ -367,7 +367,7 @@ class SyncRepositoryImpl @Inject constructor(
                                 
                                 allDocs.mapNotNull { it.toHouseSafe(uid, officialAgentName ?: "") }
                             } else {
-                                houseDao.getHousesByMonth(officialAgentName ?: "", uid, monthYear)
+                                houseDao.getHousesByMonth(uid, monthYear)
                             }
                             
                             val housesInMonth = housesInMonthRaw.filter { house ->
@@ -389,7 +389,7 @@ class SyncRepositoryImpl @Inject constructor(
                                 
                                 (docs1 + docs2).mapNotNull { it.toDayActivitySafe(uid, officialAgentName ?: "") }
                             } else {
-                                dayActivityDao.getDayActivitiesByMonth(officialAgentName ?: "", uid, monthYear)
+                                dayActivityDao.getDayActivitiesByMonth(uid, monthYear)
                             }
                             
                             val activitiesInMonth = activitiesInMonthRaw.filter { activity ->
@@ -513,9 +513,9 @@ class SyncRepositoryImpl @Inject constructor(
                             android.util.Log.w("SyncRepository", "Remote Wipe Triggered for UID: $uid")
                             // SURGICAL WIPE: Only clear data for the target agent to prevent Admin data loss
                             val wipeResult = runInTransactionWithRetry {
-                                houseDao.deleteByAgent(finalAgentName, uid)
-                                dayActivityDao.deleteByAgent(finalAgentName, uid)
-                                tombstoneDao.deleteByAgent(finalAgentName, uid)
+                                houseDao.deleteByAgent(uid)
+                                dayActivityDao.deleteByAgent(uid)
+                                tombstoneDao.deleteByAgent(uid)
                                 
                                 // Reset sync state ONLY if this is the current authenticated user
                                 if (!isTargetDifferentUser) {
@@ -538,9 +538,15 @@ class SyncRepositoryImpl @Inject constructor(
                         val serverTime = now
 
                         // 2. Fetchers (EXHAUSTIVE DISCOVERY)
+                        // RISK MITIGATION: Skip email-based discovery for Admins/Supervisors to prevent
+                        // accidental data merging from different accounts sharing the same administrative email.
+                        val isHighPrivilegeUser = auth.currentUser?.uid?.let { 
+                            try { firestore.collection("users").document(it).get().await().getString("role")?.let { r -> r == "ADMIN" || r == "SUPERVISOR" } } catch(e: Exception) { false }
+                        } ?: false
+
                         val possibleAgentDocs = mutableListOf(firestore.collection("agents").document(uid))
                         
-                        if (!isIncremental) {
+                        if (!isIncremental && !isHighPrivilegeUser) {
                             discoveryEmails.forEach { dEmail ->
                                 try {
                                     val matchingEmailDocs = firestore.collection("agents")
@@ -671,7 +677,19 @@ class SyncRepositoryImpl @Inject constructor(
                             try {
                                 val activeBlocks = houseDao.getActiveBlockNumbers()
                                 if (activeBlocks.isNotEmpty()) {
-                                    val currentCiclo = cloudHouses.firstOrNull()?.ciclo ?: "1º"
+                                    val currentCiclo = cloudHouses.firstOrNull()?.ciclo ?: run {
+                                        val cal = java.util.Calendar.getInstance()
+                                        val month = cal.get(java.util.Calendar.MONTH)
+                                        when (month) {
+                                            java.util.Calendar.JANUARY, java.util.Calendar.FEBRUARY -> "1º"
+                                            java.util.Calendar.MARCH, java.util.Calendar.APRIL -> "2º"
+                                            java.util.Calendar.MAY, java.util.Calendar.JUNE -> "3º"
+                                            java.util.Calendar.JULY, java.util.Calendar.AUGUST -> "4º"
+                                            java.util.Calendar.SEPTEMBER, java.util.Calendar.OCTOBER -> "5º"
+                                            java.util.Calendar.NOVEMBER, java.util.Calendar.DECEMBER -> "6º"
+                                            else -> "1º"
+                                        }
+                                    }
                                     
                                     // Fetch all houses for these blocks across all agents
                                     val teamHouses = activeBlocks.chunked(10).flatMap { blockChunk ->
@@ -746,7 +764,7 @@ class SyncRepositoryImpl @Inject constructor(
                         cloudDeletedHouses.removeAll { it in validCloudHouseKeys }
                         cloudDeletedActivities.removeAll { it in validCloudActivityKeys }
                         
-                        val allLocalHouses = houseDao.getHousesByAgentSnapshot(finalAgentName, uid)
+                        val allLocalHouses = houseDao.getHousesByAgentSnapshot(uid)
                         var allLocalHousesWithKeys = allLocalHouses.map { HouseWithKeys(it) }
                         
                         val cloudDeletedIdentities = cloudDeletedHouses.mapNotNull { deletedKey ->
@@ -773,213 +791,213 @@ class SyncRepositoryImpl @Inject constructor(
                                 } else if (timeSinceLastUpdate > 900000L) {
                                     android.util.Log.i("SyncRepository", "Admin Authority / Ghost Cleanup: Deleting unsynced house ${house.id} due to cloud deletion.")
                                     true
-                                } else {
-                                    android.util.Log.i("SyncRepository", "Agent Priority: Preserving actively typed house ${house.id} despite cloud deletion.")
-                                    false
-                                }
-                            } else false
-                        }.map { it.house }
+                                        } else {
+                                            android.util.Log.i("SyncRepository", "Agent Priority: Preserving actively typed house ${house.id} despite cloud deletion.")
+                                            false
+                                        }
+                                    } else false
+                                }.map { it.house }
 
-                        val allLocalActivities = dayActivityDao.getAllDayActivities(finalAgentName, uid)
-                        
-                        val corruptActivities = allLocalActivities.filter { it.date.isBlank() }
-                        if (corruptActivities.isNotEmpty()) {
-                            corruptActivities.forEach { 
-                                dayActivityDao.deleteDayActivity(it.date, it.agentName, it.agentUid)
-                            }
-                        }
-
-                        val activitiesToDelete = allLocalActivities.filter { activity ->
-                            val dateKey = "${activity.date}|${activity.agentName.uppercase()}"
-                            
-                            if (dateKey in cloudDeletedActivities) {
-                                val timeSinceLastUpdate = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis() - activity.lastUpdated
-                                if (activity.isSynced) {
-                                    true
-                                } else if (timeSinceLastUpdate > 900000L) {
-                                    android.util.Log.i("SyncRepository", "Admin Authority / Ghost Cleanup: Deleting unsynced activity ${activity.date} due to cloud deletion.")
-                                    true
-                                } else {
-                                    android.util.Log.i("SyncRepository", "Agent Priority: Preserving actively typed activity ${activity.date} despite cloud deletion.")
-                                    false
-                                }
-                            } else false
-                        }
-
-                        // 4. Reconciliation
-                        val localHousesByNaturalKey = allLocalHousesWithKeys.associateBy { it.naturalKey }
-                        val localActivities = allLocalActivities.groupBy { "${it.date.replace("/", "-")}|${it.agentName.uppercase()}" }
-                        
-                        val localTombstones = tombstoneDao.getAllTombstones(finalAgentName, uid)
-                        val localHouseTombstoneKeys = localTombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE }.map { it.naturalKey }.toSet()
-                        val localActivityTombstoneKeys = localTombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.ACTIVITY }.map { "${it.naturalKey.split("|")[0]}|${finalAgentName.uppercase()}" }.toSet()
-
-                        val housesDelta = cloudHousesWithKeys.filter { 
-                            it.naturalKey !in cloudDeletedHouses && it.naturalKey !in localHouseTombstoneKeys 
-                        }
-                        val activitiesDelta = cloudDayActivities.filter {
-                            val dateKey = "${it.date.replace("/", "-")}|${finalAgentName.uppercase()}"
-                            dateKey !in cloudDeletedActivities && dateKey !in localActivityTombstoneKeys
-                        }
-
-                        runInTransactionWithRetry {
-                            if (housesToDelete.isNotEmpty()) {
-                                val tombstonesToInsert = mutableListOf<com.antigravity.healthagent.data.local.model.Tombstone>()
-                                for (house in housesToDelete) {
-                                    houseDao.deleteHouse(house)
-                                    tombstonesToInsert.add(
-                                        com.antigravity.healthagent.data.local.model.Tombstone(
-                                            type = com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE,
-                                            naturalKey = house.generateNaturalKey(),
-                                            agentName = house.agentName,
-                                            agentUid = house.agentUid,
-                                            dataDate = house.data
-                                        )
-                                    )
-                                }
-                                if (tombstonesToInsert.isNotEmpty()) {
-                                    tombstoneDao.insertTombstones(tombstonesToInsert)
-                                }
-                            }
-
-                            if (activitiesToDelete.isNotEmpty()) {
-                                val tombstonesToInsert = mutableListOf<com.antigravity.healthagent.data.local.model.Tombstone>()
-                                for (activity in activitiesToDelete) {
-                                    dayActivityDao.deleteDayActivity(activity.date, activity.agentName, activity.agentUid)
-                                    tombstonesToInsert.add(
-                                        com.antigravity.healthagent.data.local.model.Tombstone(
-                                            type = com.antigravity.healthagent.data.local.model.TombstoneType.ACTIVITY,
-                                            naturalKey = "${activity.date.replace("/", "-")}|${activity.agentName.uppercase()}",
-                                            agentName = activity.agentName,
-                                            agentUid = activity.agentUid,
-                                            dataDate = activity.date
-                                        )
-                                    )
-                                }
-                                if (tombstonesToInsert.isNotEmpty()) {
-                                    tombstoneDao.insertTombstones(tombstonesToInsert)
-                                }
-                            }
-
-                            val localIdentityMap = if (housesDelta.isNotEmpty()) allLocalHousesWithKeys.groupBy { it.identityKey } else emptyMap()
-
-                            val housesToUpsert = housesDelta.mapNotNull { cloudWrapper ->
-                                val cloudHouse = cloudWrapper.house
-                                val key = cloudWrapper.naturalKey
-                                var existing = localHousesByNaturalKey[key]?.house
+                                val allLocalActivities = dayActivityDao.getAllDayActivities(uid)
                                 
-                                if (existing == null) {
-                                    val identityKey = cloudWrapper.identityKey
-                                    existing = localIdentityMap[identityKey]?.find { it.house.agentUid == cloudHouse.agentUid }?.house
+                                allLocalActivities.filter { it.date.replace("/", "-") in cloudDeletedActivities }.forEach {
+                                    android.util.Log.i("SyncRepository", "Cloud Deletion Sync: Deleting local activity ${it.date} for $finalAgentName")
+                                    runInTransactionWithRetry {
+                                        dayActivityDao.deleteDayActivity(it.date, it.agentUid)
+                                    }
+                                }
+
+                                val activitiesToDelete = allLocalActivities.filter { activity ->
+                                    val dateKey = "${activity.date}|${activity.agentUid}"
                                     
-                                    if (existing == null) {
-                                        val normalizedDate = cloudHouse.data.replace("/", "-")
-                                        val dateKey = "$normalizedDate|$finalAgentName"
-                                        val dayActivity = localActivities[dateKey]?.firstOrNull()
-                                        val cloudActivity = activitiesDelta.find { it.date.replace("/", "-") == normalizedDate }
+                                    if (dateKey in cloudDeletedActivities) {
+                                        val timeSinceLastUpdate = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis() - activity.lastUpdated
+                                        if (activity.isSynced) {
+                                            true
+                                        } else if (timeSinceLastUpdate > 900000L) {
+                                            android.util.Log.i("SyncRepository", "Admin Authority / Ghost Cleanup: Deleting unsynced activity ${activity.date} due to cloud deletion.")
+                                            true
+                                        } else {
+                                            android.util.Log.i("SyncRepository", "Agent Priority: Preserving actively typed activity ${activity.date} despite cloud deletion.")
+                                            false
+                                        }
+                                    } else false
+                                }
+
+                                // 4. Reconciliation
+                                val localHousesByNaturalKey = allLocalHousesWithKeys.associateBy { it.naturalKey }
+                                val localActivities = allLocalActivities.groupBy { "${it.date.replace("/", "-")}|${it.agentUid}" }
+                                
+                                val localTombstones = tombstoneDao.getAllTombstones(uid)
+                                val localHouseTombstoneKeys = localTombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE }.map { it.naturalKey }.toSet()
+                                val localActivityTombstoneKeys = localTombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.ACTIVITY }.map { it.naturalKey }.toSet()
+
+                                val housesDelta = cloudHousesWithKeys.filter { 
+                                    it.naturalKey !in cloudDeletedHouses && it.naturalKey !in localHouseTombstoneKeys 
+                                }
+                                val activitiesDelta = cloudDayActivities.filter {
+                                    val dateKey = "${it.date.replace("/", "-")}|${it.agentUid}"
+                                    dateKey !in cloudDeletedActivities && dateKey !in localActivityTombstoneKeys
+                                }
+
+                                runInTransactionWithRetry {
+                                    if (housesToDelete.isNotEmpty()) {
+                                        val tombstonesToInsert = mutableListOf<com.antigravity.healthagent.data.local.model.Tombstone>()
+                                        for (house in housesToDelete) {
+                                            houseDao.deleteHouse(house)
+                                            tombstonesToInsert.add(
+                                                com.antigravity.healthagent.data.local.model.Tombstone(
+                                                    type = com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE,
+                                                    naturalKey = house.generateNaturalKey(),
+                                                    agentName = house.agentName,
+                                                    agentUid = house.agentUid,
+                                                    dataDate = house.data
+                                                )
+                                            )
+                                        }
+                                        if (tombstonesToInsert.isNotEmpty()) {
+                                            tombstoneDao.insertTombstones(tombstonesToInsert)
+                                        }
+                                    }
+
+                                    if (activitiesToDelete.isNotEmpty()) {
+                                        val tombstonesToInsert = mutableListOf<com.antigravity.healthagent.data.local.model.Tombstone>()
+                                        for (activity in activitiesToDelete) {
+                                            dayActivityDao.deleteDayActivity(activity.date, activity.agentUid)
+                                            tombstonesToInsert.add(
+                                                com.antigravity.healthagent.data.local.model.Tombstone(
+                                                    type = com.antigravity.healthagent.data.local.model.TombstoneType.ACTIVITY,
+                                                    naturalKey = "${activity.date.replace("/", "-")}|${activity.agentUid}",
+                                                    agentName = activity.agentName,
+                                                    agentUid = activity.agentUid,
+                                                    dataDate = activity.date
+                                                )
+                                            )
+                                        }
+                                        if (tombstonesToInsert.isNotEmpty()) {
+                                            tombstoneDao.insertTombstones(tombstonesToInsert)
+                                        }
+                                    }
+
+                                    val localIdentityMap = if (housesDelta.isNotEmpty()) allLocalHousesWithKeys.groupBy { it.identityKey } else emptyMap()
+
+                                    val housesToUpsert = housesDelta.mapNotNull { cloudWrapper ->
+                                        val cloudHouse = cloudWrapper.house
+                                        val key = cloudWrapper.naturalKey
+                                        var existing = localHousesByNaturalKey[key]?.house
                                         
-                                        val isCloudUnlocked = cloudActivity?.isManualUnlock == true
-                                        val isLocallyClosed = dayActivity?.isClosed == true && dayActivity.isManualUnlock != true
+                                        if (existing == null) {
+                                            val identityKey = cloudWrapper.identityKey
+                                            existing = localIdentityMap[identityKey]?.find { it.house.agentUid == cloudHouse.agentUid }?.house
+                                            
+                                            if (existing == null) {
+                                                val normalizedDate = cloudHouse.data.replace("/", "-")
+                                                val dateKey = "$normalizedDate|$uid"
+                                                val dayActivity = localActivities[dateKey]?.firstOrNull()
+                                                val cloudActivity = activitiesDelta.find { it.date.replace("/", "-") == normalizedDate }
+                                                
+                                                val isCloudUnlocked = cloudActivity?.isManualUnlock == true
+                                                val isLocallyClosed = dayActivity?.isClosed == true && dayActivity.isManualUnlock != true
+                                                
+                                                if (isLocallyClosed && !isCloudUnlocked && !cloudHouse.editedByAdmin && !isTargetDifferentUser) {
+                                                    return@mapNotNull null
+                                                }
+                                            }
+                                        }
+
+                                        if (existing != null && !existing.isSynced) {
+                                            val isAdminOverride = cloudHouse.editedByAdmin && !existing.editedByAdmin && 
+                                                (System.currentTimeMillis() - existing.lastUpdated > 120000L)
+
+                                            if (!isAdminOverride) {
+                                                val threshold = com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS
+                                                if (existing.lastUpdated > (cloudHouse.lastUpdated + threshold)) {
+                                                    return@mapNotNull null
+                                                }
+                                            }
+                                        }
+
+                                        cloudHouse.copy(
+                                            id = existing?.id ?: 0,
+                                            agentName = finalAgentName,
+                                            agentUid = uid,
+                                            isSynced = true
+                                        )
+                                    }
+                                    
+                                    val activitiesToUpsert = activitiesDelta.mapNotNull { activity ->
+                                        val normalizedDate = activity.date.replace("/", "-")
+                                        val key = "$normalizedDate|$uid"
+                                        val dateKey = "$normalizedDate|$uid"
                                         
-                                        if (isLocallyClosed && !isCloudUnlocked && !cloudHouse.editedByAdmin && !isTargetDifferentUser) {
+                                        if (dateKey in cloudDeletedActivities) {
                                             return@mapNotNull null
+                                        }
+                                        
+                                        val existing = localActivities[key]?.firstOrNull()
+
+                                        if (existing != null && !existing.isSynced) {
+                                             val isRemoteUnlock = activity.isManualUnlock && !existing.isManualUnlock
+                                             val isAdminOverride = activity.editedByAdmin && !existing.editedByAdmin && 
+                                                (System.currentTimeMillis() - existing.lastUpdated > 120000L)
+
+                                             val threshold = com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS
+                                             
+                                             if (!isRemoteUnlock && !isAdminOverride && existing.lastUpdated > (activity.lastUpdated + threshold)) {
+                                                 return@mapNotNull null
+                                             }
+                                        }
+
+                                        activity.copy(
+                                            date = normalizedDate,
+                                            agentName = finalAgentName,
+                                            agentUid = uid,
+                                            isSynced = true
+                                        )
+                                    }
+
+                                    houseDao.upsertHouses(housesToUpsert)
+                                    dayActivityDao.upsertDayActivities(activitiesToUpsert)
+
+                                    housesToUpsert.forEach { house ->
+                                        tombstoneDao.deleteByNaturalKey(house.generateNaturalKey(), house.agentUid)
+                                    }
+                                    activitiesToUpsert.forEach { activity ->
+                                        tombstoneDao.deleteByNaturalKey("${activity.date.replace("/", "-")}|${activity.agentUid}", activity.agentUid)
+                                    }
+
+                                    housesToUpsert.forEach { pulledHouse ->
+                                        val key = pulledHouse.generateNaturalKey()
+                                        val localMatches = allLocalHousesWithKeys.filter { it.naturalKey == key && it.house.id != pulledHouse.id && it.house.id != 0 }
+                                        localMatches.forEach { match ->
+                                            // DEDUPLICATION SAFETY: Never delete unsynced local records during a pull.
+                                            // This prevents the 'houses removed' regression where pending work is lost.
+                                            if (match.house.isSynced) {
+                                                houseDao.deleteHouse(match.house)
+                                            }
                                         }
                                     }
                                 }
 
-                                if (existing != null && !existing.isSynced) {
-                                    val isAdminOverride = cloudHouse.editedByAdmin && !existing.editedByAdmin && 
-                                        (System.currentTimeMillis() - existing.lastUpdated > 120000L)
-
-                                    if (!isAdminOverride) {
-                                        val threshold = com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS
-                                        if (existing.lastUpdated > (cloudHouse.lastUpdated + threshold)) {
-                                            return@mapNotNull null
-                                        }
-                                    }
-                                }
-
-                                cloudHouse.copy(
-                                    id = existing?.id ?: 0,
-                                    agentName = finalAgentName,
-                                    agentUid = uid,
-                                    isSynced = true
-                                )
-                            }
-                            
-                            val activitiesToUpsert = activitiesDelta.mapNotNull { activity ->
-                                val normalizedDate = activity.date.replace("/", "-")
-                                val key = "$normalizedDate|$finalAgentName"
-                                val dateKey = "$normalizedDate|${finalAgentName.uppercase()}"
-                                
-                                if (dateKey in cloudDeletedActivities) {
-                                    return@mapNotNull null
+                                if (!isTargetDifferentUser) {
+                                    val maxObservedTime = (cloudHouses.map { it.lastUpdated } + cloudDayActivities.map { it.lastUpdated }).maxOrNull() ?: 0L
+                                    val safetyAnchor = serverTime - 600000L 
+                                    settingsManager.setLastSyncTimestamp(maxOf(maxObservedTime, safetyAnchor))
                                 }
                                 
-                                val existing = localActivities[key]?.firstOrNull()
+                                allLocalHousesWithKeys = emptyList()
+                                cloudHousesWithKeys = emptyList()
 
-                                if (existing != null && !existing.isSynced) {
-                                     val isRemoteUnlock = activity.isManualUnlock && !existing.isManualUnlock
-                                     val isAdminOverride = activity.editedByAdmin && !existing.editedByAdmin && 
-                                        (System.currentTimeMillis() - existing.lastUpdated > 120000L)
-
-                                     val threshold = com.antigravity.healthagent.utils.AppConstants.SYNC_CONFLICT_THRESHOLD_MS
-                                     
-                                     if (!isRemoteUnlock && !isAdminOverride && existing.lastUpdated > (activity.lastUpdated + threshold)) {
-                                         return@mapNotNull null
-                                     }
-                                }
-
-                                activity.copy(
-                                    date = normalizedDate,
-                                    agentName = finalAgentName,
-                                    agentUid = uid,
-                                    isSynced = true
-                                )
-                            }
-
-                            houseDao.upsertHouses(housesToUpsert)
-                            dayActivityDao.upsertDayActivities(activitiesToUpsert)
-
-                            housesToUpsert.forEach { house ->
-                                tombstoneDao.deleteByNaturalKey(house.generateNaturalKey(), house.agentName, house.agentUid)
-                            }
-                            activitiesToUpsert.forEach { activity ->
-                                tombstoneDao.deleteByNaturalKey("${activity.date}|${activity.agentName.uppercase()}", activity.agentName, activity.agentUid)
-                            }
-
-                            housesToUpsert.forEach { pulledHouse ->
-                                val key = pulledHouse.generateNaturalKey()
-                                val localMatches = allLocalHousesWithKeys.filter { it.naturalKey == key && it.house.id != pulledHouse.id && it.house.id != 0 }
-                                localMatches.forEach { match ->
-                                    // DEDUPLICATION SAFETY: Never delete unsynced local records during a pull.
-                                    // This prevents the 'houses removed' regression where pending work is lost.
-                                    if (match.house.isSynced) {
-                                        houseDao.deleteHouse(match.house)
-                                    }
-                                }
+                                Result.success(Unit)
+                            } catch (e: Exception) {
+                                android.util.Log.e("SyncRepository", "Pull failed", e)
+                                Result.failure(e)
                             }
                         }
-
-                        if (!isTargetDifferentUser) {
-                            val maxObservedTime = (cloudHouses.map { it.lastUpdated } + cloudDayActivities.map { it.lastUpdated }).maxOrNull() ?: 0L
-                            val safetyAnchor = serverTime - 600000L 
-                            settingsManager.setLastSyncTimestamp(maxOf(maxObservedTime, safetyAnchor))
-                        }
-                        
-                        allLocalHousesWithKeys = emptyList()
-                        cloudHousesWithKeys = emptyList()
-
-                        Result.success(Unit)
-                    } catch (e: Exception) {
-                        android.util.Log.e("SyncRepository", "Pull failed", e)
-                        Result.failure(e)
                     }
-                }
+                } ?: Result.failure(Exception("O download de dados atingiu o tempo limite. Verifique sua conexão ou tente novamente."))
+                return result
             }
-        } ?: Result.failure(Exception("O download de dados atingiu o tempo limite. Verifique sua conexão ou tente novamente."))
-        return result
-    }
 
 
 
@@ -1009,21 +1027,21 @@ class SyncRepositoryImpl @Inject constructor(
         } ?: Result.failure(Exception("Tempo esgotado ao tentar limpar dados locais (Database busy)"))
     }
 
-    override suspend fun clearAgentData(agentName: String, agentUid: String): Result<Unit> {
+    override suspend fun clearAgentData(agentUid: String): Result<Unit> {
         return withTimeoutOrNull(15000L) {
             syncMutex.withLock {
                 try {
                     runInTransactionWithRetry {
-                        houseDao.deleteByAgent(agentName, agentUid)
-                        dayActivityDao.deleteByAgent(agentName, agentUid)
+                        houseDao.deleteByAgent(agentUid)
+                        dayActivityDao.deleteByAgent(agentUid)
                     }
                     Result.success(Unit)
                 } catch (e: Exception) {
-                    android.util.Log.e("SyncRepository", "Surgical Wipe Failed for $agentName: ${e.message}")
+                    android.util.Log.e("SyncRepository", "Surgical Wipe Failed for $agentUid: ${e.message}")
                     Result.failure(e)
                 }
             }
-        } ?: Result.failure(Exception("Tempo esgotado ao tentar limpar dados do agente (Database busy)"))
+        } ?: Result.failure(Exception("Tempo esgotado ao tentar limpar dados locais (Database busy)"))
     }
 
     override suspend fun performDataCleanup(): Result<Unit> {
@@ -1035,39 +1053,35 @@ class SyncRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun restoreLocalData(agentName: String, houses: List<House>, activities: List<DayActivity>, agentUid: String?): Result<Unit> {
+    override suspend fun restoreLocalData(houses: List<House>, activities: List<DayActivity>, agentUid: String?): Result<Unit> {
         val finalUid = agentUid ?: ""
         return try {
             runInTransactionWithRetry {
-                // 1. Identify all dates being restored (normalized)
-                val restoredDatesList = (houses.map { it.data.replace("/", "-") } + activities.map { it.date.replace("/", "-") }).distinct()
-                
-                // 2. Perform Atomic CLEANUP of local data for these dates FIRST
-                // This ensures a true "Full Replace" and prevents casing-based duplicates ("John Doe" vs "JOHN DOE")
-                // while avoiding self-deletion bugs.
+                val restoredDatesList = activities.map { it.date.replace("/", "-") }.distinct()
+
                 if (restoredDatesList.isNotEmpty()) {
-                    android.util.Log.i("SyncRepository", "Restoration: Atomic purge of ${restoredDatesList.size} dates for $agentName")
-                    houseDao.deleteByAgentAndDates(agentName, finalUid, restoredDatesList)
-                    dayActivityDao.deleteByAgentAndDates(agentName, finalUid, restoredDatesList)
+                    android.util.Log.i("SyncRepository", "Restoration: Atomic purge of ${restoredDatesList.size} dates for $finalUid")
+                    houseDao.deleteByAgentAndDates(finalUid, restoredDatesList)
+                    dayActivityDao.deleteByAgentAndDates(finalUid, restoredDatesList)
                 }
 
                 // 3. Normalize and Prepare Data
                 val normalizedActivities = activities.map { 
-                    val finalAgentName = if (it.agentName.isNotBlank()) it.agentName else agentName
                     val normalized = it.copy(
-                        agentName = finalAgentName.uppercase(),
                         agentUid = finalUid,
                         date = it.date.replace("/", "-"),
                         isSynced = false,
                         lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                     ) 
-                    // Clear local tombstone for restored activity
-                    tombstoneDao.deleteByNaturalKey("${normalized.date}|${normalized.agentName}", normalized.agentName, normalized.agentUid)
                     normalized
+                }
+                
+                normalizedActivities.forEach { normalized ->
+                    // Clear local tombstone for restored activity
+                    tombstoneDao.deleteByNaturalKey("${normalized.date}|${normalized.agentUid}", normalized.agentUid)
                 }
 
                 val housesToUpsert = houses.map { restoredHouse ->
-                    val finalAgentName = if (restoredHouse.agentName.isNotBlank()) restoredHouse.agentName else agentName
                     
                     // Healing logic: Default EMPTY to NONE (Aberto) for restored data
                     val finalSituation = if (restoredHouse.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
@@ -1076,7 +1090,6 @@ class SyncRepositoryImpl @Inject constructor(
 
                     val finalHouse = restoredHouse.copy(
                         id = 0, // Reset ID to allow auto-generation and prevent collision with unrelated local records
-                        agentName = finalAgentName.uppercase(),
                         agentUid = finalUid,
                         data = restoredHouse.data.replace("/", "-"),
                         situation = finalSituation,
@@ -1084,10 +1097,12 @@ class SyncRepositoryImpl @Inject constructor(
                         lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                     )
                     
-                    // Clear local tombstone for restored house
-                    tombstoneDao.deleteByNaturalKey(finalHouse.generateNaturalKey(), finalHouse.agentName, finalHouse.agentUid)
-                    
                     finalHouse
+                }
+                
+                housesToUpsert.forEach { finalHouse ->
+                    // Clear local tombstone for restored house
+                    tombstoneDao.deleteByNaturalKey(finalHouse.generateNaturalKey(), finalHouse.agentUid)
                 }
 
                 // 4. Upsert Data
@@ -1256,14 +1271,14 @@ class SyncRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun recordActivityDeletion(date: String, agentName: String, agentUid: String): Result<Unit> {
+    override suspend fun recordActivityDeletion(date: String, agentUid: String): Result<Unit> {
         return try {
             tombstoneDao.insertTombstone(
                 com.antigravity.healthagent.data.local.model.Tombstone(
                     type = com.antigravity.healthagent.data.local.model.TombstoneType.ACTIVITY,
-                    naturalKey = "$date|$agentName",
-                    agentName = agentName,
-                    agentUid = agentUid
+                    naturalKey = "$date|$agentUid",
+                    agentUid = agentUid,
+                    dataDate = date
                 )
             )
             syncSchedulerProvider.get().scheduleSync()

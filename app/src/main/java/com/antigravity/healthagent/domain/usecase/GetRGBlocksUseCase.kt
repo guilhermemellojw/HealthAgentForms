@@ -59,15 +59,24 @@ class GetRGBlocksUseCase @Inject constructor() {
 
         if (initialFiltered.isEmpty()) return emptyList()
 
-        // 2. PRODUCTION-FAITHFUL SORTING
-        // We mirror the Production Screen sorting logic: Date first, then listOrder, then id.
-        // NO DEDUPLICATION: Every visit in the production/bulletin must appear in the RG.
+        // 1. GLOBAL PERCURSO (Unfiltered)
+        // We use the entire database to judge if a block was "left behind" globally.
+        // This ensures that the last block of a bairro closes if the agent moved to another bairro.
+        val globalSortedVisits = allHouses
+            .sortedWith(compareBy(
+                { getTimestamp(it.data) },
+                { it.agentName },
+                { it.listOrder },
+                { it.id }
+            ))
+
+        // 2. FILTERED SORTING (For display)
         val sortedVisits = initialFiltered
             .sortedWith(compareBy(
-                { getTimestamp(it.data) }, // Primary: Production Date
-                { it.agentName },           // Secondary: Group by Agent to avoid interleaving
-                { it.listOrder },           // Tertiary: Manual Percurso Order
-                { it.id }                  // Quaternary: Database ID (Tie-breaker)
+                { getTimestamp(it.data) },
+                { it.agentName },
+                { it.listOrder },
+                { it.id }
             ))
 
         // 3. GROUP BY BLOCK & CREATE SEGMENTS
@@ -83,12 +92,12 @@ class GetRGBlocksUseCase @Inject constructor() {
             val blockHouses = blockGroups[bNum to bSeq] ?: emptyList()
             val lastHouse = blockHouses.lastOrNull()
             
-            // Implicit Conclusion Logic (Boletim Parity):
+            // Implicit Conclusion Logic (Global Parity):
             // A block is concluded if it has a manual flag OR if it was "left behind" 
-            // (i.e., its last house is not the last house of the entire sorted production).
+            // in the global percurso of the agent(s).
             val lastHouseId = lastHouse?.id ?: -1
-            val indexOfLastInGlobal = sortedVisits.indexOfLast { it.id == lastHouseId }
-            val isImplicitlyConcluded = indexOfLastInGlobal != -1 && indexOfLastInGlobal < sortedVisits.lastIndex
+            val indexOfLastInGlobal = globalSortedVisits.indexOfLast { it.id == lastHouseId }
+            val isImplicitlyConcluded = indexOfLastInGlobal != -1 && indexOfLastInGlobal < globalSortedVisits.lastIndex
 
             BlockSegment(
                 blockNumber = bNum,

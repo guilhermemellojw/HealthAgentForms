@@ -305,14 +305,21 @@ fun HomeScreen(
         if (draggingHouse == null) {
             // Stability: Prevent showing empty state by reconciling instead of clearing.
             val target = uiState.houses
-            if (uiHouses.size != target.size) {
-                uiHouses.clear()
-                uiHouses.addAll(target)
-            } else {
-                for (i in uiHouses.indices) {
-                    if (uiHouses[i] != target[i]) {
-                        uiHouses[i] = target[i]
+            
+            // Granular reconciliation to prevent "flash" (clear/addAll) and preserve card stability
+            // 1. Remove items if target is smaller
+            while (uiHouses.size > target.size) {
+                uiHouses.removeAt(uiHouses.size - 1)
+            }
+            
+            // 2. Update existing items or add new ones
+            target.forEachIndexed { index, targetHouse ->
+                if (index < uiHouses.size) {
+                    if (uiHouses[index] != targetHouse) {
+                        uiHouses[index] = targetHouse
                     }
+                } else {
+                    uiHouses.add(targetHouse)
                 }
             }
         }
@@ -360,7 +367,7 @@ fun HomeScreen(
         context,
         { _, year, month, dayOfMonth ->
             val formattedDate = String.format(java.util.Locale("pt", "BR"), "%02d-%02d-%04d", dayOfMonth, month + 1, year)
-            viewModel.updateHeader(uiState.municipality, uiState.neighborhood, "BRR", uiState.zone, uiState.type, formattedDate, uiState.cycle, uiState.activity)
+            viewModel.onDateSelected(formattedDate)
         },
         calendar.get(Calendar.YEAR),
         calendar.get(Calendar.MONTH),
@@ -371,7 +378,7 @@ fun HomeScreen(
     val moveDatePickerDialog = DatePickerDialog(
         context,
         { _, year, month, dayOfMonth ->
-            val formattedDate = String.format(java.util.Locale("pt", "BR"), "%02d/%02d/%04d", dayOfMonth, month + 1, year)
+            val formattedDate = String.format(java.util.Locale("pt", "BR"), "%02d-%02d-%04d", dayOfMonth, month + 1, year)
             houseToMove?.let { 
                 viewModel.moveHouseToDate(it, formattedDate)
                 houseToMove = null 

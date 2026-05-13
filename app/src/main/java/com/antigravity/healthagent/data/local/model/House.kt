@@ -148,4 +148,12 @@ data class House(
             "editedByAdmin" to editedByAdmin
         )
     }
+
+    @get:com.google.firebase.firestore.Exclude
+    val hasAnyTreatment: Boolean 
+        get() = (a1 + a2 + b + c + d1 + d2 + e + eliminados) > 0 || larvicida > 0.0 || comFoco
+
+    @get:com.google.firebase.firestore.Exclude
+    val isAddressComplete: Boolean
+        get() = bairro.isNotBlank() && streetName.isNotBlank() && blockNumber.isNotBlank() && (number.isNotBlank() || sequence > 0)
 }

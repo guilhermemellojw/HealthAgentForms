@@ -12,28 +12,24 @@ class DayManagementUseCase @Inject constructor(
     private val repository: HouseRepository
 ) {
 
-    suspend fun getDayActivity(date: String, agentName: String, agentUid: String? = null): DayActivity? {
-        return repository.getDayActivity(date.replace("/", "-"), agentName.uppercase(), agentUid)
+    suspend fun getDayActivity(date: String, agentUid: String? = null): DayActivity? {
+        return repository.getDayActivity(date.replace("/", "-"), agentUid)
     }
 
-    suspend fun unlockDay(originalDate: String, agentName: String, agentUid: String? = null, force: Boolean = false) {
+    suspend fun unlockDay(originalDate: String, agentUid: String? = null, force: Boolean = false) {
         val date = originalDate.replace("/", "-")
-        val upperName = agentName.uppercase()
-        val activity = repository.getDayActivity(date, upperName, agentUid)
+        val activity = repository.getDayActivity(date, agentUid)
         
-        // Use copy to preserve metadata (lastUpdated, isSynced, isManualUnlock history)
-        // Set isClosed = false AND isManualUnlock = true
+        // Use copy to preserve metadata
         val newActivity = activity?.copy(
             isClosed = false,
             isManualUnlock = true,
-            agentName = upperName,
             agentUid = agentUid ?: ""
         ) ?: DayActivity(
             date = date,
             status = "NORMAL",
             isClosed = false,
             isManualUnlock = true,
-            agentName = upperName,
             agentUid = agentUid ?: ""
         )
         
@@ -41,31 +37,27 @@ class DayManagementUseCase @Inject constructor(
     }
 
 
-    suspend fun closeDay(originalDate: String, agentName: String, agentUid: String? = null, force: Boolean = false) {
+    suspend fun closeDay(originalDate: String, agentUid: String? = null, force: Boolean = false) {
         val date = originalDate.replace("/", "-")
-        val upperName = agentName.uppercase()
-        val activity = repository.getDayActivity(date, upperName, agentUid) ?: DayActivity(date, "NORMAL", false, false, upperName, agentUid ?: "")
+        val activity = repository.getDayActivity(date, agentUid) ?: DayActivity(date, "NORMAL", false, false, "", agentUid ?: "")
         // When closing, reset isManualUnlock to false
-        repository.updateDayActivity(activity.copy(isClosed = true, isManualUnlock = false, agentName = upperName, agentUid = agentUid ?: ""), force)
+        repository.updateDayActivity(activity.copy(isClosed = true, isManualUnlock = false, agentUid = agentUid ?: ""), force)
     }
 
     fun isDateLocked(activity: DayActivity?): Boolean {
         return activity?.isClosed == true
     }
 
-    suspend fun canSafelyUnlock(currentDate: String, agentName: String, agentUid: String? = null, isAdmin: Boolean = false): Boolean {
+    suspend fun canSafelyUnlock(currentDate: String, agentUid: String? = null, isAdmin: Boolean = false): Boolean {
         try {
-            // Admins can ALWAYS unlock without confirmation
             if (isAdmin) return true
             
             val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
             val todayStr = sdf.format(Date())
             
-            // 1. Today is always safe
             if (currentDate == todayStr) return true
             
-            // 2. The last workday is also safe (silent unlock)
-            val lastWorkday = getPreviousWorkDay(agentName, agentUid)
+            val lastWorkday = getPreviousWorkDay(agentUid)
             if (currentDate == lastWorkday) return true
             
         } catch (e: Exception) {
@@ -74,13 +66,13 @@ class DayManagementUseCase @Inject constructor(
         return false
     }
 
-    suspend fun getPreviousWorkDay(agentName: String, agentUid: String?): String? {
+    suspend fun getPreviousWorkDay(agentUid: String?): String? {
         return try {
             val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
             val todayStr = sdf.format(Date())
             val todayObj = sdf.parse(todayStr) ?: return null
             
-            val activities = repository.getAllDayActivitiesOnce(agentName, agentUid ?: "")
+            val activities = repository.getAllDayActivitiesOnce(agentUid ?: "")
             
             // Find the most recent activity that is BEFORE today
             activities
@@ -101,7 +93,7 @@ class DayManagementUseCase @Inject constructor(
         }
     }
 
-    suspend fun getNextBusinessDay(date: String, agentName: String, agentUid: String? = null): String {
+    suspend fun getNextBusinessDay(date: String, agentUid: String? = null): String {
         return try {
             val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
             val cal = Calendar.getInstance()
@@ -121,7 +113,7 @@ class DayManagementUseCase @Inject constructor(
                 
                 // Check if this day has a non-NORMAL status
                 val nextDateStr = sdf.format(cal.time)
-                val activity = repository.getDayActivity(nextDateStr, agentName.uppercase(), agentUid)
+                val activity = repository.getDayActivity(nextDateStr, agentUid)
                 val status = activity?.status ?: "NORMAL"
                 
                 // If status is NORMAL or blank, this is a valid work day

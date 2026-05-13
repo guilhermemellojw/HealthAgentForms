@@ -77,13 +77,15 @@ fun DocumentSnapshot.toDayActivitySafe(uid: String, agentName: String = ""): Day
         val sourceName = if (agentName.isNotBlank()) agentName else (activity.agentName.ifBlank { "" })
         val finalAgentName = normalizeAgentName(sourceName)
         
+        val finalAgentUid = activity.agentUid.ifBlank { uid }
+        
         activity.copy(
             status = finalStatus,
             date = finalDate,
             isClosed = isClosed,
             isManualUnlock = isManualUnlock,
             lastUpdated = lastUpdated, 
-            agentUid = uid, 
+            agentUid = finalAgentUid, 
             agentName = finalAgentName,
             editedByAdmin = this.getBoolean("editedByAdmin") ?: activity.editedByAdmin
         )

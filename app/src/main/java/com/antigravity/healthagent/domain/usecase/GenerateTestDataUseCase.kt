@@ -26,7 +26,7 @@ class GenerateTestDataUseCase @Inject constructor(
             var listOrderCounter = 1000 // Iniciar com um list order alto para ficar no final
             
             // Garantir que a atividade do dia está aberta
-            val currentActivity = repository.getDayActivity(currentDate, agentName, agentUid)
+            val currentActivity = repository.getDayActivity(currentDate, agentUid)
             if (currentActivity == null) {
                 repository.updateDayActivity(
                     DayActivity(
