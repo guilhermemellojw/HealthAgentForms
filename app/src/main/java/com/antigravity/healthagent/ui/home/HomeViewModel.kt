@@ -58,7 +58,8 @@ class HomeViewModel @Inject constructor(
     private val cleanupHistoricalDataUseCase: CleanupHistoricalDataUseCase,
     private val restoreDataUseCase: RestoreDataUseCase,
     private val backupManager: BackupManager,
-    private val generateTestDataUseCase: GenerateTestDataUseCase
+    private val generateTestDataUseCase: GenerateTestDataUseCase,
+    private val cleanupBrokenHousesUseCase: com.antigravity.healthagent.domain.usecase.CleanupBrokenHousesUseCase
 ) : ViewModel() {
 
     // --- State Definitions ---
@@ -1507,6 +1508,13 @@ class HomeViewModel @Inject constructor(
                     
                     if (pushResult.isSuccess) {
                         syncRepository.pruneOldTombstones()
+                        
+                        // SURGICAL CLEANUP: Auto-remove empty/broken houses (zombies) after successful sync
+                        val currentUid = targetUid ?: _currentUserUid.value ?: ""
+                        if (currentUid.isNotBlank()) {
+                            cleanupBrokenHousesUseCase(currentUid)
+                        }
+
                         settingsManager.setLastSyncTimestamp(com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
                         soundManager.vibrateSuccess()
                         _syncStatus.value = SyncStatus(SyncStage.SUCCESS, 1.0f, "Sincronização concluída!")
@@ -1543,6 +1551,12 @@ class HomeViewModel @Inject constructor(
                 _syncStatus.value = SyncStatus(SyncStage.DOWNLOADING, 0.5f, "Baixando dados da nuvem...")
                 val result = syncRepository.pullCloudDataToLocal(targetUid)
                 if (result.isSuccess) {
+                    // SURGICAL CLEANUP: Auto-remove empty/broken houses after download
+                    val currentUid = targetUid ?: _currentUserUid.value ?: ""
+                    if (currentUid.isNotBlank()) {
+                        cleanupBrokenHousesUseCase(currentUid)
+                    }
+
                     settingsManager.setLastSyncTimestamp(com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
                     soundManager.vibrateSuccess()
                     _syncStatus.value = SyncStatus(SyncStage.SUCCESS, 1.0f, "Download concluído!")
