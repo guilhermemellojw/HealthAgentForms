@@ -209,15 +209,15 @@ fun QuarteiroesScreen(
             
             // Render Focus Points (Radar)
             focusHouses.forEach { house ->
-                val lat = house.latitude
-                val lng = house.longitude
+                val lat = house.geo.latitude
+                val lng = house.geo.longitude
                 if (lat != null && lng != null) {
                     val position = LatLng(lat, lng)
                     MarkerComposable(
                         keys = arrayOf(house.id, position),
                         state = remember(house.id) { MarkerState(position = position) },
-                        title = "${house.agentName.substringBefore("@").uppercase()}: FOCO: ${house.streetName.formatStreetName()} nº ${house.number}",
-                        snippet = "Quadra: ${house.blockNumber} | ${house.bairro}"
+                        title = "${house.agentName.substringBefore("@").uppercase()}: FOCO: ${house.address.streetName.formatStreetName()} nº ${house.address.number}",
+                        snippet = "Quadra: ${house.address.blockNumber} | ${house.address.bairro}"
                     ) {
                         Box(
                             modifier = Modifier.size(36.dp),
@@ -325,7 +325,7 @@ fun QuarteiroesScreen(
         ) {
             // Focus Radar Zoom
             if (focusHouses.isNotEmpty()) {
-                val validFocusHouses = focusHouses.filter { it.latitude != null && it.longitude != null }
+                val validFocusHouses = focusHouses.filter { it.geo.latitude != null && it.geo.longitude != null }
                 if (validFocusHouses.isNotEmpty()) {
                     FloatingActionButton(
                         onClick = {
@@ -334,7 +334,7 @@ fun QuarteiroesScreen(
                                     val house = validFocusHouses.first()
                                     cameraPositionState.animate(
                                         update = CameraUpdateFactory.newLatLngZoom(
-                                            LatLng(house.latitude!!, house.longitude!!),
+                                            LatLng(house.geo.latitude!!, house.geo.longitude!!),
                                             18f
                                         ),
                                         durationMs = 800
@@ -342,7 +342,7 @@ fun QuarteiroesScreen(
                                 } else {
                                     val builder = com.google.android.gms.maps.model.LatLngBounds.builder()
                                     validFocusHouses.forEach {
-                                        builder.include(LatLng(it.latitude!!, it.longitude!!))
+                                        builder.include(LatLng(it.geo.latitude!!, it.geo.longitude!!))
                                     }
                                     cameraPositionState.animate(
                                         update = CameraUpdateFactory.newLatLngBounds(builder.build(), 150),

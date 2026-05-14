@@ -24,6 +24,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import com.antigravity.healthagent.domain.model.VisitAddress
 import javax.inject.Provider
 
 @RunWith(RobolectricTestRunner::class)
@@ -83,9 +84,15 @@ class SyncRestoreTest {
             data = "06-05-2026", 
             agentName = agentName, 
             agentUid = agentUid, 
-            blockNumber = "001", 
-            streetName = "RUA TESTE", 
-            number = "10", 
+            address = VisitAddress(
+                number = "10",
+                streetName = "RUA TESTE",
+                blockNumber = "001",
+                blockSequence = "",
+                sequence = 0,
+                complement = 0,
+                bairro = ""
+            ),
             propertyType = PropertyType.R, 
             situation = Situation.NONE,
             lastUpdated = now,
@@ -99,9 +106,15 @@ class SyncRestoreTest {
             data = "06-05-2026", 
             agentName = agentName, 
             agentUid = agentUid, 
-            blockNumber = "001", 
-            streetName = "RUA TESTE", 
-            number = "10", 
+            address = VisitAddress(
+                number = "10",
+                streetName = "RUA TESTE",
+                blockNumber = "001",
+                blockSequence = "",
+                sequence = 0,
+                complement = 0,
+                bairro = ""
+            ),
             propertyType = PropertyType.R, 
             situation = Situation.NONE,
             lastUpdated = now - 60000, // 1 minuto atrás
@@ -139,9 +152,15 @@ class SyncRestoreTest {
             data = "07-05-2026", 
             agentName = agentName, 
             agentUid = agentUid, 
-            blockNumber = "002", 
-            streetName = "RUA TESTE", 
-            number = "20", 
+            address = VisitAddress(
+                number = "20",
+                streetName = "RUA TESTE",
+                blockNumber = "002",
+                blockSequence = "",
+                sequence = 0,
+                complement = 0,
+                bairro = ""
+            ),
             lastUpdated = now,
             isSynced = false,
             editedByAdmin = false
@@ -154,9 +173,15 @@ class SyncRestoreTest {
             data = "07-05-2026", 
             agentName = agentName, 
             agentUid = agentUid, 
-            blockNumber = "002", 
-            streetName = "RUA TESTE", 
-            number = "20", 
+            address = VisitAddress(
+                number = "20",
+                streetName = "RUA TESTE",
+                blockNumber = "002",
+                blockSequence = "",
+                sequence = 0,
+                complement = 0,
+                bairro = ""
+            ),
             lastUpdated = now - 5000, // Mesmo sendo um pouco mais antiga que a local
             isSynced = true,
             editedByAdmin = true // FLAG CRÍTICA
@@ -193,9 +218,15 @@ class SyncRestoreTest {
             data = "08-05-2026", 
             agentName = agentName, 
             agentUid = agentUid, 
-            blockNumber = "003", 
-            streetName = "RUA DELETADA", 
-            number = "30", 
+            address = VisitAddress(
+                number = "30",
+                streetName = "RUA DELETADA",
+                blockNumber = "003",
+                blockSequence = "",
+                sequence = 0,
+                complement = 0,
+                bairro = ""
+            ),
             isSynced = true
         )
         houseDao.insertHouse(localHouse)

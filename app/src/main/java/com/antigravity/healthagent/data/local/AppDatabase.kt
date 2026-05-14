@@ -20,7 +20,7 @@ import com.antigravity.healthagent.data.local.model.Tombstone
         com.antigravity.healthagent.data.local.model.CachedAgent::class,
         com.antigravity.healthagent.data.local.model.CachedAgentSummary::class
     ], 
-    version = 34, 
+    version = 38, 
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -32,6 +32,40 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun agentCacheDao(): com.antigravity.healthagent.data.local.dao.AgentCacheDao
 
     companion object {
+        val MIGRATION_37_38 = object : androidx.room.migration.Migration(37, 38) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Clean Code refactoring: @Embedded TreatmentData, DailyContext, GeoCapture.
+                // No SQLite schema changes — only Room identity hash update.
+                android.util.Log.i("AppDatabase", "MIGRATION 37->38: Clean Code @Embedded refactoring (no schema change).")
+            }
+        }
+
+        val MIGRATION_36_37 = object : androidx.room.migration.Migration(36, 37) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Heal uppercased agentUid from previous nuclear rebuilds.
+                // Since we cannot know the correct mixed-case UID at migration time,
+                // we wipe and let sync re-pull from Firestore with correct UIDs.
+                android.util.Log.w("AppDatabase", "MIGRATION 36->37: Clearing houses with uppercased UIDs for re-sync...")
+                database.execSQL("DELETE FROM houses WHERE agentUid != '' AND agentUid = UPPER(agentUid) AND agentUid != LOWER(agentUid)")
+                android.util.Log.w("AppDatabase", "MIGRATION 36->37: Complete. Sync will restore data with correct UIDs.")
+            }
+        }
+
+        val MIGRATION_35_36 = object : androidx.room.migration.Migration(35, 36) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Fix: agentUid was uppercased by previous nuclear rebuild, breaking
+                // case-sensitive Firebase Auth UID matching. Re-sync will heal the data.
+                performFullNuclearRebuild(database)
+            }
+        }
+
+        val MIGRATION_34_35 = object : androidx.room.migration.Migration(34, 35) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Nuclear rebuild to handle schema change artifacts from VisitAddress refactoring
+                performFullNuclearRebuild(database)
+            }
+        }
+
         val MIGRATION_32_33 = object : androidx.room.migration.Migration(32, 33) {
             override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
                 // Remove visitSegment from the unique index by performing a full nuclear rebuild
@@ -364,7 +398,7 @@ abstract class AppDatabase : RoomDatabase() {
                         MAX(COALESCE(CAST(quarteiraoConcluido AS INTEGER), 0)), 
                         MAX(COALESCE(CAST(listOrder AS INTEGER), 0)), 
                         ${if (includeVisitSegmentInIndex) "COALESCE(CAST(visitSegment AS INTEGER), 0)" else "MAX(COALESCE(CAST(visitSegment AS INTEGER), 0))"}, 
-                        UPPER(TRIM(COALESCE(CAST(agentUid AS TEXT), ''))),
+                        TRIM(COALESCE(CAST(agentUid AS TEXT), '')),
                         MAX(COALESCE(CAST(observation AS TEXT), '')), 
                         MAX(COALESCE(CAST(createdAt AS INTEGER), 0)), 
                         MAX(COALESCE(CAST(isSynced AS INTEGER), 0)), 
@@ -375,7 +409,7 @@ abstract class AppDatabase : RoomDatabase() {
                         MAX(COALESCE(CAST(lastUpdated AS INTEGER), 0))
                     FROM houses
                     GROUP BY 
-                        UPPER(TRIM(COALESCE(CAST(agentUid AS TEXT), ''))),
+                        TRIM(COALESCE(CAST(agentUid AS TEXT), '')),
                         UPPER(TRIM(COALESCE(CAST(agentName AS TEXT), ''))), 
                         REPLACE(COALESCE(CAST(`data` AS TEXT), ''), '/', '-'), 
                         UPPER(TRIM(COALESCE(CAST(blockNumber AS TEXT), ''))), 

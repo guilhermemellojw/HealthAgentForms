@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.antigravity.healthagent.ui.home.SyncStatus
+import androidx.compose.ui.graphics.Color
 import com.antigravity.healthagent.ui.home.SyncStage
 
 @Composable
@@ -24,8 +25,6 @@ fun SyncStatusOverlay(
     syncStatus: SyncStatus,
     isEasyMode: Boolean = false
 ) {
-    // SyncStatusOverlay no longer uses manual rotation state
-
     AnimatedVisibility(
         visible = syncStatus.stage != SyncStage.IDLE,
         enter = slideInVertically { -it } + fadeIn(),
@@ -34,21 +33,15 @@ fun SyncStatusOverlay(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 80.dp) // Below the GlassTopAppBar
-                .padding(horizontal = 24.dp)
-                .zIndex(1000f), // Very high z-index
+                .padding(top = 84.dp) // Below the GlassTopAppBar
+                .padding(horizontal = 32.dp)
+                .zIndex(1000f),
             contentAlignment = Alignment.TopCenter
         ) {
             val bgColor = when (syncStatus.stage) {
-                SyncStage.SUCCESS -> MaterialTheme.colorScheme.tertiary
+                SyncStage.SUCCESS -> Color(0xFF4CAF50)
                 SyncStage.ERROR -> MaterialTheme.colorScheme.error
                 else -> MaterialTheme.colorScheme.primary
-            }
-
-            val contentColor = when (syncStatus.stage) {
-                SyncStage.SUCCESS -> MaterialTheme.colorScheme.onTertiary
-                SyncStage.ERROR -> MaterialTheme.colorScheme.onError
-                else -> MaterialTheme.colorScheme.onPrimary
             }
 
             val icon: ImageVector = when (syncStatus.stage) {
@@ -61,16 +54,16 @@ fun SyncStatusOverlay(
             }
 
             Surface(
-                color = bgColor.copy(alpha = 0.9f),
-                contentColor = contentColor,
-                shape = RoundedCornerShape(32.dp), // Pill shape
-                tonalElevation = 12.dp,
-                shadowElevation = 8.dp,
+                color = if (syncStatus.stage == SyncStage.ERROR) bgColor.copy(alpha = 0.95f) else Color.Black.copy(alpha = 0.8f),
+                contentColor = Color.White,
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 16.dp,
+                shadowElevation = 12.dp,
                 modifier = Modifier.wrapContentSize(),
-                border = androidx.compose.foundation.BorderStroke(1.dp, contentColor.copy(alpha = 0.2f))
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(
@@ -83,41 +76,43 @@ fun SyncStatusOverlay(
 
                         Box(
                             contentAlignment = Alignment.Center,
-                            modifier = Modifier.size(if (isEasyMode) 32.dp else 28.dp)
+                            modifier = Modifier.size(if (isEasyMode) 36.dp else 30.dp)
                         ) {
                             if (isRotating) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.fillMaxSize(),
-                                    strokeWidth = 2.dp,
-                                    color = contentColor,
-                                    trackColor = contentColor.copy(alpha = 0.1f)
+                                    strokeWidth = 3.dp,
+                                    color = Color.White,
+                                    trackColor = Color.White.copy(alpha = 0.2f)
                                 )
                             }
                             
                             Icon(
                                 imageVector = icon,
                                 contentDescription = null,
-                                modifier = Modifier.size(if (isEasyMode) 22.dp else 18.dp)
+                                modifier = Modifier.size(if (isEasyMode) 24.dp else 20.dp),
+                                tint = if (syncStatus.stage == SyncStage.SUCCESS) Color(0xFF4CAF50) else Color.White
                             )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(16.dp))
                         Text(
                             text = syncStatus.message ?: "Sincronizando...",
-                            style = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Black
+                            style = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Black,
+                            color = Color.White
                         )
                     }
                     
                     if (syncStatus.stage != SyncStage.SUCCESS && syncStatus.stage != SyncStage.ERROR) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         LinearProgressIndicator(
                             progress = { syncStatus.progress },
                             modifier = Modifier
-                                .width(120.dp)
-                                .height(if (isEasyMode) 6.dp else 4.dp)
+                                .width(180.dp)
+                                .height(if (isEasyMode) 8.dp else 6.dp)
                                 .clip(RoundedCornerShape(4.dp)),
-                            color = contentColor,
-                            trackColor = contentColor.copy(alpha = 0.3f),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = Color.White.copy(alpha = 0.2f),
                         )
                     }
                 }

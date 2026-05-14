@@ -580,16 +580,13 @@ class SupervisorViewModel @Inject constructor(
                         housesDetails.add(StatDetail(displayName, agent.email, agent.uid, workedCount, agent.photoUrl))
                     }
                     
-                    val fociCount = periodHouses.count { it.comFoco }
+                    val fociCount = periodHouses.count { it.treatment.comFoco }
                     if (fociCount > 0) {
                         totalFoci += fociCount
                         fociDetails.add(StatDetail(displayName, agent.email, agent.uid, fociCount, agent.photoUrl))
                     }
 
-                    val treatedCount = periodHouses.count { house ->
-                        (house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e + house.eliminados) > 0 ||
-                        house.larvicida > 0.0 || house.comFoco
-                    }
+                    val treatedCount = periodHouses.count { it.treatment.hasAnyTreatment }
                     if (treatedCount > 0) {
                         totalTratados += treatedCount
                         tratadosDetails.add(StatDetail(displayName, agent.email, agent.uid, treatedCount, agent.photoUrl))

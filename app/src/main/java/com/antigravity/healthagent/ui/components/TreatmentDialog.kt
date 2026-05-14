@@ -31,20 +31,20 @@ fun TreatmentDialog(
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     // Local state for the form
-    var a1 by remember { androidx.compose.runtime.mutableIntStateOf(house.a1) }
-    var a2 by remember { androidx.compose.runtime.mutableIntStateOf(house.a2) }
-    var b by remember { androidx.compose.runtime.mutableIntStateOf(house.b) }
-    var c by remember { androidx.compose.runtime.mutableIntStateOf(house.c) }
-    var d1 by remember { androidx.compose.runtime.mutableIntStateOf(house.d1) }
-    var d2 by remember { androidx.compose.runtime.mutableIntStateOf(house.d2) }
-    var e by remember { androidx.compose.runtime.mutableIntStateOf(house.e) }
-    var eliminados by remember { androidx.compose.runtime.mutableIntStateOf(house.eliminados) }
-    var larvicida by remember { androidx.compose.runtime.mutableDoubleStateOf(house.larvicida) }
-    var comFoco by remember { mutableStateOf(house.comFoco) }
+    var a1 by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.a1) }
+    var a2 by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.a2) }
+    var b by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.b) }
+    var c by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.c) }
+    var d1 by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.d1) }
+    var d2 by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.d2) }
+    var e by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.e) }
+    var eliminados by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.eliminados) }
+    var larvicida by remember { androidx.compose.runtime.mutableDoubleStateOf(house.treatment.larvicida) }
+    var comFoco by remember { mutableStateOf(house.treatment.comFoco) }
     
-    var latitude by remember { mutableStateOf(house.latitude) }
-    var longitude by remember { mutableStateOf(house.longitude) }
-    var focusCaptureTime by remember { mutableStateOf(house.focusCaptureTime) }
+    var latitude by remember { mutableStateOf(house.geo.latitude) }
+    var longitude by remember { mutableStateOf(house.geo.longitude) }
+    var focusCaptureTime by remember { mutableStateOf(house.geo.focusCaptureTime) }
 
     var showMapPicker by remember { mutableStateOf(false) }
 
@@ -328,9 +328,13 @@ fun TreatmentDialog(
                     onClick = {
                         haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                         onConfirm(house.copy(
-                            a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e, 
-                            eliminados = eliminados, larvicida = larvicida, comFoco = comFoco,
-                            latitude = latitude, longitude = longitude, focusCaptureTime = focusCaptureTime
+                            treatment = com.antigravity.healthagent.domain.model.TreatmentData(
+                                a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e,
+                                eliminados = eliminados, larvicida = larvicida, comFoco = comFoco
+                            ),
+                            geo = com.antigravity.healthagent.domain.model.GeoCapture(
+                                latitude = latitude, longitude = longitude, focusCaptureTime = focusCaptureTime
+                            )
                         ))
                     },
                     modifier = Modifier.weight(1.3f).height(if (isEasyMode) 52.dp else 48.dp),

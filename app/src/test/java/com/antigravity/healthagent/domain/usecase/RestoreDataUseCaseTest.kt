@@ -79,8 +79,8 @@ class RestoreDataUseCaseTest {
         val otherAgentUid = "other-uid"
         
         val houses = listOf(
-            House(agentUid = backupOwnerUid, agentName = "RESTORER", streetName = "MY STREET", data = "15-03-2026"),
-            House(agentUid = otherAgentUid, agentName = "OTHER AGENT", streetName = "OTHER STREET", data = "15-03-2026")
+            House(agentUid = backupOwnerUid, agentName = "RESTORER", address = com.antigravity.healthagent.domain.model.VisitAddress(streetName = "MY STREET"), data = "15-03-2026"),
+            House(agentUid = otherAgentUid, agentName = "OTHER AGENT", address = com.antigravity.healthagent.domain.model.VisitAddress(streetName = "OTHER STREET"), data = "15-03-2026")
         )
         val backupData = BackupData(
             houses = houses, 

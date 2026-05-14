@@ -307,13 +307,10 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        val treatedValue = displayAgent.summary?.treatedCount?.toString() ?: displayAgent.houses.count { house ->
-                            (house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e + house.eliminados) > 0 ||
-                            house.larvicida > 0.0 || house.comFoco
-                        }.toString()
+                        val treatedValue = displayAgent.summary?.treatedCount?.toString() ?: displayAgent.houses.count { it.treatment.hasAnyTreatment }.toString()
                         
-                        val focusValue = displayAgent.summary?.focusCount?.toString() ?: displayAgent.houses.count { it.comFoco }.toString()
-                        val hasFoci = (displayAgent.summary?.focusCount ?: 0) > 0 || displayAgent.houses.any { it.comFoco }
+                        val focusValue = displayAgent.summary?.focusCount?.toString() ?: displayAgent.houses.count { it.treatment.comFoco }.toString()
+                        val hasFoci = (displayAgent.summary?.focusCount ?: 0) > 0 || displayAgent.houses.any { it.treatment.comFoco }
 
                         AgentStatItem(label = "TRATADOS", value = treatedValue, modifier = Modifier.weight(1f))
                         AgentStatItem(

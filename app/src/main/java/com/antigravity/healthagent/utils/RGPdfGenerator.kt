@@ -516,7 +516,7 @@ object RGPdfGenerator {
         var cur = x
         
         // Smart Abbreviation Logic for Street Name
-        val streetNameRaw = house.streetName.formatStreetName()
+        val streetNameRaw = house.address.streetName.formatStreetName()
         
         // 4f padding is used in drawTextInRect (alignLeft adds 4f)
         // We give a bit more safety margin (e.g. 6f)
@@ -526,13 +526,13 @@ object RGPdfGenerator {
 
         drawRect(canvas, line, cur, y, wLog, h); drawTextInRect(canvas, text, streetName, cur, y, wLog, h, alignLeft=true)
         cur += wLog
-        val nText = house.number.ifEmpty { "—" }
+        val nText = house.address.number.ifEmpty { "—" }
         drawRect(canvas, line, cur, y, wN, h); drawCenteredText(canvas, text, nText, cur, y, wN, h)
         cur += wN
-        val seqText = house.sequence.let { if (it == 0) "—" else it.toString() }
+        val seqText = house.address.sequence.let { if (it == 0) "—" else it.toString() }
         drawRect(canvas, line, cur, y, wSeq, h); drawCenteredText(canvas, text, seqText, cur, y, wSeq, h)
         cur += wSeq
-        val compText = house.complement.let { if (it == 0) "—" else it.toString() }
+        val compText = house.address.complement.let { if (it == 0) "—" else it.toString() }
         drawRect(canvas, line, cur, y, wComp, h); drawCenteredText(canvas, text, compText, cur, y, wComp, h)
         cur += wComp
         drawRect(canvas, line, cur, y, wTipo, h); drawCenteredText(canvas, text, house.propertyType.code, cur, y, wTipo, h)

@@ -31,7 +31,7 @@ class GetBoletimSummaryUseCase @Inject constructor() {
                 val dayHousesSorted = groupHouses.sortedWith(compareBy({ it.listOrder }, { it.createdAt }))
                 
                 val blockMap = dayHousesSorted.groupBy { 
-                    Triple(it.bairro.trim().uppercase(), it.blockNumber, it.blockSequence) 
+                    Triple(it.address.bairro.trim().uppercase(), it.address.blockNumber, it.address.blockSequence) 
                 }
                 
                 val completedBlocks = mutableListOf<Triple<String, String, String>>()
@@ -49,7 +49,7 @@ class GetBoletimSummaryUseCase @Inject constructor() {
                 
                 val bairrosWithLocalidadeConcluida = groupHouses
                     .filter { it.localidadeConcluida }
-                    .map { it.bairro }
+                    .map { it.address.bairro }
                     .toSet()
                 
                 val blockSummaries = blockMap.map { (blockKey, blockHouses) ->
@@ -57,12 +57,12 @@ class GetBoletimSummaryUseCase @Inject constructor() {
                     BlockSummary(
                         number = blockKey.second,
                         sequence = blockKey.third,
-                        bairro = firstBH.bairro,
+                        bairro = firstBH.address.bairro,
                         isCompleted = completedBlocks.contains(blockKey),
-                        isLocalidadeConcluded = bairrosWithLocalidadeConcluida.contains(firstBH.bairro),
+                        isLocalidadeConcluded = bairrosWithLocalidadeConcluida.contains(firstBH.address.bairro),
                         totalHouses = blockHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }, // Abertos
                         totalVisits = blockHouses.size, // Total real visits
-                        focos = blockHouses.count { it.comFoco }
+                        focos = blockHouses.count { it.treatment.comFoco }
                     )
                 }.sortedWith(compareBy({ it.isCompleted }, { it.bairro }, { it.number }))
 
@@ -71,17 +71,17 @@ class GetBoletimSummaryUseCase @Inject constructor() {
                     agentName = agentName,
                     totals = DashboardTotals(
                         totalHouses = groupHouses.size,
-                        a1 = groupHouses.sumOf { it.a1 }, a2 = groupHouses.sumOf { it.a2 },
-                        b = groupHouses.sumOf { it.b }, c = groupHouses.sumOf { it.c },
-                        d1 = groupHouses.sumOf { it.d1 }, d2 = groupHouses.sumOf { it.d2 },
-                        e = groupHouses.sumOf { it.e }, eliminados = groupHouses.sumOf { it.eliminados },
-                        larvicida = groupHouses.sumOf { it.larvicida },
+                        a1 = groupHouses.sumOf { it.treatment.a1 }, a2 = groupHouses.sumOf { it.treatment.a2 },
+                        b = groupHouses.sumOf { it.treatment.b }, c = groupHouses.sumOf { it.treatment.c },
+                        d1 = groupHouses.sumOf { it.treatment.d1 }, d2 = groupHouses.sumOf { it.treatment.d2 },
+                        e = groupHouses.sumOf { it.treatment.e }, eliminados = groupHouses.sumOf { it.treatment.eliminados },
+                        larvicida = groupHouses.sumOf { it.treatment.larvicida },
                         worked = groupHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY },
                         recused = groupHouses.count { it.situation == Situation.REC },
                         absent = groupHouses.count { it.situation == Situation.A },
                         closed = groupHouses.count { it.situation == Situation.F },
                         vacant = groupHouses.count { it.situation == Situation.V },
-                        totalFocos = groupHouses.count { it.comFoco },
+                        totalFocos = groupHouses.count { it.treatment.comFoco },
                         totalRegisteredHouses = groupHouses.size
                     ),
                     blocks = blockSummaries,

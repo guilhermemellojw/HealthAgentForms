@@ -21,8 +21,8 @@ fun DocumentSnapshot.toHouseSafe(uid: String, agentName: String = ""): House? {
             else -> house.lastUpdated
         }
 
-        val finalSequence = (this.get("sequence") as? Long)?.toInt() ?: house.sequence
-        val finalComplement = (this.get("complement") as? Long)?.toInt() ?: house.complement
+        val finalSequence = (this.get("sequence") as? Long)?.toInt() ?: house.address.sequence
+        val finalComplement = (this.get("complement") as? Long)?.toInt() ?: house.address.complement
 
         // Identity Preservation: Prioritize fields from the document/object if present.
         // This ensures teamwork data (from other agents) isn't misattributed to the current user.
@@ -30,8 +30,8 @@ fun DocumentSnapshot.toHouseSafe(uid: String, agentName: String = ""): House? {
         val sourceName = house.agentName.ifBlank { agentName }
         val finalAgentName = normalizeAgentName(sourceName)
         
-        val finalMunicipio = if (house.municipio.isBlank()) "BOM JARDIM" else house.municipio
-        val finalBairro = if (house.bairro.isBlank()) "" else house.bairro
+        val finalMunicipio = if (house.context.municipio.isBlank()) "BOM JARDIM" else house.context.municipio
+        val finalBairro = if (house.address.bairro.isBlank()) "" else house.address.bairro
         
         // Healing logic: Default EMPTY to NONE (Aberto) for cloud data
         val finalSituation = if (house.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
@@ -39,15 +39,17 @@ fun DocumentSnapshot.toHouseSafe(uid: String, agentName: String = ""): House? {
         } else house.situation
 
         house.copy(
-            sequence = finalSequence,
-            complement = finalComplement,
+            address = house.address.copy(
+                sequence = finalSequence,
+                complement = finalComplement,
+                bairro = finalBairro
+            ),
             data = house.data.replace("/", "-"),
             createdAt = createdAt, 
             lastUpdated = lastUpdated, 
             agentUid = finalAgentUid, 
             agentName = finalAgentName,
-            municipio = finalMunicipio,
-            bairro = finalBairro,
+            context = house.context.copy(municipio = if (finalMunicipio.isBlank()) "BOM JARDIM" else finalMunicipio),
             situation = finalSituation,
             editedByAdmin = this.getBoolean("editedByAdmin") ?: house.editedByAdmin
         )

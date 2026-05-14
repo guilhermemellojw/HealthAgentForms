@@ -3,9 +3,11 @@ package com.antigravity.healthagent.domain.usecase
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.domain.model.TreatmentData
 import com.antigravity.healthagent.data.repository.HouseRepository
 import com.antigravity.healthagent.data.repository.StreetRepository
 import com.antigravity.healthagent.utils.formatStreetName
+import com.antigravity.healthagent.utils.normalize
 import javax.inject.Inject
 
 class HouseManagementUseCase @Inject constructor(
@@ -23,7 +25,7 @@ class HouseManagementUseCase @Inject constructor(
             val withNewHouse = (dayHouses + sanitized.copy(id = id.toInt())).sortedBy { it.listOrder }
             val recalculated = recalculateVisitSegments(withNewHouse)
             repository.updateHouses(recalculated, force)
-            streetRepository.saveCustomStreet(sanitized.streetName, sanitized.bairro)
+            streetRepository.saveCustomStreet(sanitized.address.streetName, sanitized.address.bairro)
             id
         }
     }
@@ -45,7 +47,7 @@ class HouseManagementUseCase @Inject constructor(
             }
             
             repository.updateHouses(finalUpdated, force)
-            streetRepository.saveCustomStreet(sanitized.streetName, sanitized.bairro)
+            streetRepository.saveCustomStreet(sanitized.address.streetName, sanitized.address.bairro)
         }
     }
 
@@ -81,10 +83,10 @@ class HouseManagementUseCase @Inject constructor(
         
         // 2. Check for localization changes
         val localizationChanged = originalHouse != null && (
-            originalHouse.bairro != sanitized.bairro ||
-            originalHouse.blockNumber != sanitized.blockNumber ||
-            originalHouse.blockSequence != sanitized.blockSequence ||
-            originalHouse.streetName != sanitized.streetName
+            originalHouse.address.bairro != sanitized.address.bairro ||
+            originalHouse.address.blockNumber != sanitized.address.blockNumber ||
+            originalHouse.address.blockSequence != sanitized.address.blockSequence ||
+            originalHouse.address.streetName != sanitized.address.streetName
         )
         
         val sequenceUpdated = if (localizationChanged) {
@@ -93,17 +95,19 @@ class HouseManagementUseCase @Inject constructor(
                     sanitized
                 } else if (h.listOrder > sanitized.listOrder && originalHouse != null) {
                     // Propagate location change ONLY IF the subsequent house has the exact same ORIGINAL address
-                    val matchesOriginal = h.bairro.equals(originalHouse.bairro, ignoreCase = true) &&
-                                        h.blockNumber.equals(originalHouse.blockNumber, ignoreCase = true) &&
-                                        h.blockSequence.equals(originalHouse.blockSequence, ignoreCase = true) &&
-                                        h.streetName.equals(originalHouse.streetName, ignoreCase = true)
+                    val matchesOriginal = h.address.bairro.equals(originalHouse.address.bairro, ignoreCase = true) &&
+                                        h.address.blockNumber.equals(originalHouse.address.blockNumber, ignoreCase = true) &&
+                                        h.address.blockSequence.equals(originalHouse.address.blockSequence, ignoreCase = true) &&
+                                        h.address.streetName.equals(originalHouse.address.streetName, ignoreCase = true)
                     
                     if (matchesOriginal) {
                         val updated = h.copy(
-                            bairro = sanitized.bairro,
-                            blockNumber = sanitized.blockNumber,
-                            blockSequence = sanitized.blockSequence,
-                            streetName = sanitized.streetName,
+                            address = h.address.copy(
+                                bairro = sanitized.address.bairro,
+                                blockNumber = sanitized.address.blockNumber,
+                                blockSequence = sanitized.address.blockSequence,
+                                streetName = sanitized.address.streetName
+                            ),
                             isSynced = false,
                             lastUpdated = System.currentTimeMillis()
                         )
@@ -114,13 +118,13 @@ class HouseManagementUseCase @Inject constructor(
                             other.data == updated.data &&
                             other.agentUid == updated.agentUid &&
                             other.agentName.equals(updated.agentName, ignoreCase = true) &&
-                            other.blockNumber.equals(updated.blockNumber, ignoreCase = true) &&
-                            other.blockSequence.equals(updated.blockSequence, ignoreCase = true) &&
-                            other.streetName.equals(updated.streetName, ignoreCase = true) &&
-                            other.number.equals(updated.number, ignoreCase = true) &&
-                            other.sequence == updated.sequence &&
-                            other.complement == updated.complement &&
-                            other.bairro.equals(updated.bairro, ignoreCase = true) &&
+                            other.address.blockNumber.equals(updated.address.blockNumber, ignoreCase = true) &&
+                            other.address.blockSequence.equals(updated.address.blockSequence, ignoreCase = true) &&
+                            other.address.streetName.equals(updated.address.streetName, ignoreCase = true) &&
+                            other.address.number.equals(updated.address.number, ignoreCase = true) &&
+                            other.address.sequence == updated.address.sequence &&
+                            other.address.complement == updated.address.complement &&
+                            other.address.bairro.equals(updated.address.bairro, ignoreCase = true) &&
                             other.visitSegment == updated.visitSegment
                         }
                         
@@ -169,7 +173,7 @@ class HouseManagementUseCase @Inject constructor(
         var lastStreet = ""
         
         return houses.sortedBy { it.listOrder }.map { house ->
-            val street = house.streetName.formatStreetName()
+            val street = house.address.streetName.formatStreetName()
             if (lastStreet.isNotEmpty() && street != lastStreet) {
                 currentSegment++
             }
@@ -185,13 +189,13 @@ class HouseManagementUseCase @Inject constructor(
     )
 
     private fun sanitizeHouse(house: House): House {
-        val totalDeposits = house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e
-        val hasTreatment = totalDeposits > 0 || house.eliminados > 0 || house.larvicida > 0.0
+        val totalDeposits = house.treatment.totalDeposits
+        val hasTreatment = totalDeposits > 0 || house.treatment.eliminados > 0 || house.treatment.larvicida > 0.0
 
         var situation = house.situation
-        var a1 = house.a1; var a2 = house.a2; var b = house.b; var c = house.c; 
-        var d1 = house.d1; var d2 = house.d2; var e = house.e; var elims = house.eliminados; 
-        var larv = house.larvicida
+        var a1 = house.treatment.a1; var a2 = house.treatment.a2; var b = house.treatment.b; var c = house.treatment.c; 
+        var d1 = house.treatment.d1; var d2 = house.treatment.d2; var e = house.treatment.e; var elims = house.treatment.eliminados; 
+        var larv = house.treatment.larvicida
 
         // Strict Consistency: ONLY Situation.NONE (Worked) can have treatment
         if (situation != Situation.NONE && hasTreatment) {
@@ -199,28 +203,32 @@ class HouseManagementUseCase @Inject constructor(
             a1 = 0; a2 = 0; b = 0; c = 0; d1 = 0; d2 = 0; e = 0; elims = 0; larv = 0.0
         }
 
-        val normalizedNumber = house.number.trim().uppercase() // Don't clear "0" while editing
-        val normalizedSequence = house.sequence
-        val normalizedComplement = house.complement
+        val normalizedNumber = house.address.number.trim().uppercase() // Don't clear "0" while editing
+        val normalizedSequence = house.address.sequence
+        val normalizedComplement = house.address.complement
 
         return house.copy(
-            blockNumber = house.blockNumber.trim().uppercase(),
-            blockSequence = house.blockSequence.trim().uppercase(),
-            streetName = house.streetName.trim().formatStreetName(),
-            number = normalizedNumber,
-            sequence = normalizedSequence,
-            complement = normalizedComplement,
-            municipio = house.municipio.trim().uppercase(),
-            bairro = house.bairro.trim().uppercase(),
-            agentName = house.agentName.trim().uppercase(),
-            categoria = house.categoria.trim().uppercase(),
-            zona = house.zona.trim().uppercase(),
-            ciclo = house.ciclo.trim().uppercase(),
+            address = house.address.copy(
+                blockNumber = house.address.blockNumber.normalize(),
+                blockSequence = house.address.blockSequence.normalize(),
+                streetName = house.address.streetName.trim().formatStreetName(),
+                number = normalizedNumber,
+                sequence = normalizedSequence,
+                complement = normalizedComplement,
+                bairro = house.address.bairro.normalize()
+            ),
+            context = house.context.copy(
+                municipio = house.context.municipio.normalize(),
+                categoria = house.context.categoria.normalize(),
+                zona = house.context.zona.normalize(),
+                ciclo = house.context.ciclo.normalize()
+            ),
+            agentName = house.agentName.normalize(),
             situation = situation,
             data = house.data.replace("/", "-").trim(),
             isSynced = false, // Force re-sync on every local edit
             lastUpdated = if (house.lastUpdated > 0) house.lastUpdated else System.currentTimeMillis(),
-            a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e, eliminados = elims, larvicida = larv
+            treatment = TreatmentData(a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e, eliminados = elims, larvicida = larv)
         )
     }
 
@@ -241,10 +249,10 @@ class HouseManagementUseCase @Inject constructor(
         // Filter by context (Block/Street) REGARDLESS of date to enable cross-day trends.
         // CRITICAL: Filter out incomplete houses (blank numbers) to ensure reliable prediction bounds
         val contextHouses = houses.filter { 
-            val hBlock = it.blockNumber.trim().uppercase()
-            val hStreet = it.streetName.trim().formatStreetName()
+            val hBlock = it.address.blockNumber.trim().uppercase()
+            val hStreet = it.address.streetName.trim().formatStreetName()
             hBlock == blockNumber && hStreet == streetName && 
-            (it.number.isNotBlank() || it.sequence > 0 || it.complement > 0)
+            (it.address.number.isNotBlank() || it.address.sequence > 0 || it.address.complement > 0)
         }.sortedBy { it.listOrder } // CRITICAL: Strict global chronological order by listOrder
 
         if (contextHouses.isEmpty()) {
@@ -261,13 +269,13 @@ class HouseManagementUseCase @Inject constructor(
     ): HousePrediction {
         // Find other houses in the same context (Block/Street) as the reference house
         // Filter out incomplete ones to avoid "empty" baseline predictions
-        val refBlock = referenceHouse.blockNumber.trim().uppercase()
-        val refStreet = referenceHouse.streetName.trim().formatStreetName()
+        val refBlock = referenceHouse.address.blockNumber.trim().uppercase()
+        val refStreet = referenceHouse.address.streetName.trim().formatStreetName()
         val contextHouses = allHouses.filter {
-            val hBlock = it.blockNumber.trim().uppercase()
-            val hStreet = it.streetName.trim().formatStreetName()
+            val hBlock = it.address.blockNumber.trim().uppercase()
+            val hStreet = it.address.streetName.trim().formatStreetName()
             hBlock == refBlock && hStreet == refStreet &&
-            (it.number.isNotBlank() || it.sequence > 0 || it.complement > 0)
+            (it.address.number.isNotBlank() || it.address.sequence > 0 || it.address.complement > 0)
         }.sortedBy { it.listOrder } // CRITICAL: Strict global chronological order by listOrder
 
         return calculatePrediction(contextHouses, referenceHouse)
@@ -277,7 +285,7 @@ class HouseManagementUseCase @Inject constructor(
         contextHouses: List<House>,
         last: House
     ): HousePrediction {
-        val lastNum = last.number.filter { it.isDigit() }.toIntOrNull() ?: 0
+        val lastNum = last.address.number.filter { it.isDigit() }.toIntOrNull() ?: 0
 
         // Use listOrder + data for identity matching instead of object equality.
         val lastIndexInContext = contextHouses.indexOfFirst { it.listOrder == last.listOrder && it.data == last.data }
@@ -285,11 +293,11 @@ class HouseManagementUseCase @Inject constructor(
         // Single House Case: No history to establish a trend. Simple increment.
         if (contextHouses.size < 2 || lastIndexInContext < 1) {
              return when {
-                 last.complement > 0 -> {
-                     HousePrediction(last.number, last.sequence, last.complement + 1, last.propertyType, Situation.NONE)
+                 last.address.complement > 0 -> {
+                     HousePrediction(last.address.number, last.address.sequence, last.address.complement + 1, last.propertyType, Situation.NONE)
                  }
-                 last.sequence > 0 -> {
-                     HousePrediction(last.number, last.sequence + 1, 0, last.propertyType, Situation.NONE)
+                 last.address.sequence > 0 -> {
+                     HousePrediction(last.address.number, last.address.sequence + 1, 0, last.propertyType, Situation.NONE)
                  }
                  lastNum > 0 -> {
                      HousePrediction((lastNum + 1).toString(), 0, 0, last.propertyType, Situation.NONE)
@@ -297,78 +305,74 @@ class HouseManagementUseCase @Inject constructor(
                  else -> {
                      // If number is non-numeric and no sequence exists, START a sequence 
                      // instead of duplicating the number, which causes natural key collisions.
-                     HousePrediction(last.number, 1, 0, last.propertyType, Situation.NONE)
+                     HousePrediction(last.address.number, 1, 0, last.propertyType, Situation.NONE)
                  }
              }
         }
 
         val preLast = contextHouses[lastIndexInContext - 1]
-        val preLastNum = preLast.number.filter { it.isDigit() }.toIntOrNull() ?: 0
+        val preLastNum = preLast.address.number.filter { it.isDigit() }.toIntOrNull() ?: 0
         
         // Priority 1: House Number Trend (only if numbers were different)
-        if (last.number != preLast.number && last.number.isNotBlank()) {
+        if (last.address.number != preLast.address.number && last.address.number.isNotBlank()) {
             val nextNumber = if (lastNum > 0 && preLastNum > 0) {
                 val diff = lastNum - preLastNum
                 val predicted = lastNum + diff
                 val predictedValue = if (predicted >= 1 && predicted != lastNum) predicted else (lastNum + 1)
                 
                 // If both last and preLast had the same non-numeric suffix/prefix, try to preserve it
-                val lastSuffix = last.number.filter { !it.isDigit() }
-                val preLastSuffix = preLast.number.filter { !it.isDigit() }
+                val lastSuffix = last.address.number.filter { !it.isDigit() }
+                val preLastSuffix = preLast.address.number.filter { !it.isDigit() }
                 
                 if (lastSuffix.isNotEmpty() && lastSuffix == preLastSuffix) {
-                    val replaced = last.number.replace(lastNum.toString(), predictedValue.toString())
+                    val replaced = last.address.number.replace(lastNum.toString(), predictedValue.toString())
                     // Safety check: if replace didn't change anything (e.g. complex format), 
                     // fallback to just the number to avoid collision.
-                    if (replaced == last.number) predictedValue.toString() else replaced
+                    if (replaced == last.address.number) predictedValue.toString() else replaced
                 } else {
                     predictedValue.toString()
                 }
             } else {
-                if (lastNum > 0) (lastNum + 1).toString() else last.number
+                if (lastNum > 0) (lastNum + 1).toString() else last.address.number
             }
             
             // CRITICAL: If the predicted number is IDENTICAL to the last one (e.g. non-numeric fallback),
             // start a sequence to avoid immediate natural key collision.
-            return if (nextNumber == last.number) {
+            return if (nextNumber == last.address.number) {
                 HousePrediction(nextNumber, 1, 0, last.propertyType, Situation.NONE)
             } else {
                 HousePrediction(nextNumber, 0, 0, last.propertyType, Situation.NONE)
             }
         }
 
-        // --- SUB-UNIT PRIORITY ---
-        // Numbers are identical, so we are working on sub-units.
-        // We MUST check Complement first, as it is the deepest level.
-        
         // Priority 2: Complement Increment
-        if (last.complement > 0 || last.complement != preLast.complement) {
-            return HousePrediction(last.number, last.sequence, last.complement + 1, last.propertyType, Situation.NONE)
+        if (last.address.complement > 0 || last.address.complement != preLast.address.complement) {
+            return HousePrediction(last.address.number, last.address.sequence, last.address.complement + 1, last.propertyType, Situation.NONE)
         }
-
+ 
         // Priority 3: Sequence Increment
-        if (last.sequence > 0 || last.sequence != preLast.sequence) {
-             return HousePrediction(last.number, last.sequence + 1, 0, last.propertyType, Situation.NONE)
+        if (last.address.sequence > 0 || last.address.sequence != preLast.address.sequence) {
+             return HousePrediction(last.address.number, last.address.sequence + 1, 0, last.propertyType, Situation.NONE)
         }
-
+ 
         // Priority 4: Fallback (Numbers same, no seq/comp trend) -> Start a sequence
-        return HousePrediction(last.number, 1, 0, last.propertyType, Situation.NONE)
+        return HousePrediction(last.address.number, 1, 0, last.propertyType, Situation.NONE)
     }
 
     suspend fun migrateStreetNamesToFormat() {
         val allHouses = repository.getAllHousesSnapshot()
-        val toUpdate = allHouses.filter { it.streetName != it.streetName.formatStreetName() }
+        val toUpdate = allHouses.filter { it.address.streetName != it.address.streetName.formatStreetName() }
         if (toUpdate.isNotEmpty()) {
-            val updated = toUpdate.map { it.copy(streetName = it.streetName.formatStreetName()) }
+            val updated = toUpdate.map { it.copy(address = it.address.copy(streetName = it.address.streetName.formatStreetName())) }
             repository.updateHouses(updated, force = true)
         }
     }
 
     suspend fun migrateBairrosToUppercase() {
         val allHouses = repository.getAllHousesSnapshot()
-        val toUpdate = allHouses.filter { it.bairro != it.bairro.trim().uppercase() }
+        val toUpdate = allHouses.filter { it.address.bairro != it.address.bairro.trim().uppercase() }
         if (toUpdate.isNotEmpty()) {
-            val updated = toUpdate.map { it.copy(bairro = it.bairro.trim().uppercase()) }
+            val updated = toUpdate.map { it.copy(address = it.address.copy(bairro = it.address.bairro.trim().uppercase())) }
             repository.updateHouses(updated, force = true)
         }
     }

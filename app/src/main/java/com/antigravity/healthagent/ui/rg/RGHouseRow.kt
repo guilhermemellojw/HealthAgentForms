@@ -34,7 +34,7 @@ fun RGHouseRow(
         ) {
             // Street Name - Weight 1f to take available space
             Text(
-                text = house.streetName.formatStreetName(),
+                text = house.address.streetName.formatStreetName(),
                 style = basicStyle,
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -45,7 +45,7 @@ fun RGHouseRow(
             
             // Number
             Text(
-                text = if (house.number.isBlank() || house.number == "0") "—" else house.number,
+                text = if (house.address.number.isBlank() || house.address.number == "0") "—" else house.address.number,
                 style = basicStyle,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.width(numberWidth)
@@ -55,7 +55,7 @@ fun RGHouseRow(
             
             // Sequence
             Text(
-                text = if (house.sequence == 0) "—" else house.sequence.toString(),
+                text = if (house.address.sequence == 0) "—" else house.address.sequence.toString(),
                 style = basicStyle,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.width(seqWidth)
@@ -65,7 +65,7 @@ fun RGHouseRow(
             
             // Complement
             Text(
-                text = if (house.complement == 0) "—" else house.complement.toString(),
+                text = if (house.address.complement == 0) "—" else house.address.complement.toString(),
                 style = basicStyle,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.width(seqWidth)

@@ -3,6 +3,7 @@ package com.antigravity.healthagent.data.backup
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.domain.model.VisitAddress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -13,9 +14,11 @@ class HouseIdentityTest {
     fun testNaturalKeyStabilityAcrossTime() {
         val house1 = House(
             id = 1,
-            blockNumber = "10",
-            streetName = "Rua Principal",
-            number = "100",
+            address = VisitAddress(
+                blockNumber = "10",
+                streetName = "Rua Principal",
+                number = "100"
+            ),
             data = "16-03-2026",
             agentName = "GUILHERME",
             createdAt = 1000L,
@@ -34,10 +37,10 @@ class HouseIdentityTest {
     @Test
     fun testStreetSegmentsForReturnTrips() {
         val houses = listOf(
-            House(agentName = "A", data = "16-03-2026", streetName = "Rua 1", number = "1", listOrder = 1),
-            House(agentName = "A", data = "16-03-2026", streetName = "Rua 1", number = "2", listOrder = 2),
-            House(agentName = "A", data = "16-03-2026", streetName = "Rua 2", number = "10", listOrder = 3),
-            House(agentName = "A", data = "16-03-2026", streetName = "Rua 1", number = "3", listOrder = 4) // Return to Rua 1
+            House(agentName = "A", data = "16-03-2026", address = VisitAddress(streetName = "Rua 1", number = "1"), listOrder = 1),
+            House(agentName = "A", data = "16-03-2026", address = VisitAddress(streetName = "Rua 1", number = "2"), listOrder = 2),
+            House(agentName = "A", data = "16-03-2026", address = VisitAddress(streetName = "Rua 2", number = "10"), listOrder = 3),
+            House(agentName = "A", data = "16-03-2026", address = VisitAddress(streetName = "Rua 1", number = "3"), listOrder = 4) // Return to Rua 1
         )
         
         val normalized = recalculateVisitSegments(houses)
@@ -56,8 +59,8 @@ class HouseIdentityTest {
 
     @Test
     fun testDeduplicationWithinSegment() {
-        val house1 = House(agentName = "A", data = "16-03-2026", streetName = "Rua 1", number = "1", listOrder = 1)
-        val house2 = House(agentName = "A", data = "16-03-2026", streetName = "Rua 1", number = "1", listOrder = 2) // Duplicate in same segment
+        val house1 = House(agentName = "A", data = "16-03-2026", address = VisitAddress(streetName = "Rua 1", number = "1"), listOrder = 1)
+        val house2 = House(agentName = "A", data = "16-03-2026", address = VisitAddress(streetName = "Rua 1", number = "1"), listOrder = 2) // Duplicate in same segment
         
         val normalized = recalculateVisitSegments(listOf(house1, house2))
         
@@ -74,7 +77,7 @@ class HouseIdentityTest {
         var currentSegment = 0
         var lastStreet = ""
         return houses.sortedBy { it.listOrder }.map { house ->
-            val street = house.streetName.trim().uppercase()
+            val street = house.address.streetName.trim().uppercase()
             if (lastStreet.isNotEmpty() && street != lastStreet) {
                 currentSegment++
             }

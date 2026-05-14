@@ -57,6 +57,32 @@ fun AdminTimelineScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
                     }
+                },
+                actions = {
+                    var showCleanupConfirm by remember { mutableStateOf(false) }
+                    IconButton(onClick = { showCleanupConfirm = true }) {
+                        Icon(Icons.Default.DeleteSweep, "Limpar Registros Vazios", tint = Color.White)
+                    }
+                    
+                    if (showCleanupConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showCleanupConfirm = false },
+                            title = { Text("Limpeza Cirúrgica") },
+                            text = { Text("Deseja remover permanentemente todos os registros vazios (sem rua, número e quarteirão) para este agente? Isso também os removerá da nuvem na próxima sincronização.") },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        viewModel.performSurgicalCleanup(agentUid)
+                                        showCleanupConfirm = false
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                ) { Text("Limpar Agora") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showCleanupConfirm = false }) { Text("Cancelar") }
+                            }
+                        )
+                    }
                 }
             )
         }

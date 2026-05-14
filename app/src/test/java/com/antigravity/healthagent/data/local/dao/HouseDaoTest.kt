@@ -8,6 +8,7 @@ import com.antigravity.healthagent.data.local.AppDatabase
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.domain.model.VisitAddress
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -59,13 +60,15 @@ class HouseDaoTest {
                         data = data,
                         agentName = agentName,
                         agentUid = agentUid,
-                        bairro = "CENTRO",
-                        blockNumber = blockNumber,
-                        blockSequence = "A",
-                        streetName = "RUA TESTE $blockIndex",
-                        number = houseIndex.toString(),
-                        sequence = 1,
-                        complement = 0,
+                        address = VisitAddress(
+                            bairro = "CENTRO",
+                            blockNumber = blockNumber,
+                            blockSequence = "A",
+                            streetName = "RUA TESTE $blockIndex",
+                            number = houseIndex.toString(),
+                            sequence = 1,
+                            complement = 0
+                        ),
                         propertyType = PropertyType.R,
                         situation = Situation.NONE,
                         visitSegment = 1,
@@ -91,13 +94,13 @@ class HouseDaoTest {
         val clashCount = houseDao.checkClash(
             uid = duplicatedHouse.agentUid,
             date = duplicatedHouse.data,
-            blockNum = duplicatedHouse.blockNumber,
-            blockSeq = duplicatedHouse.blockSequence,
-            street = duplicatedHouse.streetName,
-            num = duplicatedHouse.number,
-            seq = duplicatedHouse.sequence,
-            compl = duplicatedHouse.complement,
-            bairro = duplicatedHouse.bairro,
+            blockNum = duplicatedHouse.address.blockNumber,
+            blockSeq = duplicatedHouse.address.blockSequence,
+            street = duplicatedHouse.address.streetName,
+            num = duplicatedHouse.address.number,
+            seq = duplicatedHouse.address.sequence,
+            compl = duplicatedHouse.address.complement,
+            bairro = duplicatedHouse.address.bairro,
             segment = duplicatedHouse.visitSegment
         )
         

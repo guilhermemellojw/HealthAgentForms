@@ -36,18 +36,18 @@ object HouseUiStateMapper {
             }
         }
 
-        val formattedStreet = house.streetName.formatStreetName().ifBlank { "Sem Logradouro" }
+        val formattedStreet = house.address.streetName.formatStreetName().ifBlank { "Sem Logradouro" }
         
         val treatmentParts = mutableListOf<String>()
-        if (house.a1 > 0) treatmentParts.add("A1: ${house.a1}")
-        if (house.a2 > 0) treatmentParts.add("A2: ${house.a2}")
-        if (house.b > 0) treatmentParts.add("B: ${house.b}")
-        if (house.c > 0) treatmentParts.add("C: ${house.c}")
-        if (house.d1 > 0) treatmentParts.add("D1: ${house.d1}")
-        if (house.d2 > 0) treatmentParts.add("D2: ${house.d2}")
-        if (house.e > 0) treatmentParts.add("E: ${house.e}")
-        if (house.eliminados > 0) treatmentParts.add("Elim: ${house.eliminados}")
-        if (house.larvicida > 0.0) treatmentParts.add("Larv: ${house.larvicida}g")
+        if (house.treatment.a1 > 0) treatmentParts.add("A1: ${house.treatment.a1}")
+        if (house.treatment.a2 > 0) treatmentParts.add("A2: ${house.treatment.a2}")
+        if (house.treatment.b > 0) treatmentParts.add("B: ${house.treatment.b}")
+        if (house.treatment.c > 0) treatmentParts.add("C: ${house.treatment.c}")
+        if (house.treatment.d1 > 0) treatmentParts.add("D1: ${house.treatment.d1}")
+        if (house.treatment.d2 > 0) treatmentParts.add("D2: ${house.treatment.d2}")
+        if (house.treatment.e > 0) treatmentParts.add("E: ${house.treatment.e}")
+        if (house.treatment.eliminados > 0) treatmentParts.add("Elim: ${house.treatment.eliminados}")
+        if (house.treatment.larvicida > 0.0) treatmentParts.add("Larv: ${house.treatment.larvicida}g")
         
         // Resilience: Ensure house has a fallback agentName and healed situation if missing during mapping
         val displayHouse = house.copy(
@@ -56,18 +56,14 @@ object HouseUiStateMapper {
                 com.antigravity.healthagent.data.local.model.Situation.NONE else house.situation
         )
         
-        val idParts = mutableListOf<String>()
-        if (house.number.isNotBlank()) idParts.add(house.number)
-        if (house.sequence > 0) idParts.add("S${house.sequence}")
-        if (house.complement > 0) idParts.add("C${house.complement}")
-        val fullIdDisplay = idParts.joinToString("-").ifBlank { "S/N" }
+        val fullIdDisplay = house.address.fullIdDisplay
 
         return HouseUiState(
             house = displayHouse,
             invalidFields = if (isRecentlyEdited) emptySet() else invalidFields,
             highlightErrors = !isRecentlyEdited && (invalidFields.isNotEmpty() || isDuplicate),
-            isTreated = treatmentParts.isNotEmpty() || house.comFoco,
-            blockDisplay = if (house.blockSequence.isNotBlank()) "${house.blockNumber} / ${house.blockSequence}" else house.blockNumber,
+            isTreated = treatmentParts.isNotEmpty() || house.treatment.comFoco,
+            blockDisplay = if (house.address.blockSequence.isNotBlank()) "${house.address.blockNumber} / ${house.address.blockSequence}" else house.address.blockNumber,
             formattedStreet = formattedStreet,
             treatmentShortSummary = treatmentParts.joinToString(" | "),
             observation = displayHouse.observation,

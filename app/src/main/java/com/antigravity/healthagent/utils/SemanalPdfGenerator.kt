@@ -179,10 +179,10 @@ object SemanalPdfGenerator {
         cursorY += logoH + 30f // Increased slightly to maintain spacing after logo
 
         // Metadata Header
-        val uniqueWeekBairros = allHouses.filter { weekDates.contains(it.data) }.map { it.bairro.trim().uppercase() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }
+        val uniqueWeekBairros = allHouses.filter { weekDates.contains(it.data) }.map { it.address.bairro.trim().uppercase() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }
         val bairro = uniqueWeekBairros.joinToString(" / ")
         val firstHouse = allHouses.find { h -> weekDates.contains(h.data) }
-        val categoria = firstHouse?.categoria ?: "BRR"
+        val categoria = firstHouse?.context?.categoria ?: "BRR"
         // Fix: If no houses (e.g. holiday week), calculate cycle from the first date of the week
         val firstDateOfWeek = weekDates.firstOrNull() ?: ""
         val calculatedCiclo = if (firstDateOfWeek.isNotBlank()) calculateCiclo(firstDateOfWeek) else ""
@@ -381,7 +381,7 @@ object SemanalPdfGenerator {
         val allHousesSorted = allHouses.sortedBy { it.listOrder }
         val blockToLastIndex = mutableMapOf<String, Int>()
         allHousesSorted.forEachIndexed { index, h ->
-            val key = "${h.blockNumber}|${h.blockSequence}|${h.bairro.trim().uppercase()}"
+            val key = "${h.address.blockNumber}|${h.address.blockSequence}|${h.address.bairro.trim().uppercase()}"
             blockToLastIndex[key] = index
         }
 
@@ -393,10 +393,10 @@ object SemanalPdfGenerator {
             val dayHouseIds = dayHouses.map { it.id }.toSet()
             
             // 1. Identify all unique blocks worked on this day
-            val dayBlocks = dayHouses.map { Triple(it.blockNumber, it.blockSequence, it.bairro.trim().uppercase()) }.distinct()
+            val dayBlocks = dayHouses.map { Triple(it.address.blockNumber, it.address.blockSequence, it.address.bairro.trim().uppercase()) }.distinct()
 
             dayBlocks.forEach { (bNum, bSeq, bairro) ->
-                val blockHousesInDay = dayHouses.filter { it.blockNumber == bNum && it.blockSequence == bSeq && it.bairro.trim().uppercase() == bairro }
+                val blockHousesInDay = dayHouses.filter { it.address.blockNumber == bNum && it.address.blockSequence == bSeq && it.address.bairro.trim().uppercase() == bairro }
                 
                 val hasManual = blockHousesInDay.any { it.quarteiraoConcluido }
                 val hasBairroManual = blockHousesInDay.any { it.localidadeConcluida }
@@ -471,17 +471,17 @@ object SemanalPdfGenerator {
                     
                     val workedDayHouses = dayHouses.filter { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
                     val dists = intArrayOf(
-                        workedDayHouses.sumOf { it.a1 },
-                        workedDayHouses.sumOf { it.a2 },
-                        workedDayHouses.sumOf { it.b },
-                        workedDayHouses.sumOf { it.c },
-                        workedDayHouses.sumOf { it.d1 },
-                        workedDayHouses.sumOf { it.d2 },
-                        workedDayHouses.sumOf { it.e }
+                        workedDayHouses.sumOf { it.treatment.a1 },
+                        workedDayHouses.sumOf { it.treatment.a2 },
+                        workedDayHouses.sumOf { it.treatment.b },
+                        workedDayHouses.sumOf { it.treatment.c },
+                        workedDayHouses.sumOf { it.treatment.d1 },
+                        workedDayHouses.sumOf { it.treatment.d2 },
+                        workedDayHouses.sumOf { it.treatment.e }
                     )
                     val dayTotalDeps = dists.sum()
-                    val elim = workedDayHouses.sumOf { it.eliminados }
-                    val larv = workedDayHouses.sumOf { it.larvicida }
+                    val elim = workedDayHouses.sumOf { it.treatment.eliminados }
+                    val larv = workedDayHouses.sumOf { it.treatment.larvicida }
                     
                 // formatDouble and dsh are now shared helpers below
 

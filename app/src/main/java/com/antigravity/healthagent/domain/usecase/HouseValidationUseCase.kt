@@ -43,7 +43,7 @@ class HouseValidationUseCase @Inject constructor() {
                 errorHouseIds.add(house.id)
                 errorDetails.add(ErrorDetail(
                     houseId = house.id,
-                    streetName = house.streetName,
+                    streetName = house.address.streetName,
                     location = getFullAddressDisplay(house),
                     description = "Endereço Duplicado no mesmo segmento (Mova este imóvel ou altere o número)",
                     isDuplicate = true
@@ -60,7 +60,7 @@ class HouseValidationUseCase @Inject constructor() {
                 
                 errorDetails.add(ErrorDetail(
                     houseId = house.id,
-                    streetName = house.streetName,
+                    streetName = house.address.streetName,
                     location = getFullAddressDisplay(house),
                     description = "Pendências: ${missingFields.joinToString(", ")}"
                 ))
@@ -83,11 +83,14 @@ class HouseValidationUseCase @Inject constructor() {
         val invalidFields = mutableListOf<String>()
         
         // Basic identification
-        if (house.number.isBlank() && house.sequence <= 0) invalidFields.add("number")
+        if (!house.address.isComplete) {
+            if (house.address.number.isBlank() && house.address.sequence <= 0) invalidFields.add("number")
+            if (house.address.bairro.isBlank()) invalidFields.add("bairro")
+            if (house.address.streetName.isBlank()) invalidFields.add("streetName")
+            if (house.address.blockNumber.isBlank()) invalidFields.add("blockNumber")
+        }
+        
         if (house.agentName.isBlank()) invalidFields.add("agentName")
-        if (house.bairro.isBlank()) invalidFields.add("bairro")
-        if (house.streetName.isBlank()) invalidFields.add("streetName")
-        if (house.blockNumber.isBlank()) invalidFields.add("blockNumber")
         if (house.propertyType == PropertyType.EMPTY) invalidFields.add("propertyType")
 
         // Treatment logic
@@ -111,21 +114,17 @@ class HouseValidationUseCase @Inject constructor() {
     }
 
     private fun extractTreatmentData(house: House) = TreatmentData(
-        a1 = house.a1, a2 = house.a2, b = house.b, c = house.c,
-        d1 = house.d1, d2 = house.d2, e = house.e,
-        eliminados = house.eliminados, larvicida = house.larvicida, comFoco = house.comFoco
+        a1 = house.treatment.a1, a2 = house.treatment.a2, b = house.treatment.b, c = house.treatment.c,
+        d1 = house.treatment.d1, d2 = house.treatment.d2, e = house.treatment.e,
+        eliminados = house.treatment.eliminados, larvicida = house.treatment.larvicida, comFoco = house.treatment.comFoco
     )
 
     private fun generateIdentitySignature(house: House): String {
-        return "${house.bairro.normalize()}|${house.blockNumber.normalize()}|${house.blockSequence.normalize()}|${house.streetName.formatStreetName()}|${house.number.normalize()}|${house.sequence}|${house.complement}|${house.visitSegment}".uppercase()
+        return "${house.address.generateAddressSignature()}|${house.visitSegment}".uppercase()
     }
 
     private fun getFullAddressDisplay(house: House): String {
-        val parts = mutableListOf<String>()
-        if (house.number.isNotBlank()) parts.add("Nº ${house.number}")
-        if (house.sequence > 0) parts.add("Seq. ${house.sequence}")
-        if (house.complement > 0) parts.add("Comp. ${house.complement}")
-        return parts.joinToString(" - ").ifBlank { "Sem Identificação" }
+        return house.address.fullIdDisplay
     }
 
     private fun getMissingFieldLabels(house: House, invalidFields: List<String>): List<String> {

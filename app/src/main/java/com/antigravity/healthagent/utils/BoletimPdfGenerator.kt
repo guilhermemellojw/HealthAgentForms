@@ -173,11 +173,11 @@ object BoletimPdfGenerator {
         val houseChunks = mutableListOf<List<House>>()
         
         if (sortedHouses.isNotEmpty()) {
-            var currentBairro = sortedHouses.first().bairro.trim().uppercase()
+            var currentBairro = sortedHouses.first().address.bairro.trim().uppercase()
             var currentGroup = mutableListOf<House>()
             
             for (house in sortedHouses) {
-                val houseBairro = house.bairro.trim().uppercase()
+                val houseBairro = house.address.bairro.trim().uppercase()
                 val messageChanged = !houseBairro.equals(currentBairro, ignoreCase = true)
                 val groupFull = currentGroup.size >= 20
                 
@@ -203,17 +203,17 @@ object BoletimPdfGenerator {
         // Block key: blockNumber|blockSequence|bairro
         val blockToLastIndex = mutableMapOf<String, Int>()
         allHouses.forEachIndexed { index, h ->
-            val key = "${h.blockNumber}|${h.blockSequence}|${h.bairro.trim().uppercase()}"
+            val key = "${h.address.blockNumber}|${h.address.blockSequence}|${h.address.bairro.trim().uppercase()}"
             blockToLastIndex[key] = index
         }
 
         val chunkHouseIds = chunk.map { it.id }.toSet()
-        val workedBlocks = chunk.map { Pair(it.blockNumber, it.blockSequence) }.distinct()
-        val currentBairro = chunk.firstOrNull()?.bairro ?: ""
+        val workedBlocks = chunk.map { Pair(it.address.blockNumber, it.address.blockSequence) }.distinct()
+        val currentBairro = chunk.firstOrNull()?.address?.bairro ?: ""
         val completedBlocks = mutableListOf<Pair<String, String>>()
         
         workedBlocks.forEach { (bNum, bSeq) ->
-            val blockHousesInChunk = chunk.filter { it.blockNumber == bNum && it.blockSequence == bSeq }
+            val blockHousesInChunk = chunk.filter { it.address.blockNumber == bNum && it.address.blockSequence == bSeq }
             val hasManual = blockHousesInChunk.any { it.quarteiraoConcluido }
             
             val key = "$bNum|$bSeq|${currentBairro.trim().uppercase()}"
@@ -337,11 +337,11 @@ object BoletimPdfGenerator {
 
         // Data from last house of the chunk (most recent context for this page)
         val lastHouse = houses.lastOrNull() 
-        val municipio = lastHouse?.municipio ?: "Bom Jardim"
-        val bairro = lastHouse?.bairro?.trim()?.uppercase() ?: ""
-        val categoria = lastHouse?.categoria ?: "BRR"
-        val zona = lastHouse?.zona ?: "URB"
-        val tipo = lastHouse?.tipo?.toString() ?: "2"
+        val municipio = lastHouse?.context?.municipio ?: "Bom Jardim"
+        val bairro = lastHouse?.address?.bairro?.trim()?.uppercase() ?: ""
+        val categoria = lastHouse?.context?.categoria ?: "BRR"
+        val zona = lastHouse?.context?.zona ?: "URB"
+        val tipo = lastHouse?.context?.tipo?.toString() ?: "2"
 
         var cx = MARGIN
         // Use uniform Large Font helper or apply inline
@@ -400,7 +400,7 @@ object BoletimPdfGenerator {
         val year = date.split("-").lastOrNull() ?: ""
         val cicloRaw = if (date.isNotBlank()) calculateCicloFromDate(date) else ""
         val ciclo = if (cicloRaw.isNotBlank() && year.isNotBlank()) "$cicloRaw / $year" else cicloRaw
-        val atividadeCode = lastHouse?.atividade?.toString() ?: "4" 
+        val atividadeCode = lastHouse?.context?.atividade?.toString() ?: "4" 
         
         cx = MARGIN
         // Data & Ciclo 
@@ -647,15 +647,15 @@ object BoletimPdfGenerator {
             val house = houses.getOrNull(i)
             var curX = MARGIN
             
-            val blockText = if (house != null && house.blockSequence.isNotBlank()) {
-                "${house.blockNumber} / ${house.blockSequence}"
+            val blockText = if (house != null && house.address.blockSequence.isNotBlank()) {
+                "${house.address.blockNumber} / ${house.address.blockSequence}"
             } else {
-                house?.blockNumber ?: ""
+                house?.address?.blockNumber ?: ""
             }
             drawCell(canvas, linePaint, textPaint, blockText, curX, cursorY, cwQuart, gridRowH); curX += cwQuart
             val logPaint = Paint(textPaint).apply { textSize = 10f } // Increased logradouro font size
             
-            val streetNameRaw = house?.streetName?.formatStreetName() ?: ""
+            val streetNameRaw = house?.address?.streetName?.formatStreetName() ?: ""
 
             
             // Smart Abbreviation Logic
@@ -670,10 +670,10 @@ object BoletimPdfGenerator {
             // Logic to fill with dash if street exists but value is empty
             fun chk(v: String?): String = if (streetName.isNotBlank() && v.isNullOrBlank()) "—" else v ?: ""
             
-            drawCell(canvas, linePaint, textPaint, chk(house?.number), curX, cursorY, cwNum, gridRowH); curX += cwNum
-            val seqStr = house?.sequence?.let { if (it == 0) "" else it.toString() } ?: ""
+            drawCell(canvas, linePaint, textPaint, chk(house?.address?.number), curX, cursorY, cwNum, gridRowH); curX += cwNum
+            val seqStr = house?.address?.sequence?.let { if (it == 0) "" else it.toString() } ?: ""
             drawCell(canvas, linePaint, textPaint, chk(seqStr), curX, cursorY, cwSeq, gridRowH); curX += cwSeq
-            val complStr = house?.complement?.let { if (it == 0) "" else it.toString() } ?: ""
+            val complStr = house?.address?.complement?.let { if (it == 0) "" else it.toString() } ?: ""
             drawCell(canvas, linePaint, textPaint, chk(complStr), curX, cursorY, cwComp, gridRowH); curX += cwComp
             drawCell(canvas, linePaint, textPaint, house?.propertyType?.code ?: "", curX, cursorY, cwTipo, gridRowH); curX += cwTipo
             drawCell(canvas, linePaint, textPaint, "", curX, cursorY, cwHora, gridRowH); curX += cwHora
@@ -691,7 +691,7 @@ object BoletimPdfGenerator {
             drawCell(canvas, linePaint, textPaint, chk(sit), curX, cursorY, cwSit, gridRowH); curX += cwSit
             drawCell(canvas, linePaint, textPaint, "", curX, cursorY, cwDa, gridRowH); curX += cwDa
             
-            val depValues = if (house != null && isOpen) listOf(house.a1, house.a2, house.b, house.c, house.d1, house.d2, house.e) else List(7){0}
+            val depValues = if (house != null && isOpen) listOf(house.treatment.a1, house.treatment.a2, house.treatment.b, house.treatment.c, house.treatment.d1, house.treatment.d2, house.treatment.e) else List(7){0}
             for (v in depValues) {
                 // Determine value logic: if > 0 then number string, else (if street exists -> dash, else empty)
                 val vStr = if (v > 0) v.toString() else ""
@@ -699,7 +699,7 @@ object BoletimPdfGenerator {
                 curX += cwDepSingle
             }
             
-            val elim = if ((house?.eliminados ?: 0) > 0 && isOpen) house?.eliminados.toString() else ""
+            val elim = if ((house?.treatment?.eliminados ?: 0) > 0 && isOpen) house?.treatment?.eliminados.toString() else ""
             drawCell(canvas, linePaint, textPaint, if(isOpen) chk(elim) else "", curX, cursorY, cwElim, gridRowH); curX += cwElim
             
             // Amostras & Insp
@@ -709,10 +709,10 @@ object BoletimPdfGenerator {
             
             // Tratamento: Imov Trat + Larv1 (2 cols) + Larv2 (2 cols) + Adult (2 cols) -> 7 cols total
              // Only show treatment if Open
-             val larvG = if (house != null && (house.larvicida > 0.0) && isOpen) {
-                 if (house.larvicida % 1.0 == 0.0) house.larvicida.toInt().toString() else house.larvicida.toString()
+             val larvG = if (house != null && (house.treatment.larvicida > 0.0) && isOpen) {
+                 if (house.treatment.larvicida % 1.0 == 0.0) house.treatment.larvicida.toInt().toString() else house.treatment.larvicida.toString()
              } else ""
-             val treated = if (larvG.isNotEmpty() || (house != null && house.eliminados > 0)) "X" else "" 
+             val treated = if (larvG.isNotEmpty() || (house != null && house.treatment.eliminados > 0)) "X" else "" 
              
              // Imov. Trat. (X)
              drawCell(canvas, linePaint, textPaint, if(isOpen) chk(treated) else "", curX, cursorY, cwImovTrat, gridRowH); curX += cwImovTrat
@@ -721,13 +721,13 @@ object BoletimPdfGenerator {
              drawCell(canvas, linePaint, textPaint, if(isOpen) chk(larvG) else "", curX, cursorY, cwLarvItem, gridRowH); curX += cwLarvItem
              
              // Qtde dep Trat (Sum of A1..E)
-             val sumDeps = if (house != null && isOpen) (house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e) else 0
+             val sumDeps = if (house != null && isOpen) (house.treatment.a1 + house.treatment.a2 + house.treatment.b + house.treatment.c + house.treatment.d1 + house.treatment.d2 + house.treatment.e) else 0
              val sumDepsStr = if (sumDeps > 0) sumDeps.toString() else ""
              drawCell(canvas, linePaint, textPaint, if(isOpen) chk(sumDepsStr) else "", curX, cursorY, cwLarvItem, gridRowH); curX += cwLarvItem
              
              // Larv 2 & Adult (Merged if Com Foco)
              // User requested to use only the last 2 cells (Adulticida columns) for indication of "Com Foco"
-             if (house != null && house.comFoco && isOpen) {
+             if (house != null && house.treatment.comFoco && isOpen) {
                  // Larv 2 (Empty)
                  drawCell(canvas, linePaint, textPaint, "", curX, cursorY, cwLarvItem, gridRowH); curX += cwLarvItem
                  drawCell(canvas, linePaint, textPaint, "", curX, cursorY, cwLarvItem, gridRowH); curX += cwLarvItem
@@ -758,12 +758,12 @@ object BoletimPdfGenerator {
         val workedHouses = houses.filter { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
         val sums = mutableListOf<Int>()
         if (workedHouses.isNotEmpty()) {
-             sums.add(workedHouses.sumOf { it.a1 }); sums.add(workedHouses.sumOf { it.a2 }); sums.add(workedHouses.sumOf { it.b })
-             sums.add(workedHouses.sumOf { it.c }); sums.add(workedHouses.sumOf { it.d1 }); sums.add(workedHouses.sumOf { it.d2 }); sums.add(workedHouses.sumOf { it.e })
+             sums.add(workedHouses.sumOf { it.treatment.a1 }); sums.add(workedHouses.sumOf { it.treatment.a2 }); sums.add(workedHouses.sumOf { it.treatment.b })
+             sums.add(workedHouses.sumOf { it.treatment.c }); sums.add(workedHouses.sumOf { it.treatment.d1 }); sums.add(workedHouses.sumOf { it.treatment.d2 }); sums.add(workedHouses.sumOf { it.treatment.e })
         } else { repeat(7) { sums.add(0) } }
         sums.forEach { drawCell(canvas, linePaint, boldPaint, it.toString(), totX, cursorY, cwDepSingle, totalRowH); totX += cwDepSingle }
         
-        val totalElim = workedHouses.sumOf { it.eliminados }
+        val totalElim = workedHouses.sumOf { it.treatment.eliminados }
         drawCell(canvas, linePaint, boldPaint, totalElim.toString(), totX, cursorY, cwElim, totalRowH); totX += cwElim
         
         repeat(3) { drawCell(canvas, linePaint, textPaint, "", totX, cursorY, cwAmostraSingle, totalRowH); totX += cwAmostraSingle }
@@ -772,16 +772,16 @@ object BoletimPdfGenerator {
         drawCell(canvas, linePaint, boldPaint, "", totX, cursorY, cwInsp, totalRowH); totX += cwInsp
         
         // Imov. Trat. (Houses where any treatment was performed: larvicide or eliminated items)
-        val totalTreated = workedHouses.count { it.larvicida > 0 || it.eliminados > 0 }
+        val totalTreated = workedHouses.count { it.treatment.larvicida > 0 || it.treatment.eliminados > 0 }
         drawCell(canvas, linePaint, boldPaint, totalTreated.toString(), totX, cursorY, cwImovTrat, totalRowH); totX += cwImovTrat
 
         // Larv 1 Gramas Sum (BPU)
-        val totalLarv = workedHouses.sumOf { it.larvicida }
+        val totalLarv = workedHouses.sumOf { it.treatment.larvicida }
         val totalLarvStr = if (totalLarv % 1.0 == 0.0) totalLarv.toInt().toString() else "%.1f".format(java.util.Locale.US, totalLarv)
         drawCell(canvas, linePaint, boldPaint, totalLarvStr, totX, cursorY, cwLarvItem, totalRowH); totX += cwLarvItem
         
         // Larv 1 Qtde Dep Trat Sum (New)
-        val totalDepsTreated = workedHouses.sumOf { it.a1 + it.a2 + it.b + it.c + it.d1 + it.d2 + it.e }
+        val totalDepsTreated = workedHouses.sumOf { it.treatment.a1 + it.treatment.a2 + it.treatment.b + it.treatment.c + it.treatment.d1 + it.treatment.d2 + it.treatment.e }
         drawCell(canvas, linePaint, boldPaint, totalDepsTreated.toString(), totX, cursorY, cwLarvItem, totalRowH); totX += cwLarvItem
         
         // Remaining 4 columns (Larv2 and Adult)
@@ -908,7 +908,8 @@ object BoletimPdfGenerator {
         // R1: Equipe / Agente
         val hRowB2 = 14f
         drawRectBox(canvas, xB2, cursorY, wLabelB2, hRowB2, "Equipe / Agente", textPaint, null, alignLeft=true)
-        drawRectBox(canvas, xB2 + wLabelB2, cursorY, wValB2, hRowB2, "PMBJ", boldPaint, null)
+        val teamName = chunkHouses.lastOrNull()?.agentName?.uppercase() ?: "PMBJ"
+        drawRectBox(canvas, xB2 + wLabelB2, cursorY, wValB2, hRowB2, teamName, boldPaint, null)
         
         // R2: Data
         val yR1Equipe = cursorY + hRowB2
@@ -1007,7 +1008,7 @@ object BoletimPdfGenerator {
         
         // Table 2: Nº de Imóveis
         val t2Labels = listOf("Trat. Focal", "Trat. Perifocal", "Inspecionados")
-        val tratFocal = chunkHouses.count { it.larvicida > 0 }
+        val tratFocal = chunkHouses.count { it.treatment.larvicida > 0 }
         val inspec = chunkHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
         val t2Vals = listOf(tratFocal.toString(), "—", "—")
         
@@ -1051,13 +1052,13 @@ object BoletimPdfGenerator {
         
         // Table 4: Depósitos
         val t4Labels = listOf("A1", "A2", "B", "C", "D1", "D2", "E", "Total")
-        val sA1 = chunkHouses.sumOf { it.a1 }
-        val sA2 = chunkHouses.sumOf { it.a2 }
-        val sB = chunkHouses.sumOf { it.b }
-        val sC = chunkHouses.sumOf { it.c }
-        val sD1 = chunkHouses.sumOf { it.d1 }
-        val sD2 = chunkHouses.sumOf { it.d2 }
-        val sE = chunkHouses.sumOf { it.e }
+        val sA1 = chunkHouses.sumOf { it.treatment.a1 }
+        val sA2 = chunkHouses.sumOf { it.treatment.a2 }
+        val sB = chunkHouses.sumOf { it.treatment.b }
+        val sC = chunkHouses.sumOf { it.treatment.c }
+        val sD1 = chunkHouses.sumOf { it.treatment.d1 }
+        val sD2 = chunkHouses.sumOf { it.treatment.d2 }
+        val sE = chunkHouses.sumOf { it.treatment.e }
         val sTotal = sA1 + sA2 + sB + sC + sD1 + sD2 + sE
         val t4Vals = listOf(sA1, sA2, sB, sC, sD1, sD2, sE, sTotal)
         
@@ -1103,7 +1104,7 @@ object BoletimPdfGenerator {
         // R2-R4: Eliminados (Labels)
         drawRectBox(canvas, dx, r2Y + hHeader, wElim, hHeader * 3, "Eliminados", smallPaint, null)
         // R5: Eliminados (Value Row)
-        drawRectBox(canvas, dx, r2Y + hHeader * 4, wElim, hData, chunkHouses.sumOf { it.eliminados }.toString(), dataPaint, null)
+        drawRectBox(canvas, dx, r2Y + hHeader * 4, wElim, hData, chunkHouses.sumOf { it.treatment.eliminados }.toString(), dataPaint, null)
         
         dx += wElim
         
@@ -1125,9 +1126,9 @@ object BoletimPdfGenerator {
         }
         
         // R5: Value Row (Data)
-        val larvOutput = chunkHouses.sumOf { it.larvicida }
+        val larvOutput = chunkHouses.sumOf { it.treatment.larvicida }
         val larvOutputStr = if (larvOutput > 0) String.format(java.util.Locale.US, "%.1f", larvOutput).replace(".", ",") else "—"
-        val larvDep = chunkHouses.count { it.larvicida > 0 }
+        val larvDep = chunkHouses.count { it.treatment.larvicida > 0 }
         val larvDepStr = if (larvDep > 0) larvDep.toString() else "—"
         
         tx = dx

@@ -27,7 +27,77 @@ class BackupManagerTest {
         .registerTypeAdapter(java.lang.Long::class.java, SafeLongAdapter())
         .registerTypeAdapter(Double::class.java, SafeDoubleAdapter())
         .registerTypeAdapter(java.lang.Double::class.java, SafeDoubleAdapter())
+        .registerTypeAdapter(House::class.java, BackupManager.HouseDeserializer())
         .create()
+
+    @Test
+    fun testLegacyFlatStructure() {
+        // This JSON simulates the old flat structure where fields are at the root
+        val json = """
+            {
+                "houses": [
+                    {
+                        "a1": 10,
+                        "larvicida": 1.5,
+                        "municipio": "TEST CITY",
+                        "blockNumber": "100",
+                        "streetName": "TEST STREET",
+                        "data": "10-01-2024",
+                        "agentName": "TEST AGENT",
+                        "propertyType": "R",
+                        "situation": "NONE"
+                    }
+                ]
+            }
+        """.trimIndent()
+
+        val backupData = parseNew(json)
+        val house = backupData.houses[0]
+
+        // Assert nested objects are correctly populated from flat fields
+        assertEquals(10, house.treatment.a1)
+        assertEquals(1.5, house.treatment.larvicida, 0.001)
+        assertEquals("TEST CITY", house.context.municipio)
+        assertEquals("100", house.address.blockNumber)
+        assertEquals("TEST STREET", house.address.streetName)
+    }
+
+    @Test
+    fun testPortugueseLegacyNames() {
+        // This JSON simulates older Portuguese field names used in early versions
+        val json = """
+            {
+                "houses": [
+                    {
+                        "quarteirao": "42",
+                        "logradouro": "RUA DAS FLORES",
+                        "numero": "123",
+                        "localidade": "BAIRRO NOVO",
+                        "situacao": "V",
+                        "tipo_imovel": "TB",
+                        "data_visita": "12-05-2026",
+                        "agente": "MARCOS AGENTE",
+                        "foco": 1,
+                        "gramas": 10.5
+                    }
+                ]
+            }
+        """.trimIndent()
+
+        val backupData = parseNew(json)
+        val house = backupData.houses[0]
+
+        assertEquals("42", house.address.blockNumber)
+        assertEquals("RUA DAS FLORES", house.address.streetName)
+        assertEquals("123", house.address.number)
+        assertEquals("BAIRRO NOVO", house.address.bairro)
+        assertEquals(com.antigravity.healthagent.data.local.model.Situation.V, house.situation)
+        assertEquals(com.antigravity.healthagent.data.local.model.PropertyType.TB, house.propertyType)
+        assertEquals("12-05-2026", house.data)
+        assertEquals("MARCOS AGENTE", house.agentName)
+        assertEquals(true, house.treatment.comFoco)
+        assertEquals(10.5, house.treatment.larvicida, 0.001)
+    }
 
     // --- Custom Type Adapters for Legacy Compatibility (Copied from BackupManager for testing) ---
 
@@ -97,14 +167,19 @@ class BackupManagerTest {
         val json = """
             {
                 "houses": [
-                    {"blockNumber": "1", "streetName": "Rua A", "data": "10-01-2024", "comFoco": 1, "isSynced": 0}
+                    {
+                        "address": {"blockNumber": "1", "streetName": "Rua A", "bairro": "CENTRO"},
+                        "data": "10-01-2024", 
+                        "comFoco": 1, 
+                        "isSynced": 0
+                    }
                 ]
             }
         """.trimIndent()
         
         val backupData = parseNew(json)
         val house = backupData.houses[0]
-        assertEquals(true, house.comFoco)
+        assertEquals(true, house.treatment.comFoco)
         assertEquals(false, house.isSynced)
     }
 
@@ -113,16 +188,20 @@ class BackupManagerTest {
         val json = """
             {
                 "houses": [
-                    {"blockNumber": "1", "streetName": "Rua A", "data": "10-01-2024", "sequence": "", "complement": "", "larvicida": ""}
+                    {
+                        "address": {"blockNumber": "1", "streetName": "Rua A", "sequence": "", "complement": ""},
+                        "data": "10-01-2024", 
+                        "larvicida": ""
+                    }
                 ]
             }
         """.trimIndent()
         
         val backupData = parseNew(json)
         val house = backupData.houses[0]
-        assertEquals(0, house.sequence)
-        assertEquals(0, house.complement)
-        assertEquals(0.0, house.larvicida, 0.001)
+        assertEquals(0, house.address.sequence)
+        assertEquals(0, house.address.complement)
+        assertEquals(0.0, house.treatment.larvicida, 0.001)
     }
 
     @Test
@@ -130,15 +209,20 @@ class BackupManagerTest {
         val json = """
             {
                 "houses": [
-                    {"blockNumber": "1", "streetName": "Rua A", "data": "10-01-2024", "latitude": "NaN", "longitude": "Infinity"}
+                    {
+                        "address": {"blockNumber": "1", "streetName": "Rua A"},
+                        "data": "10-01-2024", 
+                        "latitude": "NaN", 
+                        "longitude": "Infinity"
+                    }
                 ]
             }
         """.trimIndent()
         
         val backupData = parseNew(json)
         val house = backupData.houses[0]
-        assertEquals(0.0, house.latitude ?: 0.0, 0.001)
-        assertEquals(0.0, house.longitude ?: 0.0, 0.001)
+        assertEquals(0.0, house.geo.latitude ?: 0.0, 0.001)
+        assertEquals(0.0, house.geo.longitude ?: 0.0, 0.001)
     }
 
     @Test
@@ -146,7 +230,10 @@ class BackupManagerTest {
         val json = """
             {
                 "houses": [
-                    {"blockNumber": "1", "streetName": "Rua A", "data": "10-01-2024"}
+                    {
+                        "address": {"blockNumber": "1", "streetName": "Rua A"},
+                        "data": "10-01-2024"
+                    }
                 ],
                 "dayActivities": [
                     {"date": "10-01-2024", "status": "NORMAL"}
@@ -191,14 +278,18 @@ class BackupManagerTest {
             house.copy(
                 agentName = house.agentName?.trim()?.uppercase() ?: "",
                 agentUid = safeAgentUid,
-                municipio = house.municipio?.trim() ?: "BOM JARDIM",
-                bairro = house.bairro?.trim()?.uppercase() ?: "",
-                blockNumber = house.blockNumber?.trim() ?: "",
-                blockSequence = house.blockSequence?.trim() ?: "",
-                streetName = house.streetName?.trim() ?: "",
-                number = if (house.number?.trim() == "0") "" else house.number?.trim() ?: "",
-                sequence = house.sequence,
-                complement = house.complement,
+                context = house.context.copy(
+                    municipio = house.context.municipio?.trim() ?: "BOM JARDIM"
+                ),
+                address = house.address.copy(
+                    bairro = house.address.bairro?.trim()?.uppercase() ?: "",
+                    blockNumber = house.address.blockNumber?.trim() ?: "",
+                    blockSequence = house.address.blockSequence?.trim() ?: "",
+                    streetName = house.address.streetName?.trim() ?: "",
+                    number = if (house.address.number?.trim() == "0") "" else house.address.number?.trim() ?: "",
+                    sequence = house.address.sequence,
+                    complement = house.address.complement
+                ),
                 data = house.data?.trim() ?: "",
                 situation = finalSituation
             )

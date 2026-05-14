@@ -20,7 +20,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.ui.components.SyncStatusOverlay
 import com.antigravity.healthagent.ui.components.HouseRowItem
+import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
+import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.home.HomeViewModel
+import androidx.compose.ui.zIndex
 import android.widget.Toast
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -134,8 +137,7 @@ fun RGScreen(
             isRefreshing = isSyncing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
-            modifier = Modifier.padding(paddingValues).fillMaxSize(),
-            indicator = { /* Hide simple circle */ }
+            modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())

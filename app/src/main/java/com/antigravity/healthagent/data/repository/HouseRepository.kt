@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.Flow
 
 interface HouseRepository {
     fun getAllHouses(agentUid: String): Flow<List<House>>
+    fun getPersonalHousesFlow(agentUid: String, agentName: String): Flow<List<House>>
     val allActivitiesFlow: Flow<List<DayActivity>>
     fun getDistinctAgentNames(): Flow<List<String>>
     fun getAllHousesOrderedByBlock(agentUid: String): Flow<List<House>>

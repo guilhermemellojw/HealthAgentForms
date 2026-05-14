@@ -42,6 +42,8 @@ class HouseRepositoryImpl @Inject constructor(
 
     override fun getAllHouses(agentUid: String): Flow<List<House>> = houseDao.getAllHouses(agentUid)
 
+    override fun getPersonalHousesFlow(agentUid: String, agentName: String): Flow<List<House>> = houseDao.getHousesByAgentWithOrphans(agentUid, agentName)
+
     override fun getDistinctAgentNames(): Flow<List<String>> {
         return houseDao.getDistinctAgentNames()
     }
@@ -61,8 +63,23 @@ class HouseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getHousesByAgentSnapshot(agentUid: String): List<House> = houseDao.getHousesByAgentSnapshot(agentUid)
-    override suspend fun getLastHouseForAgent(agentUid: String): House? = houseDao.getLastHouseForAgent(agentUid)
-    override suspend fun getLastHouseForAgentOnDate(agentUid: String, date: String): House? = houseDao.getLastHouseForAgentOnDate(agentUid, date)
+    override suspend fun getLastHouseForAgent(agentUid: String): House? {
+        val house = houseDao.getLastHouseForAgent(agentUid)
+        return house?.let { healOrphanHouse(it, agentUid) }
+    }
+
+    override suspend fun getLastHouseForAgentOnDate(agentUid: String, date: String): House? {
+        val house = houseDao.getLastHouseForAgentOnDate(agentUid, date)
+        return house?.let { healOrphanHouse(it, agentUid) }
+    }
+    
+    private fun healOrphanHouse(house: House, correctUid: String): House {
+        if (house.agentUid.isBlank() && correctUid.isNotBlank()) {
+            android.util.Log.i("HouseRepository", "Healing orphan house ${house.id} with UID $correctUid")
+            return house.copy(agentUid = correctUid, isSynced = false)
+        }
+        return house
+    }
 
     override fun getAllHousesSnapshotFlow(): Flow<List<House>> {
         return houseDao.getAllHousesSnapshotFlow()
@@ -79,17 +96,17 @@ class HouseRepositoryImpl @Inject constructor(
                 excludeId = 0,
                 date = house.data,
                 agentUid = house.agentUid,
-                blockNumber = house.blockNumber,
-                blockSequence = house.blockSequence,
-                streetName = house.streetName,
-                number = house.number,
-                sequence = house.sequence,
-                complement = house.complement,
-                bairro = house.bairro,
+                blockNumber = house.address.blockNumber,
+                blockSequence = house.address.blockSequence,
+                streetName = house.address.streetName,
+                number = house.address.number,
+                sequence = house.address.sequence,
+                complement = house.address.complement,
+                bairro = house.address.bairro,
                 visitSegment = house.visitSegment
             )
             if (clashCount > 0 && !force) {
-                throw IllegalStateException("Este endereço (${house.streetName}, ${house.number}) já existe neste bairro/quarteirão para este dia.")
+                throw IllegalStateException("Este endereço (${house.address.streetName}, ${house.address.number}) já existe neste bairro/quarteirão para este dia.")
             }
 
             // Healing logic: Prevent EMPTY from being stored locally
@@ -123,13 +140,13 @@ class HouseRepositoryImpl @Inject constructor(
                 excludeId = house.id,
                 date = house.data,
                 agentUid = house.agentUid,
-                blockNumber = house.blockNumber,
-                blockSequence = house.blockSequence,
-                streetName = house.streetName,
-                number = house.number,
-                sequence = house.sequence,
-                complement = house.complement,
-                bairro = house.bairro,
+                blockNumber = house.address.blockNumber,
+                blockSequence = house.address.blockSequence,
+                streetName = house.address.streetName,
+                number = house.address.number,
+                sequence = house.address.sequence,
+                complement = house.address.complement,
+                bairro = house.address.bairro,
                 visitSegment = house.visitSegment
             )
             if (clashCount > 0) {
@@ -178,13 +195,13 @@ class HouseRepositoryImpl @Inject constructor(
                     excludeId = house.id,
                     date = house.data,
                     agentUid = house.agentUid,
-                    blockNumber = house.blockNumber,
-                    blockSequence = house.blockSequence,
-                    streetName = house.streetName,
-                    number = house.number,
-                    sequence = house.sequence,
-                    complement = house.complement,
-                    bairro = house.bairro,
+                    blockNumber = house.address.blockNumber,
+                    blockSequence = house.address.blockSequence,
+                    streetName = house.address.streetName,
+                    number = house.address.number,
+                    sequence = house.address.sequence,
+                    complement = house.address.complement,
+                    bairro = house.address.bairro,
                     visitSegment = house.visitSegment
                 )
                 // We log it but don't throw, letting the UI validation (Red Highlight) handle the user notification.
@@ -467,17 +484,28 @@ class HouseRepositoryImpl @Inject constructor(
         if (targetUid.isBlank()) return
         runInTransactionWithRetry {
             try {
-                // 1. Standardize Houses (Lenient/Aggressive migration)
+                // 1. Standardize Houses (Smarter Merge Migration)
                 val allOrphans = houseDao.getAllOrphanHouses()
+                val targetHouses = houseDao.getHousesByAgentSnapshot(targetUid)
                 
                 allOrphans.forEach { house ->
-                        val hasClash = houseDao.checkClash(
-                            targetUid, house.data, house.blockNumber, house.blockSequence, 
-                            house.streetName, house.number, house.sequence, house.complement, house.bairro, house.visitSegment
-                        ) > 0
+                        // Match by Natural Identity (Includes Segment)
+                        val naturalKey = house.generateNaturalKey().replaceFirst("_", "${targetUid}_")
+                        val conflict = targetHouses.find { it.generateNaturalKey() == naturalKey }
                         
-                        if (hasClash) {
-                            houseDao.deleteHouseById(house.id)
+                        if (conflict != null) {
+                            // MERGE LOGIC: Prefer the house that has actual fieldwork data (treatment)
+                            val localHasWork = house.treatment.a1 > 0 || house.treatment.a2 > 0 || house.treatment.comFoco || house.observation.isNotBlank()
+                            val conflictHasWork = conflict.treatment.a1 > 0 || conflict.treatment.a2 > 0 || conflict.treatment.comFoco || conflict.observation.isNotBlank()
+                            
+                            if (localHasWork && !conflictHasWork) {
+                                android.util.Log.i("HouseRepository", "Migration: Overwriting empty cloud skeleton with local production for ${house.id}")
+                                houseDao.deleteHouse(conflict)
+                                houseDao.updateHouseIdentity(house.id, targetUid, agentName)
+                            } else {
+                                // Conflict already has work or local is also empty
+                                houseDao.deleteHouseById(house.id)
+                            }
                         } else {
                             houseDao.updateHouseIdentity(house.id, targetUid, agentName)
                         }
@@ -514,15 +542,19 @@ class HouseRepositoryImpl @Inject constructor(
             val allHouses = getAllHousesOnce(agentUid)
             if (allHouses.isEmpty()) return@runInTransactionWithRetry
 
+            // RESTORED: Group by NaturalKey to respect different visitSegments.
+            // Since we now have unified normalization, this will safely unify 
+            // exact duplicates while preserving legitimate multi-turn visits.
             val groups = allHouses.groupBy { it.generateNaturalKey() }
             val toDelete = mutableListOf<House>()
 
             groups.forEach { (_, matches) ->
                 if (matches.size > 1) {
-                    // Keep the best record: prioritize synced, then most recent
+                    // Keep the best record: prioritize synced, then most recent, then highest listOrder
                     val kept = matches.sortedWith(
                         compareByDescending<House> { it.isSynced }
                             .thenByDescending { it.lastUpdated }
+                            .thenByDescending { it.listOrder }
                     ).first()
                     
                     matches.forEach { house ->
@@ -559,20 +591,14 @@ class HouseRepositoryImpl @Inject constructor(
                 toDelete.forEach { houseDao.deleteHouse(it) }
             }
 
-            // Also clean Activities (Identity is date|agentName, but here we check for same date in different UIDs)
-            val allActivities = dayActivityDao.getAllDayActivitiesSnapshot()
-            val inspectedAct = allActivities.filter { it.agentUid == inspectedUid }
-            val adminAct = allActivities.filter { it.agentUid == adminUid }
-            
-            val adminDates = adminAct.map { it.date }.toSet()
-            val actToDelete = inspectedAct.filter { it.date in adminDates }
-            
-            if (actToDelete.isNotEmpty()) {
-                android.util.Log.i("HouseRepository", "Surgical clean: removing ${actToDelete.size} activity dates from $inspectedUid")
-                actToDelete.forEach { dayActivityDao.deleteDayActivity(it.date, it.agentUid) }
-            }
+            // Also clean Activities (Surgical: only if the activity is truly duplicate in identity)
+            // Note: Since Identity is date|agentName, and adminUid != inspectedUid, 
+            // they can only clash if agentName is the same, which we already handle 
+            // in the houses section. Activities per-se are isolated by UID.
+            // WE REMOVE the date-based collision check as it was purging legitimate 
+            // concurrent production of different agents on the same day.
 
-            if (toDelete.isNotEmpty() || actToDelete.isNotEmpty()) {
+            if (toDelete.isNotEmpty()) {
                 syncSchedulerProvider.get().scheduleSync()
             }
         }

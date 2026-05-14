@@ -451,8 +451,8 @@ class AuthRepositoryImpl @Inject constructor(
                 val misattributedHouses = houseDao.getHousesToReclaim(user.email ?: "", emailPrefix, user.uid, properName)
                 for (house in misattributedHouses) {
                     val hasClash = houseDao.checkClash(
-                        user.uid, house.data, house.blockNumber, house.blockSequence, 
-                        house.streetName, house.number, house.sequence, house.complement, house.bairro, house.visitSegment
+                        user.uid, house.data, house.address.blockNumber, house.address.blockSequence, 
+                        house.address.streetName, house.address.number, house.address.sequence, house.address.complement, house.address.bairro, house.visitSegment
                     ) > 0
                     
                     if (hasClash) {
@@ -640,8 +640,8 @@ class AuthRepositoryImpl @Inject constructor(
             val housesToReclaim = houseDao.getHousesToReclaim(email, emailPrefix, targetUid, properName)
             for (house in housesToReclaim) {
                 val hasClash = houseDao.checkClash(
-                    targetUid, house.data, house.blockNumber, house.blockSequence, 
-                    house.streetName, house.number, house.sequence, house.complement, house.bairro, house.visitSegment
+                    targetUid, house.data, house.address.blockNumber, house.address.blockSequence, 
+                    house.address.streetName, house.address.number, house.address.sequence, house.address.complement, house.address.bairro, house.visitSegment
                 ) > 0
                 
                 if (hasClash) {

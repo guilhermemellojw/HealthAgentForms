@@ -8,7 +8,8 @@ import javax.inject.Inject
 class RestoreFromTimelineUseCase @Inject constructor(
     private val backupRepository: BackupRepository,
     private val syncRepository: SyncRepository,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val cleanupBrokenHousesUseCase: CleanupBrokenHousesUseCase
 ) {
     suspend operator fun invoke(agentUid: String, storagePath: String): Result<Unit> {
         return try {
@@ -35,6 +36,9 @@ class RestoreFromTimelineUseCase @Inject constructor(
             )
 
             if (syncResult.isSuccess) {
+                // 5. AUTOMATIC CLEANUP: Remove any "broken" houses (ghost records)
+                cleanupBrokenHousesUseCase(agentUid)
+                
                 Result.success(Unit)
             } else {
                 Result.failure(syncResult.exceptionOrNull() ?: Exception("Failed to sync restored data to cloud"))

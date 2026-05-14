@@ -26,10 +26,10 @@ class StreetRepository @Inject constructor(
 
         return combine(housesFlow, customStreetsFlow) { houses, customStreets ->
             val historicalStreets = if (bairro.isBlank()) {
-                houses.map { it.streetName }
+                houses.map { it.address.streetName }
             } else {
-                houses.filter { it.bairro.equals(bairro, ignoreCase = true) }
-                    .map { it.streetName }
+                houses.filter { it.address.bairro.equals(bairro, ignoreCase = true) }
+                    .map { it.address.streetName }
             }
 
             val userCustomStreets = if (bairro.isBlank()) {

@@ -1113,8 +1113,8 @@ fun UnifiedProfileCard(
                         ) {
                             val housesCount = agent.summary?.totalHouses?.toString() ?: agent.houses.size.toString()
                             val daysCount = agent.summary?.daysWorked?.toString() ?: agent.activities.size.toString()
-                            val focusCount = agent.summary?.focusCount?.toString() ?: agent.houses.count { it.comFoco }.toString()
-                            val treatedCount = agent.summary?.treatedCount?.toString() ?: agent.houses.count { it.a1 > 0 || it.a2 > 0 || it.b > 0 || it.c > 0 || it.d1 > 0 || it.d2 > 0 || it.e > 0 }.toString()
+                            val focusCount = agent.summary?.focusCount?.toString() ?: agent.houses.count { it.treatment.comFoco }.toString()
+                            val treatedCount = agent.summary?.treatedCount?.toString() ?: agent.houses.count { it.treatment.a1 > 0 || it.treatment.a2 > 0 || it.treatment.b > 0 || it.treatment.c > 0 || it.treatment.d1 > 0 || it.treatment.d2 > 0 || it.treatment.e > 0 }.toString()
                             
                             AgentStatItem(label = "IMÓVEIS", value = housesCount, modifier = Modifier.weight(1f))
                             AgentStatItem(label = "TRATADOS", value = treatedCount, modifier = Modifier.weight(1f))
@@ -1122,7 +1122,7 @@ fun UnifiedProfileCard(
                             AgentStatItem(
                                 label = "FOCOS", 
                                 value = focusCount,
-                                color = if ((agent.summary?.focusCount ?: 0) > 0 || agent.houses.any { it.comFoco }) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                color = if ((agent.summary?.focusCount ?: 0) > 0 || agent.houses.any { it.treatment.comFoco }) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f)
                             )
                         }

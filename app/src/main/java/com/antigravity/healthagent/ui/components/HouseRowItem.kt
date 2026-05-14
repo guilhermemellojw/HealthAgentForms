@@ -84,23 +84,24 @@ fun HouseRowItem(
 
     if (showContextDialog) {
         ContextDialog(
-            currentBlock = house.blockNumber,
-            currentBlockSequence = house.blockSequence,
-            currentStreet = house.streetName,
-            currentBairro = house.bairro,
+            currentBlock = house.address.blockNumber,
+            currentBlockSequence = house.address.blockSequence,
+            currentStreet = house.address.streetName,
+            currentBairro = house.address.bairro,
             currentQuarteiraoConcluido = house.quarteiraoConcluido,
             currentLocalidadeConcluida = house.localidadeConcluida,
             invalidFields = invalidFields,
             streetSuggestions = streetSuggestions,
             onDismiss = { showContextDialog = false },
             onConfirm = { block, blockSeq, street, bairro, qConcluido, lConcluido ->
-                onUpdate(house.copy(
+                onUpdate(house.copy(address = house.address.copy(
                     blockNumber = block, 
                     blockSequence = blockSeq,
                     streetName = street, 
-                    bairro = bairro,
-                    quarteiraoConcluido = qConcluido,
-                    localidadeConcluida = lConcluido
+                    bairro = bairro
+                ),
+                quarteiraoConcluido = qConcluido,
+                localidadeConcluida = lConcluido
                 ))
                 showContextDialog = false
             },
@@ -339,8 +340,8 @@ fun HouseRowItem(
                     ) {
                         DebouncedCompactInputBox(
                             label = "NÚMERO",
-                            initialValue = house.number,
-                            onValueChange = { onUpdate(house.copy(number = it)) },
+                            initialValue = house.address.number,
+                            onValueChange = { onUpdate(house.copy(address = house.address.copy(number = it))) },
                             modifier = Modifier.weight(0.7f),
                             isError = highlightErrors && isMissingNumbers,
                             enabled = enabled,
@@ -353,8 +354,8 @@ fun HouseRowItem(
     
                         DebouncedCompactInputBox(
                             label = "SEQUÊNCIA",
-                            initialValue = if (house.sequence == 0) "" else house.sequence.toString(),
-                            onValueChange = { onUpdate(house.copy(sequence = it.trim().toIntOrNull() ?: 0)) },
+                            initialValue = if (house.address.sequence == 0) "" else house.address.sequence.toString(),
+                            onValueChange = { onUpdate(house.copy(address = house.address.copy(sequence = it.trim().toIntOrNull() ?: 0))) },
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                                 keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
                                 imeAction = androidx.compose.ui.text.input.ImeAction.Next
@@ -366,8 +367,8 @@ fun HouseRowItem(
     
                         DebouncedCompactInputBox(
                             label = "COMPLEMENTO",
-                            initialValue = if (house.complement == 0) "" else house.complement.toString(),
-                            onValueChange = { onUpdate(house.copy(complement = it.trim().toIntOrNull() ?: 0)) },
+                            initialValue = if (house.address.complement == 0) "" else house.address.complement.toString(),
+                            onValueChange = { onUpdate(house.copy(address = house.address.copy(complement = it.trim().toIntOrNull() ?: 0))) },
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                                 keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
                                 imeAction = androidx.compose.ui.text.input.ImeAction.Done
@@ -584,7 +585,7 @@ fun EasyHouseCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = house.streetName.formatStreetName().ifBlank { "NOME DA RUA" },
+                        text = house.address.streetName.formatStreetName().ifBlank { "NOME DA RUA" },
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.primary,
@@ -592,7 +593,7 @@ fun EasyHouseCard(
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "Quarteirão ${house.blockNumber} • ${house.bairro.uppercase()}",
+                        text = "Quarteirão ${house.address.blockNumber} • ${house.address.bairro.uppercase()}",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
@@ -632,8 +633,8 @@ fun EasyHouseCard(
                 ) {
                     DebouncedCompactInputBox(
                         label = "Número",
-                        initialValue = house.number,
-                        onValueChange = { onUpdate(house.copy(number = it)) },
+                        initialValue = house.address.number,
+                        onValueChange = { onUpdate(house.copy(address = house.address.copy(number = it))) },
                         enabled = enabled,
                         isEasyMode = true,
                         focusRequester = focusRequester,
@@ -675,8 +676,8 @@ fun EasyHouseCard(
                 ) {
                     DebouncedCompactInputBox(
                         label = "Sequência",
-                        initialValue = if (house.sequence == 0) "" else house.sequence.toString(),
-                        onValueChange = { onUpdate(house.copy(sequence = it.trim().toIntOrNull() ?: 0)) },
+                        initialValue = if (house.address.sequence == 0) "" else house.address.sequence.toString(),
+                        onValueChange = { onUpdate(house.copy(address = house.address.copy(sequence = it.trim().toIntOrNull() ?: 0))) },
                         enabled = enabled,
                         isEasyMode = true,
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
@@ -688,8 +689,8 @@ fun EasyHouseCard(
                 ) {
                     DebouncedCompactInputBox(
                         label = "Compl.",
-                        initialValue = if (house.complement == 0) "" else house.complement.toString(),
-                        onValueChange = { onUpdate(house.copy(complement = it.trim().toIntOrNull() ?: 0)) },
+                        initialValue = if (house.address.complement == 0) "" else house.address.complement.toString(),
+                        onValueChange = { onUpdate(house.copy(address = house.address.copy(complement = it.trim().toIntOrNull() ?: 0))) },
                         enabled = enabled,
                         isEasyMode = true,
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
@@ -905,9 +906,9 @@ fun EasyHouseCard(
                 }
             }
 
-            if (house.comFoco) {
+            if (house.treatment.comFoco) {
                 Spacer(Modifier.height(12.dp))
-                val hasCoords = house.latitude != null
+                val hasCoords = house.geo.latitude != null
                 Surface(
                     color = if (hasCoords) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
                     shape = RoundedCornerShape(12.dp),

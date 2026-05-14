@@ -800,8 +800,7 @@ fun HomeScreen(
             isRefreshing = isSyncing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
-            modifier = Modifier.padding(paddingValues).fillMaxSize(),
-            indicator = { /* Hide the simple loading circle as we use the SyncStatusOverlay */ }
+            modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             // Indentation and content will be below
         
@@ -857,6 +856,12 @@ fun HomeScreen(
                 }
             )
             Column(modifier = Modifier.fillMaxSize()) {
+                // Last Sync Balloon
+                SyncFloatingBalloon(
+                    syncStatus = uiState.syncStatus,
+                    modifier = Modifier.zIndex(5f)
+                )
+
                 // Item 1: Minimalist Progress Line
                 if (!isSearchActive && !isReorderMode) {
                     val workedCount = uiState.dashboardTotals.worked
@@ -1134,7 +1139,7 @@ fun HomeScreen(
             }
         }
     }
-    }
+}
 }
 
 @Composable

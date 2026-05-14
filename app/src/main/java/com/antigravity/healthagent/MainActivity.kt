@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Edit
+import com.antigravity.healthagent.ui.components.*
 import com.antigravity.healthagent.domain.repository.UserRole
 import javax.inject.Inject
 
@@ -445,9 +446,16 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
                     }
                 }
                 
-                // Unified Sync Status Overlay for all screens
+                // Unified Sync Status Feedback for all screens
                 val uiState by homeViewModel.uiState.collectAsState()
-                com.antigravity.healthagent.ui.components.SyncStatusOverlay(
+                
+                SyncFloatingBalloon(
+                    syncStatus = uiState.syncStatus,
+                    isEasyMode = uiState.isEasyMode,
+                    isSolarMode = uiState.isSolarMode
+                )
+
+                SyncStatusOverlay(
                     syncStatus = uiState.syncStatus,
                     isEasyMode = uiState.isEasyMode
                 )

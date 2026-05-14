@@ -1,6 +1,10 @@
 package com.antigravity.healthagent.data.local.model
 
 import androidx.room.*
+import com.antigravity.healthagent.domain.model.DailyContext
+import com.antigravity.healthagent.domain.model.GeoCapture
+import com.antigravity.healthagent.domain.model.TreatmentData
+import com.antigravity.healthagent.domain.model.VisitAddress
 import com.antigravity.healthagent.utils.normalize
 
 @com.google.firebase.firestore.IgnoreExtraProperties
@@ -16,36 +20,15 @@ import com.antigravity.healthagent.utils.normalize
 )
 data class House(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
-    val blockNumber: String = "",
-    val streetName: String = "",
-    val number: String = "",
-    @ColumnInfo(defaultValue = "0") val sequence: Int = 0,
-    @ColumnInfo(defaultValue = "0") val complement: Int = 0,
+    @Embedded val address: VisitAddress = VisitAddress(),
+    @Embedded val treatment: TreatmentData = TreatmentData(),
+    @Embedded val context: DailyContext = DailyContext(),
+    @Embedded val geo: GeoCapture = GeoCapture(),
     @ColumnInfo(defaultValue = "'EMPTY'") val propertyType: PropertyType = PropertyType.EMPTY,
     @ColumnInfo(defaultValue = "'EMPTY'") val situation: Situation = Situation.EMPTY,
-    // Daily Header Context
-    @ColumnInfo(defaultValue = "'Bom Jardim'") val municipio: String = "Bom Jardim",
-    val bairro: String = "",
-    @ColumnInfo(defaultValue = "'BRR'") val categoria: String = "BRR",
-    @ColumnInfo(defaultValue = "'URB'") val zona: String = "URB",
-    @ColumnInfo(defaultValue = "2") val tipo: Int = 2,
     val data: String = "",
-    @ColumnInfo(defaultValue = "'1º'") val ciclo: String = "1º",
-    @ColumnInfo(defaultValue = "4") val atividade: Int = 4,
     val agentName: String = "",
-    // Treatment Details
-    @ColumnInfo(defaultValue = "0") val a1: Int = 0,
-    @ColumnInfo(defaultValue = "0") val a2: Int = 0,
-    @ColumnInfo(defaultValue = "0") val b: Int = 0,
-    @ColumnInfo(defaultValue = "0") val c: Int = 0,
-    @ColumnInfo(defaultValue = "0") val d1: Int = 0,
-    @ColumnInfo(defaultValue = "0") val d2: Int = 0,
-    @ColumnInfo(defaultValue = "0") val e: Int = 0,
-    @ColumnInfo(defaultValue = "0") val eliminados: Int = 0,
-    @ColumnInfo(defaultValue = "0.0") val larvicida: Double = 0.0,
-    @ColumnInfo(defaultValue = "0") val comFoco: Boolean = false,
     @ColumnInfo(defaultValue = "0") val localidadeConcluida: Boolean = false,
-    @ColumnInfo(defaultValue = "''") val blockSequence: String = "",
     @ColumnInfo(defaultValue = "0") val quarteiraoConcluido: Boolean = false,
     @ColumnInfo(defaultValue = "0") val listOrder: Long = 0, // For manual reordering
     @ColumnInfo(defaultValue = "0") val visitSegment: Int = 0, // To distinguish return trips to the same street
@@ -54,9 +37,6 @@ data class House(
     @ColumnInfo(defaultValue = "0") val createdAt: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
     @ColumnInfo(defaultValue = "0") val isSynced: Boolean = false,
     @ColumnInfo(defaultValue = "0") val editedByAdmin: Boolean = false,
-    val latitude: Double? = null,
-    val longitude: Double? = null,
-    val focusCaptureTime: Long? = null,
     /**
      * Timestamp of the last local or remote modification.
      * 
@@ -80,15 +60,9 @@ data class House(
      */
     fun generateNaturalKey(): String {
         val normalizedDate = data.replace("/", "-")
-        val normalizedStreet = streetName.normalize()
-        val normalizedBairro = bairro.normalize()
-        val normalizedAgent = agentName.normalize()
-        val normalizedBlock = blockNumber.normalize()
-        val normalizedBlockSeq = blockSequence.normalize()
-        val normalizedNumber = number.normalize()
         
         // Uniqueness is guaranteed by agentUid + normalizedAgent + date + address details + visitSegment.
-        return "${agentUid}_${normalizedAgent}_${normalizedDate}_${normalizedBlock}_${normalizedBlockSeq}_${normalizedStreet}_${normalizedNumber}_${sequence}_${complement}_${normalizedBairro}_${visitSegment}".uppercase()
+        return "${agentUid}_${agentName.normalize()}_${normalizedDate}_${address.generateAddressSignature()}_${visitSegment}".uppercase()
     }
 
     /**
@@ -97,43 +71,37 @@ data class House(
      */
     fun generateIdentityKey(): String {
         val normalizedDate = data.replace("/", "-")
-        val normalizedBairro = bairro.normalize()
-        val normalizedBlock = blockNumber.normalize()
-        val normalizedBlockSeq = blockSequence.normalize()
-        val normalizedNumber = number.normalize()
         
-        // Identity is Agent(UID) + Day + Block + BlockSeq + Number + Seq + Complement + Bairro.
-        // municipio and categoria are intentionally excluded because they are not present in the naturalKey (Doc ID),
-        // making it impossible to reconstruct this identity from a deleted cloud ID.
-        // visitSegment is also excluded to allow identity healing across segment recalculations.
-        return "${agentUid}_${normalizedDate}_${normalizedBlock}_${normalizedBlockSeq}_${normalizedNumber}_${sequence}_${complement}_${normalizedBairro}".uppercase()
+        // Identity is Agent(UID) + Day + Address Signature (excluding segment)
+        return "${agentUid}_${normalizedDate}_${address.generateAddressSignature()}".uppercase()
     }
 
 
     fun toFirestoreMap(): Map<String, Any?> {
         return mapOf(
-            "blockNumber" to blockNumber,
-            "streetName" to streetName,
-            "number" to number,
-            "sequence" to sequence,
-            "complement" to complement,
+            "blockNumber" to address.blockNumber,
+            "streetName" to address.streetName,
+            "number" to address.number,
+            "sequence" to address.sequence,
+            "complement" to address.complement,
+            "bairro" to address.bairro,
+            "blockSequence" to address.blockSequence,
             "propertyType" to propertyType.name,
             "situation" to situation.name,
-            "municipio" to municipio,
-            "bairro" to bairro,
-            "categoria" to categoria,
-            "zona" to zona,
-            "tipo" to tipo,
+            "municipio" to context.municipio,
+            "categoria" to context.categoria,
+            "zona" to context.zona,
+            "tipo" to context.tipo,
             "data" to data.replace("/", "-"),
-            "ciclo" to ciclo,
-            "atividade" to atividade,
+            "ciclo" to context.ciclo,
+            "atividade" to context.atividade,
             "agentName" to agentName.uppercase(),
-            "a1" to a1, "a2" to a2, "b" to b, "c" to c, "d1" to d1, "d2" to d2, "e" to e,
-            "eliminados" to eliminados,
-            "larvicida" to larvicida,
-            "comFoco" to comFoco,
+            "a1" to treatment.a1, "a2" to treatment.a2, "b" to treatment.b, "c" to treatment.c,
+            "d1" to treatment.d1, "d2" to treatment.d2, "e" to treatment.e,
+            "eliminados" to treatment.eliminados,
+            "larvicida" to treatment.larvicida,
+            "comFoco" to treatment.comFoco,
             "localidadeConcluida" to localidadeConcluida,
-            "blockSequence" to blockSequence,
             "quarteiraoConcluido" to quarteiraoConcluido,
             "listOrder" to listOrder,
             "visitSegment" to visitSegment,
@@ -141,9 +109,9 @@ data class House(
             "lastSyncTime" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
             "createdAt" to createdAt,
             "observation" to observation,
-            "latitude" to latitude,
-            "longitude" to longitude,
-            "focusCaptureTime" to focusCaptureTime,
+            "latitude" to geo.latitude,
+            "longitude" to geo.longitude,
+            "focusCaptureTime" to geo.focusCaptureTime,
             "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
             "editedByAdmin" to editedByAdmin
         )
@@ -151,9 +119,9 @@ data class House(
 
     @get:com.google.firebase.firestore.Exclude
     val hasAnyTreatment: Boolean 
-        get() = (a1 + a2 + b + c + d1 + d2 + e + eliminados) > 0 || larvicida > 0.0 || comFoco
+        get() = treatment.hasAnyTreatment
 
     @get:com.google.firebase.firestore.Exclude
     val isAddressComplete: Boolean
-        get() = bairro.isNotBlank() && streetName.isNotBlank() && blockNumber.isNotBlank() && (number.isNotBlank() || sequence > 0)
+        get() = address.isComplete
 }

@@ -42,7 +42,7 @@ class GetRGBlocksUseCase @Inject constructor() {
 
         // 1. EARLY FILTERING: Focus only on the selected neighborhood and year
         val initialFiltered = allHouses.filter { house ->
-            val matchesBairro = house.bairro.normalize() == normalizedSelectedBairro
+            val matchesBairro = house.address.bairro.normalize() == normalizedSelectedBairro
             val matchesYear = if (selectedYear.isBlank()) true else {
                 synchronized(dateFormatter) {
                     try {
@@ -81,11 +81,11 @@ class GetRGBlocksUseCase @Inject constructor() {
 
         // 3. GROUP BY BLOCK & CREATE SEGMENTS
         val blockGroups = sortedVisits.groupBy { 
-            it.blockNumber.normalize() to it.blockSequence.normalize() 
+            it.address.blockNumber.normalize() to it.address.blockSequence.normalize() 
         }
 
         val blockOrder = sortedVisits.map { 
-            it.blockNumber.normalize() to it.blockSequence.normalize() 
+            it.address.blockNumber.normalize() to it.address.blockSequence.normalize() 
         }.distinct()
 
         return blockOrder.map { (bNum, bSeq) ->
@@ -108,7 +108,7 @@ class GetRGBlocksUseCase @Inject constructor() {
                 // The date of the report is the date of the LAST house in the list
                 conclusionDate = lastHouse?.data ?: "",
                 houses = blockHouses,
-                participatingAgents = blockHouses.map { it.agentName }.distinct().filter { it.isNotBlank() }
+                participatingAgents = blockHouses.map { h -> h.agentName }.distinct().filter { name -> name.isNotBlank() }
             )
         }
     }

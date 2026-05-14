@@ -111,7 +111,9 @@ class RestoreDataUseCase @Inject constructor(
                     id = 0, // Reset for local auto-increment
                     agentName = finalAgentName,
                     agentUid = finalAgentUid,
-                    number = if (house.number.trim() == "0") "" else house.number.trim().uppercase(),
+                    address = house.address.copy(
+                        number = if (house.address.number.trim() == "0") "" else house.address.number.trim().uppercase()
+                    ),
                     data = resolveDate ?: house.data.replace("/", "-"),
                     isSynced = false,
                     lastUpdated = System.currentTimeMillis(),

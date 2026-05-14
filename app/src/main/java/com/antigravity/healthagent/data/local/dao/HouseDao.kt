@@ -174,6 +174,19 @@ interface HouseDao {
 
     @Query("""
         SELECT * FROM houses 
+        WHERE agentUid = :agentUid 
+        AND (
+            (COALESCE(streetName, '') = '' AND COALESCE(number, '') = '' AND sequence <= 0)
+            OR (COALESCE(blockNumber, '') = '' AND COALESCE(bairro, '') = '')
+        )
+    """)
+    suspend fun getEmptyHouses(agentUid: String): List<House>
+
+    @Query("SELECT * FROM houses WHERE agentUid = :agentUid OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)) ORDER BY listOrder ASC")
+    fun getHousesByAgentWithOrphans(agentUid: String, agentName: String): Flow<List<House>>
+
+    @Query("""
+        SELECT * FROM houses 
         WHERE (COALESCE(blockNumber, '') || '|' || COALESCE(blockSequence, '') || '|' || UPPER(COALESCE(bairro, '')) || '|' || COALESCE(ciclo, '')) IN (
             SELECT DISTINCT (COALESCE(blockNumber, '') || '|' || COALESCE(blockSequence, '') || '|' || UPPER(COALESCE(bairro, '')) || '|' || COALESCE(ciclo, '')) 
             FROM houses 

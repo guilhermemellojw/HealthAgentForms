@@ -2,6 +2,8 @@ package com.antigravity.healthagent.ui.home
 
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.domain.model.TreatmentData
+import com.antigravity.healthagent.domain.model.DailyContext
 import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
 import org.junit.Assert.*
 import org.junit.Test
@@ -14,8 +16,10 @@ class HouseUiStateMapperTest {
     fun `map - house with situation REC and no treatment - isTreated is false`() {
         val house = House(
             situation = Situation.REC,
-            a1 = 0, a2 = 0, b = 0, c = 0, d1 = 0, d2 = 0, e = 0,
-            eliminados = 0, larvicida = 0.0
+            treatment = TreatmentData(
+                a1 = 0, a2 = 0, b = 0, c = 0, d1 = 0, d2 = 0, e = 0,
+                eliminados = 0, larvicida = 0.0
+            )
         )
         
         val uiState = HouseUiStateMapper.map(house, houseValidationUseCase)
@@ -28,8 +32,10 @@ class HouseUiStateMapperTest {
     fun `map - house with treatment - isTreated is true and summary contains treatment info`() {
         val house = House(
             situation = Situation.NONE,
-            a1 = 1,
-            larvicida = 10.5
+            treatment = TreatmentData(
+                a1 = 1,
+                larvicida = 10.5
+            )
         )
         
         val uiState = HouseUiStateMapper.map(house, houseValidationUseCase)
@@ -44,7 +50,7 @@ class HouseUiStateMapperTest {
     fun `map - house with situation F and no treatment - summary is empty`() {
         val house = House(
             situation = Situation.F,
-            a1 = 0, eliminados = 0, larvicida = 0.0
+            treatment = TreatmentData(a1 = 0, eliminados = 0, larvicida = 0.0)
         )
         
         val uiState = HouseUiStateMapper.map(house, houseValidationUseCase)

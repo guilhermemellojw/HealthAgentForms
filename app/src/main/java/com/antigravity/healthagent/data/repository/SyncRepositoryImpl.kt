@@ -52,18 +52,19 @@ class SyncRepositoryImpl @Inject constructor(
         targetUid: String?,
         shouldReplace: Boolean
     ): Result<Unit> {
-        val result = withTimeoutOrNull(180000L) {
+        val result = withTimeoutOrNull(600000L) {
             syncMutex.withLock {
                 withContext(Dispatchers.IO) {
                     try {
                         val uid = targetUid ?: auth.currentUser?.uid ?: return@withContext Result.failure(Exception("User not authenticated"))
                         
                         // --- WIPE SAFETY CHECK ---
-                        val userDocSnapshot = try { firestore.collection("users").document(uid).get().await() } catch(e: Exception) { null }
-                        val agentDocExists = try { firestore.collection("agents").document(uid).get().await().exists() } catch(e: Exception) { true }
+                        // BUG FIX: requireDataReset is written to 'agents' collection (line 198), so we MUST read it from 'agents' too.
+                        val agentDocSnapshot = try { firestore.collection("agents").document(uid).get().await() } catch(e: Exception) { null }
+                        val agentDocExists = agentDocSnapshot?.exists() ?: true
                         val hasSyncHistory = settingsManager.lastSyncTimestamp.first() > 0
 
-                        if (targetUid == null && (userDocSnapshot?.getBoolean("requireDataReset") == true || (hasSyncHistory && !agentDocExists))) {
+                        if (targetUid == null && (agentDocSnapshot?.getBoolean("requireDataReset") == true || (hasSyncHistory && !agentDocExists))) {
                             android.util.Log.w("SyncRepository", "Push blocked for $uid: Remote wipe pending or data purged.")
                             return@withContext Result.failure(Exception("Sincronização bloqueada: Uma limpeza de dados foi solicitada. Por favor, realize um 'Receber Dados' primeiro."))
                         }
@@ -115,6 +116,15 @@ class SyncRepositoryImpl @Inject constructor(
                                 housesToPush.filter { it.agentUid.isBlank() || it.agentUid == uid }
                             }
                             
+                            // DISCARD BROKEN HOUSES: Never push records missing core address fields
+                            // RELAXED: Only discard if it's truly empty (missing Bairro, Street, or BOTH Number and Sequence)
+                            housesToPush = housesToPush.filter { h ->
+                                h.address.bairro.isNotBlank() && 
+                                h.address.streetName.isNotBlank() && 
+                                h.address.blockNumber.isNotBlank() &&
+                                (h.address.number.isNotBlank() || h.address.sequence > 0)
+                            }
+
                             val crossUidActivities = activitiesToPush.filter { it.agentUid.isNotBlank() && it.agentUid != uid }
                             if (crossUidActivities.isNotEmpty()) {
                                 android.util.Log.e("SyncRepository", "IDENTITY LEAK PREVENTED: Filtered out ${crossUidActivities.size} activities with mismatching UIDs.")
@@ -153,14 +163,18 @@ class SyncRepositoryImpl @Inject constructor(
                                 activitiesToPush.map { it.date.replace("/", "-") } +
                                 tombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.ACTIVITY }.map { it.naturalKey.split("|")[0].replace("/", "-") } +
                                 tombstones.filter { it.type == com.antigravity.healthagent.data.local.model.TombstoneType.HOUSE }.mapNotNull { tk -> 
-                                    val dateRegex = Regex("\\d{2}-\\d{2}-\\d{4}")
-                                    dateRegex.find(tk.naturalKey.replace("/", "-"))?.value
+                                    // BUG FIX: Robust extraction using delimiter split instead of fragile regex
+                                    val parts = tk.naturalKey.split("_")
+                                    if (parts.size >= 3) parts[2].replace("/", "-") else null
                                 }
                             ).toSet() 
+
+                            // BUG FIX: Legacy support for both formats (/ and -) during cloud cleanup
+                            val backupDatesWithAlternates = backupDates.flatMap { listOf(it, it.replace("-", "/")) }.toSet()
                             
-                            if (backupDates.isNotEmpty()) {
+                            if (backupDatesWithAlternates.isNotEmpty()) {
                                 val toDelete = mutableListOf<DocumentReference>()
-                                backupDates.toList().chunked(30).forEach { dateChunk ->
+                                backupDatesWithAlternates.toList().chunked(30).forEach { dateChunk ->
                                     val houseDocs = userDocRef.collection("houses")
                                         .whereIn("data", dateChunk)
                                         .get().await()
@@ -341,7 +355,7 @@ class SyncRepositoryImpl @Inject constructor(
                             val isProxyPush = targetUid != null && targetUid != auth.currentUser?.uid
                             val todayInt = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date()).toInt()
                             
-                            val housesInMonthRaw = if (isProxyPush) {
+                            val housesInMonthRaw = if (isProxyPush && !shouldReplace) {
                                 // Proxy Pushes (Admin edits) lack the full month of data locally.
                                 // We must fetch the full month from the cloud to prevent zeroing out the summary.
                                 // IMPROVEMENT: Generate correct number of days for the specific month.
@@ -367,7 +381,13 @@ class SyncRepositoryImpl @Inject constructor(
                                 
                                 allDocs.mapNotNull { it.toHouseSafe(uid, officialAgentName ?: "") }
                             } else {
-                                houseDao.getHousesByMonth(uid, monthYear)
+                                // For normal syncs OR Full Replacements (Restoration), use the provided data.
+                                // If shouldReplace is true, housesToPush contains the FULL dataset for the restoration.
+                                if (shouldReplace) {
+                                    housesToPush.filter { it.data.replace("/", "-").contains(monthYear) }
+                                } else {
+                                    houseDao.getHousesByMonth(uid, monthYear)
+                                }
                             }
                             
                             val housesInMonth = housesInMonthRaw.filter { house ->
@@ -379,17 +399,25 @@ class SyncRepositoryImpl @Inject constructor(
                                 } catch(e: Exception) { true }
                             }
                             
-                            val activitiesInMonthRaw = if (isProxyPush) {
-                                val allDays = (1..31).map { day -> String.format("%02d-%s", day, monthYear) }
-                                val chunk1 = allDays.take(30)
-                                val chunk2 = allDays.drop(30)
+                            val activitiesInMonthRaw = if (isProxyPush && !shouldReplace) {
+                                val calendar = java.util.Calendar.getInstance()
+                                val monthParts = monthYear.split("-")
+                                val month = monthParts[0].toIntOrNull() ?: 1
+                                val year = monthParts[1].toIntOrNull() ?: 2024
+                                calendar.set(year, month - 1, 1)
+                                val daysInMonth = calendar.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+
+                                val allDays = (1..daysInMonth).map { day -> String.format("%02d-%s", day, monthYear) }
                                 
-                                val docs1 = userDocRef.collection("day_activities").whereIn("date", chunk1).get().await().documents
-                                val docs2 = userDocRef.collection("day_activities").whereIn("date", chunk2).get().await().documents
-                                
-                                (docs1 + docs2).mapNotNull { it.toDayActivitySafe(uid, officialAgentName ?: "") }
+                                allDays.chunked(30).flatMap { chunk ->
+                                    userDocRef.collection("day_activities").whereIn("date", chunk).get().await().documents
+                                }.mapNotNull { it.toDayActivitySafe(uid, officialAgentName ?: "") }
                             } else {
-                                dayActivityDao.getDayActivitiesByMonth(uid, monthYear)
+                                if (shouldReplace) {
+                                    activitiesToPush.filter { it.date.replace("/", "-").contains(monthYear) }
+                                } else {
+                                    dayActivityDao.getDayActivitiesByMonth(uid, monthYear)
+                                }
                             }
                             
                             val activitiesInMonth = activitiesInMonthRaw.filter { activity ->
@@ -404,10 +432,10 @@ class SyncRepositoryImpl @Inject constructor(
                             val summary = mapOf(
                                 "monthYear" to monthYear,
                                 "treatedCount" to housesInMonth.count { house ->
-                                    (house.a1 + house.a2 + house.b + house.c + house.d1 + house.d2 + house.e + house.eliminados) > 0 ||
-                                    house.larvicida > 0.0 || house.comFoco
+                                    (house.treatment.a1 + house.treatment.a2 + house.treatment.b + house.treatment.c + house.treatment.d1 + house.treatment.d2 + house.treatment.e + house.treatment.eliminados) > 0 ||
+                                    house.treatment.larvicida > 0.0 || house.treatment.comFoco
                                 },
-                                "focusCount" to housesInMonth.count { it.comFoco },
+                                "focusCount" to housesInMonth.count { it.treatment.comFoco },
                                 "situationCounts" to housesInMonth.groupingBy { 
                                     if (it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) "NONE" else it.situation.name 
                                 }.eachCount(),
@@ -453,7 +481,7 @@ class SyncRepositoryImpl @Inject constructor(
         return result
     }
     override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> {
-        val result = withTimeoutOrNull(180000L) {
+        val result = withTimeoutOrNull(600000L) {
             syncMutex.withLock {
                 withContext(Dispatchers.IO) {
                     try {
@@ -677,7 +705,7 @@ class SyncRepositoryImpl @Inject constructor(
                             try {
                                 val activeBlocks = houseDao.getActiveBlockNumbers()
                                 if (activeBlocks.isNotEmpty()) {
-                                    val currentCiclo = cloudHouses.firstOrNull()?.ciclo ?: run {
+                                    val currentCiclo = cloudHouses.firstOrNull()?.context?.ciclo ?: run {
                                         val cal = java.util.Calendar.getInstance()
                                         val month = cal.get(java.util.Calendar.MONTH)
                                         when (month) {
@@ -705,7 +733,13 @@ class SyncRepositoryImpl @Inject constructor(
                                     // IDENTIFY TEAM DELETIONS: 
                                     // If a foreign house is in our local DB for these blocks but NOT in the cloud,
                                     // it means the colleague deleted it. We must remove it locally too.
-                                    val localTeamHouses = houseDao.getHousesByBlocks(activeBlocks).filter { it.agentUid != uid }
+                                    // SAFETY GUARD 1: Never delete local houses that have a BLANK agentUid (Orphans).
+                                    // These might be the current agent's own data waiting for migration or push.
+                                    // SAFETY GUARD 2: ONLY delete local houses from the SAME CICLO as the cloud pull.
+                                    // This prevents the sync from purging historical records of the same block from previous cycles.
+                                    val localTeamHouses = houseDao.getHousesByBlocks(activeBlocks).filter { 
+                                        it.agentUid.isNotBlank() && it.agentUid != uid && it.context.ciclo == currentCiclo 
+                                    }
                                     val remoteKeys = remoteForeignHouses.map { it.generateNaturalKey() }.toSet()
                                     
                                     val housesDeletedByTeam = localTeamHouses.filter { it.generateNaturalKey() !in remoteKeys }
@@ -769,12 +803,12 @@ class SyncRepositoryImpl @Inject constructor(
                         
                         val cloudDeletedIdentities = cloudDeletedHouses.mapNotNull { deletedKey ->
                             val parts = deletedKey.split("_")
-                            if (parts.size >= 10) {
+                            if (parts.size >= 11) {
                                 try {
-                                    // WARNING: This derivation MUST exactly match House.generateIdentityKey().
-                                    // It reconstructs the logical identity from the document ID (naturalKey) parts.
-                                    // Parts: 0:uid, 2:date, 3:block, 4:blockSeq, 6:number, 7:seq, 8:compl, 9:bairro
-                                    "${parts[0]}_${parts[2]}_${parts[3]}_${parts[4]}_${parts[6]}_${parts[7]}_${parts[8]}_${parts[9]}".uppercase()
+                                    // RECONSTRUCTION FIX: Must match House.generateIdentityKey() exactly.
+                                    // Parts index map from naturalKey: 
+                                    // 0:uid, 2:date, 3:block, 4:blockSeq, 5:street, 6:number, 7:seq, 8:compl, 9:bairro
+                                    "${parts[0]}_${parts[2]}_${parts[3]}_${parts[4]}_${parts[5]}_${parts[6]}_${parts[7]}_${parts[8]}_${parts[9]}".uppercase()
                                 } catch (e: Exception) { null }
                             } else null
                         }.toSet()
@@ -1416,6 +1450,28 @@ class SyncRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun deleteHousesSurgically(agentUid: String, houses: List<House>): Result<Unit> {
+        if (houses.isEmpty()) return Result.success(Unit)
+        
+        return try {
+            val houseKeys = houses.map { it.cloudId ?: it.generateNaturalKey() }
+            
+            // 1. Create Tombstones to ensure cloud deletion
+            recordBulkDeletions(houseKeys, emptyList(), agentUid)
+            
+            // 2. Delete locally
+            runInTransactionWithRetry {
+                houses.forEach { house ->
+                    houseDao.deleteHouseById(house.id)
+                }
+            }
+            
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun deleteAllCloudData(): Result<Unit> {
         return try {
             val agentsSnapshot = firestore.collection("agents").get().await()
@@ -1477,53 +1533,65 @@ class SyncRepositoryImpl @Inject constructor(
         // 2. Manually extract critical metadata to bypass @Exclude and handle mismatches
         val firestoreLastUpdated = this.getTimestamp("lastUpdated")?.toDate()?.time ?: 0L
         val rawData = (this.getString("data") ?: house?.data ?: "").replace("/", "-")
-        val rawAgentName = this.getString("agentName")?.uppercase() ?: agentName.uppercase()
+        val rawAgentName = (this.getString("agentName") ?: agentName).normalize()
         
         // 3. Robust Construction: Fallback to manual field extraction if toObject failed
-        val baseHouse = house ?: House(
-            blockNumber = this.getString("blockNumber") ?: "",
-            streetName = this.getString("streetName") ?: "",
-            number = this.getString("number") ?: "",
-            sequence = (this.get("sequence") as? Number)?.toInt() ?: 0,
-            complement = (this.get("complement") as? Number)?.toInt() ?: 0,
-            municipio = this.getString("municipio") ?: "Bom Jardim",
-            bairro = this.getString("bairro") ?: "",
-            categoria = this.getString("categoria") ?: "BRR",
-            zona = this.getString("zona") ?: "URB",
-            tipo = (this.get("tipo") as? Number)?.toInt() ?: 2,
-            ciclo = this.getString("ciclo") ?: "1º",
-            atividade = (this.get("atividade") as? Number)?.toInt() ?: 4,
-            a1 = (this.get("a1") as? Number)?.toInt() ?: 0,
-            a2 = (this.get("a2") as? Number)?.toInt() ?: 0,
-            b = (this.get("b") as? Number)?.toInt() ?: 0,
-            c = (this.get("c") as? Number)?.toInt() ?: 0,
-            d1 = (this.get("d1") as? Number)?.toInt() ?: 0,
-            d2 = (this.get("d2") as? Number)?.toInt() ?: 0,
-            e = (this.get("e") as? Number)?.toInt() ?: 0,
-            eliminados = (this.get("eliminados") as? Number)?.toInt() ?: 0,
-            larvicida = (this.get("larvicida") as? Number)?.toDouble() ?: 0.0,
-            comFoco = this.getBoolean("comFoco") ?: false,
+        val baseHouse = (house ?: House(
+            address = com.antigravity.healthagent.domain.model.VisitAddress(
+                blockNumber = (this.getString("blockNumber") ?: "").normalize(),
+                streetName = (this.getString("streetName") ?: "").trim().formatStreetName(),
+                number = (this.getString("number") ?: "").trim().uppercase(),
+                sequence = (this.get("sequence") as? Number)?.toInt() ?: 0,
+                complement = (this.get("complement") as? Number)?.toInt() ?: 0,
+                bairro = (this.getString("bairro") ?: "").normalize(),
+                blockSequence = (this.getString("blockSequence") ?: "").normalize()
+            ),
+            context = com.antigravity.healthagent.domain.model.DailyContext(
+                municipio = this.getString("municipio") ?: "Bom Jardim",
+                categoria = this.getString("categoria") ?: "BRR",
+                zona = this.getString("zona") ?: "URB",
+                tipo = (this.get("tipo") as? Number)?.toInt() ?: 2,
+                ciclo = this.getString("ciclo") ?: "1º",
+                atividade = (this.get("atividade") as? Number)?.toInt() ?: 4
+            ),
+            treatment = com.antigravity.healthagent.domain.model.TreatmentData(
+                a1 = (this.get("a1") as? Number)?.toInt() ?: 0,
+                a2 = (this.get("a2") as? Number)?.toInt() ?: 0,
+                b = (this.get("b") as? Number)?.toInt() ?: 0,
+                c = (this.get("c") as? Number)?.toInt() ?: 0,
+                d1 = (this.get("d1") as? Number)?.toInt() ?: 0,
+                d2 = (this.get("d2") as? Number)?.toInt() ?: 0,
+                e = (this.get("e") as? Number)?.toInt() ?: 0,
+                eliminados = (this.get("eliminados") as? Number)?.toInt() ?: 0,
+                larvicida = (this.get("larvicida") as? Number)?.toDouble() ?: 0.0,
+                comFoco = this.getBoolean("comFoco") ?: false
+            ),
             localidadeConcluida = this.getBoolean("localidadeConcluida") ?: false,
-            blockSequence = this.getString("blockSequence") ?: "",
             quarteiraoConcluido = this.getBoolean("quarteiraoConcluido") ?: false,
             listOrder = (this.get("listOrder") as? Number)?.toLong() ?: 0L,
             visitSegment = (this.get("visitSegment") as? Number)?.toInt() ?: 0,
             observation = this.getString("observation") ?: "",
-            latitude = this.get("latitude") as? Double,
-            longitude = this.get("longitude") as? Double,
-            focusCaptureTime = (this.get("focusCaptureTime") as? Number)?.toLong(),
+            geo = com.antigravity.healthagent.domain.model.GeoCapture(
+                latitude = this.get("latitude") as? Double,
+                longitude = this.get("longitude") as? Double,
+                focusCaptureTime = (this.get("focusCaptureTime") as? Number)?.toLong()
+            ),
             editedByAdmin = this.getBoolean("editedByAdmin") ?: false
-        )
+        )).copy(id = 0) // RESET ID to allow local auto-generation
 
         // 4. Force synchronization of identity fields and coerce enums
-        baseHouse.copy(
+        baseHouse.apply {
+            this.cloudId = this@toHouseSafe.id
+        }.copy(
             agentUid = agentUid,
             agentName = rawAgentName,
             data = rawData,
             lastUpdated = firestoreLastUpdated,
             propertyType = coercePropertyType(this.getString("propertyType") ?: house?.propertyType?.name),
             situation = coerceSituation(this.getString("situation") ?: house?.situation?.name)
-        )
+        ).apply {
+            this.cloudId = this@toHouseSafe.id
+        }
     } catch (e: Exception) {
         android.util.Log.e("SyncRepository", "toHouseSafe CRITICAL error for doc ${this.id}: ${e.message}")
         null

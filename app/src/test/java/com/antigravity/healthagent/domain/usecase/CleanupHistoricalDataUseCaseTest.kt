@@ -20,15 +20,16 @@ class CleanupHistoricalDataUseCaseTest {
 
     private val mockHouseRepository = object : HouseRepository {
         override fun getAllHouses(agentUid: String): Flow<List<House>> = flowOf(emptyList())
+        override fun getPersonalHousesFlow(agentUid: String, agentName: String): Flow<List<House>> = flowOf(emptyList())
         override val allActivitiesFlow: Flow<List<DayActivity>> = flowOf(emptyList())
         override fun getDistinctAgentNames(): Flow<List<String>> = flowOf(emptyList())
         override fun getAllHousesOrderedByBlock(agentUid: String): Flow<List<House>> = flowOf(emptyList())
         override suspend fun getHouseById(id: Long): House? = null
         override suspend fun getAllHousesOnce(agentUid: String): List<House> {
             return listOf(
-                House(id = 1, number = "1", data = "01-01-2026", agentName = "TEST", agentUid = agentUid),
-                House(id = 2, number = "2", data = "05/01/2026", agentName = "TEST", agentUid = agentUid), // Mixed format
-                House(id = 3, number = "3", data = "10-01-2026", agentName = "TEST", agentUid = agentUid)
+                House(id = 1, address = com.antigravity.healthagent.domain.model.VisitAddress(number = "1"), data = "01-01-2026", agentName = "TEST", agentUid = agentUid),
+                House(id = 2, address = com.antigravity.healthagent.domain.model.VisitAddress(number = "2"), data = "05/01/2026", agentName = "TEST", agentUid = agentUid), // Mixed format
+                House(id = 3, address = com.antigravity.healthagent.domain.model.VisitAddress(number = "3"), data = "10-01-2026", agentName = "TEST", agentUid = agentUid)
             )
         }
         override suspend fun getAllHousesSnapshot(): List<House> = emptyList()
@@ -97,6 +98,7 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun performDataCleanup(): Result<Unit> = Result.success(Unit)
         override suspend fun clearSyncError(uid: String): Result<Unit> = Result.success(Unit)
         override suspend fun pruneOldTombstones(): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteHousesSurgically(agentUid: String, houses: List<House>): Result<Unit> = Result.success(Unit)
     }
 
     private val mockAgentRepository = object : AgentRepository {

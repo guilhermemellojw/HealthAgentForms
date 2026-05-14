@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
 import com.antigravity.healthagent.ui.home.HomeViewModel
@@ -267,16 +268,18 @@ fun BoletimScreen(
             isRefreshing = isSyncing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
-            modifier = Modifier.padding(paddingValues).fillMaxSize(),
-            indicator = { /* Hide simple circle */ }
+            modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
             com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 60.dp, start = 12.dp, end = 12.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+            
+            Column(modifier = Modifier.fillMaxSize()) {
+                
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 12.dp, start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
             itemsIndexed(boletimList, key = { _, summary -> "${summary.date}|${summary.agentName}" }) { index, summary ->
                 PremiumCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -551,6 +554,7 @@ fun BoletimScreen(
     }
 }
 }
+}
 
 
 
@@ -589,14 +593,11 @@ private fun shareToWhatsApp(
 
     // Calculate statistics
     val trabalhados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE || it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY }
-    val tratados = houses.count {
-        (it.a1 + it.a2 + it.b + it.c + it.d1 + it.d2 + it.e + it.eliminados) > 0 || 
-        it.larvicida > 0.0 || it.comFoco
-    }
+    val tratados = houses.count { it.treatment.hasAnyTreatment }
     val fechados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }
     val recusados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }
     val abandonados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
-    val comFoco = houses.count { it.comFoco }
+    val comFoco = houses.count { it.treatment.comFoco }
 
     // Format WhatsApp message
     val sb = StringBuilder()

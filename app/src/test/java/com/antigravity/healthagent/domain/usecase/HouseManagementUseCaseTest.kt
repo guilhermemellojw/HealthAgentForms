@@ -7,6 +7,7 @@ import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.domain.model.VisitAddress
 import com.antigravity.healthagent.data.repository.HouseRepository
 import com.antigravity.healthagent.data.repository.StreetRepository
 import kotlinx.coroutines.flow.Flow
@@ -41,7 +42,7 @@ class HouseManagementUseCaseTest {
     @Test
     fun `predictNextHouseValues - single house increments number`() {
         val houses = listOf(
-            House(id = 1, number = "10", listOrder = 1, data = date, blockNumber = "A", streetName = "B")
+            House(id = 1, address = VisitAddress(number = "10", blockNumber = "A", streetName = "B"), listOrder = 1, data = date)
         )
         val prediction = useCase.predictNextHouseValues(houses, date, "A", "B")
         assertEquals("11", prediction.number)
@@ -50,8 +51,8 @@ class HouseManagementUseCaseTest {
     @Test
     fun `predictNextHouseValues - two houses with incrementing numbers`() {
         val houses = listOf(
-            House(id = 1, number = "10", listOrder = 1, data = date, blockNumber = "A", streetName = "B"),
-            House(id = 2, number = "12", listOrder = 2, data = date, blockNumber = "A", streetName = "B")
+            House(id = 1, address = VisitAddress(number = "10", blockNumber = "A", streetName = "B"), listOrder = 1, data = date),
+            House(id = 2, address = VisitAddress(number = "12", blockNumber = "A", streetName = "B"), listOrder = 2, data = date)
         )
         val prediction = useCase.predictNextHouseValues(houses, date, "A", "B")
         assertEquals("14", prediction.number) // 10 -> 12 (+2), so 12+2=14
@@ -60,8 +61,8 @@ class HouseManagementUseCaseTest {
     @Test
     fun `predictNextHouseValues - numbers the same, increments sequence`() {
         val houses = listOf(
-            House(id = 1, number = "10", sequence = 1, listOrder = 1, data = date, blockNumber = "A", streetName = "B"),
-            House(id = 2, number = "10", sequence = 2, listOrder = 2, data = date, blockNumber = "A", streetName = "B")
+            House(id = 1, address = VisitAddress(number = "10", sequence = 1, blockNumber = "A", streetName = "B"), listOrder = 1, data = date),
+            House(id = 2, address = VisitAddress(number = "10", sequence = 2, blockNumber = "A", streetName = "B"), listOrder = 2, data = date)
         )
         val prediction = useCase.predictNextHouseValues(houses, date, "A", "B")
         assertEquals("10", prediction.number)

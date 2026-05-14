@@ -3,6 +3,8 @@ package com.antigravity.healthagent.domain.usecase
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.domain.model.TreatmentData
+import com.antigravity.healthagent.domain.model.DailyContext
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -16,9 +18,11 @@ class HouseValidationUseCaseTest {
         val house = House(
             id = 1,
             data = date,
-            bairro = "", // Missing
-            streetName = "Rua Teste",
-            blockNumber = "1"
+            address = com.antigravity.healthagent.domain.model.VisitAddress(
+                bairro = "", // Missing
+                streetName = "Rua Teste",
+                blockNumber = "1"
+            )
         )
         
         val result = useCase.getInvalidFields(house)
@@ -31,13 +35,14 @@ class HouseValidationUseCaseTest {
         val house = House(
             id = 1,
             data = date,
-            bairro = "Centro",
-            streetName = "Rua Teste",
-            blockNumber = "1",
-            number = "123",
+            address = com.antigravity.healthagent.domain.model.VisitAddress(
+                bairro = "Centro",
+                streetName = "Rua Teste",
+                blockNumber = "1",
+                number = "123"
+            ),
             situation = Situation.NONE,
-            larvicida = 10.0,
-            a1 = 0 // No deposits
+            treatment = TreatmentData(larvicida = 10.0, a1 = 0) // No deposits
         )
         
         val result = useCase.getInvalidFields(house)
@@ -49,13 +54,14 @@ class HouseValidationUseCaseTest {
         val house = House(
             id = 1,
             data = date,
-            bairro = "Centro",
-            streetName = "Rua Teste",
-            blockNumber = "1",
-            number = "123",
+            address = com.antigravity.healthagent.domain.model.VisitAddress(
+                bairro = "Centro",
+                streetName = "Rua Teste",
+                blockNumber = "1",
+                number = "123"
+            ),
             situation = Situation.NONE,
-            a1 = 1,
-            larvicida = 0.0
+            treatment = TreatmentData(a1 = 1, larvicida = 0.0)
         )
         
         val result = useCase.getInvalidFields(house)
@@ -65,8 +71,8 @@ class HouseValidationUseCaseTest {
     @Test
     fun `validate - duplicate addresses on same day are flagged`() {
         val houses = listOf(
-            House(id = 1, data = date, bairro = "Centro", blockNumber = "1", streetName = "Rua A", number = "100"),
-            House(id = 2, data = date, bairro = "Centro", blockNumber = "1", streetName = "Rua A", number = "100")
+            House(id = 1, data = date, address = com.antigravity.healthagent.domain.model.VisitAddress(bairro = "Centro", blockNumber = "1", streetName = "Rua A", number = "100")),
+            House(id = 2, data = date, address = com.antigravity.healthagent.domain.model.VisitAddress(bairro = "Centro", blockNumber = "1", streetName = "Rua A", number = "100"))
         )
         
         val result = useCase.validateCurrentDay(date, houses)

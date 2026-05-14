@@ -50,6 +50,7 @@ interface SyncRepository {
     suspend fun recordHouseDeletion(house: House): Result<Unit>
     suspend fun recordActivityDeletion(date: String, agentUid: String): Result<Unit>
     suspend fun recordBulkDeletions(houseKeys: List<String>, activityDates: List<String>, targetUid: String? = null): Result<Unit>
+    suspend fun deleteHousesSurgically(agentUid: String, houses: List<House>): Result<Unit>
 
     /**
      * NUCLEAR OPTION: Deletes ALL data for ALL agents in the cloud.

@@ -55,7 +55,7 @@ class QuarteiroesViewModel @Inject constructor(
         }
     }
         .map { houses -> 
-            houses.filter { it.comFoco && it.latitude != null && it.longitude != null } 
+            houses.filter { it.treatment.comFoco && it.geo.latitude != null && it.geo.longitude != null } 
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     

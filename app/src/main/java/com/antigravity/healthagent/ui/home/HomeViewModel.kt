@@ -23,6 +23,8 @@ import com.antigravity.healthagent.utils.SemanalPdfGenerator
 import com.antigravity.healthagent.utils.BoletimPdfGenerator
 import com.antigravity.healthagent.domain.repository.*
 import com.antigravity.healthagent.domain.usecase.*
+import com.antigravity.healthagent.domain.model.DailyContext
+import com.antigravity.healthagent.domain.model.VisitAddress
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -34,6 +36,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
+import com.antigravity.healthagent.utils.normalize
 import javax.inject.Inject
 
 @HiltViewModel
@@ -124,7 +127,22 @@ class HomeViewModel @Inject constructor(
 
     private val _validationErrorHouseIds = MutableStateFlow<Set<Int>>(emptySet())
     private val _isDuplicateIds = MutableStateFlow<Set<Int>>(emptySet())
+    init {
+        // Load persisted sync timestamp
+        viewModelScope.launch {
+            settingsManager.lastSyncTimestamp.collect { ts ->
+                _syncStatus.update { it.copy(lastSyncTimestamp = ts) }
+            }
+        }
+    }
+
     private val _syncStatus = MutableStateFlow(SyncStatus())
+    val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
+
+    fun triggerSync() {
+        syncDataToCloud()
+    }
+
     private val _backupConfirmation = MutableStateFlow<BackupConfirmation?>(null)
 
     private val _showClosingAudit = MutableStateFlow<AuditSummary?>(null)
@@ -206,7 +224,8 @@ class HomeViewModel @Inject constructor(
     private fun getTimestamp(date: String): Long {
         return dateCache.getOrPut(date) {
             try {
-                dateFormatter.parse(date)?.time ?: 0L
+                // BUG FIX: Handle slash dates to prevent timestamp 0 sorting issues
+                dateFormatter.parse(date.replace("/", "-"))?.time ?: 0L
             } catch (e: Exception) {
                 0L
             }
@@ -368,9 +387,11 @@ class HomeViewModel @Inject constructor(
     .flatMapLatest { (name, remoteUid, currentUid) -> 
         val effectiveUid = remoteUid ?: currentUid
         if (effectiveUid != null) {
-            // STRICT ISOLATION: Only fetch personal houses unless a remote agent is explicitly selected.
-            // This prevents the 'merged data' bug for Admin users working as agents.
-            repository.getAllHouses(effectiveUid) 
+            // STRICT ISOLATION with ORPHAN HEALING: 
+            // We fetch personal houses (UID match) PLUS orphans that match the current agent's name.
+            // This ensures that records with blank UIDs (Ghost houses) are pulled into the flow,
+            // allowing them to be pruned from the in-flight list and displayed for correction.
+            repository.getPersonalHousesFlow(effectiveUid, name ?: "") 
         } else {
             kotlinx.coroutines.flow.flowOf(emptyList())
         }
@@ -464,13 +485,43 @@ class HomeViewModel @Inject constructor(
         
         "${displayDateFormatter.format(sunday)} a ${displayDateFormatter.format(saturday)}"
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    // Global Percurso for Completion Detection
+    private val globalSortedVisits: StateFlow<List<House>> = allHousesFlow.map { all ->
+        all.sortedWith(compareBy(
+            { getTimestamp(it.data) },
+            { it.agentName },
+            { it.listOrder },
+            { it.id }
+        ))
+    }.flowOn(Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Real Activity Status Flow
+    private val weekActivitiesFlow: StateFlow<List<DayActivity>> = combine(currentWeekDates, _remoteAgentUid, _currentUserUid) { dates, remote, current ->
+        repository.getDayActivities(dates, remote ?: current)
+    }.flatMapLatest { it }
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     
-    val weeklySummary: StateFlow<List<DaySummary>> = combine(allHousesFlow, currentWeekDates, _agentName, _remoteAgentUid, _currentUserUid) { all, dates, name, remoteUid, currentUid -> 
+    val weeklySummary: StateFlow<List<DaySummary>> = combine(
+        allHousesFlow, currentWeekDates, weekActivitiesFlow, _agentName, _remoteAgentUid, _currentUserUid
+    ) { args -> 
+        val all = args[0] as List<House>
+        val dates = args[1] as List<String>
+        val activities = args[2] as List<DayActivity>
+        val name = args[3] as String
+        val remoteUid = args[4] as String?
+        val currentUid = args[5] as String?
+        
         val targetUid = remoteUid ?: currentUid
         dates.map { date ->
             val dayHouses = all.filter { it.data == date && (it.agentUid == targetUid || it.agentName == name) }
             val totalWorked = dayHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
-            val status = if (dayHouses.any { it.isConcluded }) "CONCLUÍDO" else "EM ABERTO"
+            
+            // Use real activity status from DB, default to "NORMAL"
+            val activity = activities.find { it.date.replace("/", "-") == date.replace("/", "-") }
+            val status = activity?.status?.ifBlank { "NORMAL" } ?: "NORMAL"
+            
             DaySummary(date, dayHouses.size, totalWorked, status)
         }
     }
@@ -483,8 +534,8 @@ class HomeViewModel @Inject constructor(
         
         WeeklySummaryTotals(
             totalHouses = weekHouses.size,
-            totalTratados = weekHouses.count { (it.a1 + it.a2 + it.b + it.c + it.d1 + it.d2 + it.e + it.eliminados) > 0 || it.larvicida > 0.0 || it.comFoco },
-            totalFoci = weekHouses.count { it.comFoco },
+            totalTratados = weekHouses.count { it.treatment.hasAnyTreatment },
+            totalFoci = weekHouses.count { it.treatment.comFoco },
             totalWorked = weekHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY },
             totalFechados = weekHouses.count { it.situation == Situation.F },
             totalRecusados = weekHouses.count { it.situation == Situation.REC },
@@ -500,24 +551,33 @@ class HomeViewModel @Inject constructor(
             .sortedByDescending { it.lastUpdated }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val boletimList: StateFlow<List<BoletimSummary>> = combine(allHousesFlow, _agentName, _remoteAgentUid, _currentUserUid) { all, name, remoteUid, currentUid -> 
+    val boletimList: StateFlow<List<BoletimSummary>> = combine(allHousesFlow, globalSortedVisits, _agentName, _remoteAgentUid, _currentUserUid) { all, global, name, remoteUid, currentUid -> 
         val targetUid = remoteUid ?: currentUid
         val personalHouses = all.filter { it.agentUid == targetUid || (it.agentUid.isEmpty() && it.agentName.uppercase() == name) }
         val groupedByDate = personalHouses.groupBy { it.data }.toList().sortedByDescending { parseDate(it.first)?.time ?: 0L }
         
         groupedByDate.map { (date, houses) ->
-            val blocks = houses.groupBy { "${it.blockNumber}-${it.blockSequence}-${it.bairro}" }
+            val blocks = houses.groupBy { "${it.address.blockNumber}-${it.address.blockSequence}-${it.address.bairro}" }
                 .map { (_, blockHouses) ->
                     val h = blockHouses.first()
+                    
+                    // Unified Completion Logic (Manual + Successor)
+                    val lastHouseInBlock = blockHouses.lastOrNull()
+                    val lastHouseId = lastHouseInBlock?.id ?: -1L
+                    val indexOfLastInGlobal = global.indexOfLast { it.id == lastHouseId }
+                    val isImplicitlyConcluded = indexOfLastInGlobal != -1 && indexOfLastInGlobal < global.lastIndex
+                    
+                    val isCompleted = blockHouses.any { it.quarteiraoConcluido || it.localidadeConcluida } || isImplicitlyConcluded
+
                     BlockSummary(
-                        number = h.blockNumber,
-                        sequence = h.blockSequence,
-                        bairro = h.bairro,
-                        isCompleted = blockHouses.all { it.isConcluded },
+                        number = h.address.blockNumber,
+                        sequence = h.address.blockSequence,
+                        bairro = h.address.bairro,
+                        isCompleted = isCompleted,
                         isLocalidadeConcluded = blockHouses.any { it.isLocalidadeConcluded },
                         totalHouses = blockHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY },
                         totalVisits = blockHouses.size,
-                        focos = blockHouses.count { it.comFoco }
+                        focos = blockHouses.count { it.treatment.comFoco }
                     )
                 }
             
@@ -526,16 +586,17 @@ class HomeViewModel @Inject constructor(
                 agentName = houses.firstOrNull()?.agentName ?: name,
                 totals = calculateDashboardTotals(houses),
                 blocks = blocks,
-                status = if (houses.all { it.isConcluded }) "CONCLUÍDO" else "EM ABERTO"
+                status = if (blocks.all { it.isCompleted }) "CONCLUÍDO" else "EM ABERTO"
             )
         }
     }
     .flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+
     val activityOptions: StateFlow<List<String>> = settingsManager.customActivities.map { custom -> 
-        (listOf("NORMAL", "FERIADO", "PONTO FACULTATIVO", "REUNIÃO", "TREINAMENTO") + custom.toList()).distinct().sorted()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("NORMAL", "FERIADO", "PONTO FACULTATIVO", "REUNIÃO", "TREINAMENTO").sorted())
+        (listOf("NORMAL", "FERIADO", "PONTO FACULTATIVO", "REUNIÃO", "TREINAMENTO") + custom.toList()).distinct()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("NORMAL", "FERIADO", "PONTO FACULTATIVO", "REUNIÃO", "TREINAMENTO"))
 
     val customActivities: StateFlow<Set<String>> = settingsManager.customActivities
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
@@ -603,7 +664,7 @@ class HomeViewModel @Inject constructor(
     val rgBairros: StateFlow<List<String>> = combine(allHousesFlow, globalHousesFlow, _rgYear, _isAdmin) { all, global, year, isAdminRole ->
         val housesToUse = if (isAdminRole) global else all
         filterByYear(housesToUse, year)
-            .map { it.bairro.trim().uppercase() }
+            .map { it.address.bairro.trim().uppercase() }
             .distinct()
             .sorted()
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -757,13 +818,13 @@ class HomeViewModel @Inject constructor(
                             it.data == draft.data && 
                             it.agentUid == draft.agentUid &&
                             it.agentName.equals(draft.agentName, ignoreCase = true) &&
-                            it.blockNumber.equals(draft.blockNumber, ignoreCase = true) &&
-                            it.blockSequence.equals(draft.blockSequence, ignoreCase = true) &&
-                            it.streetName.equals(draft.streetName, ignoreCase = true) &&
-                            it.number.equals(draft.number, ignoreCase = true) &&
-                            it.sequence == draft.sequence &&
-                            it.complement == draft.complement &&
-                            it.bairro.equals(draft.bairro, ignoreCase = true) &&
+                            it.address.blockNumber.equals(draft.address.blockNumber, ignoreCase = true) &&
+                            it.address.blockSequence.equals(draft.address.blockSequence, ignoreCase = true) &&
+                            it.address.streetName.equals(draft.address.streetName, ignoreCase = true) &&
+                            it.address.number.equals(draft.address.number, ignoreCase = true) &&
+                            it.address.sequence == draft.address.sequence &&
+                            it.address.complement == draft.address.complement &&
+                            it.address.bairro.equals(draft.address.bairro, ignoreCase = true) &&
                             it.visitSegment == draft.visitSegment
                         }
                         
@@ -772,21 +833,21 @@ class HomeViewModel @Inject constructor(
                         val dbMatch = dbHouses.find { it.id == id }
                         val isDraftSynced = dbMatch != null && 
                             dbMatch.lastUpdated >= draft.lastUpdated && // STABILITY: Ensure DB is at least as new as draft
-                            dbMatch.number == draft.number && 
-                            dbMatch.sequence == draft.sequence && 
-                            dbMatch.complement == draft.complement &&
+                            dbMatch.address.number == draft.address.number && 
+                            dbMatch.address.sequence == draft.address.sequence && 
+                            dbMatch.address.complement == draft.address.complement &&
                             dbMatch.propertyType == draft.propertyType &&
                             dbMatch.situation == draft.situation &&
-                            dbMatch.streetName == draft.streetName &&
-                            dbMatch.blockNumber == draft.blockNumber &&
-                            dbMatch.blockSequence == draft.blockSequence &&
-                            dbMatch.bairro == draft.bairro &&
+                            dbMatch.address.streetName == draft.address.streetName &&
+                            dbMatch.address.blockNumber == draft.address.blockNumber &&
+                            dbMatch.address.blockSequence == draft.address.blockSequence &&
+                            dbMatch.address.bairro == draft.address.bairro &&
                             dbMatch.observation == draft.observation &&
-                            dbMatch.a1 == draft.a1 && dbMatch.a2 == draft.a2 &&
-                            dbMatch.b == draft.b && dbMatch.c == draft.c &&
-                            dbMatch.d1 == draft.d1 && dbMatch.d2 == draft.d2 &&
-                            dbMatch.e == draft.e && dbMatch.eliminados == draft.eliminados &&
-                            dbMatch.larvicida == draft.larvicida && dbMatch.comFoco == draft.comFoco &&
+                            dbMatch.treatment.a1 == draft.treatment.a1 && dbMatch.treatment.a2 == draft.treatment.a2 &&
+                            dbMatch.treatment.b == draft.treatment.b && dbMatch.treatment.c == draft.treatment.c &&
+                            dbMatch.treatment.d1 == draft.treatment.d1 && dbMatch.treatment.d2 == draft.treatment.d2 &&
+                            dbMatch.treatment.e == draft.treatment.e && dbMatch.treatment.eliminados == draft.treatment.eliminados &&
+                            dbMatch.treatment.larvicida == draft.treatment.larvicida && dbMatch.treatment.comFoco == draft.treatment.comFoco &&
                             dbMatch.quarteiraoConcluido == draft.quarteiraoConcluido &&
                             dbMatch.localidadeConcluida == draft.localidadeConcluida
                         
@@ -807,14 +868,15 @@ class HomeViewModel @Inject constructor(
                     if (inFlights.isEmpty()) return@update inFlights
                     inFlights.filter { inFlight ->
                         // Match by natural identity + content against the RAW database records.
+                        // ADDITION: Check for Identity (address signature) match to handle ID-less DB records.
                         !dbHouses.any { db -> 
-                            db.listOrder == inFlight.listOrder && 
-                            db.data == inFlight.data &&
-                            db.blockNumber == inFlight.blockNumber &&
-                            db.streetName == inFlight.streetName &&
-                            db.number == inFlight.number &&
-                            db.sequence == inFlight.sequence &&
-                            db.complement == inFlight.complement
+                            (db.listOrder == inFlight.listOrder && db.data == inFlight.data &&
+                             db.address.blockNumber == inFlight.address.blockNumber &&
+                             db.address.streetName == inFlight.address.streetName &&
+                             db.address.number == inFlight.address.number &&
+                             db.address.sequence == inFlight.address.sequence &&
+                             db.address.complement == inFlight.address.complement) ||
+                            (db.generateIdentityKey() == inFlight.generateIdentityKey())
                         }
                     }
                 }
@@ -856,10 +918,10 @@ class HomeViewModel @Inject constructor(
                     if ((identityCounts[key] ?: 0) > 1) duplicates.add(hh.id)
                 }
 
-                val normalizedQ = (q ?: "").stringNormalize()
+                val normalizedQ = (q ?: "").normalize()
                 val mappedDayHouses = dayHouses.filter { 
-                    (it.streetName ?: "").formatStreetName().contains(normalizedQ.formatStreetName(), true) || 
-                    (it.number ?: "").contains(q ?: "", true) 
+                    (it.address.streetName ?: "").formatStreetName().contains(normalizedQ.formatStreetName(), true) || 
+                    (it.address.number ?: "").contains(q ?: "", true) 
                 }.map { house ->
                     val key = generateHouseKey(house)
                     val isDuplicate = (identityCounts[key] ?: 0) > 1
@@ -984,7 +1046,7 @@ class HomeViewModel @Inject constructor(
 
     val filteredHouses: StateFlow<List<House>> = combine(houses, _pendingUpdateDrafts, _searchQuery, _data) { dbList, drafts, query, date ->
         val mergedList = dbList.map { house -> drafts[house.id] ?: house }
-        mergedList.filter { it.data == date && (query.isBlank() || it.streetName.contains(query, ignoreCase = true) || it.blockNumber.contains(query, ignoreCase = true)) }
+        mergedList.filter { it.data == date && (query.isBlank() || it.address.streetName.contains(query, ignoreCase = true) || it.address.blockNumber.contains(query, ignoreCase = true)) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val filteredHousesUiState: StateFlow<List<HouseUiState>> = combine(filteredHouses, _isDuplicateIds, recentlyEditedHouseIds, _currentUserUid) { list, dups, editing, myUid ->
@@ -1209,11 +1271,11 @@ class HomeViewModel @Inject constructor(
                         _isDuplicateIds.value.contains(lastHouse.id)
                     
                     if (!isClashingDraft) {
-                        _bairro.value = lastHouse.bairro
-                        _currentBlock.value = lastHouse.blockNumber
-                        _currentBlockSequence.value = lastHouse.blockSequence
-                        _currentStreet.value = lastHouse.streetName
-                        _municipio.value = lastHouse.municipio
+                        _bairro.value = lastHouse.address.bairro
+                        _currentBlock.value = lastHouse.address.blockNumber
+                        _currentBlockSequence.value = lastHouse.address.blockSequence
+                        _currentStreet.value = lastHouse.address.streetName
+                        _municipio.value = lastHouse.context.municipio
                         
                         // ONLY update agentName if it's currently empty, to avoid loops
                         if (_agentName.value.isBlank()) {
@@ -1507,15 +1569,15 @@ class HomeViewModel @Inject constructor(
         return AuditSummary(
             date = date,
             totalWorked = dayHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY },
-            totalTreated = dayHouses.count { (it.a1+it.a2+it.b+it.c+it.d1+it.d2+it.e+it.eliminados) > 0 || it.larvicida > 0.0 || it.comFoco },
+            totalTreated = dayHouses.count { it.treatment.hasAnyTreatment },
             totalClosed = dayHouses.count { it.situation == Situation.F },
             totalRefused = dayHouses.count { it.situation == Situation.REC },
             totalAbsent = dayHouses.count { it.situation == Situation.A },
             totalVacant = dayHouses.count { it.situation == Situation.V },
-            a1 = dayHouses.sumOf { it.a1 }, a2 = dayHouses.sumOf { it.a2 }, b = dayHouses.sumOf { it.b },
-            c = dayHouses.sumOf { it.c }, d1 = dayHouses.sumOf { it.d1 }, d2 = dayHouses.sumOf { it.d2 },
-            e = dayHouses.sumOf { it.e }, eliminados = dayHouses.sumOf { it.eliminados },
-            totalLarvicide = dayHouses.sumOf { it.larvicida }
+            a1 = dayHouses.sumOf { it.treatment.a1 }, a2 = dayHouses.sumOf { it.treatment.a2 }, b = dayHouses.sumOf { it.treatment.b },
+            c = dayHouses.sumOf { it.treatment.c }, d1 = dayHouses.sumOf { it.treatment.d1 }, d2 = dayHouses.sumOf { it.treatment.d2 },
+            e = dayHouses.sumOf { it.treatment.e }, eliminados = dayHouses.sumOf { it.treatment.eliminados },
+            totalLarvicide = dayHouses.sumOf { it.treatment.larvicida }
         )
     }
 
@@ -1640,14 +1702,16 @@ class HomeViewModel @Inject constructor(
                 }
 
                 var houseToInsert = House(
-                    municipio = _municipio.value,
-                    bairro = _bairro.value.uppercase(),
-                    blockNumber = template?.blockNumber ?: _currentBlock.value,
-                    blockSequence = template?.blockSequence ?: _currentBlockSequence.value,
-                    streetName = template?.streetName ?: _currentStreet.value,
-                    number = prediction.number,
-                    sequence = prediction.sequence,
-                    complement = prediction.complement,
+                    context = DailyContext(municipio = _municipio.value),
+                    address = VisitAddress(
+                        blockNumber = template?.address?.blockNumber ?: _currentBlock.value,
+                        blockSequence = template?.address?.blockSequence ?: _currentBlockSequence.value,
+                        streetName = template?.address?.streetName ?: _currentStreet.value,
+                        number = prediction.number,
+                        sequence = prediction.sequence,
+                        complement = prediction.complement,
+                        bairro = _bairro.value.uppercase()
+                    ),
                     propertyType = prediction.propertyType,
                     situation = prediction.situation,
                     data = _data.value,
@@ -1657,8 +1721,8 @@ class HomeViewModel @Inject constructor(
                 )
 
                 // 2.1 Clash Detection (similar to addNewHouse)
-                var finalSequence = houseToInsert.sequence
-                var finalComplement = houseToInsert.complement
+                var finalSequence = houseToInsert.address.sequence
+                var finalComplement = houseToInsert.address.complement
                 
                 // We use latestHouses (including drafts) for safe incrementing
                 val allLatest = houses.value 
@@ -1667,23 +1731,23 @@ class HomeViewModel @Inject constructor(
                     it.data == houseToInsert.data && 
                     it.agentUid == houseToInsert.agentUid &&
                     it.agentName.equals(houseToInsert.agentName, ignoreCase = true) &&
-                    it.blockNumber.stringNormalize() == houseToInsert.blockNumber.stringNormalize() &&
-                    it.blockSequence.stringNormalize() == houseToInsert.blockSequence.stringNormalize() &&
-                    it.streetName.formatStreetName() == houseToInsert.streetName.formatStreetName() &&
-                    it.number.stringNormalize() == houseToInsert.number.stringNormalize() && 
-                    it.sequence == finalSequence &&
-                    it.complement == finalComplement &&
-                    it.bairro.stringNormalize() == houseToInsert.bairro.stringNormalize()
+                    it.address.blockNumber.stringNormalize() == houseToInsert.address.blockNumber.stringNormalize() &&
+                    it.address.blockSequence.stringNormalize() == houseToInsert.address.blockSequence.stringNormalize() &&
+                    it.address.streetName.formatStreetName() == houseToInsert.address.streetName.formatStreetName() &&
+                    it.address.number.stringNormalize() == houseToInsert.address.number.stringNormalize() && 
+                    it.address.sequence == finalSequence &&
+                    it.address.complement == finalComplement &&
+                    it.address.bairro.stringNormalize() == houseToInsert.address.bairro.stringNormalize()
                 }) {
-                    if (houseToInsert.complement > 0 || houseToInsert.number.isNotBlank()) {
+                    if (houseToInsert.address.complement > 0 || houseToInsert.address.number.isNotBlank()) {
                         finalComplement++
                     } else {
                         finalSequence++
                     }
                 }
                 
-                if (finalSequence != houseToInsert.sequence || finalComplement != houseToInsert.complement) {
-                    houseToInsert = houseToInsert.copy(sequence = finalSequence, complement = finalComplement)
+                if (finalSequence != houseToInsert.address.sequence || finalComplement != houseToInsert.address.complement) {
+                    houseToInsert = houseToInsert.copy(address = houseToInsert.address.copy(sequence = finalSequence, complement = finalComplement))
                 }
 
                 // 3. Insert and Reorder
@@ -1795,16 +1859,16 @@ class HomeViewModel @Inject constructor(
                     
                     if (lastGlobalHouse != null) {
                         // Inherit Context
-                        initialBlock = lastGlobalHouse.blockNumber
-                        initialStreet = lastGlobalHouse.streetName
-                        initialBlockSeq = lastGlobalHouse.blockSequence
+                        initialBlock = lastGlobalHouse.address.blockNumber
+                        initialStreet = lastGlobalHouse.address.streetName
+                        initialBlockSeq = lastGlobalHouse.address.blockSequence
                         
                         // Update UI State Context
                         _currentBlock.value = initialBlock
                         _currentStreet.value = initialStreet
                         _currentBlockSequence.value = initialBlockSeq
-                        _bairro.value = lastGlobalHouse.bairro
-                        _municipio.value = lastGlobalHouse.municipio
+                        _bairro.value = lastGlobalHouse.address.bairro
+                        _municipio.value = lastGlobalHouse.context.municipio
                         _agentName.value = lastGlobalHouse.agentName
                         
                         // Predict based on history
@@ -1857,7 +1921,7 @@ class HomeViewModel @Inject constructor(
                 var predictedSegment = 0
                 var lastStreetName = ""
                 dayHouses.forEach { h ->
-                    val s = h.streetName.trim().uppercase()
+                    val s = h.address.streetName.trim().uppercase()
                     if (lastStreetName.isNotEmpty() && s != lastStreetName) {
                         predictedSegment++
                     }
@@ -1884,18 +1948,18 @@ class HomeViewModel @Inject constructor(
 
                 var houseToInsert = House(
                     id = 0,
-                    blockNumber = initialBlock.trim().uppercase(),
-                    blockSequence = initialBlockSeq.trim().uppercase(),
-                    streetName = initialStreet.trim().formatStreetName(),
-                    number = prediction.number.trim().uppercase(),
-                    sequence = prediction.sequence,
-                    complement = prediction.complement,
+                    address = VisitAddress(
+                        blockNumber = initialBlock.trim().uppercase(),
+                        blockSequence = initialBlockSeq.trim().uppercase(),
+                        streetName = initialStreet.trim().formatStreetName(),
+                        number = prediction.number.trim().uppercase(),
+                        sequence = prediction.sequence,
+                        complement = prediction.complement,
+                        bairro = _bairro.value.trim().uppercase()
+                    ),
                     propertyType = prediction.propertyType,
                     situation = prediction.situation,
-                    tipo = _tipo.value,
-                    ciclo = _ciclo.value,
-                    municipio = _municipio.value.trim().uppercase(),
-                    bairro = _bairro.value.trim().uppercase(),
+                    context = DailyContext(tipo = _tipo.value, ciclo = _ciclo.value, municipio = _municipio.value.trim().uppercase()),
                     agentName = currentAgentName.trim().uppercase(),
                     agentUid = currentAgentUid,
                     data = _data.value,
@@ -1904,8 +1968,8 @@ class HomeViewModel @Inject constructor(
                 )
 
                 // Exhaustive Clash Detection: Check ALL fields in the unique index to prevent REPLACE-deletions
-                var finalSequence = houseToInsert.sequence
-                var finalComplement = houseToInsert.complement
+                var finalSequence = houseToInsert.address.sequence
+                var finalComplement = houseToInsert.address.complement
                 
                 // Smarter Auto-Increment: If numbers match, prefer incrementing COMPLEMENT
                 // CRITICAL: We check against 'latestHouses' (DB + Drafts) here to ensure 
@@ -1914,24 +1978,24 @@ class HomeViewModel @Inject constructor(
                     it.data == houseToInsert.data && 
                     it.agentUid == houseToInsert.agentUid &&
                     it.agentName.equals(houseToInsert.agentName, ignoreCase = true) &&
-                    it.blockNumber.equals(houseToInsert.blockNumber, ignoreCase = true) &&
-                    it.blockSequence.equals(houseToInsert.blockSequence, ignoreCase = true) &&
-                    it.streetName.equals(houseToInsert.streetName, ignoreCase = true) &&
-                    it.number.equals(houseToInsert.number, ignoreCase = true) && 
-                    it.sequence == finalSequence &&
-                    it.complement == finalComplement &&
-                    it.bairro.equals(houseToInsert.bairro, ignoreCase = true) &&
+                    it.address.blockNumber.equals(houseToInsert.address.blockNumber, ignoreCase = true) &&
+                    it.address.blockSequence.equals(houseToInsert.address.blockSequence, ignoreCase = true) &&
+                    it.address.streetName.equals(houseToInsert.address.streetName, ignoreCase = true) &&
+                    it.address.number.equals(houseToInsert.address.number, ignoreCase = true) && 
+                    it.address.sequence == finalSequence &&
+                    it.address.complement == finalComplement &&
+                    it.address.bairro.equals(houseToInsert.address.bairro, ignoreCase = true) &&
                     it.visitSegment == houseToInsert.visitSegment
                 }) {
-                    if (houseToInsert.complement > 0 || houseToInsert.number.isNotBlank()) {
+                    if (houseToInsert.address.complement > 0 || houseToInsert.address.number.isNotBlank()) {
                         finalComplement++
                     } else {
                         finalSequence++
                     }
                 }
                 
-                if (finalSequence != houseToInsert.sequence || finalComplement != houseToInsert.complement) {
-                    houseToInsert = houseToInsert.copy(sequence = finalSequence, complement = finalComplement)
+                if (finalSequence != houseToInsert.address.sequence || finalComplement != houseToInsert.address.complement) {
+                    houseToInsert = houseToInsert.copy(address = houseToInsert.address.copy(sequence = finalSequence, complement = finalComplement))
                 }
 
                 // Add to In-Flight temporarily to prevent duplicate prediction in rapid-fire clicks
@@ -1953,9 +2017,9 @@ class HomeViewModel @Inject constructor(
                 }
                 
                 if (finalInFlightState != null && 
-                    (finalInFlightState.number != houseToInsert.number || 
-                     finalInFlightState.sequence != houseToInsert.sequence || 
-                     finalInFlightState.complement != houseToInsert.complement)) {
+                    (finalInFlightState.address.number != houseToInsert.address.number || 
+                     finalInFlightState.address.sequence != houseToInsert.address.sequence || 
+                     finalInFlightState.address.complement != houseToInsert.address.complement)) {
                      
                      houseManagementUseCase.updateHouse(
                         finalInFlightState.copy(id = newId.toInt()), 
@@ -2044,13 +2108,13 @@ class HomeViewModel @Inject constructor(
                 it.data == house.data && 
                 it.agentUid == (house.agentUid ?: _currentUserUid.value) &&
                 it.agentName.equals(house.agentName, ignoreCase = true) &&
-                it.blockNumber.equals(house.blockNumber, ignoreCase = true) &&
-                it.blockSequence.equals(house.blockSequence, ignoreCase = true) &&
-                it.streetName.equals(house.streetName, ignoreCase = true) &&
-                it.number.equals(house.number, ignoreCase = true) &&
-                it.sequence == house.sequence &&
-                it.complement == house.complement &&
-                it.bairro.equals(house.bairro, ignoreCase = true) &&
+                it.address.blockNumber.equals(house.address.blockNumber, ignoreCase = true) &&
+                it.address.blockSequence.equals(house.address.blockSequence, ignoreCase = true) &&
+                it.address.streetName.equals(house.address.streetName, ignoreCase = true) &&
+                it.address.number.equals(house.address.number, ignoreCase = true) &&
+                it.address.sequence == house.address.sequence &&
+                it.address.complement == house.address.complement &&
+                it.address.bairro.equals(house.address.bairro, ignoreCase = true) &&
                 it.visitSegment == house.visitSegment
         }
 
@@ -2089,9 +2153,9 @@ class HomeViewModel @Inject constructor(
             try {
                 // Determine if this is a "heavy" update (locality change) vs a "light" one (numbers/types)
                 val isHeavy = baselineHouse != null && (
-                    baselineHouse.streetName != house.streetName || 
-                    baselineHouse.blockNumber != house.blockNumber ||
-                    baselineHouse.bairro != house.bairro
+                    baselineHouse.address.streetName != house.address.streetName || 
+                    baselineHouse.address.blockNumber != house.address.blockNumber ||
+                    baselineHouse.address.bairro != house.address.bairro
                 )
                 
                 // Debounce delay: longer for locality changes to avoid segment recalculation spam
@@ -2155,10 +2219,10 @@ class HomeViewModel @Inject constructor(
                 val result = houseManagementUseCase.updateHouseWithContext(houseWithIdentity, latestHouses, baselineHouse)
                 
                 if (result.localizationChanged) {
-                    _bairro.value = result.updatedHouse.bairro
-                    _currentBlock.value = result.updatedHouse.blockNumber
-                    _currentBlockSequence.value = result.updatedHouse.blockSequence
-                    _currentStreet.value = result.updatedHouse.streetName
+                    _bairro.value = result.updatedHouse.address.bairro
+                    _currentBlock.value = result.updatedHouse.address.blockNumber
+                    _currentBlockSequence.value = result.updatedHouse.address.blockSequence
+                    _currentStreet.value = result.updatedHouse.address.streetName
                     
                     // Also ensure subsequent houses get the current session identity if they are being updated
                     val subsequentWithIdentity = result.subsequentHouses.map { it.copy(agentName = currentName, agentUid = currentUid ?: "") }
@@ -2171,6 +2235,9 @@ class HomeViewModel @Inject constructor(
                 if (_validationErrorHouseIds.value.contains(house.id)) {
                     _validationErrorHouseIds.value = _validationErrorHouseIds.value - house.id
                 }
+
+                // BUG FIX: Clear the draft after successful DB update to allow fresh DB states to flow back to the UI.
+                _pendingUpdateDrafts.update { it - house.id }
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error updating house", e)
                 _uiEvent.value = "Falha ao atualizar imóvel: ${e.message}"
@@ -2231,13 +2298,13 @@ class HomeViewModel @Inject constructor(
                 val clashing = latestHouses.find { 
                     it.data == house.data && 
                     it.agentUid == house.agentUid &&
-                    it.blockNumber.equals(house.blockNumber, ignoreCase = true) &&
-                    it.blockSequence.equals(house.blockSequence, ignoreCase = true) &&
-                    it.streetName.equals(house.streetName, ignoreCase = true) &&
-                    it.number.equals(house.number, ignoreCase = true) &&
-                    it.sequence == house.sequence &&
-                    it.complement == house.complement &&
-                    it.bairro.equals(house.bairro, ignoreCase = true) &&
+                    it.address.blockNumber.equals(house.address.blockNumber, ignoreCase = true) &&
+                    it.address.blockSequence.equals(house.address.blockSequence, ignoreCase = true) &&
+                    it.address.streetName.equals(house.address.streetName, ignoreCase = true) &&
+                    it.address.number.equals(house.address.number, ignoreCase = true) &&
+                    it.address.sequence == house.address.sequence &&
+                    it.address.complement == house.address.complement &&
+                    it.address.bairro.equals(house.address.bairro, ignoreCase = true) &&
                     it.visitSegment == house.visitSegment
                 }
 
@@ -2340,13 +2407,13 @@ class HomeViewModel @Inject constructor(
                 it.data == updatedHouse.data && 
                 it.agentUid == updatedHouse.agentUid &&
                 it.agentName.equals(updatedHouse.agentName, ignoreCase = true) &&
-                it.blockNumber.equals(updatedHouse.blockNumber, ignoreCase = true) &&
-                it.blockSequence.equals(updatedHouse.blockSequence, ignoreCase = true) &&
-                it.streetName.equals(updatedHouse.streetName, ignoreCase = true) &&
-                it.number.equals(updatedHouse.number, ignoreCase = true) &&
-                it.sequence == updatedHouse.sequence &&
-                it.complement == updatedHouse.complement &&
-                it.bairro.equals(updatedHouse.bairro, ignoreCase = true) &&
+                it.address.blockNumber.equals(updatedHouse.address.blockNumber, ignoreCase = true) &&
+                it.address.blockSequence.equals(updatedHouse.address.blockSequence, ignoreCase = true) &&
+                it.address.streetName.equals(updatedHouse.address.streetName, ignoreCase = true) &&
+                it.address.number.equals(updatedHouse.address.number, ignoreCase = true) &&
+                it.address.sequence == updatedHouse.address.sequence &&
+                it.address.complement == updatedHouse.address.complement &&
+                it.address.bairro.equals(updatedHouse.address.bairro, ignoreCase = true) &&
                 it.visitSegment == updatedHouse.visitSegment
             }
 
@@ -2469,7 +2536,8 @@ class HomeViewModel @Inject constructor(
                     it.agentUid == myUid && 
                     it.agentName.isNotBlank() && 
                     it.agentName.uppercase() != myName &&
-                    !it.agentName.contains("@")
+                    !it.agentName.contains("@") &&
+                    it.address.blockNumber.isNotBlank() // Ensure it's a real house record
                 }
                 
                 if (misattributed.isNotEmpty()) {
@@ -2536,11 +2604,11 @@ class HomeViewModel @Inject constructor(
             
             lastHouse?.let { house ->
                 // Auto-fill header fields if they are currently blank/default to improve UX
-                if (_municipio.value.isBlank() || _municipio.value == "BOM JARDIM") _municipio.value = house.municipio.uppercase()
-                if (_bairro.value.isBlank()) _bairro.value = house.bairro.uppercase()
-                if (_zona.value.isBlank()) _zona.value = house.zona.uppercase()
-                if (_ciclo.value.isBlank()) _ciclo.value = house.ciclo.uppercase()
-                if (_categoria.value.isBlank()) _categoria.value = house.categoria.uppercase()
+                if (_municipio.value.isBlank() || _municipio.value == "BOM JARDIM") _municipio.value = house.context.municipio.uppercase()
+                if (_bairro.value.isBlank()) _bairro.value = house.address.bairro.uppercase()
+                if (_zona.value.isBlank()) _zona.value = house.context.zona.uppercase()
+                if (_ciclo.value.isBlank()) _ciclo.value = house.context.ciclo.uppercase()
+                if (_categoria.value.isBlank()) _categoria.value = house.context.categoria.uppercase()
                 
                 // Note: We don't overwrite Tipo and Atividade unless they are definitely uninitialized
                 // as those might be day-specific and user might have started typing.
@@ -3362,12 +3430,12 @@ class HomeViewModel @Inject constructor(
     private fun calculateDashboardTotals(dayHouses: List<House>): DashboardTotals {
         return DashboardTotals(
             totalHouses = dayHouses.size, // If it's in the list, it's a property being counted
-            a1 = dayHouses.sumOf { it.a1 }, a2 = dayHouses.sumOf { it.a2 },
-            b = dayHouses.sumOf { it.b }, c = dayHouses.sumOf { it.c },
-            d1 = dayHouses.sumOf { it.d1 }, d2 = dayHouses.sumOf { it.d2 },
-            e = dayHouses.sumOf { it.e }, eliminados = dayHouses.sumOf { it.eliminados },
-            larvicida = dayHouses.sumOf { it.larvicida },
-            totalFocos = dayHouses.count { it.comFoco },
+            a1 = dayHouses.sumOf { it.treatment.a1 }, a2 = dayHouses.sumOf { it.treatment.a2 },
+            b = dayHouses.sumOf { it.treatment.b }, c = dayHouses.sumOf { it.treatment.c },
+            d1 = dayHouses.sumOf { it.treatment.d1 }, d2 = dayHouses.sumOf { it.treatment.d2 },
+            e = dayHouses.sumOf { it.treatment.e }, eliminados = dayHouses.sumOf { it.treatment.eliminados },
+            larvicida = dayHouses.sumOf { it.treatment.larvicida },
+            totalFocos = dayHouses.count { it.treatment.comFoco },
             totalRegisteredHouses = dayHouses.size,
             worked = dayHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY },
             recused = dayHouses.count { it.situation == Situation.REC },
@@ -3378,14 +3446,14 @@ class HomeViewModel @Inject constructor(
     }
     
     private fun generateHouseKey(hh: House): String {
-        val b = (hh.bairro ?: "").stringNormalize()
-        val bn = (hh.blockNumber ?: "").stringNormalize()
-        val bs = (hh.blockSequence ?: "").stringNormalize()
-        val sn = (hh.streetName ?: "").formatStreetName()
-        val n = (hh.number ?: "").stringNormalize()
-        val c = hh.complement.toString().stringNormalize()
+        val b = (hh.address.bairro).stringNormalize()
+        val bn = (hh.address.blockNumber).stringNormalize()
+        val bs = (hh.address.blockSequence).stringNormalize()
+        val sn = (hh.address.streetName).formatStreetName()
+        val n = (hh.address.number).stringNormalize()
+        val c = hh.address.complement.toString().stringNormalize()
         val vs = hh.visitSegment.toString()
-        return "$b|$bn|$bs|$sn|$n|${hh.sequence}|$c|$vs".uppercase()
+        return "$b|$bn|$bs|$sn|$n|${hh.address.sequence}|$c|$vs".uppercase()
     }
 
     private fun clearOldPdfs(context: Context, prefix: String) {

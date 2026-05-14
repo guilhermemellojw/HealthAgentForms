@@ -40,6 +40,7 @@ class AdminViewModel @Inject constructor(
     private val syncDataUseCase: SyncDataUseCase,
     private val getTimelineUseCase: com.antigravity.healthagent.domain.usecase.GetTimelineUseCase,
     private val restoreFromTimelineUseCase: com.antigravity.healthagent.domain.usecase.RestoreFromTimelineUseCase,
+    private val cleanupBrokenHousesUseCase: com.antigravity.healthagent.domain.usecase.CleanupBrokenHousesUseCase,
     private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager
 ) : ViewModel() {
 
@@ -687,6 +688,25 @@ class AdminViewModel @Inject constructor(
                 _uiEvent.emit("Erro na restauração: ${result.exceptionOrNull()?.message}")
             }
             _isTimelineLoading.value = false
+        }
+    }
+
+    fun performSurgicalCleanup(uid: String) {
+        viewModelScope.launch {
+            if (!authRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            _isLoading.value = true
+            val result = cleanupBrokenHousesUseCase(uid)
+            if (result.isSuccess) {
+                val count = result.getOrNull() ?: 0
+                _uiEvent.emit("Limpeza concluída: $count registros removidos")
+                loadAgentsData(_selectedYear.value, _selectedMonth.value)
+            } else {
+                _uiEvent.emit("Erro na limpeza: ${result.exceptionOrNull()?.message}")
+            }
+            _isLoading.value = false
         }
     }
 }

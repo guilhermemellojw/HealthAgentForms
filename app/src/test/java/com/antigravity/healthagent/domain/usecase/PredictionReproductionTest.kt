@@ -3,6 +3,7 @@ package com.antigravity.healthagent.domain.usecase
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.domain.model.VisitAddress
 import com.antigravity.healthagent.data.repository.HouseRepository
 import com.antigravity.healthagent.data.repository.StreetRepository
 import io.mockk.mockk
@@ -24,10 +25,10 @@ class PredictionReproductionTest {
         val street = "Rua João Eugênio Erthal"
         
         val houses = listOf(
-            House(id = 1, data = date, blockNumber = block, streetName = street, number = "67", sequence = 4, listOrder = 1),
-            House(id = 2, data = date, blockNumber = block, streetName = street, number = "67", sequence = 5, listOrder = 2),
-            House(id = 3, data = date, blockNumber = block, streetName = street, number = "57", sequence = 0, listOrder = 3),
-            House(id = 4, data = date, blockNumber = block, streetName = street, number = "57", sequence = 1, listOrder = 4)
+            House(id = 1, data = date, address = VisitAddress(blockNumber = block, streetName = street, number = "67", sequence = 4), listOrder = 1),
+            House(id = 2, data = date, address = VisitAddress(blockNumber = block, streetName = street, number = "67", sequence = 5), listOrder = 2),
+            House(id = 3, data = date, address = VisitAddress(blockNumber = block, streetName = street, number = "57", sequence = 0), listOrder = 3),
+            House(id = 4, data = date, address = VisitAddress(blockNumber = block, streetName = street, number = "57", sequence = 1), listOrder = 4)
         )
         
         val prediction = useCase.predictNextHouseValues(houses, date, block, street)

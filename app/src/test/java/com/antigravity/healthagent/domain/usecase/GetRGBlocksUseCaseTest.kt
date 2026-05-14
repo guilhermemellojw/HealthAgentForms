@@ -2,6 +2,7 @@ package com.antigravity.healthagent.domain.usecase
 
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.domain.model.VisitAddress
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -13,10 +14,10 @@ class GetRGBlocksUseCaseTest {
     @Test
     fun `invoke - should prioritize Date then listOrder`() {
         // Given:
-        val h1 = House(id = 1, data = "01/05/2026", listOrder = 1, blockNumber = "1", blockSequence = "A", bairro = bairro, number = "1", createdAt = 100)
-        val h2 = House(id = 2, data = "01/05/2026", listOrder = 2, blockNumber = "1", blockSequence = "A", bairro = bairro, number = "2", createdAt = 110)
-        val h3 = House(id = 3, data = "02/05/2026", listOrder = 1, blockNumber = "1", blockSequence = "A", bairro = bairro, number = "3", createdAt = 200)
-        val h4 = House(id = 4, data = "02/05/2026", listOrder = 2, blockNumber = "1", blockSequence = "A", bairro = bairro, number = "4", createdAt = 210)
+        val h1 = House(id = 1, data = "01/05/2026", listOrder = 1, address = VisitAddress(blockNumber = "1", blockSequence = "A", bairro = bairro, number = "1"), createdAt = 100)
+        val h2 = House(id = 2, data = "01/05/2026", listOrder = 2, address = VisitAddress(blockNumber = "1", blockSequence = "A", bairro = bairro, number = "2"), createdAt = 110)
+        val h3 = House(id = 3, data = "02/05/2026", listOrder = 1, address = VisitAddress(blockNumber = "1", blockSequence = "A", bairro = bairro, number = "3"), createdAt = 200)
+        val h4 = House(id = 4, data = "02/05/2026", listOrder = 2, address = VisitAddress(blockNumber = "1", blockSequence = "A", bairro = bairro, number = "4"), createdAt = 210)
         
         val houses = listOf(h4, h2, h1, h3) // Shuffled
 
@@ -36,8 +37,8 @@ class GetRGBlocksUseCaseTest {
     @Test
     fun `invoke - should use id as tie-breaker for same LO on same day`() {
         // Given: Teamwork on the same day. 
-        val h1 = House(id = 1, data = "01/05/2026", listOrder = 0, agentName = "A", bairro = bairro, blockNumber = "1", number = "1", createdAt = 2000)
-        val h2 = House(id = 2, data = "01/05/2026", listOrder = 0, agentName = "B", bairro = bairro, blockNumber = "1", number = "2", createdAt = 1000)
+        val h1 = House(id = 1, data = "01/05/2026", listOrder = 0, agentName = "A", address = VisitAddress(bairro = bairro, blockNumber = "1", number = "1"), createdAt = 2000)
+        val h2 = House(id = 2, data = "01/05/2026", listOrder = 0, agentName = "B", address = VisitAddress(bairro = bairro, blockNumber = "1", number = "2"), createdAt = 1000)
         
         val houses = listOf(h2, h1)
 
@@ -57,11 +58,11 @@ class GetRGBlocksUseCaseTest {
         // Scenario: Agent A and Agent B working together on same day.
         // Even if they have same listOrder, we group by name (A first, then B).
         
-        val h1A = House(id = 10, data = "01/05/2026", agentName = "AGENTE A", number = "1", blockNumber = "1", bairro = bairro, createdAt = 1000, listOrder = 1)
-        val h1B = House(id = 11, data = "01/05/2026", agentName = "AGENTE B", number = "2", blockNumber = "1", bairro = bairro, createdAt = 1200, listOrder = 1)
+        val h1A = House(id = 10, data = "01/05/2026", agentName = "AGENTE A", address = VisitAddress(number = "1", blockNumber = "1", bairro = bairro), createdAt = 1000, listOrder = 1)
+        val h1B = House(id = 11, data = "01/05/2026", agentName = "AGENTE B", address = VisitAddress(number = "2", blockNumber = "1", bairro = bairro), createdAt = 1200, listOrder = 1)
         
-        val h2A = House(id = 20, data = "01/05/2026", agentName = "AGENTE A", number = "3", blockNumber = "1", bairro = bairro, createdAt = 1100, listOrder = 2)
-        val h2B = House(id = 21, data = "01/05/2026", agentName = "AGENTE B", number = "4", blockNumber = "1", bairro = bairro, createdAt = 1300, listOrder = 2)
+        val h2A = House(id = 20, data = "01/05/2026", agentName = "AGENTE A", address = VisitAddress(number = "3", blockNumber = "1", bairro = bairro), createdAt = 1100, listOrder = 2)
+        val h2B = House(id = 21, data = "01/05/2026", agentName = "AGENTE B", address = VisitAddress(number = "4", blockNumber = "1", bairro = bairro), createdAt = 1300, listOrder = 2)
  
         val houses = listOf(h2B, h1B, h2A, h1A) // Shuffled
  
@@ -91,8 +92,8 @@ class GetRGBlocksUseCaseTest {
         // Monday: Agent A visits House 10 (Closed).
         // Tuesday: Agent B visits House 10 again (Worked).
         
-        val h10Monday = House(id = 10, data = "01/05/2026", agentUid = "A", number = "10", blockNumber = "1", bairro = bairro, situation = Situation.F, createdAt = 1000, listOrder = 0)
-        val h10Tuesday = House(id = 100, data = "02/05/2026", agentUid = "B", number = "10", blockNumber = "1", bairro = bairro, situation = Situation.NONE, createdAt = 2000, listOrder = 0)
+        val h10Monday = House(id = 10, data = "01/05/2026", agentUid = "A", address = VisitAddress(number = "10", blockNumber = "1", bairro = bairro), situation = Situation.F, createdAt = 1000, listOrder = 0)
+        val h10Tuesday = House(id = 100, data = "02/05/2026", agentUid = "B", address = VisitAddress(number = "10", blockNumber = "1", bairro = bairro), situation = Situation.NONE, createdAt = 2000, listOrder = 0)
         
         val houses = listOf(h10Monday, h10Tuesday)
 
@@ -120,8 +121,8 @@ class GetRGBlocksUseCaseTest {
     fun `invoke - should implicitly conclude block if it is not the last one in percurso`() {
         // Given:
         // Agent does Block 1 -> Block 2
-        val h1 = House(id = 1, data = "01/05/2026", blockNumber = "1", bairro = bairro, listOrder = 1)
-        val h2 = House(id = 2, data = "01/05/2026", blockNumber = "2", bairro = bairro, listOrder = 2)
+        val h1 = House(id = 1, data = "01/05/2026", address = VisitAddress(blockNumber = "1", bairro = bairro), listOrder = 1)
+        val h2 = House(id = 2, data = "01/05/2026", address = VisitAddress(blockNumber = "2", bairro = bairro), listOrder = 2)
         
         val houses = listOf(h1, h2)
 
@@ -143,8 +144,8 @@ class GetRGBlocksUseCaseTest {
         // Given:
         // Day 1: Block 1
         // Day 2: Block 1 (Continuation)
-        val h1 = House(id = 1, data = "01/05/2026", blockNumber = "1", bairro = bairro, listOrder = 1)
-        val h2 = House(id = 2, data = "02/05/2026", blockNumber = "1", bairro = bairro, listOrder = 1)
+        val h1 = House(id = 1, data = "01/05/2026", address = VisitAddress(blockNumber = "1", bairro = bairro), listOrder = 1)
+        val h2 = House(id = 2, data = "02/05/2026", address = VisitAddress(blockNumber = "1", bairro = bairro), listOrder = 1)
         
         val houses = listOf(h1, h2)
 
@@ -161,8 +162,8 @@ class GetRGBlocksUseCaseTest {
         // Given:
         // Agent does Block 1 in "Bairro A"
         // THEN Agent does Block 2 in "Bairro B"
-        val h1 = House(id = 1, data = "01/05/2026", blockNumber = "1", bairro = "BAIRRO A", listOrder = 1)
-        val h2 = House(id = 2, data = "01/05/2026", blockNumber = "2", bairro = "BAIRRO B", listOrder = 2)
+        val h1 = House(id = 1, data = "01/05/2026", address = VisitAddress(blockNumber = "1", bairro = "BAIRRO A"), listOrder = 1)
+        val h2 = House(id = 2, data = "01/05/2026", address = VisitAddress(blockNumber = "2", bairro = "BAIRRO B"), listOrder = 2)
         
         val houses = listOf(h1, h2)
 

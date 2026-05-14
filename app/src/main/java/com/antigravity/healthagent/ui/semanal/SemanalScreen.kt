@@ -37,12 +37,14 @@ import com.antigravity.healthagent.ui.components.SyncStatusOverlay
 import com.antigravity.healthagent.ui.home.DaySummary
 import com.antigravity.healthagent.utils.AppConstants
 import kotlinx.coroutines.launch
+import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
 import com.antigravity.healthagent.ui.components.PremiumCard
 
 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.zIndex
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -175,8 +177,7 @@ fun SemanalScreen(
             isRefreshing = isSyncing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
-            modifier = Modifier.padding(paddingValues).fillMaxSize(),
-            indicator = { /* Hide simple circle */ }
+            modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
@@ -185,6 +186,10 @@ fun SemanalScreen(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    SyncFloatingBalloon(
+                        syncStatus = uiState.syncStatus,
+                        modifier = Modifier.zIndex(5f)
+                    )
                     // Week Selector Row
                     PremiumCard(
                         modifier = Modifier
@@ -547,7 +552,7 @@ fun ObservationCard(
                 }
                 
                 Text(
-                    text = "${house.bairro.uppercase()}",
+                    text = "${house.address.bairro.uppercase()}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.Medium
@@ -557,7 +562,7 @@ fun ObservationCard(
             Spacer(modifier = Modifier.height(6.dp))
             
             Text(
-                text = "${house.streetName}, ${house.number}${house.sequence?.let { "-$it" } ?: ""}",
+                text = "${house.address.streetName}, ${house.address.number}${if (house.address.sequence > 0) "-${house.address.sequence}" else ""}",
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface

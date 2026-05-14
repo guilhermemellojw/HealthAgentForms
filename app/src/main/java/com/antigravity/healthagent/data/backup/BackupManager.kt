@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.DayActivity
+import com.antigravity.healthagent.domain.model.VisitAddress
 import com.google.gson.*
 import com.google.gson.reflect.TypeToken
 import com.google.gson.annotations.SerializedName
@@ -13,6 +14,7 @@ import com.google.gson.stream.JsonWriter
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.lang.reflect.Type
 import javax.inject.Inject
 
 data class BackupData(
@@ -44,6 +46,7 @@ class BackupManager @Inject constructor() {
         .registerTypeAdapter(java.lang.Long::class.java, SafeLongAdapter())
         .registerTypeAdapter(Double::class.java, SafeDoubleAdapter())
         .registerTypeAdapter(java.lang.Double::class.java, SafeDoubleAdapter())
+        .registerTypeAdapter(House::class.java, HouseDeserializer())
         .create()
 
     val UTF8 = java.nio.charset.StandardCharsets.UTF_8
@@ -276,31 +279,36 @@ class BackupManager @Inject constructor() {
             val safeAgentName = if (house.agentName == null) "" else house.agentName.trim().uppercase()
             @Suppress("SENSELESS_COMPARISON")
             val safeAgentUid = if (house.agentUid == null) "" else house.agentUid.trim()
+            
+            // Handle address fields safely (encapsulated)
             @Suppress("SENSELESS_COMPARISON")
-            val safeStreet = if (house.streetName == null) "" else house.streetName.trim().uppercase()
+            val safeStreet = if (house.address.streetName == null) "" else house.address.streetName.trim().uppercase()
             @Suppress("SENSELESS_COMPARISON")
-            val safeNum = if (house.number == null || house.number.trim() == "0") "" else house.number.trim().uppercase()
+            val safeNum = if (house.address.number == null || house.address.number.trim() == "0") "" else house.address.number.trim().uppercase()
 
             house.copy(
                 agentName = safeAgentName,
                 agentUid = safeAgentUid,
-                municipio = house.municipio?.trim()?.uppercase() ?: "BOM JARDIM",
-                bairro = house.bairro?.trim()?.uppercase() ?: "",
-                blockNumber = house.blockNumber?.trim() ?: "",
-                blockSequence = house.blockSequence?.trim() ?: "",
-                streetName = safeStreet,
-                number = safeNum,
-                sequence = house.sequence,
-                complement = house.complement,
+                context = house.context.copy(
+                    municipio = house.context.municipio?.trim()?.uppercase() ?: "BOM JARDIM",
+                    ciclo = house.context.ciclo?.trim() ?: "1º",
+                    categoria = house.context.categoria?.trim() ?: "BRR",
+                    zona = house.context.zona?.trim() ?: "URB"
+                ),
+                address = house.address.copy(
+                    bairro = house.address.bairro?.trim()?.uppercase() ?: "",
+                    blockNumber = house.address.blockNumber?.trim() ?: "",
+                    blockSequence = house.address.blockSequence?.trim() ?: "",
+                    streetName = safeStreet,
+                    number = safeNum,
+                    sequence = house.address.sequence,
+                    complement = house.address.complement
+                ),
                 data = normalizedData,
                 listOrder = stableOrder,
                 createdAt = if (house.createdAt == 0L) stableOrder else house.createdAt,
-                ciclo = house.ciclo?.trim() ?: "1º",
                 situation = finalSituation,
                 propertyType = finalPropertyType,
-                categoria = house.categoria?.trim() ?: "BRR",
-                zona = house.zona?.trim() ?: "URB",
-                tipo = house.tipo,
                 isSynced = false,
                 lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
             )
@@ -408,6 +416,173 @@ class BackupManager @Inject constructor() {
                 JsonToken.NULL -> { reader.nextNull(); 0.0 }
                 else -> { reader.skipValue(); 0.0 }
             }
+        }
+    }
+
+    internal class HouseDeserializer : JsonDeserializer<House> {
+        override fun deserialize(json: JsonElement, typeOfT: Type, context: JsonDeserializationContext): House {
+            val jsonObj = json.asJsonObject
+            
+            // Helper to find a field in multiple locations with multiple names
+            fun find(primary: String, vararg alternates: String, nestedObj: String? = null): JsonElement? {
+                // 1. Check in nested object if provided
+                if (nestedObj != null && jsonObj.has(nestedObj) && jsonObj.get(nestedObj).isJsonObject) {
+                    val nested = jsonObj.getAsJsonObject(nestedObj)
+                    if (nested.has(primary)) return nested.get(primary)
+                    for (alt in alternates) {
+                        if (nested.has(alt)) return nested.get(alt)
+                    }
+                }
+                
+                // 2. Check at root
+                if (jsonObj.has(primary)) return jsonObj.get(primary)
+                for (alt in alternates) {
+                    if (jsonObj.has(alt)) return jsonObj.get(alt)
+                }
+                return null
+            }
+
+            // 1. Handle Address
+            val address = VisitAddress(
+                blockNumber = find("blockNumber", "quarteirao", "quarteirão", "numQuart", nestedObj = "address").asSafeString(),
+                blockSequence = find("blockSequence", "block_sequence", "sequencia_quarteirao", nestedObj = "address").asSafeString(),
+                streetName = find("streetName", "logradouro", "rua", "nome_rua", nestedObj = "address").asSafeString(),
+                number = find("number", "numero", "número", "num", nestedObj = "address").asSafeString(),
+                sequence = find("sequence", "sequencia", "sequência", nestedObj = "address").asSafeInt(),
+                complement = find("complement", "complemento", nestedObj = "address").asSafeInt(),
+                bairro = find("bairro", "localidade", nestedObj = "address").asSafeString()
+            )
+
+            // 2. Handle Treatment
+            val treatment = com.antigravity.healthagent.domain.model.TreatmentData(
+                a1 = find("a1", "A1", nestedObj = "treatment").asSafeInt(),
+                a2 = find("a2", "A2", nestedObj = "treatment").asSafeInt(),
+                b = find("b", "B", nestedObj = "treatment").asSafeInt(),
+                c = find("c", "C", nestedObj = "treatment").asSafeInt(),
+                d1 = find("d1", "D1", nestedObj = "treatment").asSafeInt(),
+                d2 = find("d2", "D2", nestedObj = "treatment").asSafeInt(),
+                e = find("e", "E", nestedObj = "treatment").asSafeInt(),
+                eliminados = find("eliminados", "el", "eliminado", nestedObj = "treatment").asSafeInt(),
+                larvicida = find("larvicida", "gramas", "larv", nestedObj = "treatment").asSafeDouble(),
+                comFoco = find("comFoco", "foco", "com_foco", nestedObj = "treatment").asSafeBoolean()
+            )
+
+            // 3. Handle DailyContext
+            val dailyContext = com.antigravity.healthagent.domain.model.DailyContext(
+                municipio = find("municipio", "cidade", "município", nestedObj = "context").asSafeString().ifBlank { "BOM JARDIM" },
+                categoria = find("categoria", "cat", nestedObj = "context").asSafeString().ifBlank { "BRR" },
+                zona = find("zona", "zona_id", nestedObj = "context").asSafeString().ifBlank { "URB" },
+                tipo = find("tipo", "tipo_visita", nestedObj = "context").asSafeInt().let { if (it == 0) 2 else it },
+                ciclo = find("ciclo", "ciclo_id", nestedObj = "context").asSafeString().ifBlank { "1º" },
+                atividade = find("atividade", "ativ", nestedObj = "context").asSafeInt().let { if (it == 0) 4 else it }
+            )
+
+            // 4. Handle GeoCapture
+            val geo = com.antigravity.healthagent.domain.model.GeoCapture(
+                latitude = find("latitude", "lat", nestedObj = "geo")?.asSafeDouble(),
+                longitude = find("longitude", "lng", "long", nestedObj = "geo")?.asSafeDouble(),
+                focusCaptureTime = find("focusCaptureTime", "timestamp", nestedObj = "geo")?.asSafeLong()
+            )
+
+            // 5. Main House Fields
+            return House(
+                id = find("id", "_id").asSafeInt(),
+                address = address,
+                treatment = treatment,
+                context = dailyContext,
+                geo = geo,
+                propertyType = try { 
+                    val pt = find("propertyType", "tipo_imovel", "imovel_tipo")?.asString ?: "EMPTY"
+                    com.antigravity.healthagent.data.local.model.PropertyType.entries.find { it.name == pt || it.code == pt } ?: com.antigravity.healthagent.data.local.model.PropertyType.EMPTY
+                } catch(e: Exception) { com.antigravity.healthagent.data.local.model.PropertyType.EMPTY },
+                
+                situation = try { 
+                    val sit = find("situation", "situacao", "situação")?.asString ?: "EMPTY"
+                    com.antigravity.healthagent.data.local.model.Situation.entries.find { it.name == sit || it.code == sit } ?: com.antigravity.healthagent.data.local.model.Situation.EMPTY
+                } catch(e: Exception) { com.antigravity.healthagent.data.local.model.Situation.EMPTY },
+                
+                data = find("data", "data_visita", "date").asSafeString(),
+                agentName = find("agentName", "nome_agente", "agente").asSafeString(),
+                agentUid = find("agentUid", "uid", "agent_uid").asSafeString(),
+                localidadeConcluida = find("localidadeConcluida", "loc_concluida").asSafeBoolean(),
+                quarteiraoConcluido = find("quarteiraoConcluido", "quart_concluido").asSafeBoolean(),
+                listOrder = find("listOrder", "ordem").asSafeLong(),
+                visitSegment = find("visitSegment", "segmento").asSafeInt(),
+                observation = find("observation", "obs", "observacao", "observação").asSafeString(),
+                createdAt = find("createdAt", "created_at").asSafeLong().let { if (it == 0L) com.antigravity.healthagent.utils.TimeManager.currentTimeMillis() else it },
+                isSynced = find("isSynced", "sincronizado").asSafeBoolean(),
+                editedByAdmin = find("editedByAdmin", "editado_admin").asSafeBoolean(),
+                lastUpdated = find("lastUpdated", "updated_at").asSafeLong().let { if (it == 0L) com.antigravity.healthagent.utils.TimeManager.currentTimeMillis() else it }
+            )
+        }
+
+        private fun JsonElement?.asSafeString(): String {
+            if (this == null || isJsonNull) return ""
+            return try {
+                if (isJsonPrimitive) {
+                    val p = asJsonPrimitive
+                    if (p.isString) p.asString else p.toString()
+                } else ""
+            } catch (e: Exception) { "" }
+        }
+
+        private fun JsonElement?.asSafeInt(): Int {
+
+            if (this == null || isJsonNull) return 0
+            return try {
+                if (isJsonPrimitive) {
+                    val p = asJsonPrimitive
+                    if (p.isNumber) p.asInt
+                    else if (p.isBoolean) if (p.asBoolean) 1 else 0
+                    else {
+                        val s = p.asString
+                        if (s.isEmpty()) 0 else s.toDouble().toInt()
+                    }
+                } else 0
+            } catch (e: Exception) { 0 }
+        }
+
+        private fun JsonElement?.asSafeLong(): Long {
+            if (this == null || isJsonNull) return 0L
+            return try {
+                if (isJsonPrimitive) {
+                    val p = asJsonPrimitive
+                    if (p.isNumber) p.asLong
+                    else {
+                        val s = p.asString
+                        if (s.isEmpty()) 0L else s.toDouble().toLong()
+                    }
+                } else 0L
+            } catch (e: Exception) { 0L }
+        }
+
+        private fun JsonElement?.asSafeDouble(): Double {
+            if (this == null || isJsonNull) return 0.0
+            return try {
+                if (isJsonPrimitive) {
+                    val p = asJsonPrimitive
+                    if (p.isNumber) p.asDouble
+                    else {
+                        val s = p.asString
+                        if (s.isEmpty() || s == "NaN" || s == "Infinity") 0.0 else s.toDouble()
+                    }
+                } else 0.0
+            } catch (e: Exception) { 0.0 }
+        }
+
+        private fun JsonElement?.asSafeBoolean(): Boolean {
+            if (this == null || isJsonNull) return false
+            return try {
+                if (isJsonPrimitive) {
+                    val p = asJsonPrimitive
+                    if (p.isBoolean) p.asBoolean
+                    else if (p.isNumber) p.asInt != 0
+                    else {
+                        val s = p.asString.lowercase()
+                        s == "true" || s == "1"
+                    }
+                } else false
+            } catch (e: Exception) { false }
         }
     }
 }

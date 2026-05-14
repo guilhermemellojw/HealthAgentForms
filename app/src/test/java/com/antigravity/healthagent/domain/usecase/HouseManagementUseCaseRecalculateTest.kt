@@ -16,10 +16,10 @@ class HouseManagementUseCaseRecalculateTest {
     @Test
     fun `recalculateVisitSegments should handle interleaved streets correctly`() {
         val houses = listOf(
-            House(id = 1, streetName = "STREET A", listOrder = 10),
-            House(id = 2, streetName = "STREET A", listOrder = 20),
-            House(id = 3, streetName = "STREET B", listOrder = 30),
-            House(id = 4, streetName = "STREET A", listOrder = 40)
+            House(id = 1, address = com.antigravity.healthagent.domain.model.VisitAddress(streetName = "STREET A"), listOrder = 10),
+            House(id = 2, address = com.antigravity.healthagent.domain.model.VisitAddress(streetName = "STREET A"), listOrder = 20),
+            House(id = 3, address = com.antigravity.healthagent.domain.model.VisitAddress(streetName = "STREET B"), listOrder = 30),
+            House(id = 4, address = com.antigravity.healthagent.domain.model.VisitAddress(streetName = "STREET A"), listOrder = 40)
         )
 
         val result = useCase.recalculateVisitSegments(houses)
@@ -34,9 +34,9 @@ class HouseManagementUseCaseRecalculateTest {
     fun `recalculateVisitSegments should be stable after reordering`() {
         // Original: A, B, A
         val houses = listOf(
-            House(id = 1, streetName = "STREET A", listOrder = 10),
-            House(id = 3, streetName = "STREET B", listOrder = 20),
-            House(id = 4, streetName = "STREET A", listOrder = 30)
+            House(id = 1, address = com.antigravity.healthagent.domain.model.VisitAddress(streetName = "STREET A"), listOrder = 10),
+            House(id = 3, address = com.antigravity.healthagent.domain.model.VisitAddress(streetName = "STREET B"), listOrder = 20),
+            House(id = 4, address = com.antigravity.healthagent.domain.model.VisitAddress(streetName = "STREET A"), listOrder = 30)
         )
         
         val result1 = useCase.recalculateVisitSegments(houses)
@@ -46,9 +46,9 @@ class HouseManagementUseCaseRecalculateTest {
 
         // After reorder: A, A, B
         val reordered = listOf(
-            House(id = 1, streetName = "STREET A", listOrder = 10),
-            House(id = 4, streetName = "STREET A", listOrder = 20),
-            House(id = 3, streetName = "STREET B", listOrder = 30)
+            House(id = 1, address = com.antigravity.healthagent.domain.model.VisitAddress(streetName = "STREET A"), listOrder = 10),
+            House(id = 4, address = com.antigravity.healthagent.domain.model.VisitAddress(streetName = "STREET A"), listOrder = 20),
+            House(id = 3, address = com.antigravity.healthagent.domain.model.VisitAddress(streetName = "STREET B"), listOrder = 30)
         )
 
         val result2 = useCase.recalculateVisitSegments(reordered)
