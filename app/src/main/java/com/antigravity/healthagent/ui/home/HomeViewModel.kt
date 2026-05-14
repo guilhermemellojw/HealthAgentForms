@@ -127,6 +127,9 @@ class HomeViewModel @Inject constructor(
 
     private val _validationErrorHouseIds = MutableStateFlow<Set<Int>>(emptySet())
     private val _isDuplicateIds = MutableStateFlow<Set<Int>>(emptySet())
+    private val _syncStatus = MutableStateFlow(SyncStatus())
+    val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
+
     init {
         // Load persisted sync timestamp
         viewModelScope.launch {
@@ -135,9 +138,6 @@ class HomeViewModel @Inject constructor(
             }
         }
     }
-
-    private val _syncStatus = MutableStateFlow(SyncStatus())
-    val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
 
     fun triggerSync() {
         syncDataToCloud()
