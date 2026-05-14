@@ -2003,6 +2003,15 @@ class HomeViewModel @Inject constructor(
                 
                 val newId = houseManagementUseCase.insertHouse(houseToInsert, latestHouses, adminBypass)
                 
+                // SURGICAL RACE CONDITION CHECK: 
+                // If the user deleted the house (removed from in-flight) while we were saving,
+                // we must immediately DELETE it from the DB to prevent it from "reappearing".
+                val isStillInFlight = _housesInFlight.value.any { it.listOrder == houseToInsert.listOrder && it.data == houseToInsert.data }
+                if (!isStillInFlight) {
+                    houseManagementUseCase.deleteHouse(houseToInsert.copy(id = newId.toInt()), latestHouses, adminBypass)
+                    return@launch
+                }
+
                 // CRITICAL BUG FIX (Race Condition): 
                 // Any edits made to the 'in-flight' house card while 'insertHouse' was suspending (Saving)
                 // must be synced back into the DB, otherwise they are lost when the in-flight list is cleared.
@@ -2265,10 +2274,17 @@ class HomeViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-
                 recentlyDeletedHouse = house
-                // Immediately clear from drafts to prevent "Ghost" house in UI
+                // Immediately clear from both state pools to prevent "Zombie" house in UI
                 _pendingUpdateDrafts.update { it - house.id }
+                _housesInFlight.update { list -> 
+                    list.filter { it.listOrder != house.listOrder || it.data != house.data }
+                }
+
+                // If it's an in-flight house (ID 0), it hasn't finished saving yet.
+                // The 'addNewHouse' routine will detect its removal and cancel the DB commit.
+                if (house.id == 0) return@launch
+
                 val adminBypass = _isAdmin.value
                 houseManagementUseCase.deleteHouse(house, houses.value, adminBypass)
                 soundManager.playPop()
