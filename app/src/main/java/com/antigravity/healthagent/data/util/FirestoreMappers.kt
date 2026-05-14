@@ -3,6 +3,8 @@ package com.antigravity.healthagent.data.util
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.google.firebase.firestore.DocumentSnapshot
+import com.antigravity.healthagent.utils.normalize
+import com.antigravity.healthagent.utils.removeAccents
 
 fun DocumentSnapshot.toHouseSafe(uid: String, agentName: String = ""): House? {
     return try {
@@ -102,9 +104,8 @@ private fun normalizeAgentName(name: String): String {
     // If it's an email, take the part before @ to avoid displaying emails as names in the UI
     val effectiveName = if (name.contains("@")) name.substringBefore("@") else name
     
-    val normalized = java.text.Normalizer.normalize(effectiveName, java.text.Normalizer.Form.NFD)
-    return Regex("\\p{InCombiningDiacriticalMarks}+").replace(normalized, "")
-        .trim()
+    // SURGICAL FIX: Stop stripping accents from names.
+    return effectiveName.trim()
         .uppercase()
         .replace(Regex("\\s+"), " ")
 }

@@ -8,6 +8,7 @@ import com.antigravity.healthagent.data.repository.HouseRepository
 import com.antigravity.healthagent.data.repository.StreetRepository
 import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.normalize
+import com.antigravity.healthagent.utils.removeAccents
 import javax.inject.Inject
 
 class HouseManagementUseCase @Inject constructor(
@@ -207,6 +208,12 @@ class HouseManagementUseCase @Inject constructor(
         val normalizedSequence = house.address.sequence
         val normalizedComplement = house.address.complement
 
+        val normalizedBairro = house.address.bairro.normalize()
+        // SURGICAL HEALING: Restore accents to Bairros by matching against AppConstants
+        val healedBairro = com.antigravity.healthagent.utils.AppConstants.BAIRROS.find { 
+            it.removeAccents().equals(normalizedBairro.removeAccents(), ignoreCase = true) 
+        } ?: normalizedBairro
+
         return house.copy(
             address = house.address.copy(
                 blockNumber = house.address.blockNumber.normalize(),
@@ -215,7 +222,7 @@ class HouseManagementUseCase @Inject constructor(
                 number = normalizedNumber,
                 sequence = normalizedSequence,
                 complement = normalizedComplement,
-                bairro = house.address.bairro.normalize()
+                bairro = healedBairro
             ),
             context = house.context.copy(
                 municipio = house.context.municipio.normalize(),
@@ -223,7 +230,9 @@ class HouseManagementUseCase @Inject constructor(
                 zona = house.context.zona.normalize(),
                 ciclo = house.context.ciclo.normalize()
             ),
-            agentName = house.agentName.normalize(),
+            agentName = com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES.find { 
+                it.removeAccents().equals(house.agentName.removeAccents(), ignoreCase = true) 
+            } ?: house.agentName.normalize(),
             situation = situation,
             data = house.data.replace("/", "-").trim(),
             isSynced = false, // Force re-sync on every local edit

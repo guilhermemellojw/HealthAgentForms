@@ -171,12 +171,20 @@ fun String.fitToWidth(paint: android.graphics.Paint, maxWidth: Float): String {
 }
 
 fun String.normalize(): String {
-    val normalized = java.text.Normalizer.normalize(this, java.text.Normalizer.Form.NFD)
-    return Regex("\\p{InCombiningDiacriticalMarks}+").replace(normalized, "")
-        .trim()
+    // SURGICAL FIX: Stop stripping accents! We only want to standardize separators and casing.
+    return this.trim()
         .replace("/", "-")
         .replace(".", "-")
         .replace(Regex("\\s+"), " ")
         .replace(Regex("-+"), "-")
         .uppercase()
+}
+
+/**
+ * Strips diacritical marks (accents) from a string.
+ * Use ONLY for accent-insensitive comparisons or search filters.
+ */
+fun String.removeAccents(): String {
+    val normalized = java.text.Normalizer.normalize(this, java.text.Normalizer.Form.NFD)
+    return Regex("\\p{InCombiningDiacriticalMarks}+").replace(normalized, "")
 }

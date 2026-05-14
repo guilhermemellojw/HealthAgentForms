@@ -1579,8 +1579,7 @@ class SyncRepositoryImpl @Inject constructor(
             editedByAdmin = this.getBoolean("editedByAdmin") ?: false
         )).copy(id = 0) // RESET ID to allow local auto-generation
 
-        // 4. Force synchronization of identity fields and coerce enums
-        baseHouse.apply {
+        val finalHouse = baseHouse.apply {
             this.cloudId = this@toHouseSafe.id
         }.copy(
             agentUid = agentUid,
@@ -1592,6 +1591,19 @@ class SyncRepositoryImpl @Inject constructor(
         ).apply {
             this.cloudId = this@toHouseSafe.id
         }
+
+        // SURGICAL FILTER: Discard "Zombies" (Houses without core address info)
+        val isBroken = finalHouse.address.streetName.isBlank() && 
+                       finalHouse.address.bairro.isBlank() && 
+                       finalHouse.address.number.isBlank() && 
+                       finalHouse.address.sequence <= 0
+        
+        if (isBroken) {
+            android.util.Log.w("SyncRepository", "Discarded broken house from cloud: ${this.id}")
+            return null
+        }
+
+        return finalHouse
     } catch (e: Exception) {
         android.util.Log.e("SyncRepository", "toHouseSafe CRITICAL error for doc ${this.id}: ${e.message}")
         null
