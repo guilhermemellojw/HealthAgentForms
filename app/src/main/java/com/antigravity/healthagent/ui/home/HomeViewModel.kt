@@ -306,18 +306,18 @@ class HomeViewModel @Inject constructor(
                 return@launch
             }
             
-            _syncStatus.value = SyncStatus(SyncStage.STARTING, 0.1f, "Finalizando edição...")
+            _syncStatus.update { it.copy(stage = SyncStage.STARTING, progress = 0.1f, message = "Finalizando edição...") }
             
             try {
                 // 1. Push local data (which belongs to the remote agent) to cloud
-                _syncStatus.value = SyncStatus(SyncStage.UPLOADING, 0.5f, "Sincronizando dados remotos...")
+                _syncStatus.update { it.copy(stage = SyncStage.UPLOADING, progress = 0.5f, message = "Sincronizando dados remotos...") }
                 val uid = _remoteAgentUid.value ?: _currentUserUid.value
                 val houses = repository.getAllHousesOnce(uid ?: "")
                 val activities = repository.getAllDayActivitiesOnce(uid ?: "")
                 val result = syncDataUseCase.pushData(houses, activities, uid ?: "")
                 
                 if (result.isSuccess) {
-                    _syncStatus.value = SyncStatus(SyncStage.SUCCESS, 1.0f, "Sincronizado com sucesso!")
+                    _syncStatus.update { it.copy(stage = SyncStage.SUCCESS, progress = 1.0f, message = "Sincronizado com sucesso!") }
                     _uiEvent.value = "Edição finalizada e sincronizada!"
                     
                     // BUG FIX: Navigate away FIRST to prevent the UI from flickering 
@@ -330,16 +330,16 @@ class HomeViewModel @Inject constructor(
                     delay(1000)
                     setRemoteAgent(null)
                 } else {
-                    _syncStatus.value = SyncStatus(SyncStage.ERROR, 0.5f, "Falha: ${result.exceptionOrNull()?.message}")
+                    _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0.5f, message = "Falha: ${result.exceptionOrNull()?.message}") }
                     _uiEvent.value = "Falha ao finalizar: ${result.exceptionOrNull()?.message}"
                     delay(3000)
                 }
             } catch (e: Exception) {
-                _syncStatus.value = SyncStatus(SyncStage.ERROR, 0f, "Erro: ${e.message}")
+                _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0f, message = "Erro: ${e.message}") }
                 _uiEvent.value = "Erro ao finalizar: ${e.message}"
                 delay(3000)
             } finally {
-                _syncStatus.value = SyncStatus(SyncStage.IDLE)
+                _syncStatus.update { it.copy(stage = SyncStage.IDLE, progress = 0f, message = null) }
             }
         }
     }
@@ -349,11 +349,11 @@ class HomeViewModel @Inject constructor(
             val email = settingsManager.cachedUser.firstOrNull()?.email
             if (email != "gmellobkp@gmail.com") return@launch // Double security layer
             
-            _syncStatus.value = SyncStatus(SyncStage.STARTING, 0.1f, "Gerando 100 casas de teste...")
             val agent = _agentName.value
             val uid = _currentUserUid.value ?: return@launch
             val date = _data.value
             
+            _syncStatus.update { it.copy(stage = SyncStage.STARTING, progress = 0.1f, message = "Gerando 100 casas de teste...") }
             val result = generateTestDataUseCase(
                 agentName = agent,
                 agentUid = uid,
@@ -363,21 +363,21 @@ class HomeViewModel @Inject constructor(
             )
             
             if (result.isSuccess) {
-                _syncStatus.value = SyncStatus(SyncStage.SUCCESS, 1.0f, "Dados gerados! Sincronizando...")
+                _syncStatus.update { it.copy(stage = SyncStage.SUCCESS, progress = 1.0f, message = "Dados gerados! Sincronizando...") }
                 delay(1000)
                 try {
                     val housesToPush = repository.getAllHousesOnce(uid)
                     val activitiesToPush = repository.getAllDayActivitiesOnce(uid)
                     syncRepository.pushLocalDataToCloud(housesToPush, activitiesToPush, uid)
                 } catch(e: Exception) {
-                    _syncStatus.value = SyncStatus(SyncStage.ERROR, 1.0f, "Erro no push: ${e.message}")
+                    _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 1.0f, message = "Erro no push: ${e.message}") }
                 }
             } else {
-                _syncStatus.value = SyncStatus(SyncStage.ERROR, 0.0f, "Erro: ${result.exceptionOrNull()?.message}")
+                _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0.0f, message = "Erro: ${result.exceptionOrNull()?.message}") }
             }
             
             delay(2000)
-            _syncStatus.value = SyncStatus(SyncStage.IDLE)
+            _syncStatus.update { it.copy(stage = SyncStage.IDLE, progress = 0f, message = null) }
         }
     }
 
@@ -882,7 +882,9 @@ class HomeViewModel @Inject constructor(
                     }
                 }
             }
-            // --- MAIN PRODUCTION STATE REDUCER ---
+        }
+
+        // --- MAIN PRODUCTION STATE REDUCER ---
         // Optimized to only include fields essential for the Production Screen.
         // Heavy reporting (RG/Weekly/Boletim) is moved to independent flows below.
         combine(
@@ -983,7 +985,6 @@ class HomeViewModel @Inject constructor(
         }
         .flowOn(Dispatchers.Default)
         .launchIn(viewModelScope)
-    }
     }
 
     fun refreshConfig() {
@@ -1487,93 +1488,88 @@ class HomeViewModel @Inject constructor(
             soundManager.playWarning()
             return
         }
-        if (_isSyncing.value) return
-        _isSyncing.value = true
-        _syncStatus.value = SyncStatus(SyncStage.STARTING, 0.1f, "Iniciando sincronização...")
         
-        val targetUid = _remoteAgentUid.value
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                // 1. Pull cloud data to local FIRST (Applies Admin Authority exclusions)
-                _syncStatus.value = SyncStatus(SyncStage.DOWNLOADING, 0.3f, "Baixando dados atualizados...")
-                val pullResult = syncRepository.pullCloudDataToLocal(targetUid)
-                
-                if (pullResult.isSuccess) {
-                    // 2. Push local data to cloud
-                    _syncStatus.value = SyncStatus(SyncStage.UPLOADING, 0.6f, "Enviando dados para a nuvem...")
-                    val currentName = _agentName.value
-                    val houses = repository.getAllHousesOnce(targetUid ?: "")
-                    val activities = repository.getAllDayActivitiesOnce(targetUid ?: "")
-                    val pushResult = syncRepository.pushLocalDataToCloud(houses, activities, targetUid)
-                    
-                    if (pushResult.isSuccess) {
-                        syncRepository.pruneOldTombstones()
+        viewModelScope.launch {
+            if (_isSyncing.value) return@launch
+            val uid = _remoteAgentUid.value ?: _currentUserUid.value ?: return@launch
+            
+            _isSyncing.value = true
+            _syncStatus.update { it.copy(stage = SyncStage.STARTING, progress = 0.1f, message = "Iniciando sincronização...") }
+            
+            val targetUid = _remoteAgentUid.value
+            withContext(Dispatchers.IO) {
+                try {
+                    // 1. Pull cloud data to local FIRST (Applies Admin Authority exclusions)
+                    val pullResult = syncDataUseCase.pullData(uid)
+                    if (pullResult.isSuccess) {
+                        _syncStatus.update { it.copy(stage = SyncStage.DOWNLOADING, progress = 0.3f, message = "Baixando dados atualizados...") }
                         
-                        // SURGICAL CLEANUP: Auto-remove empty/broken houses (zombies) after successful sync
-                        val currentUid = targetUid ?: _currentUserUid.value ?: ""
-                        if (currentUid.isNotBlank()) {
-                            cleanupBrokenHousesUseCase(currentUid)
-                        }
+                        // 2. Push local data to cloud
+                        _syncStatus.update { it.copy(stage = SyncStage.UPLOADING, progress = 0.6f, message = "Enviando dados para a nuvem...") }
+                        val houses = repository.getAllHousesOnce(targetUid ?: "")
+                        val activities = repository.getAllDayActivitiesOnce(uid)
+                        val pushResult = syncRepository.pushLocalDataToCloud(houses, activities, targetUid)
+                        
+                        if (pushResult.isSuccess) {
+                            syncRepository.pruneOldTombstones()
+                            
+                            // SURGICAL CLEANUP: Auto-remove empty/broken houses (zombies) after successful sync
+                            if (uid.isNotBlank()) {
+                                cleanupBrokenHousesUseCase(uid)
+                            }
 
-                        settingsManager.setLastSyncTimestamp(com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
-                        soundManager.vibrateSuccess()
-                        _syncStatus.value = SyncStatus(SyncStage.SUCCESS, 1.0f, "Sincronização concluída!")
-                        _uiEvent.value = "Sincronização completa com sucesso."
-                        delay(2000) // Show success for a bit
+                            settingsManager.setLastSyncTimestamp(System.currentTimeMillis())
+                            _syncStatus.update { it.copy(stage = SyncStage.SUCCESS, progress = 1.0f, message = "Sincronização concluída!") }
+                        } else {
+                            _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0.6f, message = "Erro ao enviar: ${pushResult.exceptionOrNull()?.message}") }
+                        }
                     } else {
-                        _syncStatus.value = SyncStatus(SyncStage.ERROR, 1.0f, "Erro ao enviar: ${pushResult.exceptionOrNull()?.message}")
-                        _uiEvent.value = "Dados recebidos, mas houve erro ao enviar: ${pushResult.exceptionOrNull()?.message}"
-                        delay(3000)
+                        _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0.3f, message = "Falha ao baixar: ${pullResult.exceptionOrNull()?.message}") }
                     }
-                } else {
-                    _syncStatus.value = SyncStatus(SyncStage.ERROR, 0.3f, "Falha ao baixar: ${pullResult.exceptionOrNull()?.message}")
-                    _uiEvent.value = "Falha ao iniciar sincronização: ${pullResult.exceptionOrNull()?.message}"
-                    delay(3000)
+                } catch (e: Exception) {
+                    _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0f, message = "Erro: ${e.message}") }
+                } finally {
+                    delay(1500) // Stabilize Success/Error message visibility
+                    _isSyncing.value = false
+                    _syncStatus.update { it.copy(stage = SyncStage.IDLE, progress = 0f, message = null) }
                 }
-            } catch (e: Exception) {
-                _syncStatus.value = SyncStatus(SyncStage.ERROR, 0f, "Erro: ${e.message}")
-                _uiEvent.value = "Erro na sincronização: ${e.message}"
-                delay(3000)
-            } finally {
-                _isSyncing.value = false
-                _syncStatus.value = SyncStatus(SyncStage.IDLE)
             }
         }
     }
-
     fun pullDataFromCloud(targetUid: String? = null) {
-        if (_isSyncing.value) return
-        _isSyncing.value = true
-        _syncStatus.value = SyncStatus(SyncStage.DOWNLOADING, 0.1f, "Iniciando download...")
-        
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                _syncStatus.value = SyncStatus(SyncStage.DOWNLOADING, 0.5f, "Baixando dados da nuvem...")
-                val result = syncRepository.pullCloudDataToLocal(targetUid)
-                if (result.isSuccess) {
-                    // SURGICAL CLEANUP: Auto-remove empty/broken houses after download
-                    val currentUid = targetUid ?: _currentUserUid.value ?: ""
-                    if (currentUid.isNotBlank()) {
-                        cleanupBrokenHousesUseCase(currentUid)
-                    }
+        viewModelScope.launch {
+            if (_isSyncing.value) return@launch
+            val uid = targetUid ?: _currentUserUid.value ?: return@launch
+            
+            _isSyncing.value = true
+            _syncStatus.update { it.copy(stage = SyncStage.DOWNLOADING, progress = 0.1f, message = "Iniciando download...") }
+            
+            withContext(Dispatchers.IO) {
+                try {
+                    _syncStatus.update { it.copy(stage = SyncStage.DOWNLOADING, progress = 0.5f, message = "Baixando dados da nuvem...") }
+                    val result = syncRepository.pullCloudDataToLocal(uid)
+                    if (result.isSuccess) {
+                        // SURGICAL CLEANUP: Auto-remove empty/broken houses after download
+                        if (uid.isNotBlank()) {
+                            cleanupBrokenHousesUseCase(uid)
+                        }
 
-                    settingsManager.setLastSyncTimestamp(com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
-                    soundManager.vibrateSuccess()
-                    _syncStatus.value = SyncStatus(SyncStage.SUCCESS, 1.0f, "Download concluído!")
-                    _uiEvent.value = "Dados baixados com sucesso."
-                    delay(2000)
-                } else {
-                    _syncStatus.value = SyncStatus(SyncStage.ERROR, 0.5f, "Falha ao baixar: ${result.exceptionOrNull()?.message}")
-                    _uiEvent.value = "Falha ao baixar dados: ${result.exceptionOrNull()?.message}"
-                    delay(3000)
+                        settingsManager.setLastSyncTimestamp(System.currentTimeMillis())
+                        soundManager.vibrateSuccess()
+                        _syncStatus.update { it.copy(stage = SyncStage.SUCCESS, progress = 1.0f, message = "Download concluído!") }
+                        _uiEvent.value = "Dados baixados com sucesso."
+                    } else {
+                        _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0.5f, message = "Falha ao baixar: ${result.exceptionOrNull()?.message}") }
+                        _uiEvent.value = "Falha ao baixar dados: ${result.exceptionOrNull()?.message}"
+                    }
+                } catch (e: Exception) {
+                    _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0f, message = "Erro: ${e.message}") }
+                    _uiEvent.value = "Erro ao baixar: ${e.message}"
+                } finally {
+                    delay(1500)
+                    _isSyncing.value = false
+                    _syncStatus.update { it.copy(stage = SyncStage.IDLE, progress = 0f, message = null) }
                 }
-            } catch (e: Exception) {
-                _syncStatus.value = SyncStatus(SyncStage.ERROR, 0f, "Erro: ${e.message}")
-                _uiEvent.value = "Erro ao baixar: ${e.message}"
-                delay(3000)
-            } finally {
-                _isSyncing.value = false
-                _syncStatus.value = SyncStatus(SyncStage.IDLE)
             }
         }
     }

@@ -19,6 +19,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.Scaffold
+import androidx.compose.ui.zIndex
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.LibraryBooks
@@ -452,12 +453,18 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
                 SyncFloatingBalloon(
                     syncStatus = uiState.syncStatus,
                     isEasyMode = uiState.isEasyMode,
-                    isSolarMode = uiState.isSolarMode
+                    isSolarMode = uiState.isSolarMode,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .zIndex(3000f)
                 )
 
                 SyncStatusOverlay(
                     syncStatus = uiState.syncStatus,
-                    isEasyMode = uiState.isEasyMode
+                    isEasyMode = uiState.isEasyMode,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .zIndex(4000f)
                 )
             }
         }

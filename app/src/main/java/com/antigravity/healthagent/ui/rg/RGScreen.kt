@@ -18,12 +18,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.antigravity.healthagent.ui.components.SyncStatusOverlay
 import com.antigravity.healthagent.ui.components.HouseRowItem
 import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.home.HomeViewModel
-import androidx.compose.ui.zIndex
 import android.widget.Toast
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -108,8 +106,8 @@ fun RGScreen(
                                  val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                      com.antigravity.healthagent.utils.RGPdfGenerator.generatePdf(
                                          context, 
-                                         uiState.rgFilteredList, 
-                                         uiState.selectedRgBairro, 
+                                         rgFilteredList, 
+                                         selectedRgBairro, 
                                          blockLabel, // Pass the formatted label
                                          municipio = uiState.municipality,
                                          participatingAgents = block?.participatingAgents ?: emptyList()
@@ -146,7 +144,7 @@ fun RGScreen(
                         .fillMaxSize()
                 ) {
             // Filters Header (Only visible in Selection Mode)
-            if (uiState.selectedRgBlock.isBlank()) {
+            if (selectedRgBlock.isBlank()) {
                 com.antigravity.healthagent.ui.components.PremiumCard(
                     modifier = Modifier
                         .fillMaxWidth()

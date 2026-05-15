@@ -1,14 +1,14 @@
 package com.antigravity.healthagent.ui.components
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -17,11 +17,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import com.antigravity.healthagent.ui.home.SyncStage
+import com.antigravity.healthagent.ui.home.SyncStatus
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
-import com.antigravity.healthagent.ui.home.SyncStatus
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -32,62 +31,80 @@ fun SyncFloatingBalloon(
     isSolarMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    if (syncStatus.lastSyncTimestamp <= 0) return
-
-    val timeStr = SimpleDateFormat("HH:mm", Locale("pt", "BR"))
-        .format(Date(syncStatus.lastSyncTimestamp))
-    val dateStr = SimpleDateFormat("dd/MM", Locale("pt", "BR"))
-        .format(Date(syncStatus.lastSyncTimestamp))
-
-    Box(
-        modifier = modifier
-            .padding(top = 8.dp)
-            .fillMaxWidth(),
-        contentAlignment = Alignment.TopCenter
+    // Entrance/Exit Animation
+    AnimatedVisibility(
+        visible = syncStatus.lastSyncTimestamp > 0,
+        enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+        exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top),
+        modifier = modifier.fillMaxWidth()
     ) {
-        Surface(
-            color = if (isSolarMode) MaterialTheme.colorScheme.surface.copy(alpha = 0.9f) else Color.Black.copy(alpha = 0.4f),
-            shape = RoundedCornerShape(100.dp),
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
-            border = androidx.compose.foundation.BorderStroke(
-                width = 1.dp,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.3f),
-                        Color.White.copy(alpha = 0.05f)
-                    )
-                )
+        val timeStr = remember(syncStatus.lastSyncTimestamp) {
+            SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(syncStatus.lastSyncTimestamp))
+        }
+        val dateStr = remember(syncStatus.lastSyncTimestamp) {
+            SimpleDateFormat("dd/MM", Locale("pt", "BR")).format(Date(syncStatus.lastSyncTimestamp))
+        }
+
+        // Pulse Animation for the icon
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val iconAlpha by infiniteTransition.animateFloat(
+            initialValue = 0.6f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1500, easing = LinearOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
             ),
-            modifier = Modifier.graphicsLayer {
-                this.shadowElevation = 12.dp.toPx()
-                this.shape = RoundedCornerShape(24.dp)
-                this.clip = true
-            }
+            label = "alpha"
+        )
+
+        Box(
+            modifier = Modifier
+                .padding(top = 72.dp)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.TopCenter
         ) {
-            Row(
+            Surface(
+                color = if (isSolarMode) MaterialTheme.colorScheme.surface.copy(alpha = 0.95f) else Color.Black.copy(alpha = 0.85f),
+                shape = RoundedCornerShape(100.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    width = 1.dp,
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.6f),
+                            Color.White.copy(alpha = 0.1f)
+                        )
+                    )
+                ),
                 modifier = Modifier
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+                    .shadow(elevation = 8.dp, shape = RoundedCornerShape(100.dp), spotColor = Color.Black.copy(alpha = 0.2f))
+                    .widthIn(min = 180.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.CloudDone,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = if (isSolarMode) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.8f)
-                )
-                
-                Spacer(Modifier.width(8.dp))
-                
-                Text(
-                    text = "Nuvem atualizada: $dateStr às $timeStr",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isSolarMode) MaterialTheme.colorScheme.onSurface else Color.White,
-                    letterSpacing = 0.2.sp,
-                    fontSize = if (isEasyMode) 11.sp else 9.sp
-                )
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CloudDone,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .graphicsLayer { alpha = iconAlpha },
+                        tint = if (isSolarMode) MaterialTheme.colorScheme.primary else Color(0xFF4CAF50)
+                    )
+                    
+                    Spacer(Modifier.width(10.dp))
+                    
+                    Text(
+                        text = "Sincronizado: $dateStr às $timeStr",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (isSolarMode) MaterialTheme.colorScheme.onSurface else Color.White,
+                        letterSpacing = 0.5.sp,
+                        fontSize = if (isEasyMode) 13.sp else 11.sp
+                    )
+                }
             }
         }
     }

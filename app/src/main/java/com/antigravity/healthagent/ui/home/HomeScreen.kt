@@ -856,12 +856,6 @@ fun HomeScreen(
                 }
             )
             Column(modifier = Modifier.fillMaxSize()) {
-                // Last Sync Balloon
-                SyncFloatingBalloon(
-                    syncStatus = uiState.syncStatus,
-                    modifier = Modifier.zIndex(5f)
-                )
-
                 // Item 1: Minimalist Progress Line
                 if (!isSearchActive && !isReorderMode) {
                     val workedCount = uiState.dashboardTotals.worked

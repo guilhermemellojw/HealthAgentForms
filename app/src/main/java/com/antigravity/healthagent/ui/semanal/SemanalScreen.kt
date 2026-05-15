@@ -186,10 +186,6 @@ fun SemanalScreen(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    SyncFloatingBalloon(
-                        syncStatus = uiState.syncStatus,
-                        modifier = Modifier.zIndex(5f)
-                    )
                     // Week Selector Row
                     PremiumCard(
                         modifier = Modifier
