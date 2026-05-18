@@ -3,6 +3,7 @@ package com.antigravity.healthagent.data.repository
 import androidx.room.withTransaction
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
+import com.antigravity.healthagent.data.util.toDayActivitySafe
 import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import com.google.firebase.auth.FirebaseAuth
@@ -1609,31 +1610,6 @@ class SyncRepositoryImpl @Inject constructor(
         null
     }
 }
-
-    private fun DocumentSnapshot.toDayActivitySafe(agentUid: String, agentName: String): com.antigravity.healthagent.data.local.model.DayActivity? {
-        return try {
-            val activity = try { this.toObject(com.antigravity.healthagent.data.local.model.DayActivity::class.java) } catch (e: Exception) { null }
-            val firestoreLastUpdated = this.getTimestamp("lastUpdated")?.toDate()?.time ?: 0L
-            val rawDate = (this.getString("date") ?: activity?.date ?: "").replace("/", "-")
-            
-            val baseActivity = activity ?: com.antigravity.healthagent.data.local.model.DayActivity(
-                status = this.getString("status") ?: "",
-                isClosed = this.getBoolean("isClosed") ?: false,
-                isManualUnlock = this.getBoolean("isManualUnlock") ?: false,
-                editedByAdmin = this.getBoolean("editedByAdmin") ?: false
-            )
-            
-            baseActivity.copy(
-                agentUid = agentUid,
-                agentName = this.getString("agentName")?.uppercase() ?: agentName.uppercase(),
-                date = rawDate,
-                lastUpdated = firestoreLastUpdated
-            )
-        } catch (e: Exception) {
-            android.util.Log.e("SyncRepository", "toDayActivitySafe error for doc ${this.id}: ${e.message}")
-            null
-        }
-    }
 
     private fun coercePropertyType(raw: String?): com.antigravity.healthagent.data.local.model.PropertyType {
         if (raw == null) return com.antigravity.healthagent.data.local.model.PropertyType.EMPTY
