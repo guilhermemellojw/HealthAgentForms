@@ -6,7 +6,7 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.ToneGenerator
 import android.net.Uri
-import android.util.Log
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.data.settings.SettingsManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -28,8 +28,9 @@ class SoundManager @Inject constructor(
 ) {
 
     private var mediaPlayer: MediaPlayer? = null
+    private val lock = Any()
     private val exceptionHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
-        Log.e("SoundManager", "Uncaught exception in SoundManager scope", throwable)
+        AppLogger.e("SoundManager", "Uncaught exception in SoundManager scope", throwable)
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
 
@@ -63,7 +64,7 @@ class SoundManager @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            Log.e("SoundManager", "Failed to initialize SoundManager", e)
+            AppLogger.e("SoundManager", "Failed to initialize SoundManager", e)
         }
     }
 
@@ -97,7 +98,7 @@ class SoundManager @Inject constructor(
                     playCustomSound(soundId)
                 }
             } catch (e: Exception) {
-                Log.e("SoundManager", "Error playing sound: $soundId", e)
+                AppLogger.e("SoundManager", "Error playing sound: $soundId", e)
             }
         }
     }
@@ -132,44 +133,50 @@ class SoundManager @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            Log.e("SoundManager", "Error playing system sound: $soundId", e)
+            AppLogger.e("SoundManager", "Error playing system sound: $soundId", e)
         }
     }
 
     private fun playCustomSound(uri: String) {
-        try {
-            // For file:// URIs, we need to ensure we're accessing them correctly.
-            // Using MediaPlayer with a Uri is standard.
-            
-            // Release previous player if any
-            mediaPlayer?.release()
-            mediaPlayer = null
-            
-            mediaPlayer = MediaPlayer().apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setUsage(AudioAttributes.USAGE_MEDIA) // Changed from USAGE_NOTIFICATION_EVENT
-                        .build()
-                )
-                setDataSource(context, Uri.parse(uri))
-                prepare()
-                start()
-                setOnCompletionListener {
-                    it.release()
-                    if (mediaPlayer == it) {
-                        mediaPlayer = null
+        synchronized(lock) {
+            try {
+                // For file:// URIs, we need to ensure we're accessing them correctly.
+                // Using MediaPlayer with a Uri is standard.
+                
+                // Release previous player if any
+                mediaPlayer?.release()
+                mediaPlayer = null
+                
+                mediaPlayer = MediaPlayer().apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .setUsage(AudioAttributes.USAGE_MEDIA) // Changed from USAGE_NOTIFICATION_EVENT
+                            .build()
+                    )
+                    setDataSource(context, Uri.parse(uri))
+                    prepare()
+                    start()
+                    setOnCompletionListener { mp ->
+                        synchronized(lock) {
+                            mp.release()
+                            if (mediaPlayer == mp) {
+                                mediaPlayer = null
+                            }
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                AppLogger.e("SoundManager", "Error playing custom sound: $uri", e)
             }
-        } catch (e: Exception) {
-            Log.e("SoundManager", "Error playing custom sound: $uri", e)
         }
     }
 
     fun release() {
-        mediaPlayer?.release()
-        mediaPlayer = null
+        synchronized(lock) {
+            mediaPlayer?.release()
+            mediaPlayer = null
+        }
     }
 
     /**

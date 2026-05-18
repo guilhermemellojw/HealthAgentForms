@@ -89,6 +89,134 @@ object RGPdfGenerator {
         return file
     }
 
+    private fun drawHeaderSection(
+        context: Context,
+        canvas: Canvas,
+        boldPaint: Paint,
+        textPaint: Paint,
+        headerAreaWidth: Float,
+        headerY: Float,
+        cursorY: Float
+    ): Float {
+        val prefText = "PREFEITURA MUNICIPAL DE BOM JARDIM"
+        val secText = "SECRETARIA MUNICIPAL DE SAÚDE"
+        
+        val prefWidth = boldPaint.measureText(prefText)
+        val secWidth = textPaint.measureText(secText)
+        
+        drawTextInRect(canvas, boldPaint, prefText, MARGIN, headerY, headerAreaWidth, 10f, alignLeft = true)
+        
+        val secBounds = Rect()
+        textPaint.getTextBounds(secText, 0, secText.length, secBounds)
+        val secTyCalculated = headerY + 10 + (10f + secBounds.height()) / 2 - secBounds.bottom
+        
+        val centerPref = MARGIN + 4f + (prefWidth / 2)
+        val secX = centerPref - (secWidth / 2)
+        val finalSecX = if (secX < MARGIN) MARGIN else secX
+        
+        canvas.drawText(secText, finalSecX, secTyCalculated, textPaint)
+        
+        val nextY = headerY + 10 + 10.2f
+        val logoBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.logo_vigilancia_ambiental)
+        if (logoBitmap != null) {
+            val logoWidth = 140
+            val finalLogoWidth = if (logoWidth > headerAreaWidth) headerAreaWidth.toInt() else logoWidth
+            val finalLogoHeight = (logoBitmap.height.toFloat() / logoBitmap.width.toFloat() * finalLogoWidth).toInt()
+
+            val destRect = Rect((MARGIN + 5).toInt(), nextY.toInt(), (MARGIN + 5 + finalLogoWidth).toInt(), nextY.toInt() + finalLogoHeight)
+            canvas.drawBitmap(logoBitmap, null, destRect, null)
+            
+            val logoBottom = nextY + finalLogoHeight
+            return if (logoBottom > cursorY + 60) logoBottom else cursorY + 60
+        }
+        return cursorY + 50
+    }
+
+    private fun drawResponsavelTable(
+        canvas: Canvas,
+        linePaint: Paint,
+        textPaint: Paint,
+        boldPaint: Paint,
+        tableX: Float,
+        tableY: Float,
+        tableWidth: Float,
+        responsavelRowH: Float,
+        rowH: Float
+    ): Float {
+        drawRect(canvas, linePaint, tableX, tableY, tableWidth, responsavelRowH)
+        drawCenteredText(canvas, boldPaint, "RESPONSÁVEL", tableX, tableY, tableWidth, responsavelRowH)
+        
+        val r1y = tableY + responsavelRowH
+        val c1w = tableWidth * 0.25f
+        val c2w = tableWidth * 0.25f
+        val c3w = tableWidth * 0.35f
+        val c4w = tableWidth * 0.15f
+        
+        drawRect(canvas, linePaint, tableX, r1y, c1w, rowH)
+        drawTextInRect(canvas, textPaint, "Gerente", tableX, r1y, c1w, rowH)
+        drawRect(canvas, linePaint, tableX + c1w, r1y, c2w, rowH) 
+        drawRect(canvas, linePaint, tableX + c1w + c2w, r1y, c3w, rowH)
+        drawTextInRect(canvas, textPaint, "Supervisor de Turma", tableX + c1w + c2w, r1y, c3w, rowH)
+        drawRect(canvas, linePaint, tableX + c1w + c2w + c3w, r1y, c4w, rowH) 
+        
+        val r2y = r1y + rowH
+        drawRect(canvas, linePaint, tableX, r2y, c1w, rowH)
+        drawTextInRect(canvas, textPaint, "Supervisor", tableX, r2y, c1w, rowH)
+        drawRect(canvas, linePaint, tableX + c1w, r2y, c2w, rowH) 
+        drawRect(canvas, linePaint, tableX + c1w + c2w, r2y, c3w, rowH)
+        drawTextInRect(canvas, textPaint, "Agente", tableX + c1w + c2w, r2y, c3w, rowH)
+        drawRect(canvas, linePaint, tableX + c1w + c2w + c3w, r2y, c4w, rowH)
+        drawCenteredText(canvas, textPaint, "X", tableX + c1w + c2w + c3w, r2y, c4w, rowH)
+        
+        return r2y + rowH
+    }
+
+    private fun drawLocationHeaderTable(
+        canvas: Canvas,
+        linePaint: Paint,
+        textPaint: Paint,
+        boldPaint: Paint,
+        cursorY: Float,
+        municipio: String,
+        bairro: String,
+        block: String,
+        rowHeight: Float
+    ) {
+        val totalRowWidth = PAGE_WIDTH - 2 * MARGIN
+        val halfWidth = totalRowWidth / 2
+        val w1 = halfWidth / 2
+        val w2 = halfWidth / 2
+        val w3 = halfWidth / 2
+        val w4 = halfWidth / 2
+        
+        var curX = MARGIN
+        drawRect(canvas, linePaint, curX, cursorY, w1, rowHeight)
+        drawTextInRect(canvas, textPaint, "MUNICÍPIO", curX, cursorY, w1, rowHeight, alignLeft = true)
+        curX += w1
+        drawRect(canvas, linePaint, curX, cursorY, w2, rowHeight)
+        drawCenteredText(canvas, boldPaint, municipio, curX, cursorY, w2, rowHeight)
+        curX += w2
+        drawRect(canvas, linePaint, curX, cursorY, w3, rowHeight)
+        drawTextInRect(canvas, textPaint, "CATEGORIA", curX, cursorY, w3, rowHeight, alignLeft = true)
+        curX += w3
+        drawRect(canvas, linePaint, curX, cursorY, w4, rowHeight)
+        drawCenteredText(canvas, boldPaint, "BRR", curX, cursorY, w4, rowHeight)
+        
+        val line2y = cursorY + rowHeight
+        curX = MARGIN
+        drawRect(canvas, linePaint, curX, line2y, w1, rowHeight)
+        drawTextInRect(canvas, textPaint, "BAIRRO", curX, line2y, w1, rowHeight, alignLeft = true)
+        curX += w1
+        drawRect(canvas, linePaint, curX, line2y, w2, rowHeight)
+        drawCenteredText(canvas, boldPaint, bairro, curX, line2y, w2, rowHeight)
+        curX += w2
+        drawRect(canvas, linePaint, curX, line2y, w3, rowHeight)
+        drawTextInRect(canvas, textPaint, "QUART. Nº", curX, line2y, w3, rowHeight, alignLeft = true)
+        curX += w3
+        drawRect(canvas, linePaint, curX, line2y, w4, rowHeight)
+        drawCenteredText(canvas, boldPaint, block, curX, line2y, w4, rowHeight)
+    }
+
     private fun drawPage(
         context: Context,
         canvas: Canvas,
@@ -125,21 +253,10 @@ object RGPdfGenerator {
 
         var cursorY = MARGIN
 
-        // --- Header Section ---
-        // Header text and Logo are Left-Aligned at MARGIN
-        // Order: Text Lines, then Logo below.
-        
-        // Text
-        // "aligned in the bottom center of 'prefeitura municipal' text" -> Center the second line relative to the first? 
-        // Or simply stack them tightly Left Aligned as per previous request? 
-        // The user said "bottom center of... text". This usually implies centering the second line with respect to the width of the first line.
-        // --- Column Width Calculations for Alignment ---
         val totalWidth = PAGE_WIDTH - 2 * MARGIN
         val colGap = 10f
         val listWidth = (totalWidth - colGap) / 2
         
-        // Defined later in code, but needed here for alignment
-        // Columns: Log | N | Seq | Comp | Tipo | Pend
         val cmN = 35f
         val cmSeq = 25f
         val cmComp = 25f
@@ -147,145 +264,60 @@ object RGPdfGenerator {
         val cmPend = 25f
         val cmLog = listWidth - cmN - cmSeq - cmComp - cmTipo - cmPend
         
-        // Calculate X position of "Tipo do Imóvel" in the Left List
-        // X = MARGIN + Log + N + Seq + Comp
         val alignX = MARGIN + cmLog + cmN + cmSeq + cmComp
         
-        // Responsavel Table (Top Right)
         val tableX = alignX
         val tableWidth = PAGE_WIDTH - MARGIN - tableX
         val tableY = MARGIN
-        val rowH = 25f // Increased from 15f
+        val rowH = 25f
         val responsavelRowH = 16f
         
-        val headerAreaWidth = tableX - MARGIN - 10f // Leave some gap
+        val headerAreaWidth = tableX - MARGIN - 10f
         
-        // --- Header Section ---
-        var headerY = cursorY
+        val headerBottomLogo = drawHeaderSection(
+            context = context,
+            canvas = canvas,
+            boldPaint = boldPaint,
+            textPaint = textPaint,
+            headerAreaWidth = headerAreaWidth,
+            headerY = cursorY,
+            cursorY = cursorY
+        )
         
-        // Text
-        val prefText = "PREFEITURA MUNICIPAL DE BOM JARDIM"
-        val secText = "SECRETARIA MUNICIPAL DE SAÚDE"
-        
-        // Measure widths
-        val prefWidth = boldPaint.measureText(prefText)
-        val secWidth = textPaint.measureText(secText)
-        
-        // Draw Prefecture (Left aligned at MARGIN)
-        drawTextInRect(canvas, boldPaint, prefText, MARGIN, headerY, headerAreaWidth, 10f, alignLeft = true)
-        
-        headerY += 10 
-        
-        // Draw Secretaria (Centered relative to Prefecture)
-        // Center of Prefecture = (MARGIN + 4f) + (prefWidth / 2)  -- +4f comes from drawTextInRect padding
-        // Start of Secretaria = Center of Prefecture - (secWidth / 2)
-        
-        // Bounds for vertical centering:
-        // val secTy = headerY + 10f 
-        val secBounds = Rect()
-        textPaint.getTextBounds(secText, 0, secText.length, secBounds)
-        val secTyCalculated = headerY + (10f + secBounds.height()) / 2 - secBounds.bottom
-        
-        val centerPref = MARGIN + 4f + (prefWidth / 2)
-        val secX = centerPref - (secWidth / 2)
-        
-        // Ensure it doesn't go below MARGIN
-        val finalSecX = if (secX < MARGIN) MARGIN else secX
-        
-        canvas.drawText(secText, finalSecX, secTyCalculated, textPaint)
-        
-        headerY += 10.2f 
-        
-        // Logo
-        val logoBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.logo_vigilancia_ambiental)
-        if (logoBitmap != null) {
-            val logoWidth = 140
-            val logoHeight = (logoBitmap.height.toFloat() / logoBitmap.width.toFloat() * logoWidth).toInt()
-            // Ensure logo doesn't exceed available width
-             val finalLogoWidth = if (logoWidth > headerAreaWidth) headerAreaWidth.toInt() else logoWidth
-             val finalLogoHeight = (logoBitmap.height.toFloat() / logoBitmap.width.toFloat() * finalLogoWidth).toInt()
+        val tableBottomY = drawResponsavelTable(
+            canvas = canvas,
+            linePaint = linePaint,
+            textPaint = textPaint,
+            boldPaint = boldPaint,
+            tableX = tableX,
+            tableY = tableY,
+            tableWidth = tableWidth,
+            responsavelRowH = responsavelRowH,
+            rowH = rowH
+        )
 
-            val destRect = Rect((MARGIN + 5).toInt(), headerY.toInt(), (MARGIN + 5 + finalLogoWidth).toInt(), headerY.toInt() + finalLogoHeight)
-            canvas.drawBitmap(logoBitmap, null, destRect, null)
-            
-            val logoBottom = headerY + finalLogoHeight
-            if (logoBottom > cursorY + 60) {
-                 cursorY = logoBottom
-            } else {
-                 cursorY += 60
-            }
-        } else {
-             cursorY += 50
-        }
+        val headerBottom = maxOf(headerBottomLogo, tableBottomY)
         
-        // Row 0: RESPONSÁVEL (Merged)
-        drawRect(canvas, linePaint, tableX, tableY, tableWidth, responsavelRowH)
-        drawCenteredText(canvas, boldPaint, "RESPONSÁVEL", tableX, tableY, tableWidth, responsavelRowH)
-        
-        val r1y = tableY + responsavelRowH
-        val c1w = tableWidth * 0.25f
-        val c2w = tableWidth * 0.25f
-        val c3w = tableWidth * 0.35f
-        val c4w = tableWidth * 0.15f
-        
-        // Row 2: Gerente | Empty | Supervisor | Empty
-        drawRect(canvas, linePaint, tableX, r1y, c1w, rowH); drawTextInRect(canvas, textPaint, "Gerente", tableX, r1y, c1w, rowH)
-        drawRect(canvas, linePaint, tableX+c1w, r1y, c2w, rowH) 
-        drawRect(canvas, linePaint, tableX+c1w+c2w, r1y, c3w, rowH); drawTextInRect(canvas, textPaint, "Supervisor de Turma", tableX+c1w+c2w, r1y, c3w, rowH)
-        drawRect(canvas, linePaint, tableX+c1w+c2w+c3w, r1y, c4w, rowH) 
-        
-        // Row 3: Supervisor | Empty | Agente | X
-        val r2y = r1y + rowH
-        drawRect(canvas, linePaint, tableX, r2y, c1w, rowH); drawTextInRect(canvas, textPaint, "Supervisor", tableX, r2y, c1w, rowH)
-        drawRect(canvas, linePaint, tableX+c1w, r2y, c2w, rowH) 
-        drawRect(canvas, linePaint, tableX+c1w+c2w, r2y, c3w, rowH); drawTextInRect(canvas, textPaint, "Agente", tableX+c1w+c2w, r2y, c3w, rowH)
-        drawRect(canvas, linePaint, tableX+c1w+c2w+c3w, r2y, c4w, rowH); drawCenteredText(canvas, textPaint, "X", tableX+c1w+c2w+c3w, r2y, c4w, rowH)
-
-        // Ensure proper spacing before next section
-        // Use max of Logo bottom or Table bottom
-        val headerBottom = maxOf(cursorY, r2y + rowH)
-        
-        // Folha 1 Position
-        // Draw centered at fixed Y relative to headerBottom
-        val folhaY = headerBottom // Start exactly after visual elements
+        val folhaY = headerBottom
         drawCenteredText(canvas, textPaint, "FOLHA $pageNumber/$totalPages", MARGIN, folhaY, PAGE_WIDTH - 2 * MARGIN, 10f)
         
-        // Next grid starts with a small gap from Folha 1
-        cursorY = folhaY + 12f // 10f height + 2f padding
+        cursorY = folhaY + 12f
         
-        // Location Header Table
-        // ...
-        val totalRowWidth = PAGE_WIDTH - 2 * MARGIN
-        val halfWidth = totalRowWidth / 2
-        val w1 = halfWidth / 2 // Label
-        val w2 = halfWidth / 2 // Value
-        val w3 = halfWidth / 2 // Label 2 (Categoria)
-        val w4 = halfWidth / 2 // Value 2 (BRR)
+        val rowHeight = 20f
         
-        val rowHeight = 20f // Increased from 15f for Municipio/Bairro headers
+        drawLocationHeaderTable(
+            canvas = canvas,
+            linePaint = linePaint,
+            textPaint = textPaint,
+            boldPaint = boldPaint,
+            cursorY = cursorY,
+            municipio = municipio,
+            bairro = bairro,
+            block = block,
+            rowHeight = rowHeight
+        )
         
-        // Line 1
-        var curX = MARGIN
-        drawRect(canvas, linePaint, curX, cursorY, w1, rowHeight); drawTextInRect(canvas, textPaint, "MUNICÍPIO", curX, cursorY, w1, rowHeight, alignLeft=true)
-        curX += w1
-        drawRect(canvas, linePaint, curX, cursorY, w2, rowHeight); drawCenteredText(canvas, boldPaint, municipio, curX, cursorY, w2, rowHeight)
-        curX += w2
-        drawRect(canvas, linePaint, curX, cursorY, w3, rowHeight); drawTextInRect(canvas, textPaint, "CATEGORIA", curX, cursorY, w3, rowHeight, alignLeft=true)
-        curX += w3
-        drawRect(canvas, linePaint, curX, cursorY, w4, rowHeight); drawCenteredText(canvas, boldPaint, "BRR", curX, cursorY, w4, rowHeight)
-        
-        cursorY += rowHeight
-        // Line 2
-        curX = MARGIN
-        drawRect(canvas, linePaint, curX, cursorY, w1, rowHeight); drawTextInRect(canvas, textPaint, "BAIRRO", curX, cursorY, w1, rowHeight, alignLeft=true)
-        curX += w1
-        drawRect(canvas, linePaint, curX, cursorY, w2, rowHeight); drawCenteredText(canvas, boldPaint, bairro, curX, cursorY, w2, rowHeight)
-        curX += w2
-        drawRect(canvas, linePaint, curX, cursorY, w3, rowHeight); drawTextInRect(canvas, textPaint, "QUART. Nº", curX, cursorY, w3, rowHeight, alignLeft=true)
-        curX += w3
-        drawRect(canvas, linePaint, curX, cursorY, w4, rowHeight); drawCenteredText(canvas, boldPaint, block, curX, cursorY, w4, rowHeight)
-        
-        cursorY += rowHeight + 10 // Space before lists
+        cursorY += (2 * rowHeight) + 10
         
         // --- Lists (Two Columns) ---
         // Total width available parameters defined at top of function for alignment calculations

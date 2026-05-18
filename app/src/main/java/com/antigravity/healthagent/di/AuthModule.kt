@@ -30,6 +30,12 @@ abstract class AuthModule {
 
     @Binds
     @Singleton
+    abstract fun bindAccessControlRepository(
+        accessControlRepositoryImpl: com.antigravity.healthagent.data.repository.AccessControlRepositoryImpl
+    ): com.antigravity.healthagent.domain.repository.AccessControlRepository
+
+    @Binds
+    @Singleton
     abstract fun bindSyncRepository(
         syncRepositoryImpl: SyncRepositoryImpl
     ): SyncRepository

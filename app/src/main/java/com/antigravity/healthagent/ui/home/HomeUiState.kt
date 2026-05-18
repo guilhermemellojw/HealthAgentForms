@@ -4,15 +4,7 @@ import com.antigravity.healthagent.data.local.model.House
 
 
 
-enum class SyncStage { IDLE, STARTING, UPLOADING, DOWNLOADING, SUCCESS, ERROR }
-
-data class SyncStatus(
-    val stage: SyncStage = SyncStage.IDLE,
-    val progress: Float = 0f,
-    val message: String? = null,
-    val lastSyncTimestamp: Long = 0L,
-    val clockSkewMs: Long = 0L
-)
+import com.antigravity.healthagent.ui.state.SyncUiState
 
 data class BackupConfirmation(
     val backupAgentName: String,
@@ -68,7 +60,7 @@ data class HomeUiState(
     val isSolarMode: Boolean = false,
     val isEditingToolsEnabled: Boolean = false,
     val maxOpenHouses: Int = 25,
-    val syncStatus: SyncStatus = SyncStatus(),
+    val syncStatus: SyncUiState = SyncUiState.Idle(),
     val backupConfirmation: BackupConfirmation? = null,
     val isDuplicateIds: Set<Int> = emptySet(),
     val highlightedHouseId: Int? = null,

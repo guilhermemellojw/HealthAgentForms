@@ -36,6 +36,7 @@ class AdminViewModel @Inject constructor(
     private val agentRepository: AgentRepository,
     private val localizationRepository: LocalizationRepository,
     private val authRepository: AuthRepository,
+    private val accessControlRepository: com.antigravity.healthagent.domain.repository.AccessControlRepository,
     private val restoreDataUseCase: RestoreDataUseCase,
     private val syncDataUseCase: SyncDataUseCase,
     private val getTimelineUseCase: com.antigravity.healthagent.domain.usecase.GetTimelineUseCase,
@@ -223,7 +224,7 @@ class AdminViewModel @Inject constructor(
         
         // Collect real-time access requests once and for all
         viewModelScope.launch {
-            authRepository.pendingAccessRequests.collect { requests ->
+            accessControlRepository.pendingAccessRequests.collect { requests ->
                 _accessRequests.value = requests
             }
         }
@@ -245,11 +246,11 @@ class AdminViewModel @Inject constructor(
 
     fun approveAccess(requestId: String, agentName: String?) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
-            val result = authRepository.respondToAccessRequest(requestId, true, agentName)
+            val result = accessControlRepository.respondToAccessRequest(requestId, true, agentName)
             if (result.isSuccess) {
                 loadUsers()
                 _uiEvent.emit("Acesso aprovado")
@@ -259,11 +260,11 @@ class AdminViewModel @Inject constructor(
 
     fun rejectAccess(requestId: String) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
-            val result = authRepository.respondToAccessRequest(requestId, false)
+            val result = accessControlRepository.respondToAccessRequest(requestId, false)
             if (result.isSuccess) {
                 _uiEvent.emit("Acesso rejeitado")
             }
@@ -293,7 +294,7 @@ class AdminViewModel @Inject constructor(
     }
 
     private suspend fun loadUsers() {
-        val result = authRepository.fetchAllUsers()
+        val result = accessControlRepository.fetchAllUsers()
         if (result.isSuccess) {
             _users.value = result.getOrNull() ?: emptyList()
         }
@@ -309,7 +310,7 @@ class AdminViewModel @Inject constructor(
 
     fun addAgentName(name: String) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
@@ -325,7 +326,7 @@ class AdminViewModel @Inject constructor(
 
     fun removeAgentName(name: String) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
@@ -348,11 +349,11 @@ class AdminViewModel @Inject constructor(
 
     fun authorizeUser(uid: String, isAuthorized: Boolean) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
-            val result = authRepository.authorizeUser(uid, isAuthorized)
+            val result = accessControlRepository.authorizeUser(uid, isAuthorized)
             if (result.isSuccess) {
                 loadUsers()
             }
@@ -361,11 +362,11 @@ class AdminViewModel @Inject constructor(
 
     fun changeUserRole(uid: String, role: com.antigravity.healthagent.domain.repository.UserRole) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
-            val result = authRepository.changeUserRole(uid, role)
+            val result = accessControlRepository.changeUserRole(uid, role)
             if (result.isSuccess) {
                 loadUsers()
             }
@@ -374,11 +375,11 @@ class AdminViewModel @Inject constructor(
 
     fun updateUserProfile(uid: String, updates: Map<String, Any?>) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
-            val result = authRepository.updateUserProfile(uid, updates)
+            val result = accessControlRepository.updateUserProfile(uid, updates)
             if (result.isSuccess) {
                 loadUsers()
             }
@@ -387,7 +388,7 @@ class AdminViewModel @Inject constructor(
 
     fun createUser(email: String, role: com.antigravity.healthagent.domain.repository.UserRole, agentName: String?, isAuthorized: Boolean) {
         viewModelScope.launch {
-            val result = authRepository.createUserProfile(email, role, agentName, isAuthorized)
+            val result = accessControlRepository.createUserProfile(email, role, agentName, isAuthorized)
             if (result.isSuccess) {
                 loadUsers()
             }
@@ -396,7 +397,7 @@ class AdminViewModel @Inject constructor(
 
     fun createAgent(email: String, agentName: String?) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
@@ -413,7 +414,7 @@ class AdminViewModel @Inject constructor(
 
     fun deleteUser(uid: String, deleteCloudData: Boolean = false) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
@@ -425,7 +426,7 @@ class AdminViewModel @Inject constructor(
                     }
                 }
                 
-                val result = authRepository.deleteUser(uid)
+                val result = accessControlRepository.deleteUser(uid)
                 if (result.isSuccess) {
                     _uiEvent.emit("Perfil excluído com sucesso")
                     loadUsers()
@@ -441,7 +442,7 @@ class AdminViewModel @Inject constructor(
 
     fun deleteAgent(uid: String) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
@@ -454,7 +455,7 @@ class AdminViewModel @Inject constructor(
 
     fun remoteWipeAgentData(uid: String) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
@@ -463,7 +464,7 @@ class AdminViewModel @Inject constructor(
                 val cloudResult = agentRepository.deleteAgent(uid)
                 
                 // 2. Set flag to force local device to clear database on next sync
-                authRepository.updateUserProfile(uid, mapOf("requireDataReset" to true))
+                accessControlRepository.updateUserProfile(uid, mapOf("requireDataReset" to true))
                 
                 if (cloudResult.isSuccess) {
                     _uiEvent.emit("Wipe remoto concluído (Nuvem e Local)")
@@ -566,7 +567,7 @@ class AdminViewModel @Inject constructor(
 
     fun restoreAgentBackup(context: Context, agentUid: String, uri: Uri, targetDate: String? = null, autoShift: Boolean = false) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
@@ -628,7 +629,7 @@ class AdminViewModel @Inject constructor(
 
     fun transferData(fromUid: String, toUid: String) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
@@ -636,7 +637,7 @@ class AdminViewModel @Inject constructor(
             val result = agentRepository.transferAgentData(fromUid, toUid)
             if (result.isSuccess) {
                 // Set flag to force source device to clear local data on next sync
-                authRepository.updateUserProfile(fromUid, mapOf("requireDataReset" to true))
+                accessControlRepository.updateUserProfile(fromUid, mapOf("requireDataReset" to true))
                 
                 _uiEvent.emit("Dados transferidos com sucesso")
                 refreshAll()
@@ -674,7 +675,7 @@ class AdminViewModel @Inject constructor(
 
     fun restoreFromTimeline(agentUid: String, storagePath: String) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }
@@ -693,7 +694,7 @@ class AdminViewModel @Inject constructor(
 
     fun performSurgicalCleanup(uid: String) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }

@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import com.antigravity.healthagent.ui.state.SyncUiState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -21,7 +22,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.ui.components.HouseRowItem
 import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
 import com.antigravity.healthagent.ui.components.PremiumCard
-import com.antigravity.healthagent.ui.home.HomeViewModel
+import com.antigravity.healthagent.ui.rg.RgViewModel
 import android.widget.Toast
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -37,13 +38,12 @@ import com.antigravity.healthagent.utils.formatStreetName
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RGScreen(
-    viewModel: HomeViewModel = hiltViewModel(),
+    viewModel: RgViewModel = hiltViewModel(),
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
     onOpenSettings: () -> Unit = {}
 ) {
-    val uiState by viewModel.uiState.collectAsState()
     val rgBlocks by viewModel.rgBlocks.collectAsState()
     val selectedRgBlock by viewModel.selectedRgBlock.collectAsState()
     val rgFilteredList by viewModel.rgFilteredList.collectAsState()
@@ -51,6 +51,9 @@ fun RGScreen(
     val availableYears by viewModel.availableYears.collectAsState()
     val rgYear by viewModel.rgYear.collectAsState()
     val selectedRgBairro by viewModel.selectedRgBairro.collectAsState()
+    val isEasyMode by viewModel.isEasyMode.collectAsState()
+    val isSolarMode by viewModel.isSolarMode.collectAsState()
+    val municipality by viewModel.municipality.collectAsState()
     
     // State for showing loading or error
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -109,7 +112,7 @@ fun RGScreen(
                                          rgFilteredList, 
                                          selectedRgBairro, 
                                          blockLabel, // Pass the formatted label
-                                         municipio = uiState.municipality,
+                                         municipio = municipality,
                                          participatingAgents = block?.participatingAgents ?: emptyList()
                                      )
                                  }
@@ -128,11 +131,11 @@ fun RGScreen(
             }
         }
     ) { paddingValues ->
-        val isSyncing by viewModel.isSyncing.collectAsState()
+        val syncState by viewModel.syncState.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
 
         PullToRefreshBox(
-            isRefreshing = isSyncing,
+            isRefreshing = syncState is SyncUiState.Syncing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
             modifier = Modifier.padding(paddingValues).fillMaxSize()
@@ -149,7 +152,7 @@ fun RGScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    isSolarMode = uiState.isSolarMode
+                    isSolarMode = isSolarMode
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -220,8 +223,8 @@ fun RGScreen(
                                     ) {
                                         com.antigravity.healthagent.ui.components.RGBlockCard(
                                             segment = segment,
-                                            isEasyMode = uiState.isEasyMode,
-                                            isSolarMode = uiState.isSolarMode,
+                                            isEasyMode = isEasyMode,
+                                            isSolarMode = isSolarMode,
                                             onClick = { viewModel.selectRgBlock(segment.id) }
                                         )
                                     }
@@ -266,8 +269,8 @@ fun RGScreen(
                             items(rgFilteredList, key = { it.id }) { house ->
                                 RGHouseRow(
                                     house = house,
-                                    isEasyMode = uiState.isEasyMode,
-                                    isSolarMode = uiState.isSolarMode
+                                    isEasyMode = isEasyMode,
+                                    isSolarMode = isSolarMode
                                 )
                             }
                         }

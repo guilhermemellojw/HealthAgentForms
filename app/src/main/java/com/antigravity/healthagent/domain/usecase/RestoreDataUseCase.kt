@@ -12,6 +12,7 @@ import javax.inject.Inject
 class RestoreDataUseCase @Inject constructor(
     private val syncRepository: SyncRepository,
     private val authRepository: AuthRepository,
+    private val accessControlRepository: com.antigravity.healthagent.domain.repository.AccessControlRepository,
     private val backupManager: BackupManager
 ) {
     suspend operator fun invoke(
@@ -24,7 +25,7 @@ class RestoreDataUseCase @Inject constructor(
     ): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             // 1. Get the agent name for this UID
-            val usersResult = authRepository.fetchAllUsers()
+            val usersResult = accessControlRepository.fetchAllUsers()
             val user = usersResult.getOrNull()?.find { it.uid == targetUid }
             val agentName = (user?.agentName ?: user?.email ?: "Unknown Agent").uppercase()
             

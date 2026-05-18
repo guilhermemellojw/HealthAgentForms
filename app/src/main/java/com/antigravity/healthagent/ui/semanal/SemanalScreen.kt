@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.runtime.*
+import com.antigravity.healthagent.ui.state.SyncUiState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -31,7 +32,7 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.antigravity.healthagent.ui.home.HomeViewModel
+import com.antigravity.healthagent.ui.semanal.WeeklySummaryViewModel
 import com.antigravity.healthagent.ui.components.CompactDropdown
 import com.antigravity.healthagent.ui.components.SyncStatusOverlay
 import com.antigravity.healthagent.ui.home.DaySummary
@@ -49,25 +50,36 @@ import androidx.compose.ui.zIndex
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SemanalScreen(
-    viewModel: HomeViewModel = hiltViewModel(),
+    viewModel: WeeklySummaryViewModel = hiltViewModel(),
+    onNavigateToDate: (String) -> Unit = {},
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
     onOpenSettings: () -> Unit = {}
 ) {
-    val uiState by viewModel.uiState.collectAsState()
     val weeklySummary by viewModel.weeklySummary.collectAsState()
     val weeklySummaryTotals by viewModel.weeklySummaryTotals.collectAsState()
     val weekRangeText by viewModel.weekRangeText.collectAsState()
     val uiEvent by viewModel.uiEvent.collectAsState()
+    val isEasyMode by viewModel.isEasyMode.collectAsState()
+    val isSolarMode by viewModel.isSolarMode.collectAsState()
+    val weeklyObservations by viewModel.weeklyObservations.collectAsState()
+    val activityOptions by viewModel.activityOptions.collectAsState()
+    val customActivities by viewModel.customActivities.collectAsState()
     var showAddActivityDialog by remember { mutableStateOf(false) }
     var newActivityName by remember { mutableStateOf("") }
 
     val context = LocalContext.current
     LaunchedEffect(uiEvent) {
         uiEvent?.let {
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
-            viewModel.clearUiEvent()
+            if (it.startsWith("SUCCESS_NAVIGATE_TO:")) {
+                val targetDate = it.substringAfter("SUCCESS_NAVIGATE_TO:")
+                onNavigateToDate(targetDate)
+                viewModel.clearUiEvent()
+            } else {
+                Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+                viewModel.clearUiEvent()
+            }
         }
     }
 
@@ -86,8 +98,8 @@ fun SemanalScreen(
                     ) 
                 },
                 actions = {
-                    val iconButtonSize = if (uiState.isEasyMode) 56.dp else 48.dp
-                    val iconSize = if (uiState.isEasyMode) 32.dp else 24.dp
+                    val iconButtonSize = if (isEasyMode) 56.dp else 48.dp
+                    val iconSize = if (isEasyMode) 32.dp else 24.dp
 
                     IconButton(
                         onClick = { showAddActivityDialog = true },
@@ -170,11 +182,11 @@ fun SemanalScreen(
             )
         }
     ) { paddingValues ->
-        val isSyncing by viewModel.isSyncing.collectAsState()
+        val syncState by viewModel.syncState.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
 
         PullToRefreshBox(
-            isRefreshing = isSyncing,
+            isRefreshing = syncState is SyncUiState.Syncing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
             modifier = Modifier.padding(paddingValues).fillMaxSize()
@@ -191,7 +203,7 @@ fun SemanalScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 4.dp),
-                        isSolarMode = uiState.isSolarMode
+                        isSolarMode = isSolarMode
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -200,12 +212,12 @@ fun SemanalScreen(
                         ) {
                             FilledIconButton(
                                 onClick = { viewModel.previousWeek() },
-                                modifier = Modifier.size(if (uiState.isEasyMode) 56.dp else 44.dp)
+                                modifier = Modifier.size(if (isEasyMode) 56.dp else 44.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.ArrowBack,
                                     contentDescription = "Semana Anterior",
-                                    modifier = Modifier.size(if (uiState.isEasyMode) 32.dp else 24.dp)
+                                    modifier = Modifier.size(if (isEasyMode) 32.dp else 24.dp)
                                 )
                             }
                             
@@ -215,25 +227,25 @@ fun SemanalScreen(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
                                     fontWeight = FontWeight.Black,
-                                    fontSize = if (uiState.isEasyMode) 12.sp else 10.sp
+                                    fontSize = if (isEasyMode) 12.sp else 10.sp
                                 )
                                 Text(
                                     text = weekRangeText,
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Black,
                                     color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = if (uiState.isEasyMode) 18.sp else 16.sp
+                                    fontSize = if (isEasyMode) 18.sp else 16.sp
                                 )
                             }
                             
                             FilledIconButton(
                                 onClick = { viewModel.nextWeek() },
-                                modifier = Modifier.size(if (uiState.isEasyMode) 56.dp else 44.dp)
+                                modifier = Modifier.size(if (isEasyMode) 56.dp else 44.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.ArrowForward,
                                     contentDescription = "Próxima Semana",
-                                    modifier = Modifier.size(if (uiState.isEasyMode) 32.dp else 24.dp)
+                                    modifier = Modifier.size(if (isEasyMode) 32.dp else 24.dp)
                                 )
                             }
                         }
@@ -244,7 +256,7 @@ fun SemanalScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp),
-                        isSolarMode = uiState.isSolarMode
+                        isSolarMode = isSolarMode
                     ) {
                         Column(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -255,18 +267,18 @@ fun SemanalScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
                                 color = MaterialTheme.colorScheme.primary,
-                                fontSize = if (uiState.isEasyMode) 11.sp else 9.sp
+                                fontSize = if (isEasyMode) 11.sp else 9.sp
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceEvenly
                             ) {
-                                CompactStatItem("ABERTOS", weeklySummaryTotals.totalWorked.toString(), Icons.Default.Home, isEasyMode = uiState.isEasyMode)
-                                CompactStatItem("TRATADOS", weeklySummaryTotals.totalTratados.toString(), Icons.Default.WaterDrop, isEasyMode = uiState.isEasyMode)
-                                CompactStatItem("COM FOCO", weeklySummaryTotals.totalFoci.toString(), Icons.Default.Warning, color = if (weeklySummaryTotals.totalFoci > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, isEasyMode = uiState.isEasyMode)
-                                CompactStatItem("FECHADOS", weeklySummaryTotals.totalFechados.toString(), Icons.Default.DoorFront, isEasyMode = uiState.isEasyMode)
-                                CompactStatItem("RECUSADOS", weeklySummaryTotals.totalRecusados.toString(), Icons.Default.Block, isEasyMode = uiState.isEasyMode)
+                                CompactStatItem("ABERTOS", weeklySummaryTotals.totalWorked.toString(), Icons.Default.Home, isEasyMode = isEasyMode)
+                                CompactStatItem("TRATADOS", weeklySummaryTotals.totalTratados.toString(), Icons.Default.WaterDrop, isEasyMode = isEasyMode)
+                                CompactStatItem("COM FOCO", weeklySummaryTotals.totalFoci.toString(), Icons.Default.Warning, color = if (weeklySummaryTotals.totalFoci > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, isEasyMode = isEasyMode)
+                                CompactStatItem("FECHADOS", weeklySummaryTotals.totalFechados.toString(), Icons.Default.DoorFront, isEasyMode = isEasyMode)
+                                CompactStatItem("RECUSADOS", weeklySummaryTotals.totalRecusados.toString(), Icons.Default.Block, isEasyMode = isEasyMode)
                             }
                         }
                     }
@@ -275,7 +287,7 @@ fun SemanalScreen(
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 80.dp, start = 12.dp, end = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(if (uiState.isEasyMode) 16.dp else 12.dp)
+                        verticalArrangement = Arrangement.spacedBy(if (isEasyMode) 16.dp else 12.dp)
                     ) {
                         item {
                             Text(
@@ -284,22 +296,22 @@ fun SemanalScreen(
                                 fontWeight = FontWeight.Black,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(vertical = 4.dp),
-                                fontSize = if (uiState.isEasyMode) 12.sp else 10.sp
+                                fontSize = if (isEasyMode) 12.sp else 10.sp
                             )
                         }
 
                         itemsIndexed(weeklySummary, key = { _, day -> day.date }) { _, day ->
                             WeeklyDayRow(
                                 day = day,
-                                options = uiState.activityOptions,
+                                options = activityOptions,
                                 onStatusChange = { viewModel.updateDayStatus(day.date, it) },
-                                onClick = { viewModel.navigateToDate(day.date) },
-                                isEasyMode = uiState.isEasyMode,
-                                isSolarMode = uiState.isSolarMode
+                                onClick = { onNavigateToDate(day.date) },
+                                isEasyMode = isEasyMode,
+                                isSolarMode = isSolarMode
                             )
                         }
 
-                        if (uiState.weeklyObservations.isNotEmpty()) {
+                        if (weeklyObservations.isNotEmpty()) {
                             item {
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Text(
@@ -308,16 +320,16 @@ fun SemanalScreen(
                                     fontWeight = FontWeight.Black,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.padding(vertical = 4.dp),
-                                    fontSize = if (uiState.isEasyMode) 12.sp else 10.sp
+                                    fontSize = if (isEasyMode) 12.sp else 10.sp
                                 )
                             }
 
-                            items(uiState.weeklyObservations) { house ->
+                            items(weeklyObservations) { house ->
                                 ObservationCard(
                                     house = house,
-                                    isEasyMode = uiState.isEasyMode,
-                                    isSolarMode = uiState.isSolarMode,
-                                    onClick = { viewModel.navigateToDate(house.data) }
+                                    isEasyMode = isEasyMode,
+                                    isSolarMode = isSolarMode,
+                                    onClick = { onNavigateToDate(house.data) }
                                 )
                             }
                         }
@@ -325,7 +337,7 @@ fun SemanalScreen(
                 }
 
                 if (showAddActivityDialog) {
-                    val customActivities = uiState.customActivities
+                    val customActivities = customActivities
                     
                     AlertDialog(
                         onDismissRequest = { showAddActivityDialog = false },

@@ -17,7 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import com.antigravity.healthagent.ui.home.SyncStatus
+import com.antigravity.healthagent.ui.state.SyncUiState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
@@ -26,23 +26,23 @@ import java.util.*
 
 @Composable
 fun SyncFloatingBalloon(
-    syncStatus: SyncStatus,
+    syncStatus: SyncUiState,
     isEasyMode: Boolean = false,
     isSolarMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // Entrance/Exit Animation
     AnimatedVisibility(
-        visible = syncStatus.lastSyncTimestamp > 0,
+        visible = (syncStatus.lastSyncTime ?: 0L) > 0,
         enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
         exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top),
         modifier = modifier.fillMaxWidth()
     ) {
-        val timeStr = remember(syncStatus.lastSyncTimestamp) {
-            SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(syncStatus.lastSyncTimestamp))
+        val timeStr = remember(syncStatus.lastSyncTime) {
+            SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(syncStatus.lastSyncTime ?: 0L))
         }
-        val dateStr = remember(syncStatus.lastSyncTimestamp) {
-            SimpleDateFormat("dd/MM", Locale("pt", "BR")).format(Date(syncStatus.lastSyncTimestamp))
+        val dateStr = remember(syncStatus.lastSyncTime) {
+            SimpleDateFormat("dd/MM", Locale("pt", "BR")).format(Date(syncStatus.lastSyncTime ?: 0L))
         }
 
         // Pulse Animation for the icon

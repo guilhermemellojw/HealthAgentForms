@@ -1,7 +1,7 @@
 package com.antigravity.healthagent.utils
 
 import android.content.Context
-import android.util.Log
+import com.antigravity.healthagent.domain.logger.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
@@ -24,7 +24,7 @@ object TimeManager {
     fun initialize(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         offsetMs = prefs.getLong(KEY_OFFSET, 0L)
-        Log.i("TimeManager", "Initialized with offset: ${offsetMs}ms")
+        AppLogger.i("TimeManager", "Initialized with offset: ${offsetMs}ms")
     }
 
     /**
@@ -69,15 +69,15 @@ object TimeManager {
                             offsetMs = newOffset
                             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                             prefs.edit().putLong(KEY_OFFSET, offsetMs).apply()
-                            Log.i("TimeManager", "Time synchronized. New offset: ${offsetMs}ms")
+                            AppLogger.i("TimeManager", "Time synchronized. New offset: ${offsetMs}ms")
                         } else {
-                            Log.d("TimeManager", "Time is relatively accurate. Offset unchanged.")
+                            AppLogger.d("TimeManager", "Time is relatively accurate. Offset unchanged.")
                         }
                     }
                 }
                 connection.disconnect()
             } catch (e: Exception) {
-                Log.w("TimeManager", "Failed to synchronize network time: ${e.message}")
+                AppLogger.w("TimeManager", "Failed to synchronize network time: ${e.message}")
             }
         }
     }

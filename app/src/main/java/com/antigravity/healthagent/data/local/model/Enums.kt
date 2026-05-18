@@ -38,3 +38,6 @@ enum class Treatment(val code: String) {
 
     override fun toString(): String = code
 }
+
+fun Situation.heal(): Situation = if (this == Situation.EMPTY) Situation.NONE else this
+

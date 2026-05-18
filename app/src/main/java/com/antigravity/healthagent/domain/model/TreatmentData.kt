@@ -25,4 +25,19 @@ data class TreatmentData(
 
     val totalDeposits: Int
         get() = a1 + a2 + b + c + d1 + d2 + e
+
+    val formattedSummary: String
+        get() {
+            val parts = mutableListOf<String>()
+            if (a1 > 0) parts.add("A1: $a1")
+            if (a2 > 0) parts.add("A2: $a2")
+            if (b > 0) parts.add("B: $b")
+            if (c > 0) parts.add("C: $c")
+            if (d1 > 0) parts.add("D1: $d1")
+            if (d2 > 0) parts.add("D2: $d2")
+            if (e > 0) parts.add("E: $e")
+            if (eliminados > 0) parts.add("Elim: $eliminados")
+            if (larvicida > 0.0) parts.add("Larv: ${larvicida}g")
+            return parts.joinToString(" | ")
+        }
 }

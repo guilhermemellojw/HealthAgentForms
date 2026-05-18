@@ -14,25 +14,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.antigravity.healthagent.ui.home.SyncStatus
 import androidx.compose.ui.graphics.Color
-import com.antigravity.healthagent.ui.home.SyncStage
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.antigravity.healthagent.ui.state.SyncUiState
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.sp
 
 @Composable
 fun SyncStatusOverlay(
-    syncStatus: SyncStatus,
+    syncStatus: SyncUiState,
     isEasyMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     AnimatedVisibility(
-        visible = syncStatus.stage != SyncStage.IDLE,
+        visible = syncStatus !is SyncUiState.Idle,
         enter = slideInVertically { -it * 2 } + fadeIn(animationSpec = tween(400)),
         exit = slideOutVertically { -it * 2 } + fadeOut(animationSpec = tween(400)),
         modifier = modifier // Apply the modifier here
@@ -46,7 +45,7 @@ fun SyncStatusOverlay(
         ) {
             // Smoothly animate progress changes with a Spring spec
             val animatedProgress by animateFloatAsState(
-                targetValue = syncStatus.progress,
+                targetValue = (syncStatus as? SyncUiState.Syncing)?.progress ?: 1f,
                 animationSpec = spring(
                     dampingRatio = Spring.DampingRatioLowBouncy,
                     stiffness = Spring.StiffnessLow
@@ -54,19 +53,17 @@ fun SyncStatusOverlay(
                 label = "progress"
             )
 
-            val bgColor = when (syncStatus.stage) {
-                SyncStage.SUCCESS -> Color(0xFF4CAF50)
-                SyncStage.ERROR -> MaterialTheme.colorScheme.error
+            val bgColor = when (syncStatus) {
+                is SyncUiState.Success -> Color(0xFF4CAF50)
+                is SyncUiState.Error -> MaterialTheme.colorScheme.error
                 else -> Color.Black.copy(alpha = 0.85f)
             }
 
-            val icon: ImageVector = when (syncStatus.stage) {
-                SyncStage.STARTING -> Icons.Default.Sync
-                SyncStage.UPLOADING -> Icons.Default.CloudUpload
-                SyncStage.DOWNLOADING -> Icons.Default.CloudDownload
-                SyncStage.SUCCESS -> Icons.Default.CloudDone
-                SyncStage.ERROR -> Icons.Default.ErrorOutline
-                SyncStage.IDLE -> Icons.Default.Sync
+            val icon: ImageVector = when (syncStatus) {
+                is SyncUiState.Syncing -> if (syncStatus.isDownloading) Icons.Default.CloudDownload else Icons.Default.CloudUpload
+                is SyncUiState.Success -> Icons.Default.CloudDone
+                is SyncUiState.Error -> Icons.Default.ErrorOutline
+                is SyncUiState.Idle -> Icons.Default.Sync
             }
 
             Surface(
@@ -79,7 +76,7 @@ fun SyncStatusOverlay(
                     .wrapContentSize()
                     .graphicsLayer {
                         // Subtle scale effect based on success
-                        val scale = if (syncStatus.stage == SyncStage.SUCCESS) 1.05f else 1f
+                        val scale = if (syncStatus is SyncUiState.Success) 1.05f else 1f
                         scaleX = scale
                         scaleY = scale
                     }
@@ -99,9 +96,7 @@ fun SyncStatusOverlay(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        val isRotating = syncStatus.stage == SyncStage.STARTING || 
-                                       syncStatus.stage == SyncStage.UPLOADING || 
-                                       syncStatus.stage == SyncStage.DOWNLOADING
+                        val isRotating = syncStatus is SyncUiState.Syncing
 
                         Box(
                             contentAlignment = Alignment.Center,
@@ -130,7 +125,12 @@ fun SyncStatusOverlay(
                         Spacer(modifier = Modifier.width(18.dp))
                         
                         Text(
-                            text = syncStatus.message ?: "Sincronizando...",
+                            text = when(syncStatus) {
+                                is SyncUiState.Syncing -> syncStatus.message ?: "Sincronizando..."
+                                is SyncUiState.Success -> "Concluído!"
+                                is SyncUiState.Error -> syncStatus.message
+                                is SyncUiState.Idle -> ""
+                            },
                             style = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White,
@@ -138,7 +138,7 @@ fun SyncStatusOverlay(
                         )
                     }
                     
-                    if (syncStatus.stage != SyncStage.SUCCESS && syncStatus.stage != SyncStage.ERROR) {
+                    if (syncStatus is SyncUiState.Syncing) {
                         Spacer(modifier = Modifier.height(12.dp))
                         
                         // Premium Glow Progress Bar

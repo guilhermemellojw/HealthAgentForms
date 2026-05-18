@@ -161,30 +161,11 @@ class AuthRepositoryImpl @Inject constructor(
         workManager.enqueue(logoutRequest)
     }
 
-    override suspend fun isUserAdmin(): Boolean {
-        return try {
-            val firebaseUser = auth.currentUser ?: return false
-            val user = getFullUserData(firebaseUser)
-            user.isAdmin
-        } catch (_: Exception) {
-            false
-        }
-    }
+
 
     override fun getCurrentUserUid(): String? = auth.currentUser?.uid
 
-    override suspend fun fetchAccessRequest(uid: String): Result<AccessRequest?> {
-        return try {
-            val doc = firestore.collection("access_requests").document(uid).get().await()
-            if (doc.exists()) {
-                Result.success<AccessRequest?>(doc.toObject(AccessRequest::class.java))
-            } else {
-                Result.success<AccessRequest?>(null)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+
 
     private suspend fun getFullUserData(firebaseUser: FirebaseUser): AuthUser {
         val uid = firebaseUser.uid
@@ -495,67 +476,14 @@ class AuthRepositoryImpl @Inject constructor(
         )
     }
 
-    override suspend fun fetchAllUsers(): Result<List<AuthUser>> {
-        return try {
-            val snapshot = firestore.collection("users").get().await()
-            val users = snapshot.documents.map { doc ->
-                AuthUser(
-                    uid = doc.id,
-                    email = doc.getString("email"),
-                    displayName = doc.getString("displayName"),
-                    photoUrl = doc.getString("photoUrl"),
-                    role = try { UserRole.valueOf(doc.getString("role") ?: "AGENT") } catch (e: Exception) { UserRole.AGENT },
-                    isAuthorized = doc.getBoolean("isAuthorized") ?: false,
-                    agentName = doc.getString("agentName")?.uppercase()
-                )
-            }
-            Result.success(users)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
 
-    override suspend fun authorizeUser(uid: String, isAuthorized: Boolean): Result<Unit> {
-        return try {
-            val userRef = firestore.collection("users").document(uid)
-            val userDoc = userRef.get().await()
-            val email = userDoc.getString("email")
-            
-            // 1. Update the target document
-            userRef.update("isAuthorized", isAuthorized).await()
-            
-            // 2. If authorizing a pre-registered user, look for a matching real user to migrate to
-            if (isAuthorized && email != null && uid.startsWith("pre_")) {
-                val realUsers = firestore.collection("users")
-                    .whereEqualTo("email", email)
-                    .get().await()
-                
-                for (realUserDoc in realUsers.documents) {
-                    if (realUserDoc.id != uid && !realUserDoc.id.startsWith("pre_")) {
-                        val realUid = realUserDoc.id
-                        android.util.Log.i("AuthRepository", "Admin authorizing pre-registered user. Auto-migrating to real UID: $realUid")
-                        
-                        // Authorize the real user too
-                        firestore.collection("users").document(realUid).update("isAuthorized", true).await()
-                        
-                        // Perform migration using Admin permissions
-                        migratePreRegistration(email, realUid)
-                    }
-                }
-            }
-            
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
 
     override suspend fun migratePreRegistration(user: AuthUser): Result<Unit> {
         val email = user.email ?: return Result.failure(Exception("Email do usuário não disponível para migração"))
         return migratePreRegistration(email, user.uid)
     }
 
-    internal suspend fun migratePreRegistration(email: String, targetUid: String): Result<Unit> {
+    override suspend fun migratePreRegistration(email: String, targetUid: String): Result<Unit> {
         val preDocId = "pre_${email.replace(".", "_").replace("@", "_")}"
         android.util.Log.i("AuthRepository", "Starting atomic migration for $email to $targetUid")
         
@@ -659,211 +587,4 @@ class AuthRepositoryImpl @Inject constructor(
         return Result.success(Unit)
     }
 
-    override suspend fun changeUserRole(uid: String, role: UserRole): Result<Unit> {
-        return try {
-            firestore.collection("users").document(uid).update("role", role.name).await()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun updateUserProfile(uid: String, updates: Map<String, Any?>): Result<Unit> {
-        return try {
-            val finalUpdates = updates.toMutableMap()
-            
-            // Auto-sync and normalize agentName if updated
-            val newAgentName = (updates["agentName"] as? String)?.trim()?.uppercase()
-            if (newAgentName != null && newAgentName.isNotBlank()) {
-                finalUpdates["agentName"] = newAgentName
-                agentRepository.addAgentName(newAgentName)
-                
-                // Propagate to agents collection for data consistency
-                try {
-                    firestore.collection("agents").document(uid).update("agentName", newAgentName).await()
-                } catch(e: Exception) {
-                    // Agent doc might not exist yet, ignoring is fine as push will create it later
-                }
-            }
-            
-            
-            firestore.collection("users").document(uid).update(finalUpdates).await()
-            
-            // Also ensure agents collection has the basic metadata if it doesn't exist
-            val agentMetadata = mutableMapOf<String, Any?>()
-            if (newAgentName != null) agentMetadata["agentName"] = newAgentName
-            updates["email"]?.let { agentMetadata["email"] = it }
-            updates["photoUrl"]?.let { agentMetadata["photoUrl"] = it }
-            
-            if (agentMetadata.isNotEmpty()) {
-                firestore.collection("agents").document(uid).set(agentMetadata, com.google.firebase.firestore.SetOptions.merge()).await()
-            }
-            
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun createUserProfile(
-        email: String,
-        role: UserRole,
-        agentName: String?,
-        isAuthorized: Boolean
-    ): Result<Unit> {
-        return try {
-            val normalizedEmail = email.trim().lowercase()
-            val docId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
-            
-            val normalizedAgentName = agentName?.trim()?.uppercase()
-            
-            val userData = mutableMapOf(
-                "email" to normalizedEmail,
-                "role" to role.name,
-                "isAuthorized" to isAuthorized,
-                "agentName" to normalizedAgentName,
-                "createdAt" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
-                "isPreRegistered" to true
-            )
-            
-            firestore.collection("users").document(docId).set(userData).await()
-            
-            // Auto-sync agentName to metadata if provided
-            if (agentName != null && agentName.isNotBlank()) {
-                agentRepository.addAgentName(agentName)
-            }
-            
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun deleteUser(uid: String): Result<Unit> {
-        return try {
-            // Robust cleanup: Delete both Auth-related docs and visit data
-            // We use agentRepository.deleteAgent (which handles subcollections) to avoid orphaned data
-            agentRepository.deleteAgent(uid).onFailure { error -> 
-                android.util.Log.e("AuthRepository", "Failed to delete agent data during user deletion: ${error.message}")
-            }
-
-            val batch = firestore.batch()
-            batch.delete(firestore.collection("users").document(uid))
-            batch.delete(firestore.collection("admins").document(uid))
-            batch.commit().await()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun requestAccess(uid: String, email: String, displayName: String?, requestedName: String?): Result<Unit> {
-        return try {
-            val normalizedEmail = email.trim().lowercase()
-            val normalizedName = requestedName?.trim()?.uppercase()
-            
-            // 1. Proactively ensure basic user profile existence
-            // Some Firestore rules might require a user profile to exist before allowing an access request
-            try {
-                val userRef = firestore.collection("users").document(uid)
-                val userDoc = userRef.get(Source.SERVER).await()
-                if (!userDoc.exists()) {
-                    val newUser = mapOf(
-                        "email" to normalizedEmail,
-                        "displayName" to displayName,
-                        "role" to UserRole.AGENT.name,
-                        "isAuthorized" to false,
-                        "createdAt" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
-                    )
-                    userRef.set(newUser).await()
-                }
-            } catch (e: Exception) {
-                // If creating profile fails, we log it but still try to send the request
-                // in case the rules for access_requests are more permissive
-                android.util.Log.w("AuthRepository", "Could not ensure user profile before request: ${e.message}")
-            }
-
-            // 2. Send the Access Request
-            val request = mapOf(
-                "uid" to uid,
-                "email" to normalizedEmail,
-                "displayName" to displayName,
-                "requestedName" to normalizedName,
-                "timestamp" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
-                "status" to "PENDING"
-            )
-            firestore.collection("access_requests").document(uid).set(request).await()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            android.util.Log.e("AuthRepository", "Access request failed for $email", e)
-            val message = if (e.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true) {
-                "Permissão negada pelo servidor. Verifique se as regras do Firestore permitem solicitações de acesso ou contate um administrador diretamente."
-            } else {
-                e.message ?: "Erro ao enviar solicitação"
-            }
-            Result.failure(Exception(message))
-        }
-    }
-
-    override suspend fun fetchAccessRequests(): Result<List<com.antigravity.healthagent.domain.repository.AccessRequest>> {
-        return try {
-            val snapshot = firestore.collection("access_requests")
-                .whereEqualTo("status", "PENDING")
-                .get()
-                .await()
-            val requests = snapshot.toObjects(com.antigravity.healthagent.domain.repository.AccessRequest::class.java)
-            Result.success(requests)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun respondToAccessRequest(requestId: String, approved: Boolean, agentName: String?): Result<Unit> {
-        return try {
-            val doc = firestore.collection("access_requests").document(requestId).get().await()
-            val uid = doc.getString("uid") ?: requestId
-            val email = doc.getString("email")
-            
-            val batch = firestore.batch()
-            val requestRef = firestore.collection("access_requests").document(requestId)
-            batch.update(requestRef, "status", if (approved) "APPROVED" else "REJECTED")
-            
-            if (approved) {
-                val userRef = firestore.collection("users").document(uid)
-                val updates = mutableMapOf<String, Any>("isAuthorized" to true)
-                
-                // Prioritize manual name from admin, then requested name from user, then null
-                val finalAgentName = agentName?.takeIf { it.isNotBlank() } 
-                    ?: doc.getString("requestedName")?.takeIf { it.isNotBlank() }
-                
-                if (finalAgentName != null) updates["agentName"] = finalAgentName.trim().uppercase()
-                batch.update(userRef, updates)
-                
-                // If they have a pre-registration, migrate it now using Admin permissions
-                if (email != null) {
-                    migratePreRegistration(email, uid)
-                }
-            }
-            
-            batch.commit().await()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override val pendingAccessRequests: Flow<List<AccessRequest>> = callbackFlow {
-        val listener = firestore.collection("access_requests")
-            .whereEqualTo("status", "PENDING")
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    return@addSnapshotListener
-                }
-                if (snapshot != null) {
-                    val requests = snapshot.toObjects(AccessRequest::class.java)
-                    trySend(requests)
-                }
-            }
-        awaitClose { listener.remove() }
-    }
 }

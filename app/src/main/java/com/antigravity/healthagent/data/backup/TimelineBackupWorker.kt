@@ -1,7 +1,7 @@
 package com.antigravity.healthagent.data.backup
 
 import android.content.Context
-import android.util.Log
+import com.antigravity.healthagent.domain.logger.AppLogger
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -24,7 +24,7 @@ class TimelineBackupWorker @AssistedInject constructor(
         val uid = inputData.getString("uid") ?: return Result.failure()
         val officialAgentName = inputData.getString("officialAgentName") ?: return Result.failure()
 
-        Log.d("TimelineBackupWorker", "Starting timeline backup for $uid ($officialAgentName) in background...")
+        AppLogger.d("TimelineBackupWorker", "Starting timeline backup for $uid ($officialAgentName) in background...")
 
         return try {
             val allHouses = houseDao.getHousesByAgentSnapshot(uid)
@@ -39,16 +39,16 @@ class TimelineBackupWorker @AssistedInject constructor(
             
             val result = backupRepository.uploadTimelineBackup(uid, backupData)
             if (result.isSuccess) {
-                Log.i("TimelineBackupWorker", "Timeline Backup uploaded successfully for $uid")
+                AppLogger.i("TimelineBackupWorker", "Timeline Backup uploaded successfully for $uid")
                 Result.success()
             } else {
-                Log.w("TimelineBackupWorker", "Timeline Backup failed: ${result.exceptionOrNull()?.message}")
+                AppLogger.w("TimelineBackupWorker", "Timeline Backup failed: ${result.exceptionOrNull()?.message}")
                 // Return success anyway to not clutter the WorkManager with retries for a non-critical feature.
                 // The next sync will enqueue another one.
                 Result.success()
             }
         } catch (e: Exception) {
-            Log.e("TimelineBackupWorker", "Error executing timeline backup", e)
+            AppLogger.e("TimelineBackupWorker", "Error executing timeline backup", e)
             Result.success()
         }
     }

@@ -9,6 +9,7 @@ class RestoreFromTimelineUseCase @Inject constructor(
     private val backupRepository: BackupRepository,
     private val syncRepository: SyncRepository,
     private val authRepository: AuthRepository,
+    private val accessControlRepository: com.antigravity.healthagent.domain.repository.AccessControlRepository,
     private val cleanupBrokenHousesUseCase: CleanupBrokenHousesUseCase
 ) {
     suspend operator fun invoke(agentUid: String, storagePath: String): Result<Unit> {
@@ -19,7 +20,7 @@ class RestoreFromTimelineUseCase @Inject constructor(
             val backupData = backupDataResult.getOrThrow()
 
             // 2. Fetch target agent name
-            val usersResult = authRepository.fetchAllUsers()
+            val usersResult = accessControlRepository.fetchAllUsers()
             val user = usersResult.getOrNull()?.find { it.uid == agentUid }
             val targetName = (user?.agentName ?: user?.email ?: "Unknown Agent").uppercase()
 

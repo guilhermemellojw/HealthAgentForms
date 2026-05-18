@@ -43,7 +43,7 @@ data class AggregateSummary(
 @HiltViewModel
 class SupervisorViewModel @Inject constructor(
     private val agentRepository: AgentRepository,
-    private val authRepository: AuthRepository,
+    private val accessControlRepository: com.antigravity.healthagent.domain.repository.AccessControlRepository,
     private val restoreDataUseCase: RestoreDataUseCase,
     private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager
 ) : ViewModel() {
@@ -368,7 +368,7 @@ class SupervisorViewModel @Inject constructor(
 
     fun restoreAgentData(context: android.content.Context, agentUid: String, fileUri: android.net.Uri, targetDate: String? = null) {
         viewModelScope.launch {
-            if (!authRepository.isUserAdmin()) {
+            if (!accessControlRepository.isUserAdmin()) {
                 _uiEvent.emit("Permissão negada")
                 return@launch
             }

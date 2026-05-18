@@ -15,6 +15,7 @@ import javax.inject.Inject
 @HiltViewModel
 class LoginViewModel @Inject constructor(
     private val authRepository: AuthRepository,
+    private val accessControlRepository: com.antigravity.healthagent.domain.repository.AccessControlRepository,
     private val syncRepository: com.antigravity.healthagent.domain.repository.SyncRepository
 ) : ViewModel() {
 
@@ -30,7 +31,7 @@ class LoginViewModel @Inject constructor(
                     _authState.value = AuthState.WaitingForAuthorization(user)
                     // Check if *this* user already has a pending request
                     viewModelScope.launch {
-                        val request = authRepository.fetchAccessRequest(user.uid).getOrNull()
+                        val request = accessControlRepository.fetchAccessRequest(user.uid).getOrNull()
                         if (request != null && request.status == "PENDING") {
                             _requestSent.value = true
                         }
@@ -93,7 +94,7 @@ class LoginViewModel @Inject constructor(
     fun requestAccess(requestedName: String? = null) {
         val user = (authState.value as? AuthState.WaitingForAuthorization)?.user ?: return
         viewModelScope.launch {
-            val result = authRepository.requestAccess(user.uid, user.email ?: "", user.displayName, requestedName)
+            val result = accessControlRepository.requestAccess(user.uid, user.email ?: "", user.displayName, requestedName)
             if (result.isSuccess) {
                 _requestSent.value = true
             } else {

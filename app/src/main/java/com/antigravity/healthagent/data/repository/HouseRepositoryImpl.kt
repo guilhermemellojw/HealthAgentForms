@@ -15,6 +15,9 @@ import com.antigravity.healthagent.data.local.model.Tombstone
 import com.antigravity.healthagent.data.local.model.TombstoneType
 import com.antigravity.healthagent.utils.withRetry
 import com.antigravity.healthagent.utils.normalize
+import com.antigravity.healthagent.utils.toDashDate
+import com.antigravity.healthagent.data.local.model.heal
+import com.antigravity.healthagent.data.local.model.Situation
 
 class HouseRepositoryImpl @Inject constructor(
     private val houseDao: HouseDao,
@@ -33,7 +36,7 @@ class HouseRepositoryImpl @Inject constructor(
 
     private suspend fun ensureDayNotLocked(originalDate: String, agentUid: String? = "", force: Boolean = false) {
         if (force) return // Admin bypass
-        val date = originalDate.replace("/", "-")
+        val date = originalDate.toDashDate()
         val activity = dayActivityDao.getDayActivity(date, agentUid ?: "")
         if (activity?.isClosed == true && !activity.isManualUnlock) {
             throw IllegalStateException("Este dia ($date) está bloqueado para edições (Auditoria Concluída).")
@@ -110,9 +113,7 @@ class HouseRepositoryImpl @Inject constructor(
             }
 
             // Healing logic: Prevent EMPTY from being stored locally
-            val finalSituation = if (house.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
-                com.antigravity.healthagent.data.local.model.Situation.NONE
-            } else house.situation
+            val finalSituation = house.situation.heal()
 
             // CRITICAL: Cleanup any stale local tombstone for this same house key
             tombstoneDao.deleteByNaturalKey(house.generateNaturalKey(), house.agentUid)
@@ -165,9 +166,7 @@ class HouseRepositoryImpl @Inject constructor(
             }
 
             // Healing logic: Prevent EMPTY from being stored locally
-            val finalSituation = if (house.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
-                com.antigravity.healthagent.data.local.model.Situation.NONE
-            } else house.situation
+            val finalSituation = house.situation.heal()
 
             houseDao.updateHouse(house.copy(
                 situation = finalSituation,
@@ -221,9 +220,7 @@ class HouseRepositoryImpl @Inject constructor(
                 }
             }
             val healedHouses = houses.map { house ->
-                val finalSituation = if (house.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
-                    com.antigravity.healthagent.data.local.model.Situation.NONE
-                } else house.situation
+                val finalSituation = house.situation.heal()
 
                 house.copy(
                     situation = finalSituation,
@@ -285,7 +282,7 @@ class HouseRepositoryImpl @Inject constructor(
             tombstoneDao.deleteByNaturalKey("${dayActivity.date}|${dayActivity.agentUid}", dayActivity.agentUid)
             
             dayActivityDao.insertDayActivity(dayActivity.copy(
-                date = dayActivity.date.replace("/", "-"),
+                date = dayActivity.date.toDashDate(),
                 isSynced = false, 
                 editedByAdmin = force,
                 lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
@@ -327,7 +324,7 @@ class HouseRepositoryImpl @Inject constructor(
         val finalUid = agentUid ?: ""
         runInTransactionWithRetry {
             // 1. Identify all dates being restored (normalized)
-            val restoredDatesList = (houses.map { it.data.replace("/", "-") } + activities.map { it.date.replace("/", "-") }).distinct()
+            val restoredDatesList = (houses.map { it.data.toDashDate() } + activities.map { it.date.toDashDate() }).distinct()
 
             // 2. Perform Atomic CLEANUP of local data for these dates FIRST
             if (restoredDatesList.isNotEmpty()) {
@@ -339,7 +336,7 @@ class HouseRepositoryImpl @Inject constructor(
             val normalizedActivities = activities.map { 
                 val normalized = it.copy(
                     agentUid = finalUid,
-                    date = it.date.replace("/", "-"),
+                    date = it.date.toDashDate(),
                     isSynced = false,
                     lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                 ) 
@@ -351,14 +348,12 @@ class HouseRepositoryImpl @Inject constructor(
             val housesToUpsert = houses.map { restoredHouse ->
                 
                 // Healing logic: Default EMPTY to NONE (Aberto) for restored data
-                val finalSituation = if (restoredHouse.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
-                    com.antigravity.healthagent.data.local.model.Situation.NONE
-                } else restoredHouse.situation
+                val finalSituation = restoredHouse.situation.heal()
 
                 val finalHouse = restoredHouse.copy(
                     id = 0, // Reset ID to allow auto-generation and prevent collision with unrelated local records
                     agentUid = finalUid,
-                    data = restoredHouse.data.replace("/", "-"),
+                    data = restoredHouse.data.toDashDate(),
                     situation = finalSituation,
                     isSynced = false,
                     lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
@@ -378,7 +373,7 @@ class HouseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteProduction(originalDate: String, agentUid: String?, force: Boolean) {
-        val date = originalDate.replace("/", "-")
+        val date = originalDate.toDashDate()
         val finalUid = agentUid ?: ""
         ensureDayNotLocked(date, finalUid, force)
         runInTransactionWithRetry {
@@ -401,7 +396,7 @@ class HouseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteByAgentAndDates(dates: List<String>, agentUid: String?, force: Boolean) {
-        val normalizedDates = dates.map { it.replace("/", "-") }
+        val normalizedDates = dates.map { it.toDashDate() }
         val finalUid = agentUid ?: ""
         // Lock Check: Verify all dates
         normalizedDates.forEach { ensureDayNotLocked(it, finalUid, force) }
@@ -438,7 +433,7 @@ class HouseRepositoryImpl @Inject constructor(
             val dates = houseDao.getDistinctDates(finalUid)
             
             dates.forEach { rawDate ->
-                val date = rawDate.replace("/", "-")
+                val date = rawDate.toDashDate()
                 val activity = dayActivityDao.getDayActivity(date, finalUid)
                 if (activity == null) {
                     dayActivityDao.insertDayActivity(DayActivity(
@@ -611,7 +606,7 @@ class HouseRepositoryImpl @Inject constructor(
             if (housesToUpdate.isNotEmpty()) {
                 val updated = housesToUpdate.map { 
                     it.copy(
-                        data = it.data.replace("/", "-"),
+                        data = it.data.toDashDate(),
                         isSynced = false,
                         lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                     )
@@ -624,7 +619,7 @@ class HouseRepositoryImpl @Inject constructor(
             if (activitiesToMigrate.isNotEmpty()) {
                 for (activity in activitiesToMigrate) {
                     val newActivity = activity.copy(
-                        date = activity.date.replace("/", "-"),
+                        date = activity.date.toDashDate(),
                         isSynced = false,
                         lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                     )

@@ -14,15 +14,18 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.Assert.assertEquals
 
+import com.antigravity.healthagent.domain.repository.AccessControlRepository
+
 class RestoreDataUseCaseTest {
 
     private val syncRepository = mockk<SyncRepository>(relaxed = true)
     private val authRepository = mockk<AuthRepository>(relaxed = true)
+    private val accessControlRepository = mockk<AccessControlRepository>(relaxed = true)
     private val backupManager = mockk<BackupManager>()
     private val context = mockk<Context>()
     private val uri = mockk<Uri>()
 
-    private val useCase = RestoreDataUseCase(syncRepository, authRepository, backupManager)
+    private val useCase = RestoreDataUseCase(syncRepository, authRepository, accessControlRepository, backupManager)
 
     @Test
     fun `invoke should use agent name from auth repository when available`() = runBlocking {
@@ -44,7 +47,7 @@ class RestoreDataUseCaseTest {
         val backupData = BackupData(houses = houses, dayActivities = activities)
 
         every { authRepository.getCurrentUserUid() } returns "current-uid"
-        coEvery { authRepository.fetchAllUsers() } returns Result.success(listOf(mockUser))
+        coEvery { accessControlRepository.fetchAllUsers() } returns Result.success(listOf(mockUser))
         every { backupManager.importData(any(), any()) } returns backupData
 
         val houseSlot = slot<List<House>>()
@@ -90,7 +93,7 @@ class RestoreDataUseCaseTest {
         )
 
         every { authRepository.getCurrentUserUid() } returns targetUid
-        coEvery { authRepository.fetchAllUsers() } returns Result.success(emptyList())
+        coEvery { accessControlRepository.fetchAllUsers() } returns Result.success(emptyList())
         every { backupManager.importData(any(), any()) } returns backupData
 
         val houseSlot = slot<List<House>>()

@@ -53,6 +53,31 @@ class SyncRestoreTest {
         val dayActivityDao = database.dayActivityDao()
         val tombstoneDao = database.tombstoneDao()
 
+        val syncPushHandler = SyncPushHandler(
+            context = context,
+            auth = auth,
+            firestore = firestore,
+            houseDao = houseDao,
+            dayActivityDao = dayActivityDao,
+            tombstoneDao = tombstoneDao,
+            settingsManager = settingsManager,
+            database = database
+        )
+
+        val syncPullHandler = SyncPullHandler(
+            context = context,
+            auth = auth,
+            firestore = firestore,
+            houseDao = houseDao,
+            dayActivityDao = dayActivityDao,
+            tombstoneDao = tombstoneDao,
+            settingsManager = settingsManager,
+            database = database
+        )
+
+        val syncDeletionHandler = mockk<SyncDeletionHandler>(relaxed = true)
+        val syncAdminHandler = mockk<SyncAdminHandler>(relaxed = true)
+
         syncRepository = SyncRepositoryImpl(
             context = context,
             auth = auth,
@@ -63,7 +88,11 @@ class SyncRestoreTest {
             settingsManager = settingsManager,
             database = database,
             backupRepository = backupRepository,
-            syncSchedulerProvider = syncSchedulerProvider
+            syncSchedulerProvider = syncSchedulerProvider,
+            syncPushHandler = syncPushHandler,
+            syncPullHandler = syncPullHandler,
+            syncDeletionHandler = syncDeletionHandler,
+            syncAdminHandler = syncAdminHandler
         )
     }
 

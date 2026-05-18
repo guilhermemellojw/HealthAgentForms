@@ -16,6 +16,7 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.lang.reflect.Type
 import javax.inject.Inject
+import com.antigravity.healthagent.utils.toDashDate
 
 data class BackupData(
     @SerializedName("houses")
@@ -255,7 +256,7 @@ class BackupManager @Inject constructor() {
             val stableOrder = if (house == null || house.listOrder == null || house.listOrder == 0L) index.toLong() else house.listOrder
             
             // Bug Fix: Normalize Date Formats
-            var normalizedData = try { house.data?.replace("/", "-")?.trim() ?: "" } catch(e: Exception) { "" }
+            var normalizedData = try { house.data?.toDashDate()?.trim() ?: "" } catch(e: Exception) { "" }
             if (normalizedData.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
                 val parts = normalizedData.split("-")
                 normalizedData = "${parts[2]}-${parts[1]}-${parts[0]}"
@@ -317,7 +318,7 @@ class BackupManager @Inject constructor() {
 
     private fun sanitizeActivities(activities: List<DayActivity>): List<DayActivity> {
         return activities.map { activity ->
-            var normalizedDate = try { activity.date?.replace("/", "-")?.trim() ?: "" } catch(e: Exception) { "" }
+            var normalizedDate = try { activity.date?.toDashDate()?.trim() ?: "" } catch(e: Exception) { "" }
             if (normalizedDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
                 val parts = normalizedDate.split("-")
                 normalizedDate = "${parts[2]}-${parts[1]}-${parts[0]}"

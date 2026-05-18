@@ -1,7 +1,7 @@
 package com.antigravity.healthagent.data.sync
 
 import android.content.Context
-import android.util.Log
+import com.antigravity.healthagent.domain.logger.AppLogger
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -25,16 +25,16 @@ class SyncWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
-        Log.d("SyncWorker", "Starting background synchronization (Attempt: $runAttemptCount)...")
+        AppLogger.d("SyncWorker", "Starting background synchronization (Attempt: $runAttemptCount)...")
         
         if (runAttemptCount > 3) {
-            Log.e("SyncWorker", "Too many attempts. Giving up to save battery.")
+            AppLogger.e("SyncWorker", "Too many attempts. Giving up to save battery.")
             return Result.failure()
         }
 
         val currentUser = auth.currentUser
         if (currentUser == null) {
-            Log.w("SyncWorker", "No user logged in. Skipping background sync.")
+            AppLogger.w("SyncWorker", "No user logged in. Skipping background sync.")
             return Result.success()
         }
 
@@ -48,7 +48,7 @@ class SyncWorker @AssistedInject constructor(
             } != null
 
             if (isEditing) {
-                Log.w("SyncWorker", "Admin Edit mode active. Skipping background sync.")
+                AppLogger.w("SyncWorker", "Admin Edit mode active. Skipping background sync.")
                 return Result.success()
             }
 
@@ -59,26 +59,26 @@ class SyncWorker @AssistedInject constructor(
             // Perform background PULL first
             val pullResult = syncRepository.pullCloudDataToLocal(uid)
             if (pullResult.isFailure) {
-                Log.w("SyncWorker", "Background pull failed: ${pullResult.exceptionOrNull()?.message}")
+                AppLogger.w("SyncWorker", "Background pull failed: ${pullResult.exceptionOrNull()?.message}")
             }
 
             val houses = houseRepository.getAllHousesOnce(uid)
             val activities = houseRepository.getAllDayActivitiesOnce(uid)
             
             if (houses.isEmpty() && activities.isEmpty()) {
-                Log.d("SyncWorker", "No data to push.")
+                AppLogger.d("SyncWorker", "No data to push.")
                 return Result.success()
             }
 
             val result = syncRepository.pushLocalDataToCloud(houses, activities, uid)
             
             if (result.isSuccess) {
-                Log.d("SyncWorker", "Sync successful.")
+                AppLogger.d("SyncWorker", "Sync successful.")
                 Result.success()
             } else {
                 val exception = result.exceptionOrNull()
                 val errorMsg = exception?.message ?: "Erro de sincronização em segundo plano"
-                Log.e("SyncWorker", "Sync failed: $errorMsg")
+                AppLogger.e("SyncWorker", "Sync failed: $errorMsg")
                 
                 // If it's a permission error, don't retry
                 if (errorMsg.contains("Acesso negado", ignoreCase = true) == true) {
@@ -88,7 +88,7 @@ class SyncWorker @AssistedInject constructor(
                 }
             }
         } catch (e: Exception) {
-            Log.e("SyncWorker", "Error in sync worker", e)
+            AppLogger.e("SyncWorker", "Error in sync worker", e)
             Result.failure()
         }
     }

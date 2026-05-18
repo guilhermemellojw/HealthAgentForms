@@ -110,28 +110,6 @@ fun HomeHeader(
             }
 
             // Health Warning only (Sync date moved to Boletim Screen)
-            val syncStatus = com.antigravity.healthagent.ui.home.LocalHomeUiState.current.syncStatus
-            if (syncStatus.clockSkewMs > 120000) { // 2 minutes skew
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Default.Warning,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        "HORA ERRADA",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
             
             AnimatedVisibility(
                 visible = isHeaderExpanded,

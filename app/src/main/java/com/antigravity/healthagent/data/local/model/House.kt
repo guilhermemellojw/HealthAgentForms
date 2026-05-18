@@ -6,6 +6,7 @@ import com.antigravity.healthagent.domain.model.GeoCapture
 import com.antigravity.healthagent.domain.model.TreatmentData
 import com.antigravity.healthagent.domain.model.VisitAddress
 import com.antigravity.healthagent.utils.normalize
+import com.antigravity.healthagent.utils.toDashDate
 
 @com.google.firebase.firestore.IgnoreExtraProperties
 @Entity(
@@ -59,7 +60,7 @@ data class House(
      * will break synchronization by changing the document ID in Firestore, leading to duplicates.
      */
     fun generateNaturalKey(): String {
-        val normalizedDate = data.replace("/", "-")
+        val normalizedDate = data.toDashDate()
         
         // Uniqueness is guaranteed by agentUid + normalizedAgent + date + address details + visitSegment.
         return "${agentUid}_${agentName.normalize()}_${normalizedDate}_${address.generateAddressSignature()}_${visitSegment}".uppercase()
@@ -70,7 +71,7 @@ data class House(
      * or visit segments shift. Used for deduplication and healing during sync.
      */
     fun generateIdentityKey(): String {
-        val normalizedDate = data.replace("/", "-")
+        val normalizedDate = data.toDashDate()
         
         // Identity is Agent(UID) + Day + Address Signature (excluding segment)
         return "${agentUid}_${normalizedDate}_${address.generateAddressSignature()}".uppercase()
@@ -92,7 +93,7 @@ data class House(
             "categoria" to context.categoria,
             "zona" to context.zona,
             "tipo" to context.tipo,
-            "data" to data.replace("/", "-"),
+            "data" to data.toDashDate(),
             "ciclo" to context.ciclo,
             "atividade" to context.atividade,
             "agentName" to agentName.uppercase(),

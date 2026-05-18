@@ -30,11 +30,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.data.backup.BackupFrequency
-import com.antigravity.healthagent.ui.home.HomeViewModel
+import com.antigravity.healthagent.ui.settings.SettingsViewModel
 import com.antigravity.healthagent.ui.theme.AppColors 
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.MeshGradient
+import com.antigravity.healthagent.ui.components.SyncStatusOverlay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,7 +45,7 @@ fun SettingsScreen(
     onOpenAdmin: () -> Unit = {},
     isAdmin: Boolean = false,
     isSupervisor: Boolean = false,
-    viewModel: HomeViewModel = hiltViewModel(),
+    viewModel: SettingsViewModel = hiltViewModel(),
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {}
@@ -275,8 +276,15 @@ fun SettingsScreen(
         containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
+        val syncState by viewModel.syncState.collectAsState()
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             MeshGradient(modifier = Modifier.fillMaxSize())
+            
+            SyncStatusOverlay(
+                syncStatus = syncState,
+                isEasyMode = isEasyMode,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
             
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -666,7 +674,7 @@ fun SoundSelectionGroup(
     onCustomFileClick: (com.antigravity.healthagent.utils.SoundCategory) -> Unit,
     onTestSound: (String) -> Unit,
     context: android.content.Context,
-    viewModel: HomeViewModel
+    viewModel: SettingsViewModel
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,

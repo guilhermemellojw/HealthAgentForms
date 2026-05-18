@@ -2,7 +2,7 @@ package com.antigravity.healthagent.data.backup
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
+import com.antigravity.healthagent.domain.logger.AppLogger
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -28,7 +28,7 @@ class BackupWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         return try {
-            Log.d("BackupWorker", "Starting auto-backup...")
+            AppLogger.d("BackupWorker", "Starting auto-backup...")
             val currentUser = settingsManager.cachedUser.first()
             val currentName = currentUser?.agentName ?: "UNKNOWN"
             val currentUid = currentUser?.uid ?: ""
@@ -70,20 +70,20 @@ class BackupWorker @AssistedInject constructor(
             
             BackupManager().exportToFile(file, backupData)
             
-            Log.d("BackupWorker", "Backup saved to ${file.absolutePath}")
+            AppLogger.d("BackupWorker", "Backup saved to ${file.absolutePath}")
 
             // Optional: Prune old backups (keep last 5)
             val files = backupDir.listFiles()?.sortedByDescending { it.lastModified() }
             if (files != null && files.size > 5) {
                 files.drop(5).forEach { 
                     it.delete() 
-                    Log.d("BackupWorker", "Pruned old backup: ${it.name}")
+                    AppLogger.d("BackupWorker", "Pruned old backup: ${it.name}")
                 }
             }
 
             Result.success()
         } catch (e: Exception) {
-            Log.e("BackupWorker", "Backup failed", e)
+            AppLogger.e("BackupWorker", "Backup failed", e)
             Result.failure()
         }
     }

@@ -41,4 +41,10 @@ abstract class RepositoryModule {
     abstract fun bindBackupRepository(
         backupRepositoryImpl: com.antigravity.healthagent.data.repository.BackupRepositoryImpl
     ): com.antigravity.healthagent.domain.repository.BackupRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindAppLogger(
+        androidLoggerImpl: com.antigravity.healthagent.data.util.AndroidLoggerImpl
+    ): com.antigravity.healthagent.domain.logger.AppLogger
 }

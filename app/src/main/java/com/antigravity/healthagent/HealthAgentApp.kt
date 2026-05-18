@@ -19,6 +19,12 @@ class HealthAgentApp : Application(), Configuration.Provider {
         fun workerFactory(): HiltWorkerFactory
     }
 
+    @EntryPoint
+    @InstallIn(SingletonComponent::class)
+    interface LoggerEntryPoint {
+        fun appLogger(): com.antigravity.healthagent.domain.logger.AppLogger
+    }
+
     override val workManagerConfiguration: Configuration
         get() {
             return try {
@@ -37,6 +43,11 @@ class HealthAgentApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        
+        // Initialize AppLogger static delegator
+        val logger = EntryPointAccessors.fromApplication(this, LoggerEntryPoint::class.java).appLogger()
+        com.antigravity.healthagent.domain.logger.AppLogger.set(logger)
+
         com.antigravity.healthagent.context.AppContextHolder.setContext(this)
         com.antigravity.healthagent.utils.TimeManager.initialize(this)
         FirebaseApp.initializeApp(this)

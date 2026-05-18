@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.antigravity.healthagent.data.local.model.House
+import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.data.local.model.DayActivity
@@ -11,7 +12,10 @@ import com.antigravity.healthagent.data.repository.HouseRepository
 import com.antigravity.healthagent.data.repository.StreetRepository
 import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
 import com.antigravity.healthagent.domain.usecase.DayManagementUseCase
-import com.antigravity.healthagent.domain.usecase.HouseManagementUseCase
+import com.antigravity.healthagent.domain.usecase.SaveHouseUseCase
+import com.antigravity.healthagent.domain.usecase.PredictHouseValuesUseCase
+import com.antigravity.healthagent.domain.usecase.RecalculateVisitSegmentsUseCase
+import com.antigravity.healthagent.domain.usecase.PerformLocalDatabaseMigrationUseCase
 import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.normalize as stringNormalize
 import com.antigravity.healthagent.utils.SoundManager
@@ -19,8 +23,7 @@ import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.data.backup.BackupScheduler
 import com.antigravity.healthagent.data.backup.BackupManager
 import com.antigravity.healthagent.data.backup.BackupData
-import com.antigravity.healthagent.utils.SemanalPdfGenerator
-import com.antigravity.healthagent.utils.BoletimPdfGenerator
+
 import com.antigravity.healthagent.domain.repository.*
 import com.antigravity.healthagent.domain.usecase.*
 import com.antigravity.healthagent.domain.model.DailyContext
@@ -42,24 +45,21 @@ import javax.inject.Inject
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val repository: HouseRepository,
-    private val syncRepository: SyncRepository,
-    private val agentRepository: AgentRepository,
-    private val localizationRepository: LocalizationRepository,
-    private val houseValidationUseCase: HouseValidationUseCase,
-    val dayManagementUseCase: DayManagementUseCase,
-    private val houseManagementUseCase: HouseManagementUseCase,
-    private val soundManager: SoundManager,
     private val settingsManager: SettingsManager,
-    private val backupScheduler: BackupScheduler,
+    private val soundManager: SoundManager,
+    private val syncRepository: SyncRepository,
+    private val saveHouseUseCase: SaveHouseUseCase,
+    private val predictHouseValuesUseCase: PredictHouseValuesUseCase,
+    private val recalculateVisitSegmentsUseCase: RecalculateVisitSegmentsUseCase,
+    private val performLocalDatabaseMigrationUseCase: PerformLocalDatabaseMigrationUseCase,
+    val dayManagementUseCase: DayManagementUseCase,
+    private val houseValidationUseCase: HouseValidationUseCase,
     private val streetRepository: StreetRepository,
-    private val authRepository: AuthRepository,
-    private val syncDataUseCase: SyncDataUseCase,
-    private val getRGBlocksUseCase: GetRGBlocksUseCase,
-    private val cleanupHistoricalDataUseCase: CleanupHistoricalDataUseCase,
-    private val restoreDataUseCase: RestoreDataUseCase,
     private val backupManager: BackupManager,
     private val generateTestDataUseCase: GenerateTestDataUseCase,
-    private val cleanupBrokenHousesUseCase: com.antigravity.healthagent.domain.usecase.CleanupBrokenHousesUseCase
+    private val cleanupBrokenHousesUseCase: CleanupBrokenHousesUseCase,
+    private val agentRepository: AgentRepository,
+    private val localizationRepository: LocalizationRepository
 ) : ViewModel() {
 
     // --- State Definitions ---
@@ -77,9 +77,7 @@ class HomeViewModel @Inject constructor(
     
     private val _searchQuery = MutableStateFlow("")
 
-    private val _selectedRgBairro = MutableStateFlow("")
-    private val _rgYear = MutableStateFlow(Calendar.getInstance().get(Calendar.YEAR).toString())
-    private val _selectedRgBlock = MutableStateFlow("")
+
 
     private val _municipio = MutableStateFlow("BOM JARDIM")
     private val _bairro = MutableStateFlow("")
@@ -128,14 +126,16 @@ class HomeViewModel @Inject constructor(
 
     private val _validationErrorHouseIds = MutableStateFlow<Set<Int>>(emptySet())
     private val _isDuplicateIds = MutableStateFlow<Set<Int>>(emptySet())
-    private val _syncStatus = MutableStateFlow(SyncStatus())
-    val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
+    private val _syncStatus = MutableStateFlow<SyncUiState>(SyncUiState.Idle())
+    val syncStatus: StateFlow<SyncUiState> = _syncStatus.asStateFlow()
 
     init {
         // Load persisted sync timestamp
         viewModelScope.launch {
             settingsManager.lastSyncTimestamp.collect { ts ->
-                _syncStatus.update { it.copy(lastSyncTimestamp = ts) }
+                _syncStatus.update { state -> 
+                    SyncUiState.Idle(lastSyncTime = ts) 
+                }
             }
         }
     }
@@ -217,9 +217,6 @@ class HomeViewModel @Inject constructor(
     val warningSound: StateFlow<String> = settingsManager.warningSound
         .stateIn(viewModelScope, SharingStarted.Eagerly, "SILENT")
 
-    val pendingAccessRequestsCount: StateFlow<Int> = authRepository.pendingAccessRequests
-        .map { it.size }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     private val dateCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private fun getTimestamp(date: String): Long {
@@ -306,18 +303,19 @@ class HomeViewModel @Inject constructor(
                 return@launch
             }
             
-            _syncStatus.update { it.copy(stage = SyncStage.STARTING, progress = 0.1f, message = "Finalizando edição...") }
+            _syncStatus.update { state -> SyncUiState.Syncing(progress = 0.1f, message = "Finalizando edição...", lastSyncTime = state.lastSyncTime) }
             
             try {
                 // 1. Push local data (which belongs to the remote agent) to cloud
-                _syncStatus.update { it.copy(stage = SyncStage.UPLOADING, progress = 0.5f, message = "Sincronizando dados remotos...") }
+                _syncStatus.update { state -> SyncUiState.Syncing(progress = 0.5f, message = "Sincronizando dados remotos...", lastSyncTime = state.lastSyncTime) }
                 val uid = _remoteAgentUid.value ?: _currentUserUid.value
                 val houses = repository.getAllHousesOnce(uid ?: "")
                 val activities = repository.getAllDayActivitiesOnce(uid ?: "")
-                val result = syncDataUseCase.pushData(houses, activities, uid ?: "")
+                val result = syncRepository.pushLocalDataToCloud(houses, activities, uid ?: "")
                 
                 if (result.isSuccess) {
-                    _syncStatus.update { it.copy(stage = SyncStage.SUCCESS, progress = 1.0f, message = "Sincronizado com sucesso!") }
+                    val newTs = System.currentTimeMillis()
+                    _syncStatus.update { SyncUiState.Success(lastSyncTime = newTs) }
                     _uiEvent.value = "Edição finalizada e sincronizada!"
                     
                     // BUG FIX: Navigate away FIRST to prevent the UI from flickering 
@@ -330,16 +328,16 @@ class HomeViewModel @Inject constructor(
                     delay(1000)
                     setRemoteAgent(null)
                 } else {
-                    _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0.5f, message = "Falha: ${result.exceptionOrNull()?.message}") }
+                    _syncStatus.update { state -> SyncUiState.Error(message = "Falha: ${result.exceptionOrNull()?.message}", lastSyncTime = state.lastSyncTime) }
                     _uiEvent.value = "Falha ao finalizar: ${result.exceptionOrNull()?.message}"
                     delay(3000)
                 }
             } catch (e: Exception) {
-                _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0f, message = "Erro: ${e.message}") }
+                _syncStatus.update { state -> SyncUiState.Error(message = "Erro: ${e.message}", lastSyncTime = state.lastSyncTime) }
                 _uiEvent.value = "Erro ao finalizar: ${e.message}"
                 delay(3000)
             } finally {
-                _syncStatus.update { it.copy(stage = SyncStage.IDLE, progress = 0f, message = null) }
+                _syncStatus.update { state -> SyncUiState.Idle(lastSyncTime = state.lastSyncTime) }
             }
         }
     }
@@ -353,7 +351,7 @@ class HomeViewModel @Inject constructor(
             val uid = _currentUserUid.value ?: return@launch
             val date = _data.value
             
-            _syncStatus.update { it.copy(stage = SyncStage.STARTING, progress = 0.1f, message = "Gerando 100 casas de teste...") }
+            _syncStatus.update { state -> SyncUiState.Syncing(progress = 0.1f, message = "Gerando 100 casas de teste...", lastSyncTime = state.lastSyncTime) }
             val result = generateTestDataUseCase(
                 agentName = agent,
                 agentUid = uid,
@@ -363,21 +361,21 @@ class HomeViewModel @Inject constructor(
             )
             
             if (result.isSuccess) {
-                _syncStatus.update { it.copy(stage = SyncStage.SUCCESS, progress = 1.0f, message = "Dados gerados! Sincronizando...") }
+                _syncStatus.update { state -> SyncUiState.Syncing(progress = 1.0f, message = "Dados gerados! Sincronizando...", lastSyncTime = state.lastSyncTime) }
                 delay(1000)
                 try {
                     val housesToPush = repository.getAllHousesOnce(uid)
                     val activitiesToPush = repository.getAllDayActivitiesOnce(uid)
                     syncRepository.pushLocalDataToCloud(housesToPush, activitiesToPush, uid)
                 } catch(e: Exception) {
-                    _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 1.0f, message = "Erro no push: ${e.message}") }
+                    _syncStatus.update { state -> SyncUiState.Error(message = "Erro no push: ${e.message}", lastSyncTime = state.lastSyncTime) }
                 }
             } else {
-                _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0.0f, message = "Erro: ${result.exceptionOrNull()?.message}") }
+                _syncStatus.update { state -> SyncUiState.Error(message = "Erro: ${result.exceptionOrNull()?.message}", lastSyncTime = state.lastSyncTime) }
             }
             
             delay(2000)
-            _syncStatus.update { it.copy(stage = SyncStage.IDLE, progress = 0f, message = null) }
+            _syncStatus.update { state -> SyncUiState.Idle(lastSyncTime = state.lastSyncTime) }
         }
     }
 
@@ -504,53 +502,6 @@ class HomeViewModel @Inject constructor(
     }.flatMapLatest { it }
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     
-    val weeklySummary: StateFlow<List<DaySummary>> = combine(
-        allHousesFlow, currentWeekDates, weekActivitiesFlow, _agentName, _remoteAgentUid, _currentUserUid
-    ) { args -> 
-        val all = args[0] as List<House>
-        val dates = args[1] as List<String>
-        val activities = args[2] as List<DayActivity>
-        val name = args[3] as String
-        val remoteUid = args[4] as String?
-        val currentUid = args[5] as String?
-        
-        val targetUid = remoteUid ?: currentUid
-        dates.map { date ->
-            val dayHouses = all.filter { it.data == date && (it.agentUid == targetUid || it.agentName == name) }
-            val totalWorked = dayHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
-            
-            // Use real activity status from DB, default to "NORMAL"
-            val activity = activities.find { it.date.replace("/", "-") == date.replace("/", "-") }
-            val status = activity?.status?.ifBlank { "NORMAL" } ?: "NORMAL"
-            
-            DaySummary(date, dayHouses.size, totalWorked, status)
-        }
-    }
-    .flowOn(Dispatchers.Default)
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val weeklySummaryTotals: StateFlow<WeeklySummaryTotals> = combine(allHousesFlow, currentWeekDates, _agentName, _currentUserUid, _remoteAgentUid) { list, dates, name, currentUid, remoteUid ->
-        val targetUid = remoteUid ?: currentUid
-        val weekHouses = list.filter { it.data in dates && (it.agentUid == targetUid || it.agentName == name) }
-        
-        WeeklySummaryTotals(
-            totalHouses = weekHouses.size,
-            totalTratados = weekHouses.count { it.treatment.hasAnyTreatment },
-            totalFoci = weekHouses.count { it.treatment.comFoco },
-            totalWorked = weekHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY },
-            totalFechados = weekHouses.count { it.situation == Situation.F },
-            totalRecusados = weekHouses.count { it.situation == Situation.REC },
-            totalAbsent = weekHouses.count { it.situation == Situation.A },
-            totalVacant = weekHouses.count { it.situation == Situation.V }
-        )
-    }
-    .flowOn(Dispatchers.Default)
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), WeeklySummaryTotals())
-    
-    val weeklyObservations: StateFlow<List<House>> = combine(houses, currentWeekDates) { list, dates ->
-        list.filter { dates.contains(it.data) && it.observation.isNotBlank() }
-            .sortedByDescending { it.lastUpdated }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val boletimList: StateFlow<List<BoletimSummary>> = combine(allHousesFlow, globalSortedVisits, _agentName, _remoteAgentUid, _currentUserUid) { all, global, name, remoteUid, currentUid -> 
         val targetUid = remoteUid ?: currentUid
@@ -601,74 +552,6 @@ class HomeViewModel @Inject constructor(
 
     val customActivities: StateFlow<Set<String>> = settingsManager.customActivities
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
-
-    val availableYears: StateFlow<List<String>> = combine(allHousesFlow, globalHousesFlow, _isAdmin) { all, global, isAdminRole ->
-        val housesToUse = if (isAdminRole) global else all
-        housesToUse.mapNotNull { 
-            try { 
-                val d = dateFormatter.parse(it.data)
-                if(d != null) {
-                    val c = Calendar.getInstance().apply { time = d }
-                    c.get(Calendar.YEAR).toString()
-                } else null 
-            } catch (e: Exception) { null }
-        }.distinct().sortedDescending()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(Calendar.getInstance().get(Calendar.YEAR).toString()))
-
-    val rgBlocks: StateFlow<List<BlockSegment>> = combine(
-        allHousesFlow, 
-        globalHousesFlow, 
-        participatoryHousesFlow, 
-        _selectedRgBairro, 
-        _rgYear, 
-        _isAdmin, 
-        _remoteAgentUid
-    ) { args ->
-        val h = args[0] as List<House>
-        val global = args[1] as List<House>
-        val participatory = args[2] as List<House>
-        val b = args[3] as String
-        val y = args[4] as String
-        val isAdminRole = args[5] as Boolean
-        val remoteUid = args[6] as String?
-
-        // STRICT ISOLATION for Admin: 
-        // Only use participatory list (Team view) if explicitly inspecting another agent.
-        // On their own screen, use only their own houses to prevent 'merged' view.
-        val hasRemoteAgent = remoteUid != null
-        val filtered = if (isAdminRole && !hasRemoteAgent) h else if (isAdminRole && hasRemoteAgent) global else participatory
-        getRGBlocksUseCase(filtered, b, y)
-    }
-    .flowOn(Dispatchers.Default)
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val selectedRgBlock: StateFlow<String> = _selectedRgBlock.asStateFlow()
-    val selectedRgBairro: StateFlow<String> = _selectedRgBairro.asStateFlow()
-    val rgYear: StateFlow<String> = _rgYear.asStateFlow()
-
-    val rgFilteredList: StateFlow<List<House>> = combine(rgBlocks, selectedRgBlock) { blocks, selectedId ->
-        blocks.find { it.id == selectedId }?.houses ?: emptyList()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    // Helper to filter houses by Year (Semester removed)
-    private fun filterByYear(houses: List<House>, year: String): List<House> {
-        return houses.filter { house ->
-            val date = try { dateFormatter.parse(house.data) } catch (e: Exception) { null }
-            if (date != null) {
-                val cal = Calendar.getInstance().apply { time = date }
-                val hYear = cal.get(Calendar.YEAR).toString()
-                hYear == year
-            } else false
-        }
-    }
-
-    val rgBairros: StateFlow<List<String>> = combine(allHousesFlow, globalHousesFlow, _rgYear, _isAdmin) { all, global, year, isAdminRole ->
-        val housesToUse = if (isAdminRole) global else all
-        filterByYear(housesToUse, year)
-            .map { it.address.bairro.trim().uppercase() }
-            .distinct()
-            .sorted()
-    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
 
     init {
@@ -799,7 +682,10 @@ class HomeViewModel @Inject constructor(
             ) { lastSync, skew ->
                 lastSync to skew
             }.collect { (lastSync, skew) ->
-                _syncStatus.update { it.copy(lastSyncTimestamp = lastSync, clockSkewMs = skew) }
+                _syncStatus.update { state -> 
+                    if (state is SyncUiState.Success) state.copy(lastSyncTime = lastSync, clockSkewMs = skew) 
+                    else SyncUiState.Idle(lastSyncTime = lastSync) 
+                }
             }
         }
 
@@ -962,7 +848,7 @@ class HomeViewModel @Inject constructor(
                         currentBlock = args[13] as String,
                         currentBlockSequence = args[14] as String,
                         currentStreet = args[15] as String,
-                        syncStatus = args[17] as SyncStatus,
+                        syncStatus = args[17] as SyncUiState,
                         isDayClosed = args[18] as Boolean,
                         isManualUnlock = args[19] as Boolean,
                         backupConfirmation = args[20] as BackupConfirmation?,
@@ -1140,9 +1026,9 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             delay(1000) // Small delay to let initial UI state flows settle
             try {
-                houseManagementUseCase.migrateStreetNamesToFormat()
-                houseManagementUseCase.migrateBairrosToUppercase()
-                houseManagementUseCase.migrateDateFormats()
+                performLocalDatabaseMigrationUseCase.migrateStreetNamesToFormat()
+                performLocalDatabaseMigrationUseCase.migrateBairrosToUppercase()
+                performLocalDatabaseMigrationUseCase.migrateDateFormats()
                 repository.normalizeLocalDates()
                 syncRepository.performDataCleanup()
             } catch (ex: Exception) {
@@ -1290,21 +1176,6 @@ class HomeViewModel @Inject constructor(
             }
         }
 
-        // Initialize RG Selection with Last Worked Bairro
-        viewModelScope.launch {
-            _bairro.filter { it.isNotBlank() }.first().let { workedBairro ->
-                if (_selectedRgBairro.value.isBlank()) {
-                    _selectedRgBairro.value = workedBairro
-                }
-            }
-        }
-
-        // Initialize Auto-Backup and observe frequency changes
-        viewModelScope.launch {
-            backupFrequency.collect { freq ->
-                backupScheduler.scheduleBackup(freq)
-            }
-        }
 
         // 1. Initialize from Cache for immediate offline support
         viewModelScope.launch {
@@ -1320,7 +1191,7 @@ class HomeViewModel @Inject constructor(
 
         // 2. Keep agentName and currentUserUid synced with AuthUser or RemoteAgent
         viewModelScope.launch {
-            combine(authRepository.currentUserAsync, _remoteAgent) { user, remote ->
+            combine(settingsManager.cachedUser, _remoteAgent) { user, remote ->
                 val name = remote ?: user?.standardName ?: "AGENTE"
                 Triple(name, user, remote)
             }.collect { (name, user, remote) ->
@@ -1490,22 +1361,21 @@ class HomeViewModel @Inject constructor(
         }
         
         viewModelScope.launch {
-            if (_isSyncing.value) return@launch
+            if (_syncStatus.value !is SyncUiState.Idle) return@launch
             val uid = _remoteAgentUid.value ?: _currentUserUid.value ?: return@launch
             
-            _isSyncing.value = true
-            _syncStatus.update { it.copy(stage = SyncStage.STARTING, progress = 0.1f, message = "Iniciando sincronização...") }
+            _syncStatus.update { SyncUiState.Syncing(progress = 0.1f, message = "Iniciando sincronização...", isDownloading = false) }
             
             val targetUid = _remoteAgentUid.value
             withContext(Dispatchers.IO) {
                 try {
                     // 1. Pull cloud data to local FIRST (Applies Admin Authority exclusions)
-                    val pullResult = syncDataUseCase.pullData(uid)
+                    val pullResult = syncRepository.pullCloudDataToLocal(uid)
                     if (pullResult.isSuccess) {
-                        _syncStatus.update { it.copy(stage = SyncStage.DOWNLOADING, progress = 0.3f, message = "Baixando dados atualizados...") }
+                        _syncStatus.update { SyncUiState.Syncing(progress = 0.3f, message = "Baixando dados atualizados...", isDownloading = true) }
                         
                         // 2. Push local data to cloud
-                        _syncStatus.update { it.copy(stage = SyncStage.UPLOADING, progress = 0.6f, message = "Enviando dados para a nuvem...") }
+                        _syncStatus.update { SyncUiState.Syncing(progress = 0.6f, message = "Enviando dados para a nuvem...", isDownloading = false) }
                         val houses = repository.getAllHousesOnce(targetUid ?: "")
                         val activities = repository.getAllDayActivitiesOnce(uid)
                         val pushResult = syncRepository.pushLocalDataToCloud(houses, activities, targetUid)
@@ -1519,34 +1389,32 @@ class HomeViewModel @Inject constructor(
                             }
 
                             settingsManager.setLastSyncTimestamp(System.currentTimeMillis())
-                            _syncStatus.update { it.copy(stage = SyncStage.SUCCESS, progress = 1.0f, message = "Sincronização concluída!") }
+                            _syncStatus.update { SyncUiState.Success(System.currentTimeMillis()) }
                         } else {
-                            _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0.6f, message = "Erro ao enviar: ${pushResult.exceptionOrNull()?.message}") }
+                            _syncStatus.update { SyncUiState.Error("Erro ao enviar: ${pushResult.exceptionOrNull()?.message}") }
                         }
                     } else {
-                        _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0.3f, message = "Falha ao baixar: ${pullResult.exceptionOrNull()?.message}") }
+                        _syncStatus.update { SyncUiState.Error("Falha ao baixar: ${pullResult.exceptionOrNull()?.message}") }
                     }
                 } catch (e: Exception) {
-                    _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0f, message = "Erro: ${e.message}") }
+                    _syncStatus.update { SyncUiState.Error("Erro: ${e.message}") }
                 } finally {
                     delay(1500) // Stabilize Success/Error message visibility
-                    _isSyncing.value = false
-                    _syncStatus.update { it.copy(stage = SyncStage.IDLE, progress = 0f, message = null) }
+                    _syncStatus.update { SyncUiState.Idle(_syncStatus.value.lastSyncTime) }
                 }
             }
         }
     }
     fun pullDataFromCloud(targetUid: String? = null) {
         viewModelScope.launch {
-            if (_isSyncing.value) return@launch
+            if (_syncStatus.value !is SyncUiState.Idle) return@launch
             val uid = targetUid ?: _currentUserUid.value ?: return@launch
             
-            _isSyncing.value = true
-            _syncStatus.update { it.copy(stage = SyncStage.DOWNLOADING, progress = 0.1f, message = "Iniciando download...") }
+            _syncStatus.update { SyncUiState.Syncing(progress = 0.1f, message = "Iniciando download...", isDownloading = true) }
             
             withContext(Dispatchers.IO) {
                 try {
-                    _syncStatus.update { it.copy(stage = SyncStage.DOWNLOADING, progress = 0.5f, message = "Baixando dados da nuvem...") }
+                    _syncStatus.update { SyncUiState.Syncing(progress = 0.5f, message = "Baixando dados da nuvem...", isDownloading = true) }
                     val result = syncRepository.pullCloudDataToLocal(uid)
                     if (result.isSuccess) {
                         // SURGICAL CLEANUP: Auto-remove empty/broken houses after download
@@ -1556,19 +1424,18 @@ class HomeViewModel @Inject constructor(
 
                         settingsManager.setLastSyncTimestamp(System.currentTimeMillis())
                         soundManager.vibrateSuccess()
-                        _syncStatus.update { it.copy(stage = SyncStage.SUCCESS, progress = 1.0f, message = "Download concluído!") }
+                        _syncStatus.update { SyncUiState.Success(System.currentTimeMillis()) }
                         _uiEvent.value = "Dados baixados com sucesso."
                     } else {
-                        _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0.5f, message = "Falha ao baixar: ${result.exceptionOrNull()?.message}") }
+                        _syncStatus.update { SyncUiState.Error("Falha ao baixar: ${result.exceptionOrNull()?.message}") }
                         _uiEvent.value = "Falha ao baixar dados: ${result.exceptionOrNull()?.message}"
                     }
                 } catch (e: Exception) {
-                    _syncStatus.update { it.copy(stage = SyncStage.ERROR, progress = 0f, message = "Erro: ${e.message}") }
+                    _syncStatus.update { SyncUiState.Error("Erro: ${e.message}") }
                     _uiEvent.value = "Erro ao baixar: ${e.message}"
                 } finally {
                     delay(1500)
-                    _isSyncing.value = false
-                    _syncStatus.update { it.copy(stage = SyncStage.IDLE, progress = 0f, message = null) }
+                    _syncStatus.update { SyncUiState.Idle(_syncStatus.value.lastSyncTime) }
                 }
             }
         }
@@ -1706,9 +1573,9 @@ class HomeViewModel @Inject constructor(
                 
                 // 2. Predict next values based on template
                 val prediction = if (template != null) {
-                    houseManagementUseCase.predictBasedOnHistory(houses.value, template)
+                    predictHouseValuesUseCase.predictBasedOnHistory(houses.value, template)
                 } else {
-                    HouseManagementUseCase.HousePrediction("", 0, 0, com.antigravity.healthagent.data.local.model.PropertyType.R, Situation.NONE)
+                    PredictHouseValuesUseCase.HousePrediction("", 0, 0, com.antigravity.healthagent.data.local.model.PropertyType.R, Situation.NONE)
                 }
 
                 var houseToInsert = House(
@@ -1769,7 +1636,7 @@ class HomeViewModel @Inject constructor(
                 }
 
                 val updatedList = mutableList.mapIndexed { index, h -> h.copy(listOrder = index.toLong()) }
-                val recalculated = houseManagementUseCase.recalculateVisitSegments(updatedList)
+                val recalculated = recalculateVisitSegmentsUseCase.recalculateVisitSegments(updatedList)
                 
                 // For new house (id 0), we use insertHouse, for others updateHouses
                 val newlyAdded = recalculated.find { it.id == 0 }
@@ -1858,7 +1725,7 @@ class HomeViewModel @Inject constructor(
                 
                 val latestHouses: List<House> = (dbHouses.map { drafts[it.id] ?: it } + inFlights)
                 val isDayEmpty = latestHouses.none { it.data == _data.value }
-                var prediction: HouseManagementUseCase.HousePrediction
+                var prediction: PredictHouseValuesUseCase.HousePrediction
                 var initialBlock = _currentBlock.value
                 var initialStreet = _currentStreet.value
                 var initialBlockSeq = _currentBlockSequence.value
@@ -1882,15 +1749,15 @@ class HomeViewModel @Inject constructor(
                         _agentName.value = lastGlobalHouse.agentName
                         
                         // Predict based on history
-                        prediction = houseManagementUseCase.predictBasedOnHistory(latestHouses, lastGlobalHouse)
+                        prediction = predictHouseValuesUseCase.predictBasedOnHistory(latestHouses, lastGlobalHouse)
                     } else {
                         // No history at all, just blank prediction
-                        prediction = HouseManagementUseCase.HousePrediction("", 0, 0, com.antigravity.healthagent.data.local.model.PropertyType.EMPTY, Situation.NONE)
+                        prediction = PredictHouseValuesUseCase.HousePrediction("", 0, 0, com.antigravity.healthagent.data.local.model.PropertyType.EMPTY, Situation.NONE)
                     }
                 } else {
                     // Standard intra-day prediction using merged state
                     // Sanitize context inputs to ensure they match accurately against sanitized DB/Draft records
-                    prediction = houseManagementUseCase.predictNextHouseValues(
+                    prediction = predictHouseValuesUseCase.predictNextHouseValues(
                         latestHouses, 
                         _data.value,
                         _currentBlock.value.trim().uppercase(),
@@ -1903,7 +1770,7 @@ class HomeViewModel @Inject constructor(
                 val lastHouse = currentDayHouses.lastOrNull()
                 val newStreet = initialStreet.trim().formatStreetName()
 
-                // VisitSegment Stabilization: Align perfectly with HouseManagementUseCase.recalculateVisitSegments
+                // VisitSegment Stabilization: Align perfectly with RecalculateVisitSegmentsUseCase.recalculateVisitSegments
                 // to prevent "shifting" which causes Natural Key collisions during bulk update.
                 val dayHouses = currentDayHouses.sortedBy { it.listOrder }
                 // --- ACTION BLOCKER ---
@@ -2011,14 +1878,14 @@ class HomeViewModel @Inject constructor(
                 // Add to In-Flight temporarily to prevent duplicate prediction in rapid-fire clicks
                 _housesInFlight.update { it + houseToInsert }
                 
-                val newId = houseManagementUseCase.insertHouse(houseToInsert, latestHouses, adminBypass)
+                val newId = saveHouseUseCase.insertHouse(houseToInsert, latestHouses, adminBypass)
                 
                 // SURGICAL RACE CONDITION CHECK: 
                 // If the user deleted the house (removed from in-flight) while we were saving,
                 // we must immediately DELETE it from the DB to prevent it from "reappearing".
                 val isStillInFlight = _housesInFlight.value.any { it.listOrder == houseToInsert.listOrder && it.data == houseToInsert.data }
                 if (!isStillInFlight) {
-                    houseManagementUseCase.deleteHouse(houseToInsert.copy(id = newId.toInt()), latestHouses, adminBypass)
+                    saveHouseUseCase.deleteHouse(houseToInsert.copy(id = newId.toInt()), latestHouses, adminBypass)
                     return@launch
                 }
 
@@ -2040,7 +1907,7 @@ class HomeViewModel @Inject constructor(
                      finalInFlightState.address.sequence != houseToInsert.address.sequence || 
                      finalInFlightState.address.complement != houseToInsert.address.complement)) {
                      
-                     houseManagementUseCase.updateHouse(
+                     saveHouseUseCase.updateHouse(
                         finalInFlightState.copy(id = newId.toInt()), 
                         refreshedLatestHouses,
                         adminBypass
@@ -2235,7 +2102,7 @@ class HomeViewModel @Inject constructor(
                 // Use UseCase for context-aware updates (segment recalculation)
                 val adminBypass = _isAdmin.value
                 val shouldForce = adminBypass || forceMerge
-                val result = houseManagementUseCase.updateHouseWithContext(houseWithIdentity, latestHouses, baselineHouse)
+                val result = saveHouseUseCase.updateHouseWithContext(houseWithIdentity, latestHouses, baselineHouse)
                 
                 if (result.localizationChanged) {
                     _bairro.value = result.updatedHouse.address.bairro
@@ -2245,9 +2112,9 @@ class HomeViewModel @Inject constructor(
                     
                     // Also ensure subsequent houses get the current session identity if they are being updated
                     val subsequentWithIdentity = result.subsequentHouses.map { it.copy(agentName = currentName, agentUid = currentUid ?: "") }
-                    houseManagementUseCase.updateHouses(subsequentWithIdentity + result.updatedHouse, shouldForce)
+                    saveHouseUseCase.updateHouses(subsequentWithIdentity + result.updatedHouse, shouldForce)
                 } else {
-                    houseManagementUseCase.updateHouse(result.updatedHouse, houses.value, shouldForce)
+                    saveHouseUseCase.updateHouse(result.updatedHouse, houses.value, shouldForce)
                 }
                 
                 // If this house had a validation error highlight, remove it as it's being corrected
@@ -2296,7 +2163,7 @@ class HomeViewModel @Inject constructor(
                 if (house.id == 0) return@launch
 
                 val adminBypass = _isAdmin.value
-                houseManagementUseCase.deleteHouse(house, houses.value, adminBypass)
+                saveHouseUseCase.deleteHouse(house, houses.value, adminBypass)
                 soundManager.playPop()
             } catch (e: Exception) {
                 android.util.Log.e("HomeViewModel", "Error deleting house", e)
@@ -2340,7 +2207,7 @@ class HomeViewModel @Inject constructor(
                     _uiEvent.value = "Imóvel restaurado com conflito detectado."
                 } else {
                     val adminBypass = _isAdmin.value
-                    houseManagementUseCase.insertHouse(house.copy(id = 0), houses.value, adminBypass)
+                    saveHouseUseCase.insertHouse(house.copy(id = 0), houses.value, adminBypass)
                 }
                 
                 recentlyDeletedHouse = null 
@@ -2353,8 +2220,8 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             val adminBypass = _isAdmin.value
             val updatedList = reorderedList.mapIndexed { index, h -> h.copy(listOrder = index.toLong()) }
-            val recalculated = houseManagementUseCase.recalculateVisitSegments(updatedList)
-            houseManagementUseCase.updateHouses(recalculated, adminBypass)
+            val recalculated = recalculateVisitSegmentsUseCase.recalculateVisitSegments(updatedList)
+            saveHouseUseCase.updateHouses(recalculated, adminBypass)
             triggerDelayedValidation(500) // Trigger rapid validation after move
         }
     }
@@ -2667,19 +2534,6 @@ class HomeViewModel @Inject constructor(
     fun updateZona(z: String) { _zona.value = z.uppercase() }
     fun updateCategoria(c: String) { _categoria.value = c.uppercase() }
 
-    // --- RG Actions ---
-    fun selectRgYear(y: String) { _rgYear.value = y }
-    // fun selectRgSemester(s: Int) { _rgSemester.value = s } // Removed
-    fun selectRgBairro(b: String) { _selectedRgBairro.value = b; _selectedRgBlock.value = "" }
-    fun selectRgBlock(q: String) { _selectedRgBlock.value = q }
-
-    // --- Semanal Actions ---
-    fun previousWeek() {
-        _currentWeekStart.value = (_currentWeekStart.value.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -7) }
-    }
-    fun nextWeek() {
-        _currentWeekStart.value = (_currentWeekStart.value.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 7) }
-    }
 
     fun navigateToDate(date: String) {
         _data.value = date.replace("/", "-")
@@ -2870,37 +2724,7 @@ class HomeViewModel @Inject constructor(
     fun removeActivity(name: String) {
         viewModelScope.launch { settingsManager.removeCustomActivity(name) }
     }
-    suspend fun exportSemanalPdf(context: Context): File {
-        return withContext(Dispatchers.IO) {
-            clearOldPdfs(context, "Semanal_")
-            val summary = weeklySummary.value
-            val weekDates = summary.map { it.date }
-            // Important: Use allHousesFlow (filtered) not 'houses' (possibly global) 
-            // and filter by the current identity to be 100% sure.
-            val currentAgent = _agentName.value
-            val filteredHouses = houses.value.filter { it.agentName.uppercase() == currentAgent.uppercase() }
-            val activities = summary.associate { it.date to it.status }
-            SemanalPdfGenerator.generatePdf(context, weekDates, filteredHouses, activities, currentAgent)
-        }
-    }
 
-    suspend fun exportWeeklyBatchPdf(context: Context): File {
-        return withContext(Dispatchers.IO) {
-            clearOldPdfs(context, "Produção_")
-            clearOldPdfs(context, "Boletim_")
-            val dates = currentWeekDates.value
-            val currentAgent = _agentName.value
-            val filteredHouses = houses.value.filter { it.agentName.uppercase() == currentAgent.uppercase() && dates.contains(it.data) }
-            
-            // Group by Date for the generator
-            val weeklyData = filteredHouses.groupBy { it.data }
-
-            // Get activities for the week
-            val activities = weeklySummary.value.associate { it.date to it.status }
-            
-            BoletimPdfGenerator.generateWeeklyBatchPdf(context, weeklyData, currentAgent, activities, dates)
-        }
-    }
 
     // --- Boletim Actions ---
     fun transferProduction(date: String, newAgent: String) {
@@ -3092,332 +2916,6 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun restoreData(context: Context, uri: android.net.Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val backupData = backupManager.importData(context, uri)
-                val currentAgent = _agentName.value.trim().uppercase()
-                
-                // Detection: Find the agent name in the backup
-                val backupAgent = (backupData.houses.map { it.agentName } + backupData.dayActivities.map { it.agentName })
-                    .filter { it.isNotBlank() }
-                    .distinct()
-                    .firstOrNull()?.trim()?.uppercase() ?: ""
-                
-                // Mismatch Check (Only for informative purposes, RestoreDataUseCase will handle the actual attribution)
-                if (currentAgent.isNotBlank() && backupAgent.isNotBlank() && currentAgent != backupAgent) {
-                    _backupConfirmation.value = BackupConfirmation(
-                        backupAgentName = backupAgent,
-                        currentAgentName = currentAgent,
-                        housesCount = backupData.houses.size,
-                        activitiesCount = backupData.dayActivities.size,
-                        uri = uri,
-                        isFullRestore = true
-                    )
-                    return@launch
-                }
-
-                performRestore(context, uri)
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _uiEvent.value = "Erro ao restaurar backup: ${e.message}"
-                    soundManager.playWarning()
-                }
-            }
-        }
-    }
-
-    private suspend fun performRestore(context: Context, uri: android.net.Uri) {
-        try {
-            val targetUid = _remoteAgentUid.value ?: _currentUserUid.value
-            val result = restoreDataUseCase(context, targetUid ?: "", uri)
-
-            withContext(Dispatchers.Main) {
-                if (result.isSuccess) {
-                    val isPartial = result.getOrDefault(false)
-                    if (isPartial) {
-                        _uiEvent.value = "Aviso: Backup incompleto (arquivo truncado). Alguns dados foram recuperados."
-                        soundManager.playWarning()
-                    } else {
-                        _uiEvent.value = "Backup restaurado com sucesso!"
-                        soundManager.playPop()
-                    }
-                } else {
-                    _uiEvent.value = "Falha ao restaurar: ${result.exceptionOrNull()?.message}"
-                    soundManager.playWarning()
-                }
-            }
-        } catch (e: Exception) {
-            withContext(Dispatchers.Main) {
-                _uiEvent.value = "Erro no restauro: ${e.message}"
-                soundManager.playWarning()
-            }
-        }
-    }
-
-    fun confirmBackupImport(context: Context) {
-        val confirmation = _backupConfirmation.value ?: return
-        val uri = confirmation.uri
-        val isFullRestore = confirmation.isFullRestore
-        _backupConfirmation.value = null
-        
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                if (isFullRestore) {
-                    performRestore(context, uri)
-                } else {
-                    performImportDayData(context, uri)
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _uiEvent.value = "Erro ao processar confirmação: ${e.message}"
-                    soundManager.playWarning()
-                }
-            }
-        }
-    }
-
-    fun cancelBackupImport() {
-        if (_backupConfirmation.value != null) {
-            _backupConfirmation.value = null
-            _uiEvent.value = "Importação cancelada pelo usuário."
-        }
-    }
-
-    fun clearAllData() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                _isSyncing.value = true
-                _uiEvent.value = "Iniciando limpeza completa..."
-                
-                val user = authRepository.currentUserAsync.first()
-                val isAdmin = user?.isAdmin == true
-                
-                // 1. Clear Local Data
-                repository.clearAllData()
-                
-                // 2. If Admin, Clear ALL Cloud Data
-                if (isAdmin) {
-                    _uiEvent.value = "Limpando dados da nuvem (Global)..."
-                    val cloudResult = syncRepository.deleteAllCloudData()
-                    if (cloudResult.isFailure) {
-                        _uiEvent.value = "Limpeza local concluída, mas falha na nuvem: ${cloudResult.exceptionOrNull()?.message}"
-                        soundManager.playWarning()
-                        return@launch
-                    }
-                }
-
-                withContext(Dispatchers.Main) {
-                    soundManager.playPop()
-                    val message = if (isAdmin) "Todos os dados locais e da nuvem foram apagados." else "Todos os dados locais foram apagados."
-                    _uiEvent.value = message
-                    _data.value = dateFormatter.format(Date())
-                    _agentName.value = ""
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _uiEvent.value = "Erro ao apagar dados: ${e.message}"
-                }
-            } finally {
-                _isSyncing.value = false
-            }
-        }
-    }
-
-    fun cleanupHistoricalData(beforeDate: String) {
-        if (_isSyncing.value) return
-        _isSyncing.value = true
-        _uiEvent.value = "Iniciando limpeza de histórico..."
-        
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val user = authRepository.currentUserAsync.first()
-                val isAdmin = user?.isAdmin == true
-                
-                val result = cleanupHistoricalDataUseCase(
-                    beforeDate = beforeDate, 
-                    agentName = _agentName.value,
-                    agentUid = user?.uid ?: "", 
-                    isGlobal = isAdmin
-                )
-                
-                withContext(Dispatchers.Main) {
-                    if (result.isSuccess) {
-                        val message = if (isAdmin) "Histórico global (todos os agentes) anterior a $beforeDate removido." 
-                                     else "Seu histórico anterior a $beforeDate removido localmente."
-                        _uiEvent.value = message
-                        soundManager.playSuccess()
-                    } else {
-                        _uiEvent.value = "Erro na limpeza: ${result.exceptionOrNull()?.message}"
-                        soundManager.playWarning()
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _uiEvent.value = "Erro inesperado: ${e.message}"
-                    soundManager.playWarning()
-                }
-            } finally {
-                _isSyncing.value = false
-            }
-        }
-    }
-
-    fun importDayData(context: Context, uri: android.net.Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val backupData = backupManager.importData(context, uri)
-                val targetDate = _data.value
-                val hasDataForDate = backupData.houses.any { it.data.replace("/", "-") == targetDate.replace("/", "-") }
-                
-                if (!hasDataForDate) {
-                    withContext(Dispatchers.Main) {
-                        _uiEvent.value = "O arquivo não contém registros para a data $targetDate."
-                        soundManager.playWarning()
-                    }
-                    return@launch
-                }
-
-                // Check for conflict
-                val currentHouses = houses.value.filter { it.data == targetDate }
-                if (currentHouses.isNotEmpty()) {
-                    _backupConfirmation.value = BackupConfirmation(
-                        backupAgentName = "", // Not used for day import confirmation text in same way
-                        currentAgentName = _agentName.value,
-                        housesCount = backupData.houses.count { it.data.replace("/", "-") == targetDate.replace("/", "-") },
-                        activitiesCount = 1,
-                        uri = uri,
-                        isFullRestore = false
-                    )
-                    return@launch
-                }
-
-                performImportDayData(context, uri)
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _uiEvent.value = "Erro ao importar dia: ${e.message}"
-                    soundManager.playWarning()
-                }
-            }
-        }
-    }
-
-    private suspend fun performImportDayData(context: Context, uri: android.net.Uri) {
-        try {
-            val targetUid = _remoteAgentUid.value ?: _currentUserUid.value
-            val targetDate = _data.value
-            val existingDates = repository.getHousesByAgentSnapshot(targetUid ?: "").map { it.data }.distinct()
-
-            val result = restoreDataUseCase(
-                context = context,
-                targetUid = targetUid ?: "",
-                fileUri = uri,
-                targetDate = targetDate,
-                existingDates = existingDates,
-                isSingleDayImport = true
-            )
-
-            withContext(Dispatchers.Main) {
-                if (result.isSuccess) {
-                    val isPartial = result.getOrDefault(false)
-                    if (isPartial) {
-                        _uiEvent.value = "Aviso: Importação incompleta (arquivo truncado). Verifique os dados de $targetDate."
-                        soundManager.playWarning()
-                    } else {
-                        _uiEvent.value = "Dados importados com sucesso para o dia $targetDate!"
-                        soundManager.playPop()
-                    }
-                } else {
-                    _uiEvent.value = "Falha na importação: ${result.exceptionOrNull()?.message}"
-                    soundManager.playWarning()
-                }
-            }
-        } catch (e: Exception) {
-            withContext(Dispatchers.Main) {
-                _uiEvent.value = "Erro na finalização da importação: ${e.message}"
-                soundManager.playWarning()
-            }
-        }
-    }
-
-    fun importCustomSound(uri: android.net.Uri, category: com.antigravity.healthagent.utils.SoundCategory) {
-        viewModelScope.launch {
-            val soundUri = "file://${uri.path}"
-            when (category) {
-                com.antigravity.healthagent.utils.SoundCategory.POP -> settingsManager.setPopSound(soundUri)
-                com.antigravity.healthagent.utils.SoundCategory.SUCCESS -> settingsManager.setSuccessSound(soundUri)
-                com.antigravity.healthagent.utils.SoundCategory.CELEBRATION -> settingsManager.setCelebrationSound(soundUri)
-                com.antigravity.healthagent.utils.SoundCategory.WARNING -> settingsManager.setWarningSound(soundUri)
-            }
-        }
-    }
-
-    fun updatePopSound(soundId: String) {
-        viewModelScope.launch { settingsManager.setPopSound(soundId) }
-    }
-
-    fun updateSuccessSound(soundId: String) {
-        viewModelScope.launch { settingsManager.setSuccessSound(soundId) }
-    }
-
-    fun updateCelebrationSound(soundId: String) {
-        viewModelScope.launch { settingsManager.setCelebrationSound(soundId) }
-    }
-
-    fun updateWarningSound(soundId: String) {
-        viewModelScope.launch { settingsManager.setWarningSound(soundId) }
-    }
-
-    fun updateEasyMode(enabled: Boolean) {
-        viewModelScope.launch { settingsManager.setEasyMode(enabled) }
-    }
-
-    fun updateSolarMode(enabled: Boolean) {
-        viewModelScope.launch { settingsManager.setSolarMode(enabled) }
-    }
-
-    fun updateEditingToolsMode(enabled: Boolean) {
-        viewModelScope.launch { settingsManager.setEditingToolsMode(enabled) }
-    }
-
-    fun updateThemeMode(mode: String) {
-        viewModelScope.launch { settingsManager.setThemeMode(mode) }
-    }
-
-    fun updateThemeColor(color: String) {
-        viewModelScope.launch { settingsManager.setThemeColor(color) }
-    }
-
-
-    fun updateBackupFrequency(frequency: com.antigravity.healthagent.data.backup.BackupFrequency) {
-        viewModelScope.launch {
-            settingsManager.setBackupFrequency(frequency)
-            backupScheduler.scheduleBackup(frequency)
-        }
-    }
-
-    fun playPreview(soundId: String) {
-        soundManager.playSound(soundId)
-    }
-
-    fun getSoundTitle(soundId: String, context: Context): String {
-        return when {
-            soundId == "SILENT" -> "Silencioso"
-            soundId.startsWith("SYSTEM_") -> "Som do Sistema"
-            soundId.startsWith("content://") -> {
-                try {
-                    val ringtone = android.media.RingtoneManager.getRingtone(context, android.net.Uri.parse(soundId))
-                    ringtone?.getTitle(context) ?: "Som do Sistema"
-                } catch (e: Exception) {
-                    "Som do Sistema"
-                }
-            }
-            soundId.startsWith("file://") -> "Arquivo Personalizado"
-            else -> "Padrão"
-        }
-    }
-
-    fun testCelebration() { soundManager.playCelebration() }
 
     private fun isWorkingDay(cal: Calendar, statusMap: Map<String, DayActivity>): Boolean {
         val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
@@ -3430,7 +2928,7 @@ class HomeViewModel @Inject constructor(
 
     fun forceFullSync() {
         viewModelScope.launch {
-            syncDataUseCase.pullData(force = true)
+            syncRepository.pullCloudDataToLocal(force = true)
         }
     }
 

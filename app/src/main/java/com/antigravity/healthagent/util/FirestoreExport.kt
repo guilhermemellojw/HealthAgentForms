@@ -3,7 +3,9 @@ package com.antigravity.healthagent.util
 import android.content.Context
 import android.util.Log
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileWriter
 
@@ -19,12 +21,12 @@ object FirestoreExport {
         Log.i(TAG, "Export completed: ${outputDir.absolutePath}")
     }
 
-    private suspend fun exportCollection(name: String, dir: File, fileName: String) {
+    private suspend fun exportCollection(name: String, dir: File, fileName: String) = withContext(Dispatchers.IO) {
         try {
             val snapshot = firestore.collection(name).get().await()
             if (snapshot.isEmpty) {
                 Log.w(TAG, "Collection $name is empty")
-                return
+                return@withContext
             }
             val csv = File(dir, fileName)
             FileWriter(csv).use { writer ->
