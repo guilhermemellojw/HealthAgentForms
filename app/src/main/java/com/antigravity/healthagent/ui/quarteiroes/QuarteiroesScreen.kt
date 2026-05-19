@@ -98,6 +98,7 @@ fun QuarteiroesScreen(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val kmlFolders by viewModel.kmlFolders.collectAsState()
     val focusHouses by viewModel.focusHouses.collectAsState()
+    var showFoci by remember { mutableStateOf(true) }
 
     var hasLocationPermission by remember {
         mutableStateOf(
@@ -208,33 +209,35 @@ fun QuarteiroesScreen(
             RenderKmlFolders(folders = kmlFolders)
             
             // Render Focus Points (Radar)
-            focusHouses.forEach { house ->
-                val lat = house.geo.latitude
-                val lng = house.geo.longitude
-                if (lat != null && lng != null) {
-                    val position = LatLng(lat, lng)
-                    MarkerComposable(
-                        keys = arrayOf(house.id, position),
-                        state = remember(house.id) { MarkerState(position = position) },
-                        title = "${house.agentName.substringBefore("@").uppercase()}: FOCO: ${house.address.streetName.formatStreetName()} nº ${house.address.number}",
-                        snippet = "Quadra: ${house.address.blockNumber} | ${house.address.bairro}"
-                    ) {
-                        Box(
-                            modifier = Modifier.size(36.dp),
-                            contentAlignment = Alignment.Center
+            if (showFoci) {
+                focusHouses.forEach { house ->
+                    val lat = house.geo.latitude
+                    val lng = house.geo.longitude
+                    if (lat != null && lng != null) {
+                        val position = LatLng(lat, lng)
+                        MarkerComposable(
+                            keys = arrayOf(house.id, position),
+                            state = remember(house.id) { MarkerState(position = position) },
+                            title = "${house.agentName.substringBefore("@").uppercase()}: FOCO: ${house.address.streetName.formatStreetName()} nº ${house.address.number}",
+                            snippet = "Quadra: ${house.address.blockNumber} | ${house.address.bairro}"
                         ) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.error,
-                                shape = androidx.compose.foundation.shape.CircleShape,
-                                modifier = Modifier.fillMaxSize(),
-                                shadowElevation = 4.dp
+                            Box(
+                                modifier = Modifier.size(36.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    Icons.Default.BugReport,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.padding(6.dp)
-                                )
+                                Surface(
+                                    color = MaterialTheme.colorScheme.error,
+                                    shape = androidx.compose.foundation.shape.CircleShape,
+                                    modifier = Modifier.fillMaxSize(),
+                                    shadowElevation = 4.dp
+                                ) {
+                                    Icon(
+                                        Icons.Default.BugReport,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.padding(6.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -329,35 +332,38 @@ fun QuarteiroesScreen(
                 if (validFocusHouses.isNotEmpty()) {
                     FloatingActionButton(
                         onClick = {
-                            scope.launch {
-                                if (validFocusHouses.size == 1) {
-                                    val house = validFocusHouses.first()
-                                    cameraPositionState.animate(
-                                        update = CameraUpdateFactory.newLatLngZoom(
-                                            LatLng(house.geo.latitude!!, house.geo.longitude!!),
-                                            18f
-                                        ),
-                                        durationMs = 800
-                                    )
-                                } else {
-                                    val builder = com.google.android.gms.maps.model.LatLngBounds.builder()
-                                    validFocusHouses.forEach {
-                                        builder.include(LatLng(it.geo.latitude!!, it.geo.longitude!!))
+                            showFoci = !showFoci
+                            if (showFoci) {
+                                scope.launch {
+                                    if (validFocusHouses.size == 1) {
+                                        val house = validFocusHouses.first()
+                                        cameraPositionState.animate(
+                                            update = CameraUpdateFactory.newLatLngZoom(
+                                                LatLng(house.geo.latitude!!, house.geo.longitude!!),
+                                                18f
+                                            ),
+                                            durationMs = 800
+                                        )
+                                    } else {
+                                        val builder = com.google.android.gms.maps.model.LatLngBounds.builder()
+                                        validFocusHouses.forEach {
+                                            builder.include(LatLng(it.geo.latitude!!, it.geo.longitude!!))
+                                        }
+                                        cameraPositionState.animate(
+                                            update = CameraUpdateFactory.newLatLngBounds(builder.build(), 150),
+                                            durationMs = 800
+                                        )
                                     }
-                                    cameraPositionState.animate(
-                                        update = CameraUpdateFactory.newLatLngBounds(builder.build(), 150),
-                                        durationMs = 800
-                                    )
                                 }
                             }
                         },
                         modifier = Modifier.padding(bottom = 16.dp).size(fabSize),
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.error
+                        containerColor = if (showFoci) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (showFoci) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     ) {
                         Icon(
                             Icons.Default.BugReport, 
-                            contentDescription = "Ver Focos",
+                            contentDescription = if (showFoci) "Ocultar Focos" else "Ver Focos",
                             modifier = Modifier.size(fabIconSize)
                         )
                     }
