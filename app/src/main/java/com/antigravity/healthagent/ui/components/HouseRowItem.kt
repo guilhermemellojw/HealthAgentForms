@@ -372,7 +372,8 @@ fun HouseRowItem(
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                                 capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Characters,
                                 imeAction = androidx.compose.ui.text.input.ImeAction.Next
-                            )
+                            ),
+                            key = house.id
                         )
     
                         DebouncedCompactInputBox(
@@ -385,7 +386,8 @@ fun HouseRowItem(
                             ),
                             modifier = Modifier.weight(0.7f),
                             isError = highlightErrors && isMissingNumbers,
-                            enabled = enabled
+                            enabled = enabled,
+                            key = house.id
                         )
     
                         DebouncedCompactInputBox(
@@ -397,7 +399,8 @@ fun HouseRowItem(
                                 imeAction = androidx.compose.ui.text.input.ImeAction.Done
                             ),
                             modifier = Modifier.weight(0.6f),
-                            enabled = enabled
+                            enabled = enabled,
+                            key = house.id
                         )
     
                         CompactDropdown(
@@ -661,7 +664,8 @@ fun EasyHouseCard(
                         enabled = enabled,
                         isEasyMode = true,
                         focusRequester = focusRequester,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        key = house.id
                     )
                 }
 
@@ -703,7 +707,8 @@ fun EasyHouseCard(
                         onValueChange = { onUpdate(house.copy(address = house.address.copy(sequence = it.trim().toIntOrNull() ?: 0))) },
                         enabled = enabled,
                         isEasyMode = true,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                        key = house.id
                     )
                 }
                 EasyGridItem(
@@ -716,7 +721,8 @@ fun EasyHouseCard(
                         onValueChange = { onUpdate(house.copy(address = house.address.copy(complement = it.trim().toIntOrNull() ?: 0))) },
                         enabled = enabled,
                         isEasyMode = true,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                        key = house.id
                     )
                 }
                 EasyGridItem(

@@ -1,20 +1,26 @@
 package com.antigravity.healthagent.ui.rg
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.utils.formatStreetName
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
+
 @Composable
 fun RGHouseRow(
     house: House,
     isEasyMode: Boolean = false,
-    isSolarMode: Boolean = false
+    isSolarMode: Boolean = false,
+    currentUserUid: String = ""
 ) {
     val basicStyle = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium
     val paddingVertical = if (isEasyMode) 16.dp else 12.dp
@@ -25,13 +31,38 @@ fun RGHouseRow(
     val seqWidth = if (isEasyMode) 40.dp else 35.dp
     val typeWidth = if (isEasyMode) 35.dp else 30.dp
     
-    Column {
+    val isTeammate = house.agentUid.isNotBlank() && house.agentUid != currentUserUid
+    val backgroundColor = if (isTeammate) {
+        if (isSolarMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.07f)
+        else MaterialTheme.colorScheme.primary.copy(alpha = 0.04f)
+    } else {
+        Color.Transparent
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(backgroundColor)
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = paddingVertical),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (isTeammate) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(16.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(1.5.dp)
+                        )
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+            }
+
             // Street Name - Weight 1f to take available space
             Text(
                 text = house.address.streetName.formatStreetName(),
@@ -91,6 +122,30 @@ fun RGHouseRow(
                 modifier = Modifier.width(typeWidth)
             )
         }
+        
+        if (isTeammate) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 25.dp, end = 16.dp, bottom = paddingVertical),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Visita por: ${house.agentName.ifBlank { "Colega" }.uppercase()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                )
+            }
+        }
+
         Divider(
             color = if (isSolarMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) 
                     else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)

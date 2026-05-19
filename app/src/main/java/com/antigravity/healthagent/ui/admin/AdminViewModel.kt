@@ -142,8 +142,14 @@ class AdminViewModel @Inject constructor(
         val processedAgentUids = mutableSetOf<String?>()
         val processedEmails = mutableSetOf<String?>()
         
-        // 1. Start with users who have accounts
-        usersList.forEach { user ->
+        // 1. Start with users who have accounts. Sort real accounts first, then pre-registered.
+        val sortedUsers = usersList.sortedWith(compareBy { it.uid.startsWith("pre_") })
+        sortedUsers.forEach { user ->
+            val normalizedEmail = user.email?.trim()?.lowercase()
+            if (normalizedEmail != null && processedEmails.contains(normalizedEmail)) {
+                return@forEach
+            }
+            
             // Prioritize UID match
             var agentData = agentsByUid[user.uid]
             
@@ -160,19 +166,21 @@ class AdminViewModel @Inject constructor(
                     agentName = agentData?.agentName ?: user.agentName,
                     role = user.role,
                     isAuthorized = user.isAuthorized,
-                    isPreRegistered = false,
+                    isPreRegistered = user.uid.startsWith("pre_"),
                     agentData = agentData
                 )
             )
             processedAgentUids.add(user.uid)
-            processedEmails.add(user.email)
+            processedEmails.add(normalizedEmail)
             agentData?.uid?.let { processedAgentUids.add(it) }
-            agentData?.email?.let { processedEmails.add(it) }
+            agentData?.email?.trim()?.lowercase()?.let { processedEmails.add(it) }
         }
         
-        // 2. Add Pre-registered "agents" from Firestore who don't have a user account yet
+        // 2. Add agents from Firestore who don't have a user account yet (e.g. legacy/pre-registered)
         agentsList.forEach { agent ->
-            if (!processedAgentUids.contains(agent.uid) && !processedEmails.contains(agent.email)) {
+            val normalizedEmail = agent.email?.trim()?.lowercase()
+            if (!processedAgentUids.contains(agent.uid) && !processedEmails.contains(normalizedEmail)) {
+                val isPre = agent.uid?.startsWith("pre_") == true
                 result.add(
                     UnifiedProfile(
                         uid = agent.uid,
@@ -180,12 +188,12 @@ class AdminViewModel @Inject constructor(
                         agentName = agent.agentName,
                         role = UserRole.AGENT, 
                         isAuthorized = true,
-                        isPreRegistered = true,
+                        isPreRegistered = isPre,
                         agentData = agent
                     )
                 )
                 processedAgentUids.add(agent.uid)
-                processedEmails.add(agent.email)
+                processedEmails.add(normalizedEmail)
             }
         }
 

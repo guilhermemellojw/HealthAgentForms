@@ -283,7 +283,8 @@ class AuthRepositoryImpl @Inject constructor(
         if (isOnline && (userDoc == null || !userDoc.exists() || !(userDoc.getBoolean("isAuthorized") ?: false))) {
             try {
                 // Use a predictable document ID for pre-registration based on email
-                val preDocId = "pre_${email.replace(".", "_").replace("@", "_")}"
+                val normalizedEmail = email.trim().lowercase()
+                val preDocId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
                 android.util.Log.i("AuthRepository", "Checking for pre-registration invitations: $preDocId")
                 
                 // Fetch the invited profile if it exists
@@ -492,7 +493,8 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun migratePreRegistration(email: String, targetUid: String): Result<Unit> {
-        val preDocId = "pre_${email.replace(".", "_").replace("@", "_")}"
+        val normalizedEmail = email.trim().lowercase()
+        val preDocId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
         android.util.Log.i("AuthRepository", "Starting atomic migration for $email to $targetUid")
         
         var preAgentName: String? = null

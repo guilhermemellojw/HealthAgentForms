@@ -177,6 +177,9 @@ interface HouseDao {
     @Query("SELECT DISTINCT blockNumber FROM houses WHERE blockNumber != ''")
     suspend fun getActiveBlockNumbers(): List<String>
 
+    @Query("SELECT DISTINCT bairro FROM houses WHERE agentUid = :agentUid AND bairro != ''")
+    suspend fun getActiveBairros(agentUid: String): List<String>
+
     @Query("SELECT * FROM houses WHERE agentUid = :uid")
     suspend fun getHousesByUidOnly(uid: String): List<House>
 
@@ -210,8 +213,8 @@ interface HouseDao {
 
     @Query("""
         SELECT * FROM houses 
-        WHERE (COALESCE(blockNumber, '') || '|' || COALESCE(blockSequence, '') || '|' || UPPER(COALESCE(bairro, '')) || '|' || COALESCE(ciclo, '')) IN (
-            SELECT DISTINCT (COALESCE(blockNumber, '') || '|' || COALESCE(blockSequence, '') || '|' || UPPER(COALESCE(bairro, '')) || '|' || COALESCE(ciclo, '')) 
+        WHERE (COALESCE(blockNumber, '') || '|' || COALESCE(blockSequence, '') || '|' || UPPER(COALESCE(bairro, ''))) IN (
+            SELECT DISTINCT (COALESCE(blockNumber, '') || '|' || COALESCE(blockSequence, '') || '|' || UPPER(COALESCE(bairro, ''))) 
             FROM houses 
             WHERE agentUid = :agentUid
         )

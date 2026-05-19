@@ -132,6 +132,7 @@ fun RGScreen(
         }
     ) { paddingValues ->
         val syncState by viewModel.syncState.collectAsState()
+        val currentUserUid by viewModel.currentUserUid.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
 
         PullToRefreshBox(
@@ -270,7 +271,8 @@ fun RGScreen(
                                 RGHouseRow(
                                     house = house,
                                     isEasyMode = isEasyMode,
-                                    isSolarMode = isSolarMode
+                                    isSolarMode = isSolarMode,
+                                    currentUserUid = currentUserUid ?: ""
                                 )
                             }
                         }

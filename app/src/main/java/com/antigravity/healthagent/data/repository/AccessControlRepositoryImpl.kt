@@ -63,18 +63,32 @@ class AccessControlRepositoryImpl @Inject constructor(
             
             userRef.update("isAuthorized", isAuthorized).await()
             
-            if (isAuthorized && email != null && uid.startsWith("pre_")) {
-                val realUsers = firestore.collection("users")
-                    .whereEqualTo("email", email)
-                    .get().await()
+            if (isAuthorized && email != null) {
+                val normalizedEmail = email.trim().lowercase()
+                val preDocId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
                 
-                for (realUserDoc in realUsers.documents) {
-                    if (realUserDoc.id != uid && !realUserDoc.id.startsWith("pre_")) {
-                        val realUid = realUserDoc.id
-                        android.util.Log.i("AccessControlRepository", "Admin authorizing pre-registered user. Auto-migrating to real UID: $realUid")
-                        
-                        firestore.collection("users").document(realUid).update("isAuthorized", true).await()
-                        authRepository.migratePreRegistration(email, realUid)
+                if (uid == preDocId) {
+                    // Admin authorized the pre-registered profile card.
+                    // Find the real user account if they have signed up
+                    val realUsers = firestore.collection("users")
+                        .whereEqualTo("email", normalizedEmail)
+                        .get().await()
+                    
+                    for (realUserDoc in realUsers.documents) {
+                        if (realUserDoc.id != uid && !realUserDoc.id.startsWith("pre_")) {
+                            val realUid = realUserDoc.id
+                            android.util.Log.i("AccessControlRepository", "Admin authorizing pre-registered profile. Auto-migrating to real UID: $realUid")
+                            firestore.collection("users").document(realUid).update("isAuthorized", true).await()
+                            authRepository.migratePreRegistration(normalizedEmail, realUid)
+                        }
+                    }
+                } else if (!uid.startsWith("pre_")) {
+                    // Admin authorized the real user card.
+                    // Check if there is a pre-registered profile to migrate
+                    val preUserDoc = firestore.collection("users").document(preDocId).get().await()
+                    if (preUserDoc.exists()) {
+                        android.util.Log.i("AccessControlRepository", "Admin authorizing real user account. Auto-migrating from pre-registered profile $preDocId")
+                        authRepository.migratePreRegistration(normalizedEmail, uid)
                     }
                 }
             }

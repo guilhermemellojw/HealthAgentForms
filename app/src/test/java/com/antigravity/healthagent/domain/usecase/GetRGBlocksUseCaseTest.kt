@@ -178,4 +178,37 @@ class GetRGBlocksUseCaseTest {
         // Block 1 should be concluded because it's not the LAST visit globally (H2 follows it)
         assertEquals(true, block1.isConcluded)
     }
+
+    @Test
+    fun `invoke - should prioritize agent who started earlier on that day`() {
+        // Scenario: Agent A and Agent B working on same day.
+        // Agent B has first visit at createdAt = 800 (earlier than Agent A's 1000).
+        // Therefore, all Agent B's houses should be grouped and listed first, followed by Agent A's.
+        val hA1 = House(id = 10, data = "01-05-2026", agentUid = "A", agentName = "AGENT A", address = VisitAddress(number = "1", blockNumber = "1", bairro = bairro), createdAt = 1000, listOrder = 1)
+        val hA2 = House(id = 20, data = "01-05-2026", agentUid = "A", agentName = "AGENT A", address = VisitAddress(number = "2", blockNumber = "1", bairro = bairro), createdAt = 1200, listOrder = 2)
+        val hB1 = House(id = 11, data = "01-05-2026", agentUid = "B", agentName = "AGENT B", address = VisitAddress(number = "3", blockNumber = "1", bairro = bairro), createdAt = 800, listOrder = 1)
+        val hB2 = House(id = 21, data = "01-05-2026", agentUid = "B", agentName = "AGENT B", address = VisitAddress(number = "4", blockNumber = "1", bairro = bairro), createdAt = 1100, listOrder = 2)
+
+        val houses = listOf(hA2, hB2, hA1, hB1) // Shuffled
+
+        // When
+        val result = useCase(houses, bairro, "2026")
+
+        // Then
+        assertEquals(1, result.size)
+        val blockHouses = result.first().houses
+        assertEquals(4, blockHouses.size)
+
+        // Agent B must come first because they started at 800 (earlier than Agent A's 1000)
+        assertEquals("AGENT B", blockHouses[0].agentName)
+        assertEquals(11, blockHouses[0].id)
+        assertEquals("AGENT B", blockHouses[1].agentName)
+        assertEquals(21, blockHouses[1].id)
+
+        // Then Agent A
+        assertEquals("AGENT A", blockHouses[2].agentName)
+        assertEquals(10, blockHouses[2].id)
+        assertEquals("AGENT A", blockHouses[3].agentName)
+        assertEquals(20, blockHouses[3].id)
+    }
 }

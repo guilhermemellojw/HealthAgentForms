@@ -319,6 +319,7 @@ fun CompactDropdown(
     enabled: Boolean = true,
     isEasyMode: Boolean = false
 ) {
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     var expanded by remember { mutableStateOf(false) }
 
     val targetBorderColor = when {
@@ -387,7 +388,10 @@ fun CompactDropdown(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(if (isEasyMode) 64.dp else 28.dp)
-                    .then(if (enabled) Modifier.clickable { expanded = true } else Modifier),
+                    .then(if (enabled) Modifier.clickable { 
+                        focusManager.clearFocus()
+                        expanded = true 
+                    } else Modifier),
                 contentAlignment = Alignment.Center
             ) {
                 if (isEasyMode) {
@@ -470,6 +474,7 @@ fun CompactDropdown(
                         ) 
                     },
                     onClick = {
+                        focusManager.clearFocus()
                         onOptionSelected(option)
                         expanded = false
                     }
@@ -578,36 +583,18 @@ fun DebouncedCompactInputBox(
     isError: Boolean = false,
     enabled: Boolean = true,
     isEasyMode: Boolean = false,
-    focusRequester: androidx.compose.ui.focus.FocusRequester? = null
+    focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
+    key: Any? = null
 ) {
-    // Local state to hold the immediate value
-    var text by remember { mutableStateOf(initialValue) }
-    var isFocused by remember { mutableStateOf(false) }
+    // Keyed state values
+    var text by remember(key) { mutableStateOf(initialValue) }
+    var isFocused by remember(key) { mutableStateOf(false) }
     
     // Update local state when external initialValue changes (e.g. from DB reload), 
     // BUT ONLY IF we are not currently focused/typing.
-    LaunchedEffect(initialValue) {
+    LaunchedEffect(initialValue, key) {
         if (text != initialValue && !isFocused) {
              text = initialValue
-        }
-    }
-
-    // Debounce Logic: When text changes, wait X ms then call onValueChange
-    // Only trigger if we are focused (user is typing) AND text is actually new
-    LaunchedEffect(text) {
-        if (text != initialValue && isFocused) {
-            kotlinx.coroutines.delay(debounceTime)
-            // Double check if we are still focused (user didn't just click away/Add)
-            if (isFocused) {
-                onValueChange(text)
-            }
-        }
-    }
-
-    // CRITICAL: Flush value immediately on focus loss (e.g. user clicked '+' or another field)
-    LaunchedEffect(isFocused) {
-        if (!isFocused && text != initialValue) {
-            onValueChange(text)
         }
     }
 
@@ -616,6 +603,7 @@ fun DebouncedCompactInputBox(
         value = text,
         onValueChange = { newText ->
             text = newText
+            onValueChange(newText)
         },
         modifier = modifier,
         keyboardOptions = keyboardOptions,

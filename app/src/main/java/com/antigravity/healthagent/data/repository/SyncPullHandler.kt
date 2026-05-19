@@ -274,35 +274,27 @@ class SyncPullHandler @Inject constructor(
                         }
 
                         // --- PHASE 2: TEAMWORK SYNC (AUTOMATIC) ---
+                        val teammateHouses = mutableListOf<House>()
                         if (!isTargetDifferentUser) {
                             try {
-                                val activeBlocks = houseDao.getActiveBlockNumbers()
-                                if (activeBlocks.isNotEmpty()) {
-                                    val currentCiclo = cloudHouses.firstOrNull()?.context?.ciclo ?: run {
-                                        val cal = java.util.Calendar.getInstance()
-                                        val month = cal.get(java.util.Calendar.MONTH)
-                                        when (month) {
-                                            java.util.Calendar.JANUARY, java.util.Calendar.FEBRUARY -> "1º"
-                                            java.util.Calendar.MARCH, java.util.Calendar.APRIL -> "2º"
-                                            java.util.Calendar.MAY, java.util.Calendar.JUNE -> "3º"
-                                            java.util.Calendar.JULY, java.util.Calendar.AUGUST -> "4º"
-                                            java.util.Calendar.SEPTEMBER, java.util.Calendar.OCTOBER -> "5º"
-                                            java.util.Calendar.NOVEMBER, java.util.Calendar.DECEMBER -> "6º"
-                                            else -> "1º"
-                                        }
-                                    }
-                                    
-                                    val teamHouses = activeBlocks.chunked(10).flatMap { blockChunk ->
+                                val activeBairros = (houseDao.getActiveBairros(uid) + cloudHouses.map { it.address.bairro })
+                                    .map { it.trim().uppercase() }
+                                    .filter { it.isNotBlank() }
+                                    .distinct()
+                                if (activeBairros.isNotEmpty()) {
+                                    val teamHouses = activeBairros.chunked(10).flatMap { bairroChunk ->
                                         firestore.collectionGroup("houses")
-                                            .whereIn("blockNumber", blockChunk)
-                                            .whereEqualTo("ciclo", currentCiclo)
+                                            .whereIn("bairro", bairroChunk)
                                             .get().await().documents
                                     }.mapNotNull { it.toHouseSafe(it.getString("agentUid") ?: "", it.getString("agentName") ?: "") }
                                     
                                     val remoteForeignHouses = teamHouses.filter { it.agentUid != uid }
                                     
+                                    val activeBlocks = (houseDao.getActiveBlockNumbers() + cloudHouses.map { it.address.blockNumber })
+                                        .filter { it.isNotBlank() }
+                                        .distinct()
                                     val localTeamHouses = houseDao.getHousesByBlocks(activeBlocks).filter { 
-                                        it.agentUid.isNotBlank() && it.agentUid != uid && it.context.ciclo == currentCiclo 
+                                        it.agentUid.isNotBlank() && it.agentUid != uid && it.address.bairro.trim().uppercase() in activeBairros
                                     }
                                     val remoteKeys = remoteForeignHouses.map { it.generateNaturalKey() }.toSet()
                                     
@@ -315,6 +307,12 @@ class SyncPullHandler @Inject constructor(
                                     }
                                     
                                     cloudHouses.addAll(remoteForeignHouses)
+
+                                    // Refresh local team houses after deletions to accurately reconstruct local IDs
+                                    val remainingTeammateHouses = houseDao.getHousesByBlocks(activeBlocks).filter { 
+                                        it.agentUid.isNotBlank() && it.agentUid != uid && it.address.bairro.trim().uppercase() in activeBairros
+                                    }
+                                    teammateHouses.addAll(remainingTeammateHouses)
                                 }
                             } catch (e: Exception) {
                                 android.util.Log.w("SyncPullHandler", "Teamwork sync failed (skipping): ${e.message}")
@@ -358,7 +356,8 @@ class SyncPullHandler @Inject constructor(
                         cloudDeletedActivities.removeAll { it in validCloudActivityKeys }
                         
                         val allLocalHouses = houseDao.getHousesByAgentSnapshot(uid)
-                        var allLocalHousesWithKeys = allLocalHouses.map { HouseWithKeys(it) }
+                        val combinedLocalHouses = allLocalHouses + teammateHouses
+                        var allLocalHousesWithKeys = combinedLocalHouses.map { HouseWithKeys(it) }
                         
                         val cloudDeletedIdentities = cloudDeletedHouses.mapNotNull { deletedKey ->
                             val parts = deletedKey.split("_")
@@ -371,6 +370,7 @@ class SyncPullHandler @Inject constructor(
 
                         val housesToDelete = allLocalHousesWithKeys.filter { wrapper ->
                             val house = wrapper.house
+                            if (house.agentUid != uid) return@filter false // Teammate deletions are handled in Phase 2
                             val key = wrapper.naturalKey
                             val identityKey = wrapper.identityKey
                             
@@ -481,16 +481,19 @@ class SyncPullHandler @Inject constructor(
                                     existing = localIdentityMap[identityKey]?.find { it.house.agentUid == cloudHouse.agentUid }?.house
                                     
                                     if (existing == null) {
-                                        val normalizedDate = cloudHouse.data.replace("/", "-")
-                                        val dateKey = "$normalizedDate|$uid"
-                                        val dayActivity = localActivities[dateKey]?.firstOrNull()
-                                        val cloudActivity = activitiesDelta.find { it.date.replace("/", "-") == normalizedDate }
-                                        
-                                        val isCloudUnlocked = cloudActivity?.isManualUnlock == true
-                                        val isLocallyClosed = dayActivity?.isClosed == true && dayActivity.isManualUnlock != true
-                                        
-                                        if (isLocallyClosed && !isCloudUnlocked && !cloudHouse.editedByAdmin && !isTargetDifferentUser) {
-                                            return@mapNotNull null
+                                        val isTeammate = cloudHouse.agentUid.isNotBlank() && cloudHouse.agentUid != uid
+                                        if (!isTeammate) {
+                                            val normalizedDate = cloudHouse.data.replace("/", "-")
+                                            val dateKey = "$normalizedDate|$uid"
+                                            val dayActivity = localActivities[dateKey]?.firstOrNull()
+                                            val cloudActivity = activitiesDelta.find { it.date.replace("/", "-") == normalizedDate }
+                                            
+                                            val isCloudUnlocked = cloudActivity?.isManualUnlock == true
+                                            val isLocallyClosed = dayActivity?.isClosed == true && dayActivity.isManualUnlock != true
+                                            
+                                            if (isLocallyClosed && !isCloudUnlocked && !cloudHouse.editedByAdmin && !isTargetDifferentUser) {
+                                                return@mapNotNull null
+                                            }
                                         }
                                     }
                                 }
@@ -507,10 +510,11 @@ class SyncPullHandler @Inject constructor(
                                     }
                                 }
 
+                                val isTeammate = cloudHouse.agentUid.isNotBlank() && cloudHouse.agentUid != uid
                                 cloudHouse.copy(
                                     id = existing?.id ?: 0,
-                                    agentName = finalAgentName,
-                                    agentUid = uid,
+                                    agentName = if (isTeammate) cloudHouse.agentName else finalAgentName,
+                                    agentUid = if (isTeammate) cloudHouse.agentUid else uid,
                                     isSynced = true
                                 )
                             }

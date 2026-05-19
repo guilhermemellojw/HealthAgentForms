@@ -32,6 +32,7 @@ class RgViewModel @Inject constructor(
 
     private val _agentName = MutableStateFlow("")
     private val _currentUserUid = MutableStateFlow<String?>(null)
+    val currentUserUid: StateFlow<String?> = _currentUserUid.asStateFlow()
     private val _remoteAgentUid = MutableStateFlow<String?>(null)
     private val _isAdmin = MutableStateFlow(false)
 
@@ -83,6 +84,20 @@ class RgViewModel @Inject constructor(
                 }
             }
         }
+
+        viewModelScope.launch {
+            allHousesFlow
+                .filter { it.isNotEmpty() }
+                .first()
+                .let { houses ->
+                    if (_selectedRgBairro.value.isBlank()) {
+                        val lastBairro = houses.maxByOrNull { it.createdAt }?.address?.bairro?.trim()?.uppercase()
+                        if (!lastBairro.isNullOrBlank()) {
+                            _selectedRgBairro.value = lastBairro
+                        }
+                    }
+                }
+        }
     }
 
     private val allHousesFlow: Flow<List<House>> = combine(
@@ -121,11 +136,23 @@ class RgViewModel @Inject constructor(
     }.flatMapLatest { it }
     .flowOn(Dispatchers.Default)
 
-    val availableYears: StateFlow<List<String>> = combine(
-        allHousesFlow, globalHousesFlow, _isAdmin
-    ) { all, global, isAdminRole ->
-        val housesToUse = if (isAdminRole) global else all
-        housesToUse.mapNotNull {
+    private val filteredHousesFlow: Flow<List<House>> = combine(
+        allHousesFlow,
+        globalHousesFlow,
+        participatoryHousesFlow,
+        _isAdmin,
+        _remoteAgentUid
+    ) { all, global, participatory, isAdminRole, remoteUid ->
+        val hasRemoteAgent = remoteUid != null
+        if (isAdminRole && !hasRemoteAgent) {
+            all
+        } else {
+            participatory
+        }
+    }.flowOn(Dispatchers.Default)
+
+    val availableYears: StateFlow<List<String>> = filteredHousesFlow.map { houses ->
+        houses.mapNotNull {
             try {
                 val d = dateFormatter.parse(it.data)
                 if (d != null) {
@@ -137,25 +164,11 @@ class RgViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(Calendar.getInstance().get(Calendar.YEAR).toString()))
 
     val rgBlocks: StateFlow<List<BlockSegment>> = combine(
-        allHousesFlow,
-        globalHousesFlow,
-        participatoryHousesFlow,
+        filteredHousesFlow,
         _selectedRgBairro,
-        _rgYear,
-        _isAdmin,
-        _remoteAgentUid
-    ) { args ->
-        val h = args[0] as List<House>
-        val global = args[1] as List<House>
-        val participatory = args[2] as List<House>
-        val b = args[3] as String
-        val y = args[4] as String
-        val isAdminRole = args[5] as Boolean
-        val remoteUid = args[6] as String?
-
-        val hasRemoteAgent = remoteUid != null
-        val filtered = if (isAdminRole && !hasRemoteAgent) h else if (isAdminRole && hasRemoteAgent) global else participatory
-        getRGBlocksUseCase(filtered, b, y)
+        _rgYear
+    ) { houses, b, y ->
+        getRGBlocksUseCase(houses, b, y)
     }
     .flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -165,10 +178,9 @@ class RgViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val rgBairros: StateFlow<List<String>> = combine(
-        allHousesFlow, globalHousesFlow, _rgYear, _isAdmin
-    ) { all, global, year, isAdminRole ->
-        val housesToUse = if (isAdminRole) global else all
-        filterByYear(housesToUse, year)
+        filteredHousesFlow, _rgYear
+    ) { houses, year ->
+        filterByYear(houses, year)
             .map { it.address.bairro.trim().uppercase() }
             .distinct()
             .sorted()

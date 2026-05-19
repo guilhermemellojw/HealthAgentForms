@@ -79,7 +79,7 @@ class GetRGBlocksUseCase @Inject constructor() {
                 { it.id }
             ))
 
-        // 3. GROUP BY BLOCK & CREATE SEGMENTS
+        // 3. GROUP BY BLOCK AND CHRONOLOGICALLY PARTITION INTO SEGMENTS
         val blockGroups = sortedVisits.groupBy { 
             it.address.blockNumber.normalize() to it.address.blockSequence.normalize() 
         }
@@ -88,28 +88,71 @@ class GetRGBlocksUseCase @Inject constructor() {
             it.address.blockNumber.normalize() to it.address.blockSequence.normalize() 
         }.distinct()
 
-        return blockOrder.map { (bNum, bSeq) ->
-            val blockHouses = blockGroups[bNum to bSeq] ?: emptyList()
-            val lastHouse = blockHouses.lastOrNull()
-            
-            // Implicit Conclusion Logic (Global Parity):
-            // A block is concluded if it has a manual flag OR if it was "left behind" 
-            // in the global percurso of the agent(s).
-            val lastHouseId = lastHouse?.id ?: -1
-            val indexOfLastInGlobal = globalSortedVisits.indexOfLast { it.id == lastHouseId }
-            val isImplicitlyConcluded = indexOfLastInGlobal != -1 && indexOfLastInGlobal < globalSortedVisits.lastIndex
+        val allSegments = mutableListOf<BlockSegment>()
 
-            BlockSegment(
-                blockNumber = bNum,
-                blockSequence = bSeq,
-                startDate = blockHouses.firstOrNull()?.data ?: "",
-                endDate = lastHouse?.data ?: "",
-                isConcluded = blockHouses.any { it.quarteiraoConcluido || it.localidadeConcluida } || isImplicitlyConcluded,
-                // The date of the report is the date of the LAST house in the list
-                conclusionDate = lastHouse?.data ?: "",
-                houses = blockHouses,
-                participatingAgents = blockHouses.map { h -> h.agentName }.distinct().filter { name -> name.isNotBlank() }
-            )
+        for ((bNum, bSeq) in blockOrder) {
+            val unsortedBlockHouses = blockGroups[bNum to bSeq] ?: emptyList()
+            
+            // Compute the earliest visit timestamp for each agent on each day inside this block
+            val agentEarliestTimeOnDay = unsortedBlockHouses
+                .groupBy { getTimestamp(it.data) to it.agentUid }
+                .mapValues { (_, houses) ->
+                    houses.minOfOrNull { it.createdAt } ?: Long.MAX_VALUE
+                }
+
+            // Sort the block houses chronologically by day, then by the agent who started first on that day,
+            // then by listOrder, and fallback to SQLite ID.
+            val blockHouses = unsortedBlockHouses.sortedWith(compareBy(
+                { getTimestamp(it.data) },
+                { agentEarliestTimeOnDay[getTimestamp(it.data) to it.agentUid] ?: Long.MAX_VALUE },
+                { it.agentName },
+                { it.listOrder },
+                { it.id }
+            ))
+            
+            // Partition houses of this block into chronological segments based on manual completion flags
+            val partitions = mutableListOf<MutableList<House>>()
+            var currentPartition = mutableListOf<House>()
+            
+            for (house in blockHouses) {
+                currentPartition.add(house)
+                if (house.quarteiraoConcluido || house.localidadeConcluida) {
+                    partitions.add(currentPartition)
+                    currentPartition = mutableListOf()
+                }
+            }
+            if (currentPartition.isNotEmpty()) {
+                partitions.add(currentPartition)
+            }
+
+            // Map each partition to a BlockSegment
+            for (partition in partitions) {
+                val lastHouse = partition.lastOrNull()
+                val lastHouseId = lastHouse?.id ?: -1
+                
+                // Implicit Conclusion Logic (Global Parity):
+                // A segment is implicitly concluded if its last house is not the last house 
+                // in the global percurso of the agent(s).
+                val indexOfLastInGlobal = globalSortedVisits.indexOfLast { it.id == lastHouseId }
+                val isImplicitlyConcluded = indexOfLastInGlobal != -1 && indexOfLastInGlobal < globalSortedVisits.lastIndex
+                
+                val isConcluded = partition.any { it.quarteiraoConcluido || it.localidadeConcluida } || isImplicitlyConcluded
+
+                allSegments.add(
+                    BlockSegment(
+                        blockNumber = bNum,
+                        blockSequence = bSeq,
+                        startDate = partition.firstOrNull()?.data ?: "",
+                        endDate = lastHouse?.data ?: "",
+                        isConcluded = isConcluded,
+                        conclusionDate = lastHouse?.data,
+                        houses = partition,
+                        participatingAgents = partition.map { h -> h.agentName }.distinct().filter { name -> name.isNotBlank() }
+                    )
+                )
+            }
         }
+
+        return allSegments
     }
 }
