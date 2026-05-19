@@ -38,6 +38,11 @@ class SyncAdminHandler @Inject constructor(
                 database.customStreetDao().deleteAll()
                 database.agentCacheDao().clearAgents()
                 database.agentCacheDao().clearSummaries()
+                try {
+                    database.openHelper.writableDatabase.execSQL("DELETE FROM sqlite_sequence")
+                } catch (e: Exception) {
+                    android.util.Log.w("SyncAdminHandler", "Failed to reset sqlite_sequence: ${e.message}")
+                }
             }
             settingsManager.setLastSyncTimestamp(0L)
             Result.success(Unit)

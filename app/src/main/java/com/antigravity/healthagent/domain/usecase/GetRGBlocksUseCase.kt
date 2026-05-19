@@ -4,6 +4,8 @@ import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.ui.home.BlockSegment
 import com.antigravity.healthagent.utils.normalize
+import com.antigravity.healthagent.utils.healBairro
+import com.antigravity.healthagent.utils.healAgentName
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -38,11 +40,11 @@ class GetRGBlocksUseCase @Inject constructor() {
     ): List<BlockSegment> {
         if (selectedBairro.isBlank()) return emptyList()
 
-        val normalizedSelectedBairro = selectedBairro.normalize()
+        val healedSelectedBairro = selectedBairro.healBairro()
 
         // 1. EARLY FILTERING: Focus only on the selected neighborhood and year
         val initialFiltered = allHouses.filter { house ->
-            val matchesBairro = house.address.bairro.normalize() == normalizedSelectedBairro
+            val matchesBairro = house.address.bairro.healBairro() == healedSelectedBairro
             val matchesYear = if (selectedYear.isBlank()) true else {
                 synchronized(dateFormatter) {
                     try {
@@ -147,7 +149,7 @@ class GetRGBlocksUseCase @Inject constructor() {
                         isConcluded = isConcluded,
                         conclusionDate = lastHouse?.data,
                         houses = partition,
-                        participatingAgents = partition.map { h -> h.agentName }.distinct().filter { name -> name.isNotBlank() }
+                        participatingAgents = partition.map { h -> h.agentName.healAgentName() }.distinct().filter { name -> name.isNotBlank() }
                     )
                 )
             }

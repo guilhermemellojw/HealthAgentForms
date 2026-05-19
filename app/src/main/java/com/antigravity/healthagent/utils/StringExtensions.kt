@@ -188,3 +188,52 @@ fun String.removeAccents(): String {
     val normalized = java.text.Normalizer.normalize(this, java.text.Normalizer.Form.NFD)
     return Regex("\\p{InCombiningDiacriticalMarks}+").replace(normalized, "")
 }
+
+/**
+ * Parses a date string supporting both dd-MM-yyyy and yyyy-MM-dd (with slash or dash)
+ * into a comparable numeric representation (yyyyMMdd).
+ */
+fun String.toNumericDate(): Long? {
+    if (this.isBlank()) return null
+    val clean = this.replace("/", "-").trim()
+    val parts = clean.split("-")
+    if (parts.size != 3) return null
+    return try {
+        val part0 = parts[0].toInt()
+        val part1 = parts[1].toInt()
+        val part2 = parts[2].toInt()
+        if (part0 > 1000) {
+            // yyyy-MM-dd
+            part0.toLong() * 10000 + part1.toLong() * 100 + part2.toLong()
+        } else if (part2 > 1000) {
+            // dd-MM-yyyy
+            part2.toLong() * 10000 + part1.toLong() * 100 + part0.toLong()
+        } else {
+            null
+        }
+    } catch (e: Exception) {
+        null
+    }
+}
+
+/**
+ * Resolves small neighborhood name discrepancies (spelling, casing, accents) by matching
+ * against master lists.
+ */
+fun String.healBairro(): String {
+    val normalized = this.normalize()
+    return com.antigravity.healthagent.utils.AppConstants.BAIRROS.find {
+        it.removeAccents().equals(normalized.removeAccents(), ignoreCase = true)
+    } ?: normalized
+}
+
+/**
+ * Resolves small agent name discrepancies by matching against master constants.
+ */
+fun String.healAgentName(): String {
+    val normalized = this.normalize()
+    return com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES.find {
+        it.removeAccents().equals(normalized.removeAccents(), ignoreCase = true)
+    } ?: normalized
+}
+

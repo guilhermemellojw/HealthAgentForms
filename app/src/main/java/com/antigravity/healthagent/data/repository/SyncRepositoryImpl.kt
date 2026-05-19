@@ -96,8 +96,13 @@ class SyncRepositoryImpl @Inject constructor(
 
     override suspend fun performDataCleanup(): Result<Unit> = syncAdminHandler.performDataCleanup()
 
-    override suspend fun restoreLocalData(houses: List<House>, activities: List<DayActivity>, agentUid: String?): Result<Unit> =
-        syncAdminHandler.restoreLocalData(houses, activities, agentUid)
+    override suspend fun restoreLocalData(houses: List<House>, activities: List<DayActivity>, agentUid: String?): Result<Unit> {
+        return withTimeoutOrNull(30000L) {
+            syncMutex.withLock {
+                syncAdminHandler.restoreLocalData(houses, activities, agentUid)
+            }
+        } ?: Result.failure(Exception("Tempo esgotado ao tentar restaurar dados (Database busy)"))
+    }
 
     override suspend fun fetchSystemSettings(): Result<Map<String, Any>> = syncAdminHandler.fetchSystemSettings()
 

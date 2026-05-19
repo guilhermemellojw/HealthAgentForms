@@ -13,6 +13,8 @@ import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
 
+import com.antigravity.healthagent.utils.toNumericDate
+
 data class StatDetail(
     val agentName: String,
     val agentEmail: String,
@@ -263,45 +265,34 @@ class SupervisorViewModel @Inject constructor(
     }
 
     private fun filterFutureData(agents: List<AgentData>): List<AgentData> {
-        val cal = Calendar.getInstance()
+        val tz = java.util.TimeZone.getTimeZone("America/Sao_Paulo")
+        val cal = Calendar.getInstance(tz)
         val hourOfDay = cal.get(Calendar.HOUR_OF_DAY)
         
-        val filterCal = Calendar.getInstance()
+        val filterCal = Calendar.getInstance(tz)
         if (hourOfDay < 12) {
             filterCal.add(Calendar.DAY_OF_YEAR, -1) // Limit to yesterday
         }
         
-        val limitStr = SimpleDateFormat("yyyyMMdd", Locale.US).format(filterCal.time)
+        val limitStr = SimpleDateFormat("yyyyMMdd", Locale.US).apply { timeZone = tz }.format(filterCal.time)
         val limitInt = limitStr.toInt()
 
         return agents.map { agent ->
             val filteredHouses = agent.houses.filter { house ->
-                try {
-                    val dateStr = house.data.replace("/", "-")
-                    val parts = dateStr.split("-")
-                    if (parts.size == 3) {
-                        val houseDateStr = String.format("%04d%02d%02d", parts[2].toInt(), parts[1].toInt(), parts[0].toInt())
-                        houseDateStr.toInt() <= limitInt
-                    } else false // Safe by default: hide malformed
-                } catch (e: Exception) { false } // Safe by default: hide error
+                val numericDate = house.data.toNumericDate()
+                numericDate != null && numericDate <= limitInt
             }
             
             val filteredActivities = agent.activities.filter { activity ->
-                try {
-                    val dateStr = activity.date.replace("/", "-")
-                    val parts = dateStr.split("-")
-                    if (parts.size == 3) {
-                        val activityDateStr = String.format("%04d%02d%02d", parts[2].toInt(), parts[1].toInt(), parts[0].toInt())
-                        activityDateStr.toInt() <= limitInt
-                    } else false // Safe by default
-                } catch (e: Exception) { false } // Safe by default
+                val numericDate = activity.date.toNumericDate()
+                numericDate != null && numericDate <= limitInt
             }
             
             // Smart Summary Privacy:
             // We only show the summary if it belongs to a PAST month.
             // If it's the current month, we nullify it to force recalculation from raw data,
             // ensuring the 12:00 PM embargo and future production filters are respected.
-            val now = Calendar.getInstance()
+            val now = Calendar.getInstance(tz)
             val cMonth = now.get(Calendar.MONTH) + 1
             val cYear = now.get(Calendar.YEAR)
             
@@ -432,9 +423,10 @@ class SupervisorViewModel @Inject constructor(
         val endT = weekEnd?.time ?: Long.MAX_VALUE
         
         // OPTIMIZATION: Calculate embargo limit ONCE outside the filter loop
-        val nowCal = Calendar.getInstance()
+        val tz = java.util.TimeZone.getTimeZone("America/Sao_Paulo")
+        val nowCal = Calendar.getInstance(tz)
         val hourOfDay = nowCal.get(Calendar.HOUR_OF_DAY)
-        val limitCal = Calendar.getInstance()
+        val limitCal = Calendar.getInstance(tz)
         if (hourOfDay < 12) {
             limitCal.add(Calendar.DAY_OF_YEAR, -1)
         }
@@ -442,34 +434,29 @@ class SupervisorViewModel @Inject constructor(
 
         // Cache weekly boundaries in numeric format for performance
         val startNumeric = if (weekStart != null) {
-            val c = Calendar.getInstance().apply { time = Date(startT) }
+            val c = Calendar.getInstance(tz).apply { time = Date(startT) }
             c.get(Calendar.YEAR).toLong() * 10000 + (c.get(Calendar.MONTH) + 1).toLong() * 100 + c.get(Calendar.DAY_OF_MONTH).toLong()
         } else 0L
 
         val endNumeric = if (weekEnd != null) {
-            val c = Calendar.getInstance().apply { time = Date(endT) }
+            val c = Calendar.getInstance(tz).apply { time = Date(endT) }
             c.get(Calendar.YEAR).toLong() * 10000 + (c.get(Calendar.MONTH) + 1).toLong() * 100 + c.get(Calendar.DAY_OF_MONTH).toLong()
         } else Long.MAX_VALUE
 
         // Define the date filter
         val dateFilter: (String) -> Boolean = { dateStr ->
-            try {
-                val normalized = dateStr.replace("/", "-")
-                val parts = normalized.split("-")
-                if (parts.size == 3) {
-                    val numericDate = parts[2].toLong() * 10000 + parts[1].toLong() * 100 + parts[0].toLong()
-                    
-                    // Filter out any data beyond the allowed limit (Safe by default: > limitNumeric is hidden)
-                    if (numericDate > limitNumeric) {
-                        false
-                    } else if (weekStart != null && weekEnd != null) {
-                        // If in weekly view, also check range
-                        numericDate in startNumeric..endNumeric
-                    } else {
-                        true // In monthly/yearly view, any date <= limit is fine
-                    }
-                } else false // Malformed date: hide it
-            } catch (e: Exception) { false } // Error parsing: hide it
+            val numericDate = dateStr.toNumericDate()
+            if (numericDate != null) {
+                // Filter out any data beyond the allowed limit (Safe by default: > limitNumeric is hidden)
+                if (numericDate > limitNumeric) {
+                    false
+                } else if (weekStart != null && weekEnd != null) {
+                    // If in weekly view, also check range
+                    numericDate in startNumeric..endNumeric
+                } else {
+                    true // In monthly/yearly view, any date <= limit is fine
+                }
+            } else false // Malformed date: hide it
         }
 
         var totalWorked = 0
