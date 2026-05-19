@@ -378,7 +378,7 @@ object SemanalPdfGenerator {
         val dash = "—"
 
         // --- O(N) Pre-calculations ---
-        val allHousesSorted = allHouses.sortedBy { it.listOrder }
+        val allHousesSorted = allHouses.filter { weekDates.contains(it.data) }.sortedBy { it.listOrder }
         val blockToLastIndex = mutableMapOf<String, Int>()
         allHousesSorted.forEachIndexed { index, h ->
             val key = "${h.address.blockNumber}|${h.address.blockSequence}|${h.address.bairro.trim().uppercase()}"
@@ -464,7 +464,7 @@ object SemanalPdfGenerator {
                     val pe = dayHouses.count { it.propertyType == PropertyType.PE && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
                     val dayTotalVisits = res + com + tb + out + pe
                     
-                    val fec = dayHouses.count { it.situation == Situation.F }
+                    val fec = dayHouses.count { it.situation == Situation.F || it.situation == Situation.A || it.situation == Situation.V }
                     val rec = dayHouses.count { it.situation == Situation.REC }
                     val recup = 0 // Placeholder
                     val samples = 0 

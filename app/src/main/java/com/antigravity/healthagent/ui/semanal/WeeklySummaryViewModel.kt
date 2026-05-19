@@ -400,7 +400,7 @@ class WeeklySummaryViewModel @Inject constructor(
             // Collect houses for the week
             val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value ?: ""
             val filteredHouses = repository.getAllHousesOnce(effectiveUid)
-                .filter { it.agentName.uppercase() == currentAgent.uppercase() }
+                .filter { it.agentUid == effectiveUid || it.agentName.uppercase() == currentAgent.uppercase() }
                 
             val activities = summary.associate { it.date to it.status }
             SemanalPdfGenerator.generatePdf(context, weekDates, filteredHouses, activities, currentAgent)
@@ -416,7 +416,7 @@ class WeeklySummaryViewModel @Inject constructor(
             
             val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value ?: ""
             val filteredHouses = repository.getAllHousesOnce(effectiveUid)
-                .filter { it.agentName.uppercase() == currentAgent.uppercase() && dates.contains(it.data) }
+                .filter { (it.agentUid == effectiveUid || it.agentName.uppercase() == currentAgent.uppercase()) && dates.contains(it.data) }
                 
             val weeklyData = filteredHouses.groupBy { it.data }
             val activities = weeklySummary.value.associate { it.date to it.status }
