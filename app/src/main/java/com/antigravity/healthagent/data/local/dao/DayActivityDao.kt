@@ -85,10 +85,32 @@ interface DayActivityDao {
     @Query("SELECT * FROM day_activities WHERE agentUid = '' OR agentUid IS NULL")
     suspend fun getAllOrphanActivities(): List<DayActivity>
 
-    @Query("SELECT * FROM day_activities WHERE agentUid != :targetUid AND (UPPER(agentName) = UPPER(:email) OR UPPER(agentName) = UPPER(:prefix) OR UPPER(agentName) = UPPER(:properName) OR (agentUid = '' AND UPPER(agentName) = 'AGENTE'))")
+    @Query("""
+        SELECT * FROM day_activities 
+        WHERE agentUid != :targetUid 
+        AND (
+            UPPER(agentName) = UPPER(:email) 
+            OR UPPER(agentName) = UPPER(:prefix) 
+            OR UPPER(agentName) = UPPER(:properName) 
+            OR (agentName != '' AND UPPER(:properName) LIKE '%' || UPPER(agentName) || '%')
+            OR (agentName != '' AND UPPER(:prefix) LIKE '%' || UPPER(agentName) || '%')
+            OR (agentUid = '' AND UPPER(agentName) = 'AGENTE')
+        )
+    """)
     suspend fun getActivitiesToReclaim(email: String, prefix: String, targetUid: String, properName: String): List<DayActivity>
 
-    @Query("UPDATE OR REPLACE day_activities SET agentUid = :targetUid, isSynced = 0, lastUpdated = :now WHERE agentUid != :targetUid AND (UPPER(agentName) = UPPER(:agentName) OR UPPER(agentName) = UPPER(:email) OR UPPER(agentName) = UPPER(:emailPrefix))")
+    @Query("""
+        UPDATE OR REPLACE day_activities 
+        SET agentUid = :targetUid, isSynced = 0, lastUpdated = :now 
+        WHERE agentUid != :targetUid 
+        AND (
+            UPPER(agentName) = UPPER(:agentName) 
+            OR UPPER(agentName) = UPPER(:email) 
+            OR UPPER(agentName) = UPPER(:emailPrefix)
+            OR (agentName != '' AND UPPER(:agentName) LIKE '%' || UPPER(agentName) || '%')
+            OR (agentName != '' AND UPPER(:emailPrefix) LIKE '%' || UPPER(agentName) || '%')
+        )
+    """)
     suspend fun reclaimActivities(agentName: String, email: String, emailPrefix: String, targetUid: String, now: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
 
     @Query("SELECT * FROM day_activities WHERE agentUid = :agentUid AND REPLACE(date, '/', '-') LIKE '%-' || :monthYearSuffix")

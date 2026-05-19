@@ -479,8 +479,14 @@ class HouseRepositoryImpl @Inject constructor(
         if (targetUid.isBlank()) return
         runInTransactionWithRetry {
             try {
+                val emailPrefix = email.substringBefore("@").uppercase()
+                val properName = agentName.trim().uppercase()
+
                 // 1. Standardize Houses (Smarter Merge Migration)
-                val allOrphans = houseDao.getAllOrphanHouses()
+                val orphans = houseDao.getAllOrphanHouses()
+                val misattributed = houseDao.getHousesToReclaim(email, emailPrefix, targetUid, properName)
+                val allOrphans = (orphans + misattributed).distinctBy { it.id }
+                
                 val targetHouses = houseDao.getHousesByAgentSnapshot(targetUid)
                 
                 allOrphans.forEach { house ->
@@ -507,7 +513,10 @@ class HouseRepositoryImpl @Inject constructor(
                 }
 
                 // 2. Smarter DayActivity Migration
-                val orphanActivities = dayActivityDao.getAllOrphanActivities()
+                val orphanActs = dayActivityDao.getAllOrphanActivities()
+                val misattributedActs = dayActivityDao.getActivitiesToReclaim(email, emailPrefix, targetUid, properName)
+                val orphanActivities = (orphanActs + misattributedActs).distinctBy { it.date }
+
                 orphanActivities.forEach { local ->
                         val conflict = getDayActivity(local.date, targetUid)
                         if (conflict != null) {

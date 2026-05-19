@@ -505,7 +505,13 @@ class HomeViewModel @Inject constructor(
 
     val boletimList: StateFlow<List<BoletimSummary>> = combine(allHousesFlow, globalSortedVisits, _agentName, _remoteAgentUid, _currentUserUid) { all, global, name, remoteUid, currentUid -> 
         val targetUid = remoteUid ?: currentUid
-        val personalHouses = all.filter { it.agentUid == targetUid || (it.agentUid.isEmpty() && it.agentName.uppercase() == name) }
+        val personalHouses = all.filter { house ->
+            house.agentUid == targetUid || (house.agentUid.isEmpty() && (
+                house.agentName.uppercase() == name || 
+                name.contains(house.agentName.uppercase()) ||
+                house.agentName.uppercase().contains(name)
+            ))
+        }
         val groupedByDate = personalHouses.groupBy { it.data }.toList().sortedByDescending { parseDate(it.first)?.time ?: 0L }
         
         groupedByDate.map { (date, houses) ->
@@ -1390,6 +1396,19 @@ class HomeViewModel @Inject constructor(
 
                             settingsManager.setLastSyncTimestamp(System.currentTimeMillis())
                             _syncStatus.update { SyncUiState.Success(System.currentTimeMillis()) }
+
+                            // SMART AUTO-DATE SELECTION: If today is empty after sync, auto-switch to the most recent work date
+                            val housesAfterSync = repository.getAllHousesOnce(uid)
+                            if (housesAfterSync.isNotEmpty()) {
+                                val todayStr = dateFormatter.format(Date())
+                                val hasTodayHouses = housesAfterSync.any { it.data == todayStr }
+                                if (!hasTodayHouses) {
+                                    val lastDate = housesAfterSync.mapNotNull { 
+                                        try { dateFormatter.parse(it.data) } catch (e: Exception) { null } 
+                                    }.maxOrNull()?.let { dateFormatter.format(it) } ?: todayStr
+                                    _data.value = lastDate
+                                }
+                            }
                         } else {
                             _syncStatus.update { SyncUiState.Error("Erro ao enviar: ${pushResult.exceptionOrNull()?.message}") }
                         }
@@ -1420,6 +1439,12 @@ class HomeViewModel @Inject constructor(
                         // SURGICAL CLEANUP: Auto-remove empty/broken houses after download
                         if (uid.isNotBlank()) {
                             cleanupBrokenHousesUseCase(uid)
+                            
+                            // IMMEDIATELY heal local data to ensure pulled legacy records are claimed
+                            val currentUser = settingsManager.cachedUser.first()
+                            val name = currentUser?.agentName ?: ""
+                            val email = currentUser?.email ?: ""
+                            repository.migrateLocalData(name, email, uid, isCurrentAgent = true)
                         }
 
                         settingsManager.setLastSyncTimestamp(System.currentTimeMillis())
@@ -1957,6 +1982,11 @@ class HomeViewModel @Inject constructor(
         }
 
         val original = houses.value.find { it.id == house.id }
+        if (original?.editedByAdmin == true && !isAdmin) {
+            _uiEvent.value = "Este imóvel foi homologado por um administrador e não pode ser editado."
+            soundManager.playWarning()
+            return
+        }
 
 
         // Limit Enforcement: Only block if CHANGING to worked and meta was reached.
@@ -2140,9 +2170,15 @@ class HomeViewModel @Inject constructor(
             return
         }
 
+        val isAdmin = _isAdmin.value
+        if (house.editedByAdmin && !isAdmin) {
+            _uiEvent.value = "Este imóvel foi homologado por um administrador e não pode ser excluído."
+            soundManager.playWarning()
+            return
+        }
+
         // LOCK ENFORCEMENT
         val isUnlocked = isWorkdayManualUnlock.value
-        val isAdmin = _isAdmin.value
         if (uiState.value.isDayClosed && !isUnlocked && !isAdmin) {
             _uiEvent.value = "Este dia está FECHADO. Desbloqueie para deletar."
             soundManager.playWarning()

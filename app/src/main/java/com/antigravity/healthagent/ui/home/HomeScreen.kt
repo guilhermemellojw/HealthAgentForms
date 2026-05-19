@@ -1032,6 +1032,7 @@ fun HomeScreen(
                         
                         val focusRequester = remember(house.id) { focusRequesters.getOrPut(house.id) { androidx.compose.ui.focus.FocusRequester() } }
                         val isBaseEnabled = if (uiState.isSupervisor) uiState.isAdmin else (!uiState.isDayClosed || uiState.isManualUnlock)
+                        val isLockedByAdmin = house.editedByAdmin && !uiState.isAdmin
                         HouseRowItem(
                             houseState = houseState,
                             onUpdate = onUpdate,
@@ -1046,7 +1047,7 @@ fun HomeScreen(
                             isSolarMode = uiState.isSolarMode,
                             focusRequester = focusRequester,
                             onGetLocation = onGetLocation,
-                            enabled = isBaseEnabled && houseState.isMine
+                            enabled = isBaseEnabled && houseState.isMine && !isLockedByAdmin
                         )
                         }
 

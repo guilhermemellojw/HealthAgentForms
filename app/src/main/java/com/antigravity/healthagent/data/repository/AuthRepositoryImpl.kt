@@ -208,7 +208,7 @@ class AuthRepositoryImpl @Inject constructor(
                     android.util.Log.e("AuthRepository", "Failed to create bootstrap admin profile or timed out", e2)
                 }
             }
-            return AuthUser(
+            val bootstrapUser = AuthUser(
                 uid = uid,
                 email = email,
                 displayName = firebaseUser.displayName,
@@ -217,6 +217,8 @@ class AuthRepositoryImpl @Inject constructor(
                 isAuthorized = true,
                 agentName = null
             )
+            settingsManager.saveUserProfile(bootstrapUser)
+            return bootstrapUser
         }
 
         // 1. Immediate Cache Check
@@ -331,7 +333,7 @@ class AuthRepositoryImpl @Inject constructor(
 
             if (isAdminEmail) {
                 android.util.Log.w("AuthRepository", "EMERGENCY: Admin mode via email match (Doc not found)")
-                return AuthUser(
+                val emergencyUser = AuthUser(
                     uid = uid,
                     email = email,
                     displayName = firebaseUser.displayName,
@@ -340,6 +342,8 @@ class AuthRepositoryImpl @Inject constructor(
                     isAuthorized = true,
                     agentName = null
                 )
+                settingsManager.saveUserProfile(emergencyUser)
+                return emergencyUser
             }
             
             // If still not exists and online, create new user
@@ -376,7 +380,7 @@ class AuthRepositoryImpl @Inject constructor(
                 }
             }
             
-            return AuthUser(
+            val newUserProfile = AuthUser(
                 uid = uid,
                 email = email,
                 displayName = firebaseUser.displayName,
@@ -385,6 +389,8 @@ class AuthRepositoryImpl @Inject constructor(
                 isAuthorized = isAuthorized,
                 agentName = null
             )
+            settingsManager.saveUserProfile(newUserProfile)
+            return newUserProfile
         }
         
         val roleStr = userDoc?.getString("role") ?: "AGENT"
@@ -465,7 +471,7 @@ class AuthRepositoryImpl @Inject constructor(
 
     private suspend fun getAdminFallback(firebaseUser: FirebaseUser, uid: String, email: String): AuthUser {
         android.util.Log.i("AuthRepository", "Returning safety admin fallback for $email")
-        return AuthUser(
+        val fallbackUser = AuthUser(
             uid = uid,
             email = email,
             displayName = firebaseUser.displayName,
@@ -474,6 +480,8 @@ class AuthRepositoryImpl @Inject constructor(
             isAuthorized = true,
             agentName = null
         )
+        settingsManager.saveUserProfile(fallbackUser)
+        return fallbackUser
     }
 
 

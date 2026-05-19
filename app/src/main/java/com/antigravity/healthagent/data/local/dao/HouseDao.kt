@@ -111,7 +111,18 @@ interface HouseDao {
     @Query("UPDATE OR REPLACE houses SET agentName = :properName, isSynced = 0, lastUpdated = :now WHERE agentUid = :uid AND agentName LIKE '%@%'")
     suspend fun fixEmailNamesForUid(uid: String, properName: String, now: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
 
-    @Query("SELECT * FROM houses WHERE agentUid != :targetUid AND (UPPER(agentName) = UPPER(:email) OR UPPER(agentName) = UPPER(:prefix) OR UPPER(agentName) = UPPER(:properName) OR (agentUid = '' AND UPPER(agentName) = 'AGENTE'))")
+    @Query("""
+        SELECT * FROM houses 
+        WHERE agentUid != :targetUid 
+        AND (
+            UPPER(agentName) = UPPER(:email) 
+            OR UPPER(agentName) = UPPER(:prefix) 
+            OR UPPER(agentName) = UPPER(:properName) 
+            OR (agentName != '' AND UPPER(:properName) LIKE '%' || UPPER(agentName) || '%')
+            OR (agentName != '' AND UPPER(:prefix) LIKE '%' || UPPER(agentName) || '%')
+            OR (agentUid = '' AND UPPER(agentName) = 'AGENTE')
+        )
+    """)
     suspend fun getHousesToReclaim(email: String, prefix: String, targetUid: String, properName: String): List<House>
 
     @Query("SELECT * FROM houses WHERE agentUid = '' OR agentUid IS NULL")
@@ -182,7 +193,19 @@ interface HouseDao {
     """)
     suspend fun getEmptyHouses(agentUid: String): List<House>
 
-    @Query("SELECT * FROM houses WHERE agentUid = :agentUid OR (agentUid = '' AND UPPER(agentName) = UPPER(:agentName)) ORDER BY listOrder ASC")
+    @Query("""
+        SELECT * FROM houses 
+        WHERE agentUid = :agentUid 
+        OR (
+            (agentUid = '' OR agentUid IS NULL) 
+            AND (
+                UPPER(agentName) = UPPER(:agentName)
+                OR (agentName != '' AND UPPER(:agentName) LIKE '%' || UPPER(agentName) || '%')
+                OR (agentName != '' AND UPPER(agentName) LIKE '%' || UPPER(:agentName) || '%')
+            )
+        )
+        ORDER BY listOrder ASC
+    """)
     fun getHousesByAgentWithOrphans(agentUid: String, agentName: String): Flow<List<House>>
 
     @Query("""

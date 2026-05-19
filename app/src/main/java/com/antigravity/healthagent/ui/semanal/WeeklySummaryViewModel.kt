@@ -48,6 +48,7 @@ class WeeklySummaryViewModel @Inject constructor(
     private val _currentUserUid = MutableStateFlow<String?>(null)
     private val _remoteAgentUid = MutableStateFlow<String?>(null)
     private val _isAdmin = MutableStateFlow(false)
+    val isAdmin: StateFlow<Boolean> = _isAdmin.asStateFlow()
 
     private val _uiEvent = MutableStateFlow<String?>(null)
     val uiEvent: StateFlow<String?> = _uiEvent.asStateFlow()
@@ -144,8 +145,9 @@ class WeeklySummaryViewModel @Inject constructor(
             
             val activity = activities.find { it.date.replace("/", "-") == date.replace("/", "-") }
             val status = activity?.status?.ifBlank { "NORMAL" } ?: "NORMAL"
+            val editedByAdmin = activity?.editedByAdmin ?: false
             
-            DaySummary(date, dayHouses.size, totalWorked, status)
+            DaySummary(date, dayHouses.size, totalWorked, status, editedByAdmin)
         }
     }
     .flowOn(Dispatchers.Default)
@@ -230,6 +232,10 @@ class WeeklySummaryViewModel @Inject constructor(
                         .associateBy { it.date.replace("/", "-") }
                     
                     val existing = allActivities[date]
+                    if (existing?.editedByAdmin == true && !_isAdmin.value) {
+                        rippleError = "Este dia foi homologado por um administrador e não pode ter seu status alterado."
+                        throw Exception(rippleError)
+                    }
                     val oldStatus = existing?.status ?: "NORMAL"
                     _uiEvent.value = "Status atual: $oldStatus. Novo: $status"
                     

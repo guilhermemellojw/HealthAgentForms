@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.DoorFront
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
@@ -66,6 +67,7 @@ fun SemanalScreen(
     val weeklyObservations by viewModel.weeklyObservations.collectAsState()
     val activityOptions by viewModel.activityOptions.collectAsState()
     val customActivities by viewModel.customActivities.collectAsState()
+    val isAdmin by viewModel.isAdmin.collectAsState()
     var showAddActivityDialog by remember { mutableStateOf(false) }
     var newActivityName by remember { mutableStateOf("") }
 
@@ -307,7 +309,8 @@ fun SemanalScreen(
                                 onStatusChange = { viewModel.updateDayStatus(day.date, it) },
                                 onClick = { onNavigateToDate(day.date) },
                                 isEasyMode = isEasyMode,
-                                isSolarMode = isSolarMode
+                                isSolarMode = isSolarMode,
+                                enabled = !day.editedByAdmin || isAdmin
                             )
                         }
 
@@ -443,6 +446,7 @@ fun WeeklyDayRow(
     onClick: () -> Unit,
     isEasyMode: Boolean = false,
     isSolarMode: Boolean = false,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val dayOfWeek = remember(day.date) {
@@ -473,13 +477,24 @@ fun WeeklyDayRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Column(modifier = Modifier.weight(1.2f)) {
-                Text(
-                    text = dayOfWeek.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Black,
-                    fontSize = if (isEasyMode) 12.sp else 10.sp
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = dayOfWeek.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Black,
+                        fontSize = if (isEasyMode) 12.sp else 10.sp
+                    )
+                    if (day.editedByAdmin) {
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Default.Lock,
+                            contentDescription = "Homologado",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(10.dp)
+                        )
+                    }
+                }
                 Text(
                     text = day.date,
                     style = MaterialTheme.typography.titleMedium,
@@ -521,7 +536,8 @@ fun WeeklyDayRow(
                 options = options,
                 onOptionSelected = onStatusChange,
                 modifier = Modifier.weight(2f),
-                isEasyMode = isEasyMode
+                isEasyMode = isEasyMode,
+                enabled = enabled
             )
         }
     }

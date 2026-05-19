@@ -11,17 +11,14 @@ import com.antigravity.healthagent.utils.toDashDate
 
 fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): House? {
     return try {
-        // 1. Try standard Firestore mapping first
-        val house = try { this.toObject(House::class.java) } catch (e: Exception) { null }
-        
-        // 2. Manually extract critical metadata to bypass @Exclude and handle mismatches
+        // 1. Manually extract critical metadata to bypass @Exclude and handle mismatches
         val firestoreLastUpdated = this.getTimestamp("lastUpdated")?.toDate()?.time ?: 0L
-        val rawData = (this.getString("data") ?: house?.data ?: "").replace("/", "-")
-        val sourceName = this.getString("agentName") ?: house?.agentName ?: agentName
+        val rawData = (this.getString("data") ?: "").replace("/", "-")
+        val sourceName = this.getString("agentName") ?: agentName
         val rawAgentName = normalizeAgentName(sourceName)
         
-        // 3. Robust Construction: Fallback to manual field extraction if toObject failed
-        val baseHouse = (house ?: House(
+        // 2. Robust Construction: Always construct manually to ensure @Embedded Room fields map correctly
+        val baseHouse = House(
             address = com.antigravity.healthagent.domain.model.VisitAddress(
                 blockNumber = (this.getString("blockNumber") ?: "").normalize(),
                 streetName = (this.getString("streetName") ?: "").trim().formatStreetName(),
@@ -62,7 +59,7 @@ fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): Hous
                 focusCaptureTime = (this.get("focusCaptureTime") as? Number)?.toLong()
             ),
             editedByAdmin = this.getBoolean("editedByAdmin") ?: false
-        )).copy(id = 0) // RESET ID to allow local auto-generation
+        ).copy(id = 0) // RESET ID to allow local auto-generation
 
         // Extract createdAt robustly
         val createdAtRaw = this.get("createdAt")
@@ -73,19 +70,19 @@ fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): Hous
         }
 
         // Healing logic: Default EMPTY to NONE for situation
-        val rawSituation = this.getString("situation") ?: house?.situation?.name
+        val rawSituation = this.getString("situation")
         val coercedSituation = coerceSituation(rawSituation)
         val finalSituation = if (coercedSituation == Situation.EMPTY) Situation.NONE else coercedSituation
 
         val finalHouse = baseHouse.apply {
             this.cloudId = this@toHouseSafe.id
         }.copy(
-            agentUid = house?.agentUid?.ifBlank { agentUid } ?: agentUid,
+            agentUid = agentUid, // FORÇA o uso do UID atual/ativo para evitar que dados legados fiquem invisíveis
             agentName = rawAgentName,
             data = rawData,
             createdAt = createdAt,
             lastUpdated = firestoreLastUpdated,
-            propertyType = coercePropertyType(this.getString("propertyType") ?: house?.propertyType?.name),
+            propertyType = coercePropertyType(this.getString("propertyType")),
             situation = finalSituation
         ).apply {
             this.cloudId = this@toHouseSafe.id
@@ -129,15 +126,13 @@ fun DocumentSnapshot.toDayActivitySafe(uid: String, agentName: String = ""): Day
         val sourceName = if (agentName.isNotBlank()) agentName else (activity.agentName.ifBlank { "" })
         val finalAgentName = normalizeAgentName(sourceName)
         
-        val finalAgentUid = activity.agentUid.ifBlank { uid }
-        
         activity.copy(
             status = finalStatus,
             date = finalDate,
             isClosed = isClosed,
             isManualUnlock = isManualUnlock,
             lastUpdated = lastUpdated, 
-            agentUid = finalAgentUid, 
+            agentUid = uid, // FORÇA o uso do UID atual/ativo
             agentName = finalAgentName,
             editedByAdmin = this.getBoolean("editedByAdmin") ?: activity.editedByAdmin
         )

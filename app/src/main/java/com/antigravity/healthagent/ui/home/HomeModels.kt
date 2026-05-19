@@ -59,7 +59,8 @@ data class DaySummary(
     val date: String,
     val totalHouses: Int, // Total Visited
     val totalWorked: Int, // Total Inspected (Abertos)
-    val status: String
+    val status: String,
+    val editedByAdmin: Boolean = false
 )
 
 data class BoletimSummary(

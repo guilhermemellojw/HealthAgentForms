@@ -211,9 +211,32 @@ fun HouseRowItem(
                     }
             ) {
                 if (!enabled) {
-                    val isTeamworkProtection = houseState.isMine.not() && !houseState.highlightErrors // Only show as teamwork if it's not a lock due to Day Closed
+                    val isTeamworkProtection = houseState.isMine.not() && !houseState.highlightErrors
+                    val isHomologated = house.editedByAdmin
+                    
+                    val bannerColor = when {
+                        isTeamworkProtection -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f)
+                        isHomologated -> Color(0xFFFFEBEE)
+                        else -> MaterialTheme.colorScheme.error.copy(alpha = 0.08f)
+                    }
+                    val contentColor = when {
+                        isTeamworkProtection -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f)
+                        isHomologated -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
+                    }
+                    val bannerText = when {
+                        isTeamworkProtection -> "CASA DO COLEGA - SOMENTE LEITURA"
+                        isHomologated -> "VISITA HOMOLOGADA - SOMENTE LEITURA"
+                        else -> "DIA BLOQUEADO / LEITURA"
+                    }
+                    val dividerColor = when {
+                        isTeamworkProtection -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f)
+                        isHomologated -> MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
+                        else -> MaterialTheme.colorScheme.error.copy(alpha = 0.1f)
+                    }
+
                     Surface(
-                        color = if (isTeamworkProtection) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+                        color = bannerColor,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -224,19 +247,19 @@ fun HouseRowItem(
                                 if (isTeamworkProtection) Icons.Default.People else Icons.Default.Lock,
                                 contentDescription = null,
                                 modifier = Modifier.size(12.dp),
-                                tint = if (isTeamworkProtection) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
+                                tint = contentColor
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                if (isTeamworkProtection) "CASA DO COLEGA - SOMENTE LEITURA" else "DIA BLOQUEADO / LEITURA",
+                                bannerText,
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
-                                color = if (isTeamworkProtection) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
+                                color = contentColor,
                                 letterSpacing = 0.5.sp
                             )
                         }
                     }
-                    HorizontalDivider(color = if (isTeamworkProtection) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
+                    HorizontalDivider(color = dividerColor)
                 }
 
                 Row(

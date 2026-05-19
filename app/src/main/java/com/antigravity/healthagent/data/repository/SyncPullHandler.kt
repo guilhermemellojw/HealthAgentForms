@@ -114,7 +114,8 @@ class SyncPullHandler @Inject constructor(
                         val hasSyncHistory = settingsManager.lastSyncTimestamp.first() > 0
                         val agentDocExists = agentDocSnapshot.exists()
                         
-                        val requireReset = requireResetFromUser || requireResetFromAgent || (!isTargetDifferentUser && hasSyncHistory && !agentDocExists)
+                        val localUnsyncedCount = houseDao.getUnsyncedHouses(uid).size + dayActivityDao.getUnsyncedActivities(uid).size
+                        val requireReset = (requireResetFromUser || requireResetFromAgent || (!isTargetDifferentUser && hasSyncHistory && !agentDocExists)) && localUnsyncedCount == 0
 
                         // --- OPTIMIZATION: Incremental vs Full Sync logic ---
                         val localCount = houseDao.count()
@@ -141,19 +142,17 @@ class SyncPullHandler @Inject constructor(
                             }
                         }
 
-                        val cachedLastSync = if (isTargetDifferentUser || force || requireReset) 0L else settingsManager.lastSyncTimestamp.first()
+                        val cachedLastSync = if (isTargetDifferentUser || force || requireReset || localCount == 0) 0L else settingsManager.lastSyncTimestamp.first()
                         val now = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                         val lastSync = if (cachedLastSync > now + 3600000L) 0L else cachedLastSync
                         val serverTime = now
 
-                        // 2. Fetchers (EXHAUSTIVE DISCOVERY)
-                        val isHighPrivilegeUser = auth.currentUser?.uid?.let { 
-                            try { firestore.collection("users").document(it).get().await().getString("role")?.let { r -> r == "ADMIN" || r == "SUPERVISOR" } } catch(e: Exception) { false }
-                        } ?: false
+
 
                         val possibleAgentDocs = mutableListOf(firestore.collection("agents").document(uid))
                         
-                        if (!isIncremental && !isHighPrivilegeUser) {
+                        // ALWAYS perform discovery to robustly heal identity and retrieve legacy cloud data
+                        if (true) {
                             discoveryEmails.forEach { dEmail ->
                                 try {
                                     val matchingEmailDocs = firestore.collection("agents")
