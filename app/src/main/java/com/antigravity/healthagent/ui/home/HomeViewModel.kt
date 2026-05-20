@@ -2112,7 +2112,6 @@ class HomeViewModel @Inject constructor(
         _duplicateHouseConfirmation.value?.let { house ->
             clashDialogJobs[house.id]?.cancel()
             clashDialogJobs.remove(house.id)
-            _pendingUpdateDrafts.value = _pendingUpdateDrafts.value - house.id
             _duplicateHouseConfirmation.value = null
             // Trigger a re-validation to clear error states if necessary
             validateCurrentDay(showDialog = false)
