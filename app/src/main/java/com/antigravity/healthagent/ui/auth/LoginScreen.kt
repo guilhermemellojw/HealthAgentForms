@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Close
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.launch
@@ -178,6 +179,16 @@ fun LoginScreen(
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.weight(1f)
                                     )
+                                    IconButton(
+                                        onClick = { viewModel.resetError() },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Dispensar erro",
+                                            tint = Color.White
+                                        )
+                                    }
                                 }
                             }
                         }

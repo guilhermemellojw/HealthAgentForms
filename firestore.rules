@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Verifica se está logado
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Verifica se é Admin (E-mail específico ou Role no Firestore)
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'guigomelo9@gmail.com' || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
+      );
+    }
+    
+    // Verifica se é Staff (Admin ou Supervisor autorizado)
+    function isStaff() {
+      return isSignedIn() && (
+        isAdmin() || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAuthorized == true && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SUPERVISOR'
+        )
+      );
+    }
+
+    // 1. Coleção de Usuários
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+    
+    // 2. Coleção de Agentes e subcoleções
+    match /agents/{agentId} {
+      allow read, write: if (isSignedIn() && request.auth.uid == agentId) || isStaff();
+      
+      // PERMISSÃO COLABORATIVA CIRÚRGICA:
+      // Qualquer agente logado pode ler imóveis de outros agentes para montar o RG unificado.
+      // Modificações nos imóveis continuam exclusivas ao dono (agentId) ou à equipe Staff.
+      match /houses/{houseId} {
+        allow read: if isSignedIn();
+        allow write: if (isSignedIn() && request.auth.uid == agentId) || isStaff();
+      }
+      
+      match /{subcollection=**} {
+        allow read, write: if (isSignedIn() && request.auth.uid == agentId) || isStaff();
+      }
+    }
+    
+    // 3. Permissão de Grupo de Coleções (Collection Group)
+    // Permite que qualquer agente logado execute a busca unificada por bairros/quarteirões.
+    match /{path=**}/houses/{houseId} {
+      allow read: if isSignedIn();
+    }
+
+    // 4. Catch-all para Admin
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

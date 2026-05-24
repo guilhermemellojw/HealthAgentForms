@@ -115,5 +115,5 @@ data class BlockSegment(
         }
     
     val id: String
-         get() = "${blockNumber}_${blockSequence}_${if(isConcluded) "C" else "O"}_${startDate}"
+         get() = "${blockNumber}_${blockSequence}_${if(isConcluded) "C" else "O"}_${startDate}_${houses.firstOrNull()?.id ?: 0}"
 }

@@ -56,55 +56,14 @@ class RgViewModel @Inject constructor(
     // Default or dynamically observed from database/settings
     val municipality = MutableStateFlow("BOM JARDIM")
 
-    init {
-        // Observe settings profile cache
-        viewModelScope.launch {
-            settingsManager.cachedUser.collect { user ->
-                user?.let {
-                    val name = it.agentName?.uppercase()?.ifBlank { null }
-                        ?: it.email?.substringBefore("@")?.uppercase()
-                        ?: "DESCONHECIDO"
-                    _agentName.value = name
-                    _currentUserUid.value = it.uid
-                    _isAdmin.value = it.role == UserRole.ADMIN
-                }
-            }
-        }
-
-        viewModelScope.launch {
-            settingsManager.remoteAgentUid.collect { uid ->
-                _remoteAgentUid.value = uid
-            }
-        }
-
-        viewModelScope.launch {
-            settingsManager.remoteAgentName.collect { name ->
-                name?.uppercase()?.ifBlank { null }?.let {
-                    _agentName.value = it
-                }
-            }
-        }
-
-        viewModelScope.launch {
-            allHousesFlow
-                .filter { it.isNotEmpty() }
-                .first()
-                .let { houses ->
-                    if (_selectedRgBairro.value.isBlank()) {
-                        val lastBairro = houses.maxByOrNull { it.createdAt }?.address?.bairro?.trim()?.uppercase()
-                        if (!lastBairro.isNullOrBlank()) {
-                            _selectedRgBairro.value = lastBairro
-                        }
-                    }
-                }
-        }
-    }
-
     private val allHousesFlow: Flow<List<House>> = combine(
-        _agentName, _remoteAgentUid, _currentUserUid
-    ) { name, remoteUid, currentUid ->
-        val effectiveUid = remoteUid ?: currentUid ?: ""
-        repository.getHousesByAgentSnapshotFlow(effectiveUid)
+        _remoteAgentUid, _currentUserUid
+    ) { remoteUid, currentUid ->
+        if (remoteUid != null) {
+            repository.getHousesByAgentSnapshotFlow(remoteUid)
+        } else {
+            repository.getAllHousesSnapshotFlow()
+        }
     }.flatMapLatest { it }
     .flowOn(Dispatchers.Default)
 
@@ -151,14 +110,60 @@ class RgViewModel @Inject constructor(
         }
     }.flowOn(Dispatchers.Default)
 
+    init {
+        // Observe settings profile cache
+        viewModelScope.launch {
+            settingsManager.cachedUser.collect { user ->
+                user?.let {
+                    val name = it.agentName?.uppercase()?.ifBlank { null }
+                        ?: it.email?.substringBefore("@")?.uppercase()
+                        ?: "DESCONHECIDO"
+                    _agentName.value = name
+                    _currentUserUid.value = it.uid
+                    _isAdmin.value = it.role == UserRole.ADMIN
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            settingsManager.remoteAgentUid.collect { uid ->
+                _remoteAgentUid.value = uid
+            }
+        }
+
+        viewModelScope.launch {
+            settingsManager.remoteAgentName.collect { name ->
+                name?.uppercase()?.ifBlank { null }?.let {
+                    _agentName.value = it
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            allHousesFlow
+                .filter { it.isNotEmpty() }
+                .first()
+                .let { houses ->
+                    if (_selectedRgBairro.value.isBlank()) {
+                        val lastBairro = houses.maxByOrNull { it.createdAt }?.address?.bairro?.trim()?.uppercase()
+                        if (!lastBairro.isNullOrBlank()) {
+                            _selectedRgBairro.value = lastBairro
+                        }
+                    }
+                }
+        }
+    }
+
     val availableYears: StateFlow<List<String>> = filteredHousesFlow.map { houses ->
         houses.mapNotNull {
             try {
-                val d = dateFormatter.parse(it.data)
-                if (d != null) {
-                    val c = Calendar.getInstance().apply { time = d }
-                    c.get(Calendar.YEAR).toString()
-                } else null
+                synchronized(dateFormatter) {
+                    val d = dateFormatter.parse(it.data)
+                    if (d != null) {
+                        val c = Calendar.getInstance().apply { time = d }
+                        c.get(Calendar.YEAR).toString()
+                    } else null
+                }
             } catch (e: Exception) { null }
         }.distinct().sortedDescending()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(Calendar.getInstance().get(Calendar.YEAR).toString()))
@@ -188,7 +193,11 @@ class RgViewModel @Inject constructor(
 
     private fun filterByYear(houses: List<House>, year: String): List<House> {
         return houses.filter { house ->
-            val date = try { dateFormatter.parse(house.data) } catch (e: Exception) { null }
+            val date = try {
+                synchronized(dateFormatter) {
+                    dateFormatter.parse(house.data)
+                }
+            } catch (e: Exception) { null }
             if (date != null) {
                 val cal = Calendar.getInstance().apply { time = date }
                 val hYear = cal.get(Calendar.YEAR).toString()

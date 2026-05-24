@@ -108,7 +108,7 @@ fun SupervisorSummaryScreen(
                             containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
                         ) {
                             Row(
-                                modifier = Modifier.padding(16.dp),
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
@@ -116,8 +116,16 @@ fun SupervisorSummaryScreen(
                                 Text(
                                     text = error,
                                     color = MaterialTheme.colorScheme.onErrorContainer,
-                                    style = MaterialTheme.typography.bodyMedium
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.weight(1f)
                                 )
+                                IconButton(onClick = { viewModel.clearError() }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Fechar erro",
+                                        tint = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
                             }
                         }
                     }

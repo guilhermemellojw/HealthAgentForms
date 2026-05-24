@@ -570,8 +570,19 @@ class HouseRepositoryImpl @Inject constructor(
             }
 
             if (toDelete.isNotEmpty()) {
-                toDelete.forEach { houseDao.deleteHouse(it) }
-                syncSchedulerProvider.get().scheduleSync()
+                // CLOSED DAY GUARD: Preserve duplicates in closed days (let admin handle manually)
+                val closedDatesForDedup = toDelete.map { it.data.toDashDate() }.distinct().filter { date ->
+                    val activity = dayActivityDao.getDayActivity(date, agentUid)
+                    activity?.isClosed == true && !activity.isManualUnlock
+                }.toSet()
+                val safeToDeleteDedup = toDelete.filter { it.data.toDashDate() !in closedDatesForDedup }
+                if (closedDatesForDedup.isNotEmpty()) {
+                    android.util.Log.w("HouseRepository", "Dedup: Preserved ${toDelete.size - safeToDeleteDedup.size} duplicates in ${closedDatesForDedup.size} closed days.")
+                }
+                safeToDeleteDedup.forEach { houseDao.deleteHouse(it) }
+                if (safeToDeleteDedup.isNotEmpty()) {
+                    syncSchedulerProvider.get().scheduleSync()
+                }
             }
         }
     }

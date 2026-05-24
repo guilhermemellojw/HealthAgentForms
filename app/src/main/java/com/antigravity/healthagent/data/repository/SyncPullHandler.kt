@@ -300,9 +300,20 @@ class SyncPullHandler @Inject constructor(
                                     
                                     val housesDeletedByTeam = localTeamHouses.filter { it.generateNaturalKey() !in remoteKeys }
                                     if (housesDeletedByTeam.isNotEmpty()) {
-                                        android.util.Log.i("SyncPullHandler", "Team Sync: Deleting ${housesDeletedByTeam.size} houses removed by colleagues.")
-                                        runInTransactionWithRetry {
-                                            housesDeletedByTeam.forEach { houseDao.deleteHouse(it) }
+                                        // CLOSED DAY GUARD: Preserve teammate houses in locally closed days
+                                        val closedDatesForTeam = housesDeletedByTeam.map { it.data.replace("/", "-") }.distinct().filter { date ->
+                                            val activity = dayActivityDao.getDayActivity(date, uid)
+                                            activity?.isClosed == true && !activity.isManualUnlock
+                                        }.toSet()
+                                        val safeToDeleteTeam = housesDeletedByTeam.filter { it.data.replace("/", "-") !in closedDatesForTeam }
+                                        if (closedDatesForTeam.isNotEmpty()) {
+                                            android.util.Log.w("SyncPullHandler", "Team Sync: Preserved ${housesDeletedByTeam.size - safeToDeleteTeam.size} teammate houses in ${closedDatesForTeam.size} closed days.")
+                                        }
+                                        if (safeToDeleteTeam.isNotEmpty()) {
+                                            android.util.Log.i("SyncPullHandler", "Team Sync: Deleting ${safeToDeleteTeam.size} houses removed by colleagues.")
+                                            runInTransactionWithRetry {
+                                                safeToDeleteTeam.forEach { houseDao.deleteHouse(it) }
+                                            }
                                         }
                                     }
                                     
@@ -542,11 +553,17 @@ class SyncPullHandler @Inject constructor(
                                      }
                                 }
 
+                                // CLOSED DAY GUARD: Preserve local isClosed state when cloud tries to reopen
+                                val preserveClosedState = existing != null && existing.isClosed && !existing.isManualUnlock 
+                                    && !activity.isClosed && !activity.editedByAdmin && !activity.isManualUnlock
+
                                 activity.copy(
                                     date = normalizedDate,
                                     agentName = finalAgentName,
                                     agentUid = uid,
-                                    isSynced = true
+                                    isSynced = true,
+                                    isClosed = if (preserveClosedState) true else activity.isClosed,
+                                    isManualUnlock = if (preserveClosedState) false else activity.isManualUnlock
                                 )
                             }
 

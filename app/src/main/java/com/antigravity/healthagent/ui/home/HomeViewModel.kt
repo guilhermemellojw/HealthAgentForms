@@ -77,8 +77,6 @@ class HomeViewModel @Inject constructor(
     
     private val _searchQuery = MutableStateFlow("")
 
-
-
     private val _municipio = MutableStateFlow("BOM JARDIM")
     private val _bairro = MutableStateFlow("")
     private val _categoria = MutableStateFlow("BRR")
@@ -2475,6 +2473,7 @@ class HomeViewModel @Inject constructor(
                 
                 _uiState.update { it.copy(hasMisattributedData = false, isLoading = false) }
             } catch (e: Exception) {
+                _uiEvent.value = "Falha na limpeza: ${e.message}"
                 _uiState.update { it.copy(error = "Falha na limpeza: ${e.message}", isLoading = false) }
             }
         }

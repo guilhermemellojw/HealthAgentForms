@@ -58,6 +58,8 @@ class SupervisorViewModel @Inject constructor(
 
     fun clearUiEvent() { _uiEvent.value = null }
 
+    fun clearError() { _errorMessage.value = null }
+
     private val _rawAgents = MutableStateFlow<List<AgentData>>(emptyList())
     
     // LIVE INSPECTION STATE
