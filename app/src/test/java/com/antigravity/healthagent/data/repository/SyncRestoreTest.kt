@@ -12,6 +12,7 @@ import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.domain.repository.BackupRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.sync.SyncScheduler
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -53,26 +54,39 @@ class SyncRestoreTest {
         val dayActivityDao = database.dayActivityDao()
         val tombstoneDao = database.tombstoneDao()
 
+        val soundManager = mockk<com.antigravity.healthagent.utils.SoundManager>(relaxed = true)
+        val houseRepository = HouseRepositoryImpl(
+            houseDao = houseDao,
+            dayActivityDao = dayActivityDao,
+            tombstoneDao = tombstoneDao,
+            database = database,
+            syncSchedulerProvider = syncSchedulerProvider,
+            soundManager = soundManager
+        )
+
         val syncPushHandler = SyncPushHandler(
             context = context,
             auth = auth,
             firestore = firestore,
-            houseDao = houseDao,
-            dayActivityDao = dayActivityDao,
-            tombstoneDao = tombstoneDao,
-            settingsManager = settingsManager,
-            database = database
+            houseRepository = houseRepository,
+            settingsManager = settingsManager
         )
+
+        val versionChecker = mockk<com.antigravity.healthagent.data.sync.VersionChecker>(relaxed = true)
+        val identityDiscoveryService = mockk<com.antigravity.healthagent.data.sync.IdentityDiscoveryService>(relaxed = true)
+        val teamworkSyncHandler = mockk<com.antigravity.healthagent.data.sync.TeamworkSyncHandler>(relaxed = true)
+        val syncReconciler = mockk<com.antigravity.healthagent.data.sync.SyncReconciler>(relaxed = true)
 
         val syncPullHandler = SyncPullHandler(
             context = context,
             auth = auth,
             firestore = firestore,
-            houseDao = houseDao,
-            dayActivityDao = dayActivityDao,
-            tombstoneDao = tombstoneDao,
+            houseRepository = houseRepository,
             settingsManager = settingsManager,
-            database = database
+            versionChecker = versionChecker,
+            identityDiscoveryService = identityDiscoveryService,
+            teamworkSyncHandler = teamworkSyncHandler,
+            syncReconciler = syncReconciler
         )
 
         val syncDeletionHandler = mockk<SyncDeletionHandler>(relaxed = true)
@@ -82,11 +96,8 @@ class SyncRestoreTest {
             context = context,
             auth = auth,
             firestore = firestore,
-            houseDao = houseDao,
-            dayActivityDao = dayActivityDao,
-            tombstoneDao = tombstoneDao,
+            houseRepository = houseRepository,
             settingsManager = settingsManager,
-            database = database,
             backupRepository = backupRepository,
             syncSchedulerProvider = syncSchedulerProvider,
             syncPushHandler = syncPushHandler,

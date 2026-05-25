@@ -1,14 +1,9 @@
 package com.antigravity.healthagent.data.repository
 
-import com.antigravity.healthagent.data.local.AppDatabase
-import com.antigravity.healthagent.data.local.dao.DayActivityDao
-import com.antigravity.healthagent.data.local.dao.HouseDao
-import com.antigravity.healthagent.data.local.dao.TombstoneDao
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.settings.SettingsManager
-import com.antigravity.healthagent.utils.withRetry
-import androidx.room.withTransaction
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -17,33 +12,13 @@ import javax.inject.Inject
 
 class SyncAdminHandler @Inject constructor(
     private val firestore: FirebaseFirestore,
-    private val houseDao: HouseDao,
-    private val dayActivityDao: DayActivityDao,
-    private val tombstoneDao: TombstoneDao,
-    private val settingsManager: SettingsManager,
-    private val database: AppDatabase
+    private val houseRepository: HouseRepository,
+    private val settingsManager: SettingsManager
 ) {
-    private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        return database.withRetry(maxAttempts = 3) {
-            database.withTransaction { block() }
-        }
-    }
 
     suspend fun clearLocalDataInternal(): Result<Unit> {
         return try {
-            runInTransactionWithRetry {
-                houseDao.deleteAll()
-                dayActivityDao.deleteAll()
-                tombstoneDao.deleteAll()
-                database.customStreetDao().deleteAll()
-                database.agentCacheDao().clearAgents()
-                database.agentCacheDao().clearSummaries()
-                try {
-                    database.openHelper.writableDatabase.execSQL("DELETE FROM sqlite_sequence")
-                } catch (e: Exception) {
-                    android.util.Log.w("SyncAdminHandler", "Failed to reset sqlite_sequence: ${e.message}")
-                }
-            }
+            houseRepository.clearAllData()
             settingsManager.setLastSyncTimestamp(0L)
             Result.success(Unit)
         } catch (e: Exception) {
@@ -54,10 +29,7 @@ class SyncAdminHandler @Inject constructor(
 
     suspend fun clearAgentDataInternal(agentUid: String): Result<Unit> {
         return try {
-            runInTransactionWithRetry {
-                houseDao.deleteByAgent(agentUid)
-                dayActivityDao.deleteByAgent(agentUid)
-            }
+            houseRepository.clearAgentData(agentUid)
             Result.success(Unit)
         } catch (e: Exception) {
             android.util.Log.e("SyncRepository", "Surgical Wipe Failed for $agentUid: ${e.message}")
@@ -67,7 +39,7 @@ class SyncAdminHandler @Inject constructor(
 
     suspend fun performDataCleanup(): Result<Unit> {
         return try {
-            houseDao.cleanupZeroValues()
+            houseRepository.cleanupZeroValues()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -75,56 +47,8 @@ class SyncAdminHandler @Inject constructor(
     }
 
     suspend fun restoreLocalData(houses: List<House>, activities: List<DayActivity>, agentUid: String?): Result<Unit> {
-        val finalUid = agentUid ?: ""
         return try {
-            runInTransactionWithRetry {
-                val restoredDatesList = activities.map { it.date.replace("/", "-") }.distinct()
-
-                if (restoredDatesList.isNotEmpty()) {
-                    android.util.Log.i("SyncRepository", "Restoration: Atomic purge of ${restoredDatesList.size} dates for $finalUid")
-                    houseDao.deleteByAgentAndDates(finalUid, restoredDatesList)
-                    dayActivityDao.deleteByAgentAndDates(finalUid, restoredDatesList)
-                }
-
-                val normalizedActivities = activities.map { 
-                    val normalized = it.copy(
-                        agentUid = finalUid,
-                        date = it.date.replace("/", "-"),
-                        isSynced = false,
-                        lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
-                    ) 
-                    normalized
-                }
-                
-                normalizedActivities.forEach { normalized ->
-                    tombstoneDao.deleteByNaturalKey("${normalized.date}|${normalized.agentUid}", normalized.agentUid)
-                }
-
-                val housesToUpsert = houses.map { restoredHouse ->
-                    val finalSituation = if (restoredHouse.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY) {
-                        com.antigravity.healthagent.data.local.model.Situation.NONE
-                    } else restoredHouse.situation
-
-                    val finalHouse = restoredHouse.copy(
-                        id = 0,
-                        agentUid = finalUid,
-                        data = restoredHouse.data.replace("/", "-"),
-                        situation = finalSituation,
-                        isSynced = false,
-                        lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
-                    )
-                    
-                    finalHouse
-                }
-                
-                housesToUpsert.forEach { finalHouse ->
-                    tombstoneDao.deleteByNaturalKey(finalHouse.generateNaturalKey(), finalHouse.agentUid)
-                }
-
-                houseDao.upsertHouses(housesToUpsert)
-                dayActivityDao.upsertDayActivities(normalizedActivities)
-            }
-            
+            houseRepository.restoreAgentData(houses, activities, agentUid)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -233,7 +157,7 @@ class SyncAdminHandler @Inject constructor(
     suspend fun pruneOldTombstones(): Result<Unit> {
         return try {
             val thirtyDaysAgo = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
-            tombstoneDao.deleteOldTombstones(thirtyDaysAgo)
+            houseRepository.pruneOldTombstones(thirtyDaysAgo)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

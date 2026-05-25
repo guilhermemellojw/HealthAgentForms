@@ -7,16 +7,14 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import com.antigravity.healthagent.data.local.dao.HouseDao
-import com.antigravity.healthagent.data.local.dao.DayActivityDao
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.BackupRepository
 
 @HiltWorker
 class TimelineBackupWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    private val houseDao: HouseDao,
-    private val dayActivityDao: DayActivityDao,
+    private val houseRepository: HouseRepository,
     private val backupRepository: BackupRepository
 ) : CoroutineWorker(appContext, workerParams) {
 
@@ -27,8 +25,8 @@ class TimelineBackupWorker @AssistedInject constructor(
         AppLogger.d("TimelineBackupWorker", "Starting timeline backup for $uid ($officialAgentName) in background...")
 
         return try {
-            val allHouses = houseDao.getHousesByAgentSnapshot(uid)
-            val allActivities = dayActivityDao.getDayActivitiesByAgentSnapshot(uid)
+            val allHouses = houseRepository.getHousesByAgentSnapshot(uid)
+            val allActivities = houseRepository.getDayActivitiesByAgentSnapshot(uid)
             
             val backupData = BackupData(
                 houses = allHouses,

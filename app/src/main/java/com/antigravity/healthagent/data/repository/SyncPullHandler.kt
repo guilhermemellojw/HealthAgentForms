@@ -2,20 +2,12 @@ package com.antigravity.healthagent.data.repository
 
 import android.content.Context
 import com.antigravity.healthagent.domain.logger.AppLogger
-import androidx.room.withTransaction
-import com.antigravity.healthagent.data.local.AppDatabase
-import com.antigravity.healthagent.data.local.dao.DayActivityDao
-import com.antigravity.healthagent.data.local.dao.HouseDao
-import com.antigravity.healthagent.data.local.dao.TombstoneDao
-import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
-import com.antigravity.healthagent.data.local.model.Tombstone
-import com.antigravity.healthagent.data.local.model.TombstoneType
+import com.antigravity.healthagent.data.local.model.DayActivity
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.data.util.toDayActivitySafe
 import com.antigravity.healthagent.data.util.toHouseSafe
-import com.antigravity.healthagent.utils.AppConstants
-import com.antigravity.healthagent.utils.withRetry
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -31,45 +23,23 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.antigravity.healthagent.data.sync.VersionChecker
+import com.antigravity.healthagent.data.sync.IdentityDiscoveryService
+import com.antigravity.healthagent.data.sync.TeamworkSyncHandler
+import com.antigravity.healthagent.data.sync.SyncReconciler
 
 @Singleton
 class SyncPullHandler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
-    private val houseDao: HouseDao,
-    private val dayActivityDao: DayActivityDao,
-    private val tombstoneDao: TombstoneDao,
+    private val houseRepository: HouseRepository,
     private val settingsManager: SettingsManager,
-    private val database: AppDatabase
+    private val versionChecker: VersionChecker,
+    private val identityDiscoveryService: IdentityDiscoveryService,
+    private val teamworkSyncHandler: TeamworkSyncHandler,
+    private val syncReconciler: SyncReconciler
 ) {
-
-    private class HouseWithKeys(
-        val house: House,
-        val naturalKey: String = house.generateNaturalKey(),
-        val identityKey: String = house.generateIdentityKey()
-    )
-
-    private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        return database.withRetry(maxAttempts = 3) {
-            database.withTransaction { block() }
-        }
-    }
-
-    private suspend fun fetchSystemSettings(): Result<Map<String, Any>> {
-        return try {
-            val snapshot = withTimeoutOrNull(5000) {
-                firestore.collection("metadata").document("settings")
-                    .get().await()
-            }
-            if (snapshot == null) return Result.success(emptyMap())
-            val settings = snapshot.data ?: emptyMap()
-            Result.success(settings)
-        } catch (e: Exception) {
-            AppLogger.w("SyncPullHandler", "fetchSystemSettings offline fallback: ${e.message}")
-            Result.success(emptyMap())
-        }
-    }
 
     suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean, syncMutex: Mutex): Result<Unit> {
         val result = withTimeoutOrNull(600000L) {
@@ -98,43 +68,39 @@ class SyncPullHandler @Inject constructor(
                         val finalAgentName = profileAgentName ?: profileDisplayName ?: email.substringBefore("@").uppercase()
                         
                         // --- VERSION SAFETY CHECK ---
-                        val sysSettings = fetchSystemSettings().getOrDefault(emptyMap())
-                        val minVersion = (sysSettings["minAppVersion"] as? Number)?.toInt() ?: AppConstants.MIN_VERSION_CODE
-                        val pInfo = try { context.packageManager.getPackageInfo(context.packageName, 0) } catch (e: Exception) { null }
-                        val currentVersion = pInfo?.versionCode ?: 0
-                        
-                        if (currentVersion < minVersion) {
-                            AppLogger.e("SyncPullHandler", "Version Enforcement: App version ($currentVersion) is below minimum required ($minVersion)")
-                            return@withContext Result.failure(Exception("Versão do aplicativo desatualizada. Por favor, atualize o 'Eu ACE' na Play Store para continuar sincronizando seus dados."))
+                        val sysSettings = versionChecker.fetchSystemSettings().getOrDefault(emptyMap())
+                        versionChecker.checkVersion(context, sysSettings).onFailure {
+                            return@withContext Result.failure(it)
                         }
                         
                         // --- REMOTE WIPE CHECK (Multi-device Safety) ---
-                        val requireResetFromUser = userDoc.getBoolean("requireDataReset") ?: false
-                        val requireResetFromAgent = agentDocSnapshot.getBoolean("requireDataReset") ?: false
-                        
                         val hasSyncHistory = settingsManager.lastSyncTimestamp.first() > 0
-                        val agentDocExists = agentDocSnapshot.exists()
+                        val localUnsyncedCount = houseRepository.getUnsyncedHouses(uid).size + houseRepository.getUnsyncedActivities(uid).size
                         
-                        val localUnsyncedCount = houseDao.getUnsyncedHouses(uid).size + dayActivityDao.getUnsyncedActivities(uid).size
-                        val requireReset = (requireResetFromUser || requireResetFromAgent || (!isTargetDifferentUser && hasSyncHistory && !agentDocExists)) && localUnsyncedCount == 0
+                        val requireReset = versionChecker.isWipeRequired(
+                            userDoc = userDoc,
+                            agentDocSnapshot = agentDocSnapshot,
+                            hasSyncHistory = hasSyncHistory,
+                            isTargetDifferentUser = isTargetDifferentUser,
+                            localUnsyncedCount = localUnsyncedCount
+                        )
 
-                        // --- OPTIMIZATION: Incremental vs Full Sync logic ---
-                        val localCount = houseDao.count()
-                        val isIncremental = !force && !isTargetDifferentUser && !requireReset && settingsManager.lastSyncTimestamp.first() > 0 && localCount > 0
+                        val localCount = houseRepository.countHouses()
 
                         if (requireReset) {
                             AppLogger.w("SyncPullHandler", "Remote Wipe Triggered for UID: $uid")
-                            val wipeResult = runInTransactionWithRetry {
-                                houseDao.deleteByAgent(uid)
-                                dayActivityDao.deleteByAgent(uid)
-                                tombstoneDao.deleteByAgent(uid)
-                                
+                            val wipeResult = try {
+                                houseRepository.clearAgentData(uid)
                                 if (!isTargetDifferentUser) {
                                     settingsManager.setLastSyncTimestamp(0L)
                                 }
                                 Result.success(Unit)
+                            } catch (e: Exception) {
+                                Result.failure(e)
                             }
                             if (wipeResult.isSuccess) {
+                                val requireResetFromUser = userDoc.getBoolean("requireDataReset") ?: false
+                                val requireResetFromAgent = agentDocSnapshot.getBoolean("requireDataReset") ?: false
                                 if (requireResetFromUser) firestore.collection("users").document(uid).update("requireDataReset", false)
                                 if (requireResetFromAgent) firestore.collection("agents").document(uid).update("requireDataReset", false)
                             } else {
@@ -148,39 +114,12 @@ class SyncPullHandler @Inject constructor(
                         val lastSync = if (cachedLastSync > now + 3600000L) 0L else cachedLastSync
                         val serverTime = now
 
-
-
-                        val possibleAgentDocs = mutableListOf(firestore.collection("agents").document(uid))
-                        
                         // ALWAYS perform discovery to robustly heal identity and retrieve legacy cloud data
-                        if (true) {
-                            discoveryEmails.forEach { dEmail ->
-                                try {
-                                    val matchingEmailDocs = firestore.collection("agents")
-                                        .whereEqualTo("email", dEmail)
-                                        .get().await()
-                                    
-                                    matchingEmailDocs.documents.forEach { doc ->
-                                        if (doc.id != uid) {
-                                            possibleAgentDocs.add(doc.reference)
-                                            
-                                            val legacyName = doc.getString("agentName")
-                                            if (profileAgentName == null && !legacyName.isNullOrBlank()) {
-                                                AppLogger.i("SyncPullHandler", "Identity Healing: Adopting legacy agentName '$legacyName' from ${doc.id} for $uid")
-                                                try {
-                                                    firestore.collection("agents").document(uid).update("agentName", legacyName)
-                                                    firestore.collection("users").document(uid).update("agentName", legacyName)
-                                                } catch (e: Exception) {
-                                                    AppLogger.w("SyncPullHandler", "Identity Healing failed to update cloud profile: ${e.message}")
-                                                }
-                                            }
-                                        }
-                                    }
-                                } catch (e: Exception) {
-                                    AppLogger.w("SyncPullHandler", "Failed to search legacy agent docs for $dEmail", e)
-                                }
-                            }
-                        }
+                        val possibleAgentDocs = identityDiscoveryService.discoverAndHealAgentDocs(
+                            uid = uid,
+                            discoveryEmails = discoveryEmails,
+                            profileAgentName = profileAgentName
+                        )
 
                         val cloudHouses = mutableListOf<House>()
                         val cloudDayActivities = mutableListOf<DayActivity>()
@@ -275,318 +214,24 @@ class SyncPullHandler @Inject constructor(
                         }
 
                         // --- PHASE 2: TEAMWORK SYNC (AUTOMATIC) ---
-                        val teammateHouses = mutableListOf<House>()
-                        if (!isTargetDifferentUser) {
-                            try {
-                                val activeBairros = (houseDao.getActiveBairros(uid) + cloudHouses.map { it.address.bairro })
-                                    .map { it.trim().uppercase() }
-                                    .filter { it.isNotBlank() }
-                                    .distinct()
-                                if (activeBairros.isNotEmpty()) {
-                                    val teamHouses = activeBairros.chunked(10).flatMap { bairroChunk ->
-                                        firestore.collectionGroup("houses")
-                                            .whereIn("bairro", bairroChunk)
-                                            .get().await().documents
-                                    }.mapNotNull { it.toHouseSafe(it.getString("agentUid") ?: "", it.getString("agentName") ?: "") }
-                                    
-                                    val remoteForeignHouses = teamHouses.filter { it.agentUid != uid }
-                                    
-                                    val activeBlocks = (houseDao.getActiveBlockNumbers() + cloudHouses.map { it.address.blockNumber })
-                                        .filter { it.isNotBlank() }
-                                        .distinct()
-                                    val localTeamHouses = houseDao.getHousesByBlocks(activeBlocks).filter { 
-                                        it.agentUid.isNotBlank() && it.agentUid != uid && it.address.bairro.trim().uppercase() in activeBairros
-                                    }
-                                    val remoteKeys = remoteForeignHouses.map { it.generateNaturalKey() }.toSet()
-                                    
-                                    val housesDeletedByTeam = localTeamHouses.filter { it.generateNaturalKey() !in remoteKeys }
-                                    if (housesDeletedByTeam.isNotEmpty()) {
-                                        // CLOSED DAY GUARD: Preserve teammate houses in locally closed days
-                                        val closedDatesForTeam = housesDeletedByTeam.map { it.data.replace("/", "-") }.distinct().filter { date ->
-                                            val activity = dayActivityDao.getDayActivity(date, uid)
-                                            activity?.isClosed == true && !activity.isManualUnlock
-                                        }.toSet()
-                                        val safeToDeleteTeam = housesDeletedByTeam.filter { it.data.replace("/", "-") !in closedDatesForTeam }
-                                        if (closedDatesForTeam.isNotEmpty()) {
-                                            AppLogger.w("SyncPullHandler", "Team Sync: Preserved ${housesDeletedByTeam.size - safeToDeleteTeam.size} teammate houses in ${closedDatesForTeam.size} closed days.")
-                                        }
-                                        if (safeToDeleteTeam.isNotEmpty()) {
-                                            AppLogger.i("SyncPullHandler", "Team Sync: Deleting ${safeToDeleteTeam.size} houses removed by colleagues.")
-                                            runInTransactionWithRetry {
-                                                safeToDeleteTeam.forEach { houseDao.deleteHouse(it) }
-                                            }
-                                        }
-                                    }
-                                    
-                                    cloudHouses.addAll(remoteForeignHouses)
+                        val teammateHouses = teamworkSyncHandler.performTeamworkSync(
+                            uid = uid,
+                            cloudHouses = cloudHouses,
+                            isTargetDifferentUser = isTargetDifferentUser
+                        )
 
-                                    // Refresh local team houses after deletions to accurately reconstruct local IDs
-                                    val remainingTeammateHouses = houseDao.getHousesByBlocks(activeBlocks).filter { 
-                                        it.agentUid.isNotBlank() && it.agentUid != uid && it.address.bairro.trim().uppercase() in activeBairros
-                                    }
-                                    teammateHouses.addAll(remainingTeammateHouses)
-                                }
-                            } catch (e: Exception) {
-                                AppLogger.w("SyncPullHandler", "Teamwork sync failed (skipping): ${e.message}")
-                            }
-                        }
-
-                        // 3. Deletion logic
-                        var cloudHousesWithKeys = cloudHouses.map { HouseWithKeys(it) }
-                        val validCloudHouseKeys = cloudHousesWithKeys.map { it.naturalKey }.toSet()
-                        val validCloudActivityKeys = cloudDayActivities.map { "${it.date.replace("/", "-")}|${it.agentName.uppercase()}" }.toSet()
-                        
-                        // SELF-HEALING: Clean up zombie tombstones in Firestore
-                        val zombieActivities = cloudDeletedActivities.filter { tombstoneKey ->
-                            val datePart = tombstoneKey.split("|")[0].replace("/", "-")
-                            validCloudActivityKeys.any { it.startsWith(datePart) }
-                        }
-                        val zombieHouses = cloudDeletedHouses.filter { it in validCloudHouseKeys }
-                        
-                        if (zombieActivities.isNotEmpty() || zombieHouses.isNotEmpty()) {
-                            cloudDeletedActivities.removeAll(zombieActivities.toSet())
-                            cloudDeletedHouses.removeAll(zombieHouses.toSet())
-                            
-                            try {
-                                val batch = firestore.batch()
-                                val docRef = firestore.collection("agents").document(uid)
-                                if (zombieActivities.isNotEmpty()) {
-                                    val dateOnlyZombies = zombieActivities.map { it.split("|")[0] }
-                                    batch.update(docRef, "deleted_activity_dates", com.google.firebase.firestore.FieldValue.arrayRemove(*(zombieActivities + dateOnlyZombies).toTypedArray()))
-                                }
-                                if (zombieHouses.isNotEmpty()) {
-                                    batch.update(docRef, "deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayRemove(*zombieHouses.toTypedArray()))
-                                }
-                                batch.commit().await()
-                                AppLogger.i("SyncPullHandler", "Self-Healing: Removed ${zombieActivities.size} zombie activity tombstones and ${zombieHouses.size} house tombstones from Firestore.")
-                            } catch (e: Exception) {
-                                AppLogger.w("SyncPullHandler", "Self-Healing failed: ${e.message}")
-                            }
-                        }
-
-                        cloudDeletedHouses.removeAll { it in validCloudHouseKeys }
-                        cloudDeletedActivities.removeAll { it in validCloudActivityKeys }
-                        
-                        val allLocalHouses = houseDao.getHousesByAgentSnapshot(uid)
-                        val combinedLocalHouses = allLocalHouses + teammateHouses
-                        var allLocalHousesWithKeys = combinedLocalHouses.map { HouseWithKeys(it) }
-                        
-                        val cloudDeletedIdentities = cloudDeletedHouses.mapNotNull { deletedKey ->
-                            val parts = deletedKey.split("_")
-                            if (parts.size >= 11) {
-                                try {
-                                    "${parts[0]}_${parts[2]}_${parts[3]}_${parts[4]}_${parts[5]}_${parts[6]}_${parts[7]}_${parts[8]}_${parts[9]}".uppercase()
-                                } catch (e: Exception) { null }
-                            } else null
-                        }.toSet()
-
-                        val housesToDelete = allLocalHousesWithKeys.filter { wrapper ->
-                            val house = wrapper.house
-                            if (house.agentUid != uid) return@filter false // Teammate deletions are handled in Phase 2
-                            val key = wrapper.naturalKey
-                            val identityKey = wrapper.identityKey
-                            
-                            if (key in cloudDeletedHouses || identityKey in cloudDeletedIdentities || "${house.data.replace("/", "-")}|${house.agentName.uppercase()}" in cloudDeletedActivities) {
-                                val timeSinceLastUpdate = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis() - house.lastUpdated
-                                if (house.isSynced) {
-                                    true
-                                } else if (timeSinceLastUpdate > 900000L) {
-                                    AppLogger.i("SyncPullHandler", "Admin Authority / Ghost Cleanup: Deleting unsynced house ${house.id} due to cloud deletion.")
-                                    true
-                                } else {
-                                    AppLogger.i("SyncPullHandler", "Agent Priority: Preserving actively typed house ${house.id} despite cloud deletion.")
-                                    false
-                                }
-                            } else false
-                        }.map { it.house }
-
-                        val allLocalActivities = dayActivityDao.getAllDayActivities(uid)
-                        
-                        allLocalActivities.filter { it.date.replace("/", "-") in cloudDeletedActivities }.forEach {
-                            AppLogger.i("SyncPullHandler", "Cloud Deletion Sync: Deleting local activity ${it.date} for $finalAgentName")
-                            runInTransactionWithRetry {
-                                dayActivityDao.deleteDayActivity(it.date, it.agentUid)
-                            }
-                        }
-
-                        val activitiesToDelete = allLocalActivities.filter { activity ->
-                            val dateKey = "${activity.date}|${activity.agentUid}"
-                            
-                            if (dateKey in cloudDeletedActivities) {
-                                val timeSinceLastUpdate = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis() - activity.lastUpdated
-                                if (activity.isSynced) {
-                                    true
-                                } else if (timeSinceLastUpdate > 900000L) {
-                                    AppLogger.i("SyncPullHandler", "Admin Authority / Ghost Cleanup: Deleting unsynced activity ${activity.date} due to cloud deletion.")
-                                    true
-                                } else {
-                                    AppLogger.i("SyncPullHandler", "Agent Priority: Preserving actively typed activity ${activity.date} despite cloud deletion.")
-                                    false
-                                }
-                            } else false
-                        }
-
-                        // 4. Reconciliation
-                        val localHousesByNaturalKey = allLocalHousesWithKeys.associateBy { it.naturalKey }
-                        val localActivities = allLocalActivities.groupBy { "${it.date.replace("/", "-")}|${it.agentUid}" }
-                        
-                        val localTombstones = tombstoneDao.getAllTombstones(uid)
-                        val localHouseTombstoneKeys = localTombstones.filter { it.type == TombstoneType.HOUSE }.map { it.naturalKey }.toSet()
-                        val localActivityTombstoneKeys = localTombstones.filter { it.type == TombstoneType.ACTIVITY }.map { it.naturalKey }.toSet()
-
-                        val housesDelta = cloudHousesWithKeys.filter { 
-                            it.naturalKey !in cloudDeletedHouses && it.naturalKey !in localHouseTombstoneKeys 
-                        }
-                        val activitiesDelta = cloudDayActivities.filter {
-                            val dateKey = "${it.date.replace("/", "-")}|${it.agentUid}"
-                            dateKey !in cloudDeletedActivities && dateKey !in localActivityTombstoneKeys
-                        }
-
-                        runInTransactionWithRetry {
-                            if (housesToDelete.isNotEmpty()) {
-                                val tombstonesToInsert = mutableListOf<Tombstone>()
-                                for (house in housesToDelete) {
-                                    houseDao.deleteHouse(house)
-                                    tombstonesToInsert.add(
-                                        Tombstone(
-                                            type = TombstoneType.HOUSE,
-                                            naturalKey = house.generateNaturalKey(),
-                                            agentName = house.agentName,
-                                            agentUid = house.agentUid,
-                                            dataDate = house.data
-                                        )
-                                    )
-                                }
-                                if (tombstonesToInsert.isNotEmpty()) {
-                                    tombstoneDao.insertTombstones(tombstonesToInsert)
-                                }
-                            }
-
-                            if (activitiesToDelete.isNotEmpty()) {
-                                val tombstonesToInsert = mutableListOf<Tombstone>()
-                                for (activity in activitiesToDelete) {
-                                    dayActivityDao.deleteDayActivity(activity.date, activity.agentUid)
-                                    tombstonesToInsert.add(
-                                        Tombstone(
-                                            type = TombstoneType.ACTIVITY,
-                                            naturalKey = "${activity.date.replace("/", "-")}|${activity.agentUid}",
-                                            agentName = activity.agentName,
-                                            agentUid = activity.agentUid,
-                                            dataDate = activity.date
-                                        )
-                                    )
-                                }
-                                if (tombstonesToInsert.isNotEmpty()) {
-                                    tombstoneDao.insertTombstones(tombstonesToInsert)
-                                }
-                            }
-
-                            val localIdentityMap = if (housesDelta.isNotEmpty()) allLocalHousesWithKeys.groupBy { it.identityKey } else emptyMap()
-
-                            val housesToUpsert = housesDelta.mapNotNull { cloudWrapper ->
-                                val cloudHouse = cloudWrapper.house
-                                val key = cloudWrapper.naturalKey
-                                var existing = localHousesByNaturalKey[key]?.house
-                                
-                                if (existing == null) {
-                                    val identityKey = cloudWrapper.identityKey
-                                    existing = localIdentityMap[identityKey]?.find { it.house.agentUid == cloudHouse.agentUid }?.house
-                                    
-                                    if (existing == null) {
-                                        val isTeammate = cloudHouse.agentUid.isNotBlank() && cloudHouse.agentUid != uid
-                                        if (!isTeammate) {
-                                            val normalizedDate = cloudHouse.data.replace("/", "-")
-                                            val dateKey = "$normalizedDate|$uid"
-                                            val dayActivity = localActivities[dateKey]?.firstOrNull()
-                                            val cloudActivity = activitiesDelta.find { it.date.replace("/", "-") == normalizedDate }
-                                            
-                                            val isCloudUnlocked = cloudActivity?.isManualUnlock == true
-                                            val isLocallyClosed = dayActivity?.isClosed == true && dayActivity.isManualUnlock != true
-                                            
-                                            if (isLocallyClosed && !isCloudUnlocked && !cloudHouse.editedByAdmin && !isTargetDifferentUser) {
-                                                return@mapNotNull null
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if (existing != null && !existing.isSynced) {
-                                    val isAdminOverride = cloudHouse.editedByAdmin && !existing.editedByAdmin && 
-                                        (System.currentTimeMillis() - existing.lastUpdated > 120000L)
-
-                                    if (!isAdminOverride) {
-                                        val threshold = AppConstants.SYNC_CONFLICT_THRESHOLD_MS
-                                        if (existing.lastUpdated > (cloudHouse.lastUpdated + threshold)) {
-                                            return@mapNotNull null
-                                        }
-                                    }
-                                }
-
-                                val isTeammate = cloudHouse.agentUid.isNotBlank() && cloudHouse.agentUid != uid
-                                cloudHouse.copy(
-                                    id = existing?.id ?: 0,
-                                    agentName = if (isTeammate) cloudHouse.agentName else finalAgentName,
-                                    agentUid = if (isTeammate) cloudHouse.agentUid else uid,
-                                    isSynced = true
-                                )
-                            }
-                            
-                            val activitiesToUpsert = activitiesDelta.mapNotNull { activity ->
-                                val normalizedDate = activity.date.replace("/", "-")
-                                val key = "$normalizedDate|$uid"
-                                val dateKey = "$normalizedDate|$uid"
-                                
-                                if (dateKey in cloudDeletedActivities) {
-                                    return@mapNotNull null
-                                }
-                                
-                                val existing = localActivities[key]?.firstOrNull()
-
-                                if (existing != null && !existing.isSynced) {
-                                     val isRemoteUnlock = activity.isManualUnlock && !existing.isManualUnlock
-                                     val isAdminOverride = activity.editedByAdmin && !existing.editedByAdmin && 
-                                        (System.currentTimeMillis() - existing.lastUpdated > 120000L)
-
-                                     val threshold = AppConstants.SYNC_CONFLICT_THRESHOLD_MS
-                                     
-                                     if (!isRemoteUnlock && !isAdminOverride && existing.lastUpdated > (activity.lastUpdated + threshold)) {
-                                         return@mapNotNull null
-                                     }
-                                }
-
-                                // CLOSED DAY GUARD: Preserve local isClosed state when cloud tries to reopen
-                                val preserveClosedState = existing != null && existing.isClosed && !existing.isManualUnlock 
-                                    && !activity.isClosed && !activity.editedByAdmin && !activity.isManualUnlock
-
-                                activity.copy(
-                                    date = normalizedDate,
-                                    agentName = finalAgentName,
-                                    agentUid = uid,
-                                    isSynced = true,
-                                    isClosed = if (preserveClosedState) true else activity.isClosed,
-                                    isManualUnlock = if (preserveClosedState) false else activity.isManualUnlock
-                                )
-                            }
-
-                            houseDao.upsertHouses(housesToUpsert)
-                            dayActivityDao.upsertDayActivities(activitiesToUpsert)
-
-                            housesToUpsert.forEach { house ->
-                                tombstoneDao.deleteByNaturalKey(house.generateNaturalKey(), house.agentUid)
-                            }
-                            activitiesToUpsert.forEach { activity ->
-                                tombstoneDao.deleteByNaturalKey("${activity.date.replace("/", "-")}|${activity.agentUid}", activity.agentUid)
-                            }
-
-                            housesToUpsert.forEach { pulledHouse ->
-                                val key = pulledHouse.generateNaturalKey()
-                                val localMatches = allLocalHousesWithKeys.filter { it.naturalKey == key && it.house.id != pulledHouse.id && it.house.id != 0 }
-                                localMatches.forEach { match ->
-                                    if (match.house.isSynced) {
-                                        houseDao.deleteHouse(match.house)
-                                    }
-                                }
-                            }
+                        // --- PHASE 3: RECONCILIATION ---
+                        syncReconciler.reconcile(
+                            uid = uid,
+                            finalAgentName = finalAgentName,
+                            isTargetDifferentUser = isTargetDifferentUser,
+                            cloudHouses = cloudHouses,
+                            cloudDayActivities = cloudDayActivities,
+                            cloudDeletedHouses = cloudDeletedHouses,
+                            cloudDeletedActivities = cloudDeletedActivities,
+                            teammateHouses = teammateHouses
+                        ).onFailure {
+                            return@withContext Result.failure(it)
                         }
 
                         if (!isTargetDifferentUser) {
@@ -594,9 +239,6 @@ class SyncPullHandler @Inject constructor(
                             val safetyAnchor = serverTime - 600000L 
                             settingsManager.setLastSyncTimestamp(maxOf(maxObservedTime, safetyAnchor))
                         }
-                        
-                        allLocalHousesWithKeys = emptyList()
-                        cloudHousesWithKeys = emptyList()
 
                         Result.success(Unit)
                     } catch (e: Exception) {

@@ -1,6 +1,6 @@
 package com.antigravity.healthagent.domain.usecase
 
-import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.toDashDate
 import javax.inject.Inject

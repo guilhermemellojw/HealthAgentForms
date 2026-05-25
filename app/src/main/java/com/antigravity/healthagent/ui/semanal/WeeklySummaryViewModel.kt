@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.data.local.model.DayActivity
-import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import com.antigravity.healthagent.domain.usecase.DayManagementUseCase
 import com.antigravity.healthagent.utils.SoundManager
@@ -343,7 +343,7 @@ class WeeklySummaryViewModel @Inject constructor(
                             
                             if (updatedHouses.isNotEmpty()) {
                                 _uiEvent.value = "Atualizando ${updatedHouses.size} imóveis..."
-                                repository.updateHouses(updatedHouses)
+                                repository.updateHouses(updatedHouses, force = true)
                                 _uiEvent.value = "Movimentação concluída com sucesso."
                             } else if (housesToShift.isNotEmpty()) {
                                 _uiEvent.value = "Nenhuma casa precisou mudar de data."

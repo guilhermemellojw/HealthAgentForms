@@ -10,7 +10,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
-import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.domain.repository.AuthRepository

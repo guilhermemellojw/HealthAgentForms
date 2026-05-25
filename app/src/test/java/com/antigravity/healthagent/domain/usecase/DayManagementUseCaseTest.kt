@@ -1,7 +1,7 @@
 package com.antigravity.healthagent.domain.usecase
 
 import com.antigravity.healthagent.data.local.model.DayActivity
-import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import io.mockk.*
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*

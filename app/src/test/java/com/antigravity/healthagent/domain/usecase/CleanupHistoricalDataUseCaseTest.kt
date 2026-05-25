@@ -2,7 +2,7 @@ package com.antigravity.healthagent.domain.usecase
 
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
-import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.AgentRepository
 import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.SyncRepository
@@ -76,6 +76,32 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun fixEmailNamesForUid(uid: String, properName: String) {}
         override suspend fun getLastHouseForAgent(agentUid: String): House? = null
         override suspend fun getLastHouseForAgentOnDate(agentUid: String, date: String): House? = null
+
+        override suspend fun getUnsyncedHouses(agentUid: String): List<House> = emptyList()
+        override suspend fun getUnsyncedActivities(agentUid: String): List<DayActivity> = emptyList()
+        override suspend fun countHouses(): Int = 0
+        override suspend fun getActiveBairros(agentUid: String): List<String> = emptyList()
+        override suspend fun getActiveBlockNumbers(): List<String> = emptyList()
+        override suspend fun getHousesByBlocks(blocks: List<String>): List<House> = emptyList()
+        override suspend fun getHousesByMonth(agentUid: String, monthYear: String): List<House> = emptyList()
+        override suspend fun getDayActivitiesByMonth(agentUid: String, monthYear: String): List<DayActivity> = emptyList()
+        override suspend fun getEmptyHouses(agentUid: String): List<House> = emptyList()
+
+        override suspend fun upsertHousesRaw(houses: List<House>) {}
+        override suspend fun upsertDayActivitiesRaw(activities: List<DayActivity>) {}
+        override suspend fun deleteHousesByDateAndAgent(date: String, agentUid: String) {}
+        override suspend fun deleteHouseById(id: Int) {}
+        override suspend fun markHouseAsSynced(id: Int, lastUpdated: Long, agentUid: String, agentName: String) {}
+        override suspend fun markActivityAsSynced(date: String, agentName: String, agentUid: String, lastUpdated: Long) {}
+        override suspend fun cleanupZeroValues() {}
+
+        override suspend fun getAllTombstones(agentUid: String): List<com.antigravity.healthagent.data.local.model.Tombstone> = emptyList()
+        override suspend fun insertTombstones(tombstones: List<com.antigravity.healthagent.data.local.model.Tombstone>) {}
+        override suspend fun insertTombstone(tombstone: com.antigravity.healthagent.data.local.model.Tombstone) {}
+        override suspend fun deleteTombstoneByNaturalKey(naturalKey: String, agentUid: String) {}
+        override suspend fun deleteTombstones(ids: List<Int>) {}
+        override suspend fun deleteTombstonesByAgent(agentUid: String) {}
+        override suspend fun pruneOldTombstones(threshold: Long) {}
     }
 
     private val mockSyncRepository = object : SyncRepository {

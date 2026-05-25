@@ -139,49 +139,15 @@ fun HomeScreen(
         }
     }
 
-    if (showUnlockDialog) {
-        AlertDialog(
-            onDismissRequest = { showUnlockDialog = false },
-            title = { 
-                Text(
-                    "Reabrir Dia", 
-                    fontWeight = FontWeight.ExtraBold,
-                    style = if (uiState.isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge
-                ) 
-            },
-            text = { 
-                Text(
-                    "Deseja reabrir este dia para edição? Todas as edições serão permitidas novamente.",
-                    style = if (uiState.isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
-                ) 
-            },
-            confirmButton = {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { showUnlockDialog = false },
-                        modifier = Modifier.weight(1f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
-                        shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp)
-                    ) {
-                        Text("Cancelar", fontWeight = FontWeight.Bold)
-                    }
-                    Button(
-                        onClick = {
-                            viewModel.toggleDayLock()
-                            showUnlockDialog = false
-                        },
-                        modifier = Modifier.weight(1.3f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
-                        shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp)
-                    ) {
-                        Text("Reabrir", fontWeight = FontWeight.Bold)
-                    }
-                }
-            },
-            shape = RoundedCornerShape(if (uiState.isEasyMode) 28.dp else 24.dp)
-        )
-    }
+    UnlockDayDialog(
+        show = showUnlockDialog,
+        isEasyMode = uiState.isEasyMode,
+        onConfirm = {
+            viewModel.toggleDayLock()
+            showUnlockDialog = false
+        },
+        onDismiss = { showUnlockDialog = false }
+    )
 
     var isHeaderExpanded by remember { mutableStateOf(false) }
     var isDashboardOpen by remember { mutableStateOf(false) }
@@ -201,47 +167,12 @@ fun HomeScreen(
         }
     }
 
-    if (showHistoryConfirmation) {
-        AlertDialog(
-            onDismissRequest = { viewModel.dismissHistoryUnlockConfirmation() },
-            title = { 
-                Text(
-                    "Reabrir Dia Antigo", 
-                    fontWeight = FontWeight.ExtraBold,
-                    style = if (uiState.isEasyMode) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge
-                ) 
-            },
-            text = { 
-                Text(
-                    "Atenção: Você está tentando reabrir um dia histórico.\n\nFazer alterações pode afetar relatórios consolidados e estatísticas de produtividade.\n\nDeseja continuar?",
-                    style = if (uiState.isEasyMode) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium
-                ) 
-            },
-            confirmButton = {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { viewModel.dismissHistoryUnlockConfirmation() },
-                        modifier = Modifier.weight(1f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
-                        shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp)
-                    ) {
-                        Text("Cancelar", fontWeight = FontWeight.Bold)
-                    }
-                    Button(
-                        onClick = { viewModel.confirmUnlockHistory() },
-                        modifier = Modifier.weight(1.3f).height(if (uiState.isEasyMode) 52.dp else 48.dp),
-                        shape = RoundedCornerShape(if (uiState.isEasyMode) 16.dp else 12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Text("Sim, Reabrir", fontWeight = FontWeight.Bold)
-                    }
-                }
-            },
-            shape = RoundedCornerShape(if (uiState.isEasyMode) 28.dp else 24.dp)
-        )
-    }
+    HistoryUnlockDialog(
+        show = showHistoryConfirmation,
+        isEasyMode = uiState.isEasyMode,
+        onConfirm = { viewModel.confirmUnlockHistory() },
+        onDismiss = { viewModel.dismissHistoryUnlockConfirmation() }
+    )
 
     val showGoalReached by viewModel.showGoalReached.collectAsState()
     if (showGoalReached) {
@@ -396,109 +327,46 @@ fun HomeScreen(
         }
     }
 
-    if (showLongPressMenu && houseToMove != null && (!uiState.isSupervisor || uiState.isAdmin)) {
-        AlertDialog(
-            onDismissRequest = { showLongPressMenu = false; houseToMove = null },
-            title = { Text("Opções do Imóvel") },
-            text = { Text("O que deseja fazer com este imóvel?") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showLongPressMenu = false
-                        showMoveDatePicker = true
-                    }
-                ) {
-                    Text("Mover para outra Data")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        showLongPressMenu = false
-                        isReorderMode = true
-                    }
-                ) {
-                    Text("Reordenar Lista")
-                }
-            }
-        )
-    }
+    HouseOptionsDialog(
+        show = showLongPressMenu && houseToMove != null && (!uiState.isSupervisor || uiState.isAdmin),
+        onMoveToDate = {
+            showLongPressMenu = false
+            showMoveDatePicker = true
+        },
+        onReorderList = {
+            showLongPressMenu = false
+            isReorderMode = true
+        },
+        onDismiss = {
+            showLongPressMenu = false
+            houseToMove = null
+        }
+    )
 
-    if (isDashboardOpen) {
-        AlertDialog(
-            onDismissRequest = { isDashboardOpen = false },
-            title = { Text("Resumo do Dia") },
-            text = {
-                Column {
-                    Text("Total Visitas: ${uiState.dashboardTotals.totalHouses}", fontWeight = FontWeight.Bold)
-                    Text("Abertos: ${uiState.dashboardTotals.worked}", color = MaterialTheme.colorScheme.primary)
-                    Text("Vazios: ${uiState.dashboardTotals.vacant}")
-                    Divider(modifier = Modifier.padding(vertical = 8.dp))
-                    Text("A1: ${uiState.dashboardTotals.a1} | A2: ${uiState.dashboardTotals.a2}")
-                    Text("B: ${uiState.dashboardTotals.b} | C: ${uiState.dashboardTotals.c}")
-                    Text("D1: ${uiState.dashboardTotals.d1} | D2: ${uiState.dashboardTotals.d2}")
-                    Text("E: ${uiState.dashboardTotals.e}")
-                    Text("Eliminados: ${uiState.dashboardTotals.eliminados}")
-                    Text("Larvicida: ${uiState.dashboardTotals.larvicida}g")
-                    Text("Com Foco: ${uiState.dashboardTotals.totalFocos}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
-                }
-            },
-            confirmButton = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    if (!uiState.isDayClosed && !uiState.isSupervisor) {
-                        TextButton(
-                            onClick = { 
-                                isDashboardOpen = false
-                                viewModel.startDayClosingFlow()
-                            },
-                            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF00C853)) // Green
-                        ) { 
-                            Text("FECHAR PRODUÇÃO", fontWeight = FontWeight.Bold) 
-                        }
-                    }
-                    
-                    if (uiState.isAdmin && uiState.isDuplicateIds.isNotEmpty()) {
-                        TextButton(
-                            onClick = { 
-                                viewModel.deduplicateCurrentDay()
-                                isDashboardOpen = false
-                            },
-                            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFFF9800)) // Orange
-                        ) { 
-                            Text("DEDUPLICAR AGORA", fontWeight = FontWeight.Bold) 
-                        }
-                    }
-
-                    TextButton(onClick = { isDashboardOpen = false }) { Text("FECHAR") }
-                }
-            }
-        )
-    }
+    DashboardSummaryDialog(
+        show = isDashboardOpen,
+        dashboardTotals = uiState.dashboardTotals,
+        isDayClosed = uiState.isDayClosed,
+        isSupervisor = uiState.isSupervisor,
+        isAdmin = uiState.isAdmin,
+        showDeduplicate = uiState.isDuplicateIds.isNotEmpty(),
+        onDeduplicate = {
+            viewModel.deduplicateCurrentDay()
+            isDashboardOpen = false
+        },
+        onCloseProduction = {
+            isDashboardOpen = false
+            viewModel.startDayClosingFlow()
+        },
+        onDismiss = { isDashboardOpen = false }
+    )
 
     val moveConfirmationData by viewModel.moveConfirmationData.collectAsState()
-    if (moveConfirmationData != null) {
-        AlertDialog(
-            onDismissRequest = { viewModel.dismissMoveConfirmation() },
-            title = { Text("Confirmar Movimentação") },
-            text = { Text("O dia selecionado já atingiu a Meta Diária. Deseja mover o imóvel mesmo assim?") },
-            confirmButton = {
-                TextButton(
-                    onClick = { viewModel.confirmMoveHouse() },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Text("Sim, Mover")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { viewModel.dismissMoveConfirmation() }) {
-                    Text("Cancelar")
-                }
-            }
-        )
-    }
+    MoveHouseGoalReachedDialog(
+        show = moveConfirmationData != null,
+        onConfirm = { viewModel.confirmMoveHouse() },
+        onDismiss = { viewModel.dismissMoveConfirmation() }
+    )
 
     val duplicateHouseConfirmation by viewModel.duplicateHouseConfirmation.collectAsState()
     DuplicateHouseDialog(
@@ -516,108 +384,19 @@ fun HomeScreen(
         Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            val titleText = if (isSearchActive) "Buscar Logradouro" 
-                            else if (isReorderMode) "Reordenar Imóveis"
-                            else "Produção Diária"
-            
-            val navIcon: @Composable () -> Unit = {
-                if (isSearchActive || isReorderMode) {
-                    IconButton(onClick = { 
-                        if (isSearchActive) {
-                            isSearchActive = false
-                            viewModel.updateSearchQuery("")
-                        } else {
-                            isReorderMode = false
-                        }
-                    }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Voltar")
-                    }
-                }
-            }
-
-            GlassTopAppBar(
-                title = {
-                    if (isSearchActive) {
-                        TextField(
-                            value = uiState.searchQuery,
-                            onValueChange = { viewModel.updateSearchQuery(it) },
-                            placeholder = { Text("Buscar Logradouro") },
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                cursorColor = MaterialTheme.colorScheme.onPrimary
-                            ),
-                            textStyle = LocalTextStyle.current.copy(color = MaterialTheme.colorScheme.onPrimary),
-                            singleLine = true
-                        )
+            HomeTopBar(
+                uiState = uiState,
+                isSearchActive = isSearchActive,
+                isReorderMode = isReorderMode,
+                onSearchActiveChange = { isSearchActive = it },
+                onReorderModeChange = { isReorderMode = it },
+                strictPendingHousesCount = strictPendingHousesCount,
+                onSearchQueryChange = { viewModel.updateSearchQuery(it) },
+                onLockClick = {
+                    if (uiState.isDayClosed) {
+                        showUnlockDialog = true
                     } else {
-                        Column {
-                            Text(
-                                titleText, 
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.ExtraBold
-                            ) 
-                            if (!isReorderMode) {
-                                Text(
-                                    text = uiState.data.ifEmpty { "Selecione a Data" },
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
-                                )
-                            }
-                        }
-                    }
-                },
-                navigationIcon = navIcon,
-                actions = {
-                    if (!isSearchActive && !isReorderMode) {
-                        // Pending houses badge
-                        val hasStrictPending = strictPendingHousesCount > 0
-                        Surface(
-                            color = if (hasStrictPending) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f) 
-                                    else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.padding(end = 4.dp)
-                        ) {
-                            Text(
-                                text = "Pendentes: $strictPendingHousesCount",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-
-                        // Locker Icon
-                        IconButton(
-                            onClick = {
-                                if (uiState.isAdmin || !uiState.isSupervisor) {
-                                    if (uiState.isDayClosed) {
-                                        showUnlockDialog = true
-                                    } else {
-                                        viewModel.toggleDayLock()
-                                    }
-                                }
-                            }
-                        ) {
-                            val lockerColor = when {
-                                uiState.isDayClosed -> MaterialTheme.colorScheme.error
-                                uiState.isManualUnlock -> Color(0xFFFF9800) // Orange/Amber for manual override
-                                else -> MaterialTheme.colorScheme.onPrimary
-                            }
-                            Icon(
-                                if (uiState.isDayClosed) Icons.Default.Lock else Icons.Default.LockOpen,
-                                contentDescription = when {
-                                    uiState.isDayClosed -> "Dia Fechado"
-                                    uiState.isManualUnlock -> "Edição Extra Habilitada"
-                                    else -> "Dia Aberto"
-                                },
-                                tint = lockerColor,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
+                        viewModel.toggleDayLock()
                     }
                 },
                 user = user,
@@ -629,138 +408,38 @@ fun HomeScreen(
         },
 
         floatingActionButton = {
-            if (!isReorderMode && (!uiState.isSupervisor || uiState.isAdmin)) {
-                // Scroll Logic for FAB
-                val isScrollingUp = remember {
-                    derivedStateOf {
-                        listState.firstVisibleItemIndex == 0 || !listState.canScrollBackward || !listState.isScrollInProgress
+            HomeFab(
+                uiState = uiState,
+                listState = listState,
+                strictPendingHousesCount = strictPendingHousesCount,
+                uiHouses = uiHouses,
+                maxOpenHouses = maxOpenHouses,
+                onAddHouse = {
+                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                    lastAddRequestTime = System.currentTimeMillis()
+                    viewModel.addNewHouse()
+                },
+                onClosedDayClick = {
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Este dia já foi fechado.")
+                    }
+                },
+                onScrollToFirstError = { indexInUi ->
+                    scope.launch {
+                        listState.animateScrollToItem(indexInUi + 1) // +1 for header
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                    }
+                },
+                onCloseProduction = {
+                    viewModel.startDayClosingFlow()
+                },
+                onShowHeaderAlert = {
+                    scope.launch {
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        snackbarHostState.showSnackbar("Preencha ao menos o Município e Bairro")
                     }
                 }
-                
-                // More robust scroll direction detection
-                var isFabExpanded by remember { mutableStateOf(true) }
-
-                
-                // We need to attach this connection to the Scaffold or LazyColumn. 
-                // Since this block is inside 'floatingActionButton', we can't easily attach to the Scaffold content from here.
-                // Instead, we'll use a snapshotFlow approach or rely on the state derived above.
-                // Let's use the list state to detect scroll direction cleanly.
-                
-                val lastFirstVisibleItemIndex = remember { mutableIntStateOf(0) }
-                val lastFirstVisibleItemScrollOffset = remember { mutableIntStateOf(0) }
-                
-                LaunchedEffect(listState) {
-                    snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-                        .collect { (index, offset) ->
-                            val isScrollingDown = index > lastFirstVisibleItemIndex.intValue || 
-                                (index == lastFirstVisibleItemIndex.intValue && offset > lastFirstVisibleItemScrollOffset.intValue)
-                            val isScrollingUp = index < lastFirstVisibleItemIndex.intValue || 
-                                (index == lastFirstVisibleItemIndex.intValue && offset < lastFirstVisibleItemScrollOffset.intValue)
-                            
-                            if (isScrollingDown && (index > 0 || offset > 20)) {
-                                isFabExpanded = false
-                            } else if (isScrollingUp) {
-                                isFabExpanded = true
-                            }
-                            
-                            lastFirstVisibleItemIndex.intValue = index
-                            lastFirstVisibleItemScrollOffset.intValue = offset
-                        }
-                }
-
-                val isGoalReached = uiState.pendingCount >= maxOpenHouses && maxOpenHouses > 0
-                val hasErrors = strictPendingHousesCount > 0
-                
-                val fabColor = when {
-                    uiState.isDayClosed && !uiState.isAdmin -> MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
-                    hasErrors -> MaterialTheme.colorScheme.errorContainer
-                    isGoalReached && !uiState.isManualUnlock -> Color(0xFF00C853) // Emerald Green 700
-                    uiState.isManualUnlock -> Color(0xFFFF9800) // Orange/Amber for manual override
-                    else -> MaterialTheme.colorScheme.primary
-                }
-                val fabContentColor = when {
-                    uiState.isDayClosed && !uiState.isAdmin -> Color.White
-                    hasErrors -> MaterialTheme.colorScheme.onErrorContainer
-                    uiState.isManualUnlock -> Color.White
-                    else -> MaterialTheme.colorScheme.onPrimary
-                }
-                
-                val fabOnClick: () -> Unit = {
-                    if (uiState.isDayClosed && !uiState.isAdmin) {
-                        // Just show a message or open dashboard
-                        scope.launch {
-                            snackbarHostState.showSnackbar("Este dia já foi fechado.")
-                        }
-                    } else if (isGoalReached && hasErrors) {
-                        val firstErrorId = uiState.validationErrorHouseIds.firstOrNull()
-                        if (firstErrorId != null) {
-                            val indexInUi = uiHouses.indexOfFirst { it.house.id == firstErrorId }
-                            if (indexInUi != -1) {
-                                scope.launch {
-                                    listState.animateScrollToItem(indexInUi + 1) // +1 for header
-                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                }
-                            }
-                        }
-                    } else if (isGoalReached) {
-                        viewModel.startDayClosingFlow()
-                    } else {
-                        val isHeaderValid = uiState.municipality.isNotBlank() &&
-                                uiState.neighborhood.isNotBlank()
-                                // Removed zone, cycle, type, activity check from mandatory block 
-                                // to avoid preventing addition when user is in a hurry.
-                                // These are caught during audit/save anyway if needed.
-
-                        val skipHeaderCheck = uiState.houses.isEmpty()
-
-                        if (!isHeaderValid && !skipHeaderCheck && !uiState.isEasyMode) {
-                            scope.launch {
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                snackbarHostState.showSnackbar("Preencha ao menos o Município e Bairro")
-                            }
-                        } else {
-                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                            lastAddRequestTime = System.currentTimeMillis()
-                            viewModel.addNewHouse()
-                        }
-                    }
-                }
-
-                val fabText = when {
-                    uiState.isDayClosed -> "DIA FECHADO"
-                    hasErrors -> "CORRIGIR ERROS"
-                    isGoalReached -> "FECHAR PRODUÇÃO"
-                    else -> "ADICIONAR"
-                }
-                
-                val fabIcon = when {
-                    uiState.isDayClosed -> Icons.Default.Lock
-                    hasErrors -> Icons.Default.Warning
-                    isGoalReached -> Icons.Default.Check
-                    else -> Icons.Default.Add
-                }
-
-                ExtendedFloatingActionButton(
-                    onClick = fabOnClick,
-                    containerColor = fabColor,
-                    contentColor = fabContentColor,
-                    shape = RoundedCornerShape(if (uiState.isEasyMode) 28.dp else 16.dp),
-                    expanded = isFabExpanded,
-                    icon = { 
-                        Icon(
-                            imageVector = fabIcon,
-                            contentDescription = fabText
-                        )
-                    },
-                    text = {
-                        Text(
-                            text = fabText,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = if (uiState.isEasyMode) 16.sp else 14.sp
-                        )
-                    }
-                )
-            }
+            )
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
@@ -776,31 +455,13 @@ fun HomeScreen(
             // Indentation and content will be below
         
         fun checkForOverScroll(viewportY: Float) {
-            val distFromTop = viewportY
-            val viewportHeight = listState.layoutInfo.viewportSize.height
-            val distFromBottom = viewportHeight - viewportY
-            
-            if (distFromTop < 200f) {
-                if (overscrollJob?.isActive != true) {
-                    overscrollJob = scope.launch {
-                        while (true) {
-                            listState.scrollBy(-30f)
-                            kotlinx.coroutines.delay(16)
-                        }
-                    }
-                }
-            } else if (distFromBottom < 200f && distFromBottom > 0) {
-                 if (overscrollJob?.isActive != true) {
-                    overscrollJob = scope.launch {
-                        while (true) {
-                            listState.scrollBy(30f)
-                            kotlinx.coroutines.delay(16)
-                        }
-                    }
-                }
-            } else {
-                overscrollJob?.cancel()
-            }
+            com.antigravity.healthagent.ui.home.components.checkForOverScroll(
+                viewportY = viewportY,
+                listState = listState,
+                scope = scope,
+                currentJob = overscrollJob,
+                onJobUpdated = { overscrollJob = it }
+            )
         }   
 
         Box(
@@ -830,8 +491,6 @@ fun HomeScreen(
                 // Item 1: Minimalist Progress Line
                 if (!isSearchActive && !isReorderMode) {
                     val workedCount = uiState.dashboardTotals.worked
-                    val progress = (workedCount.toFloat() / (if (maxOpenHouses > 0) maxOpenHouses else 25).toFloat()).coerceIn(0f, 1f)
-                    val isGoalReached = workedCount >= maxOpenHouses && maxOpenHouses > 0
                     
                     ProductionProgressBar(
                         current = workedCount,

@@ -3,7 +3,7 @@ package com.antigravity.healthagent.domain.usecase
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.domain.model.TreatmentData
-import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.repository.StreetRepository
 import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.normalize

@@ -5,7 +5,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.antigravity.healthagent.domain.repository.SyncRepository
-import com.antigravity.healthagent.data.local.dao.HouseDao
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.google.firebase.auth.FirebaseAuth
 import dagger.assisted.Assisted
@@ -17,7 +17,7 @@ class LogoutWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
     private val syncRepository: SyncRepository,
-    private val houseDao: HouseDao,
+    private val houseRepository: HouseRepository,
     private val settingsManager: SettingsManager,
     private val auth: FirebaseAuth
 ) : CoroutineWorker(context, params) {
@@ -34,7 +34,7 @@ class LogoutWorker @AssistedInject constructor(
 
                 // 1. FINAL SYNC (Best Effort)
                 if (agentName.isNotBlank()) {
-                    val houses = houseDao.getUnsyncedHouses(uid)
+                    val houses = houseRepository.getUnsyncedHouses(uid)
                     if (houses.isNotEmpty()) {
                         android.util.Log.i("LogoutWorker", "Performing final sync for $agentName (${houses.size} houses)...")
                         syncRepository.pushLocalDataToCloud(houses, emptyList(), uid)

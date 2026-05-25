@@ -1,15 +1,11 @@
 package com.antigravity.healthagent.data.repository
 
-import androidx.room.withTransaction
-import com.antigravity.healthagent.data.local.AppDatabase
-import com.antigravity.healthagent.data.local.dao.HouseDao
-import com.antigravity.healthagent.data.local.dao.TombstoneDao
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.Tombstone
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.local.model.TombstoneType
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.data.sync.SyncScheduler
-import com.antigravity.healthagent.utils.withRetry
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -21,16 +17,12 @@ import javax.inject.Provider
 class SyncDeletionHandler @Inject constructor(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
-    private val houseDao: HouseDao,
-    private val tombstoneDao: TombstoneDao,
+    private val houseRepository: HouseRepository,
     private val settingsManager: SettingsManager,
-    private val database: AppDatabase,
     private val syncSchedulerProvider: Provider<SyncScheduler>
 ) {
     private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        return database.withRetry(maxAttempts = 3) {
-            database.withTransaction { block() }
-        }
+        return houseRepository.runInTransaction { block() }
     }
 
     suspend fun deleteAgentHouse(agentUid: String, houseId: String): Result<Unit> {
@@ -102,7 +94,7 @@ class SyncDeletionHandler @Inject constructor(
     suspend fun recordHouseDeletion(house: House): Result<Unit> {
         return try {
             val naturalId = house.generateNaturalKey()
-            tombstoneDao.insertTombstone(
+            houseRepository.insertTombstone(
                 Tombstone(
                     type = TombstoneType.HOUSE,
                     naturalKey = naturalId,
@@ -119,7 +111,7 @@ class SyncDeletionHandler @Inject constructor(
 
     suspend fun recordActivityDeletion(date: String, agentUid: String): Result<Unit> {
         return try {
-            tombstoneDao.insertTombstone(
+            houseRepository.insertTombstone(
                 Tombstone(
                     type = TombstoneType.ACTIVITY,
                     naturalKey = "$date|$agentUid",
@@ -162,8 +154,8 @@ class SyncDeletionHandler @Inject constructor(
                     )
                 }
                 runInTransactionWithRetry {
-                    tombstoneDao.insertTombstones(houseTombstones)
-                    tombstoneDao.insertTombstones(activityTombstones)
+                    houseRepository.insertTombstones(houseTombstones)
+                    houseRepository.insertTombstones(activityTombstones)
                 }
                 syncSchedulerProvider.get().scheduleSync()
                 Result.success(Unit)
@@ -257,7 +249,7 @@ class SyncDeletionHandler @Inject constructor(
             
             runInTransactionWithRetry {
                 houses.forEach { house ->
-                    houseDao.deleteHouseById(house.id)
+                    houseRepository.deleteHouseById(house.id)
                 }
             }
             

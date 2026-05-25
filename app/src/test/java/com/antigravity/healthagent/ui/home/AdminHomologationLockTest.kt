@@ -10,7 +10,7 @@ import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
-import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.repository.SyncRepository
@@ -39,6 +39,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import com.antigravity.healthagent.domain.model.VisitAddress
+import com.antigravity.healthagent.ui.home.delegates.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -65,6 +66,26 @@ class AdminHomologationLockTest {
     private val cleanupBrokenHousesUseCase = mockk<CleanupBrokenHousesUseCase>(relaxed = true)
     private val agentRepository = mockk<AgentRepository>(relaxed = true)
     private val localizationRepository = mockk<LocalizationRepository>(relaxed = true)
+
+    private val syncDelegate = mockk<SyncDelegate>(relaxed = true)
+    private val dayNavigationDelegate = mockk<DayNavigationDelegate>(relaxed = true)
+    private val dayClosingDelegate = mockk<DayClosingDelegate>(relaxed = true)
+    private val validationDelegate = mockk<ValidationDelegate>(relaxed = true)
+    private val remoteAgentDelegate = mockk<RemoteAgentDelegate>(relaxed = true)
+    private val boletimDataDelegate = mockk<BoletimDataDelegate>(relaxed = true)
+    private val initializationDelegate = mockk<InitializationDelegate>(relaxed = true)
+    private val houseEditDelegate by lazy {
+        HouseEditDelegate(
+            repository = repository,
+            saveHouseUseCase = saveHouseUseCase,
+            predictHouseValuesUseCase = predictHouseValuesUseCase,
+            recalculateVisitSegmentsUseCase = recalculateVisitSegmentsUseCase,
+            clashDetector = ClashDetector(),
+            dayLockEnforcer = DayLockEnforcer(),
+            roleEnforcer = RoleEnforcer(),
+            soundManager = soundManager
+        )
+    }
 
     private val testDispatcher = StandardTestDispatcher()
 
@@ -119,6 +140,7 @@ class AdminHomologationLockTest {
 
         every { repository.getPersonalHousesFlow(any(), any()) } returns flowOf(listOf(originalHouse))
         every { repository.getAllHouses(any()) } returns flowOf(listOf(originalHouse))
+        every { repository.getAllHousesSnapshotFlow() } returns flowOf(listOf(originalHouse))
         every { repository.allActivitiesFlow } returns flowOf(emptyList())
 
         val viewModel = HomeViewModel(
@@ -140,7 +162,15 @@ class AdminHomologationLockTest {
             localizationRepository = localizationRepository,
             clashDetector = ClashDetector(),
             dayLockEnforcer = DayLockEnforcer(),
-            roleEnforcer = RoleEnforcer()
+            roleEnforcer = RoleEnforcer(),
+            syncDelegate = syncDelegate,
+            dayNavigationDelegate = dayNavigationDelegate,
+            dayClosingDelegate = dayClosingDelegate,
+            validationDelegate = validationDelegate,
+            remoteAgentDelegate = remoteAgentDelegate,
+            boletimDataDelegate = boletimDataDelegate,
+            initializationDelegate = initializationDelegate,
+            houseEditDelegate = houseEditDelegate
         )
 
         // Force viewModel state loading
@@ -184,6 +214,7 @@ class AdminHomologationLockTest {
 
         every { repository.getPersonalHousesFlow(any(), any()) } returns flowOf(listOf(originalHouse))
         every { repository.getAllHouses(any()) } returns flowOf(listOf(originalHouse))
+        every { repository.getAllHousesSnapshotFlow() } returns flowOf(listOf(originalHouse))
         every { repository.allActivitiesFlow } returns flowOf(emptyList())
 
         val viewModel = HomeViewModel(
@@ -205,7 +236,15 @@ class AdminHomologationLockTest {
             localizationRepository = localizationRepository,
             clashDetector = ClashDetector(),
             dayLockEnforcer = DayLockEnforcer(),
-            roleEnforcer = RoleEnforcer()
+            roleEnforcer = RoleEnforcer(),
+            syncDelegate = syncDelegate,
+            dayNavigationDelegate = dayNavigationDelegate,
+            dayClosingDelegate = dayClosingDelegate,
+            validationDelegate = validationDelegate,
+            remoteAgentDelegate = remoteAgentDelegate,
+            boletimDataDelegate = boletimDataDelegate,
+            initializationDelegate = initializationDelegate,
+            houseEditDelegate = houseEditDelegate
         )
 
         testDispatcher.scheduler.advanceUntilIdle()

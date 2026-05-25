@@ -23,8 +23,16 @@ fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): Hous
                 blockNumber = (this.getString("blockNumber") ?: "").normalize(),
                 streetName = (this.getString("streetName") ?: "").trim().formatStreetName(),
                 number = (this.getString("number") ?: "").trim().uppercase(),
-                sequence = (this.get("sequence") as? Number)?.toInt() ?: 0,
-                complement = (this.get("complement") as? Number)?.toInt() ?: 0,
+                sequence = when (val s = this.get("sequence")) {
+                    is Number -> s.toInt()
+                    is String -> s.toIntOrNull() ?: 0
+                    else -> 0
+                },
+                complement = when (val c = this.get("complement")) {
+                    is Number -> c.toInt()
+                    is String -> c.toIntOrNull() ?: 0
+                    else -> 0
+                },
                 bairro = (this.getString("bairro") ?: "").normalize(),
                 blockSequence = (this.getString("blockSequence") ?: "").normalize()
             ),

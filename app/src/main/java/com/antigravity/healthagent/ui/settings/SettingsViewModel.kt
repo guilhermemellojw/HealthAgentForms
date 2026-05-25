@@ -7,7 +7,7 @@ import com.antigravity.healthagent.data.backup.BackupScheduler
 import com.antigravity.healthagent.data.backup.BackupManager
 import com.antigravity.healthagent.data.backup.BackupData
 import com.antigravity.healthagent.data.backup.BackupFrequency
-import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.repository.StreetRepository
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.domain.repository.AuthRepository

@@ -1,20 +1,15 @@
 package com.antigravity.healthagent.data.repository
 
 import android.content.Context
-import androidx.room.withTransaction
-import com.antigravity.healthagent.data.local.AppDatabase
-import com.antigravity.healthagent.data.local.dao.DayActivityDao
-import com.antigravity.healthagent.data.local.dao.HouseDao
-import com.antigravity.healthagent.data.local.dao.TombstoneDao
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.local.model.TombstoneType
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.data.util.toDayActivitySafe
 import com.antigravity.healthagent.data.util.toHouseSafe
 import com.antigravity.healthagent.utils.toDashDate
 import com.antigravity.healthagent.utils.toSlashDate
-import com.antigravity.healthagent.utils.withRetry
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.FieldValue
@@ -36,17 +31,12 @@ class SyncPushHandler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
-    private val houseDao: HouseDao,
-    private val dayActivityDao: DayActivityDao,
-    private val tombstoneDao: TombstoneDao,
-    private val settingsManager: SettingsManager,
-    private val database: AppDatabase
+    private val houseRepository: HouseRepository,
+    private val settingsManager: SettingsManager
 ) {
 
     private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        return database.withRetry(maxAttempts = 3) {
-            database.withTransaction { block() }
-        }
+        return houseRepository.runInTransaction { block() }
     }
 
     suspend fun pushLocalDataToCloud(
@@ -88,9 +78,9 @@ class SyncPushHandler @Inject constructor(
                         var officialAgentName = existingAgentName.uppercase()
 
                         // 1. Fetch Local Data and Tombstones
-                        val unsyncedHouses = houseDao.getUnsyncedHouses(uid)
-                        val unsyncedActivities = dayActivityDao.getUnsyncedActivities(uid)
-                        val tombstones = tombstoneDao.getAllTombstones(uid)
+                        val unsyncedHouses = houseRepository.getUnsyncedHouses(uid)
+                        val unsyncedActivities = houseRepository.getUnsyncedActivities(uid)
+                        val tombstones = houseRepository.getAllTombstones(uid)
 
                         // Optimistic return if nothing to do (and not a forced replacement)
                         if (unsyncedHouses.isEmpty() && unsyncedActivities.isEmpty() && tombstones.isEmpty() && !shouldReplace) {
@@ -239,7 +229,7 @@ class SyncPushHandler @Inject constructor(
                                 
                                 batch.commit().await()
                                 runInTransactionWithRetry {
-                                    tombstoneDao.deleteTombstones(chunk.map { it.id })
+                                    houseRepository.deleteTombstones(chunk.map { it.id })
                                 }
                                 cloudDeletedHouses.clear()
                                 cloudDeletedActivities.clear()
@@ -256,7 +246,7 @@ class SyncPushHandler @Inject constructor(
                                             .whereEqualTo("data", date)
                                             .get().await()
                                         
-                                        val localHousesForDate = houseDao.getHousesByDateAndAgent(date, uid)
+                                        val localHousesForDate = houseRepository.getHousesByDateAndAgent(date, uid)
                                         val localKeys = localHousesForDate.map { it.generateNaturalKey() }.toSet()
                                         val localIdentities = localHousesForDate.map { it.generateIdentityKey() }.toSet()
                                         
@@ -302,7 +292,7 @@ class SyncPushHandler @Inject constructor(
                                 batch.commit().await()
                                 runInTransactionWithRetry {
                                     chunk.forEach { house ->
-                                        houseDao.markAsSyncedWithTimestamp(house.id, house.lastUpdated, uid, officialAgentName)
+                                        houseRepository.markHouseAsSynced(house.id, house.lastUpdated, uid, officialAgentName)
                                     }
                                 }
                             }
@@ -333,7 +323,7 @@ class SyncPushHandler @Inject constructor(
                                 batch.commit().await()
                                 runInTransactionWithRetry {
                                     chunk.forEach { activity ->
-                                        dayActivityDao.markAsSyncedWithTimestamp(activity.date, officialAgentName, uid, activity.lastUpdated)
+                                        houseRepository.markActivityAsSynced(activity.date, officialAgentName, uid, activity.lastUpdated)
                                     }
                                 }
                             }
@@ -377,7 +367,7 @@ class SyncPushHandler @Inject constructor(
                                 if (shouldReplace) {
                                     housesToPush.filter { it.data.replace("/", "-").contains(monthYear) }
                                 } else {
-                                    houseDao.getHousesByMonth(uid, monthYear)
+                                    houseRepository.getHousesByMonth(uid, monthYear)
                                 }
                             }
                             
@@ -407,7 +397,7 @@ class SyncPushHandler @Inject constructor(
                                 if (shouldReplace) {
                                     activitiesToPush.filter { it.date.replace("/", "-").contains(monthYear) }
                                 } else {
-                                    dayActivityDao.getDayActivitiesByMonth(uid, monthYear)
+                                    houseRepository.getDayActivitiesByMonth(uid, monthYear)
                                 }
                             }
                             

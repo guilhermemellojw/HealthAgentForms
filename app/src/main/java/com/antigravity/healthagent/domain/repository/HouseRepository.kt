@@ -1,10 +1,45 @@
-package com.antigravity.healthagent.data.repository
+package com.antigravity.healthagent.domain.repository
 
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.DayActivity
+import com.antigravity.healthagent.data.local.model.Tombstone
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Interface contract for the House and DayActivity data layer.
+ * Resides in the Domain Layer (Clean Architecture) and acts as the unique entry point
+ * for all database-related operations, queries, and atomic modifications.
+ */
 interface HouseRepository {
+    // Métodos de Consulta do Sync
+    suspend fun getUnsyncedHouses(agentUid: String): List<House>
+    suspend fun getUnsyncedActivities(agentUid: String): List<DayActivity>
+    suspend fun countHouses(): Int
+    suspend fun getActiveBairros(agentUid: String): List<String>
+    suspend fun getActiveBlockNumbers(): List<String>
+    suspend fun getHousesByBlocks(blocks: List<String>): List<House>
+    suspend fun getHousesByMonth(agentUid: String, monthYear: String): List<House>
+    suspend fun getDayActivitiesByMonth(agentUid: String, monthYear: String): List<DayActivity>
+    suspend fun getEmptyHouses(agentUid: String): List<House>
+
+    // Métodos de Mutação Direta (Ignoram fechamento de dias para Reconciliação do Sync)
+    suspend fun upsertHousesRaw(houses: List<House>)
+    suspend fun upsertDayActivitiesRaw(activities: List<DayActivity>)
+    suspend fun deleteHousesByDateAndAgent(date: String, agentUid: String)
+    suspend fun deleteHouseById(id: Int)
+    suspend fun markHouseAsSynced(id: Int, lastUpdated: Long, agentUid: String, agentName: String)
+    suspend fun markActivityAsSynced(date: String, agentName: String, agentUid: String, lastUpdated: Long)
+    suspend fun cleanupZeroValues()
+
+    // Métodos do TombstoneDao
+    suspend fun getAllTombstones(agentUid: String): List<Tombstone>
+    suspend fun insertTombstones(tombstones: List<Tombstone>)
+    suspend fun insertTombstone(tombstone: Tombstone)
+    suspend fun deleteTombstoneByNaturalKey(naturalKey: String, agentUid: String)
+    suspend fun deleteTombstones(ids: List<Int>)
+    suspend fun deleteTombstonesByAgent(agentUid: String)
+    suspend fun pruneOldTombstones(threshold: Long)
+
     fun getAllHouses(agentUid: String): Flow<List<House>>
     fun getPersonalHousesFlow(agentUid: String, agentName: String): Flow<List<House>>
     val allActivitiesFlow: Flow<List<DayActivity>>

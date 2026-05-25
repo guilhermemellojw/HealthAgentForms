@@ -3,7 +3,7 @@ package com.antigravity.healthagent.ui.rg
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.antigravity.healthagent.data.local.model.House
-import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import com.antigravity.healthagent.domain.usecase.GetRGBlocksUseCase
 import com.antigravity.healthagent.domain.usecase.SyncDataUseCase

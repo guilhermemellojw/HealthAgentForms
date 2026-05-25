@@ -1,6 +1,6 @@
 package com.antigravity.healthagent.di
 
-import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.repository.HouseRepositoryImpl
 import dagger.Binds
 import dagger.Module
@@ -16,7 +16,7 @@ abstract class RepositoryModule {
     @Singleton
     abstract fun bindHouseRepository(
         houseRepositoryImpl: HouseRepositoryImpl
-    ): com.antigravity.healthagent.data.repository.HouseRepository
+    ): HouseRepository
 
     @Binds
     @Singleton

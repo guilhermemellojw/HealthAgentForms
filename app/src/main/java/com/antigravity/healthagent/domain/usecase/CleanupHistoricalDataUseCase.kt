@@ -1,6 +1,6 @@
 package com.antigravity.healthagent.domain.usecase
 
-import com.antigravity.healthagent.data.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.AgentRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import java.text.SimpleDateFormat

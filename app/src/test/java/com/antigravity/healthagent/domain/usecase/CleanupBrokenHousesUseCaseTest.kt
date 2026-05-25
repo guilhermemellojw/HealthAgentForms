@@ -1,6 +1,6 @@
 package com.antigravity.healthagent.domain.usecase
 
-import com.antigravity.healthagent.data.local.dao.HouseDao
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import io.mockk.*
@@ -11,18 +11,18 @@ import org.junit.Test
 
 class CleanupBrokenHousesUseCaseTest {
 
-    private val houseDao = mockk<HouseDao>(relaxed = true)
+    private val houseRepository = mockk<HouseRepository>(relaxed = true)
     private val syncRepository = mockk<SyncRepository>(relaxed = true)
     private lateinit var useCase: CleanupBrokenHousesUseCase
 
     @Before
     fun setup() {
-        useCase = CleanupBrokenHousesUseCase(houseDao, syncRepository)
+        useCase = CleanupBrokenHousesUseCase(houseRepository, syncRepository)
     }
 
     @Test
     fun `returns success 0 when no broken houses found`() = runBlocking {
-        coEvery { houseDao.getEmptyHouses("uid_1") } returns emptyList()
+        coEvery { houseRepository.getEmptyHouses("uid_1") } returns emptyList()
 
         val result = useCase("uid_1")
 
@@ -38,7 +38,7 @@ class CleanupBrokenHousesUseCaseTest {
             House(id = 2, agentUid = "uid_1"),
             House(id = 3, agentUid = "uid_1")
         )
-        coEvery { houseDao.getEmptyHouses("uid_1") } returns broken
+        coEvery { houseRepository.getEmptyHouses("uid_1") } returns broken
         coEvery { syncRepository.deleteHousesSurgically("uid_1", broken) } returns Result.success(Unit)
 
         val result = useCase("uid_1")
@@ -52,7 +52,7 @@ class CleanupBrokenHousesUseCaseTest {
     fun `returns failure when surgical delete fails`() = runBlocking {
         val broken = listOf(House(id = 1, agentUid = "uid_1"))
         val error = Exception("Sync failed")
-        coEvery { houseDao.getEmptyHouses("uid_1") } returns broken
+        coEvery { houseRepository.getEmptyHouses("uid_1") } returns broken
         coEvery { syncRepository.deleteHousesSurgically("uid_1", broken) } returns Result.failure(error)
 
         val result = useCase("uid_1")
@@ -63,7 +63,7 @@ class CleanupBrokenHousesUseCaseTest {
 
     @Test
     fun `returns failure when dao throws exception`() = runBlocking {
-        coEvery { houseDao.getEmptyHouses(any()) } throws RuntimeException("DB error")
+        coEvery { houseRepository.getEmptyHouses(any()) } throws RuntimeException("DB error")
 
         val result = useCase("uid_1")
 

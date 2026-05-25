@@ -8,6 +8,7 @@ import com.antigravity.healthagent.data.local.model.DayActivity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
+import com.antigravity.healthagent.domain.repository.HouseRepository
 
 import com.antigravity.healthagent.data.sync.SyncScheduler
 import com.antigravity.healthagent.data.local.dao.TombstoneDao
@@ -465,6 +466,15 @@ class HouseRepositoryImpl @Inject constructor(
         runInTransactionWithRetry {
             houseDao.deleteAll()
             dayActivityDao.deleteAll()
+            tombstoneDao.deleteAll()
+            database.customStreetDao().deleteAll()
+            database.agentCacheDao().clearAgents()
+            database.agentCacheDao().clearSummaries()
+            try {
+                database.openHelper.writableDatabase.execSQL("DELETE FROM sqlite_sequence")
+            } catch (e: Exception) {
+                android.util.Log.w("HouseRepository", "Failed to reset sqlite_sequence: ${e.message}")
+            }
         }
     }
 
@@ -472,6 +482,7 @@ class HouseRepositoryImpl @Inject constructor(
         runInTransactionWithRetry {
             houseDao.deleteByAgent(agentUid)
             dayActivityDao.deleteByAgent(agentUid)
+            tombstoneDao.deleteByAgent(agentUid)
         }
     }
 
@@ -495,17 +506,27 @@ class HouseRepositoryImpl @Inject constructor(
                         val conflict = targetHouses.find { it.generateNaturalKey() == naturalKey }
                         
                         if (conflict != null) {
-                            // MERGE LOGIC: Prefer the house that has actual fieldwork data (treatment)
-                            val localHasWork = house.treatment.a1 > 0 || house.treatment.a2 > 0 || house.treatment.comFoco || house.observation.isNotBlank()
-                            val conflictHasWork = conflict.treatment.a1 > 0 || conflict.treatment.a2 > 0 || conflict.treatment.comFoco || conflict.observation.isNotBlank()
+                            val isHouseClosed = dayActivityDao.getDayActivity(house.data.toDashDate(), targetUid)?.let { it.isClosed && !it.isManualUnlock } ?: false
+                            val isConflictClosed = dayActivityDao.getDayActivity(conflict.data.toDashDate(), targetUid)?.let { it.isClosed && !it.isManualUnlock } ?: false
                             
-                            if (localHasWork && !conflictHasWork) {
-                                android.util.Log.i("HouseRepository", "Migration: Overwriting empty cloud skeleton with local production for ${house.id}")
-                                houseDao.deleteHouse(conflict)
-                                houseDao.updateHouseIdentity(house.id, targetUid, agentName)
+                            if (isHouseClosed || isConflictClosed) {
+                                // CLOSED-DAY GUARD: skip deletion of duplicate conflict or house
+                                if (!isHouseClosed) {
+                                    houseDao.updateHouseIdentity(house.id, targetUid, agentName)
+                                }
                             } else {
-                                // Conflict already has work or local is also empty
-                                houseDao.deleteHouseById(house.id)
+                                // MERGE LOGIC: Prefer the house that has actual fieldwork data (treatment)
+                                val localHasWork = house.treatment.a1 > 0 || house.treatment.a2 > 0 || house.treatment.comFoco || house.observation.isNotBlank()
+                                val conflictHasWork = conflict.treatment.a1 > 0 || conflict.treatment.a2 > 0 || conflict.treatment.comFoco || conflict.observation.isNotBlank()
+                                
+                                if (localHasWork && !conflictHasWork) {
+                                    android.util.Log.i("HouseRepository", "Migration: Overwriting empty cloud skeleton with local production for ${house.id}")
+                                    houseDao.deleteHouse(conflict)
+                                    houseDao.updateHouseIdentity(house.id, targetUid, agentName)
+                                } else {
+                                    // Conflict already has work or local is also empty
+                                    houseDao.deleteHouseById(house.id)
+                                }
                             }
                         } else {
                             houseDao.updateHouseIdentity(house.id, targetUid, agentName)
@@ -656,4 +677,30 @@ class HouseRepositoryImpl @Inject constructor(
             dayActivityDao.fixEmailNamesForUid(uid, properName)
         }
     }
+
+    override suspend fun getUnsyncedHouses(agentUid: String): List<House> = houseDao.getUnsyncedHouses(agentUid)
+    override suspend fun getUnsyncedActivities(agentUid: String): List<DayActivity> = dayActivityDao.getUnsyncedActivities(agentUid)
+    override suspend fun countHouses(): Int = houseDao.count()
+    override suspend fun getActiveBairros(agentUid: String): List<String> = houseDao.getActiveBairros(agentUid)
+    override suspend fun getActiveBlockNumbers(): List<String> = houseDao.getActiveBlockNumbers()
+    override suspend fun getHousesByBlocks(blocks: List<String>): List<House> = houseDao.getHousesByBlocks(blocks)
+    override suspend fun getHousesByMonth(agentUid: String, monthYear: String): List<House> = houseDao.getHousesByMonth(agentUid, monthYear)
+    override suspend fun getDayActivitiesByMonth(agentUid: String, monthYear: String): List<DayActivity> = dayActivityDao.getDayActivitiesByMonth(agentUid, monthYear)
+    override suspend fun getEmptyHouses(agentUid: String): List<House> = houseDao.getEmptyHouses(agentUid)
+
+    override suspend fun upsertHousesRaw(houses: List<House>) = houseDao.upsertHouses(houses)
+    override suspend fun upsertDayActivitiesRaw(activities: List<DayActivity>) = dayActivityDao.upsertDayActivities(activities)
+    override suspend fun deleteHousesByDateAndAgent(date: String, agentUid: String) = houseDao.deleteHousesByDateAndAgent(date, agentUid)
+    override suspend fun deleteHouseById(id: Int) = houseDao.deleteHouseById(id)
+    override suspend fun markHouseAsSynced(id: Int, lastUpdated: Long, agentUid: String, agentName: String) = houseDao.markAsSyncedWithTimestamp(id, lastUpdated, agentUid, agentName)
+    override suspend fun markActivityAsSynced(date: String, agentName: String, agentUid: String, lastUpdated: Long) = dayActivityDao.markAsSyncedWithTimestamp(date, agentName, agentUid, lastUpdated)
+    override suspend fun cleanupZeroValues() = houseDao.cleanupZeroValues()
+
+    override suspend fun getAllTombstones(agentUid: String): List<Tombstone> = tombstoneDao.getAllTombstones(agentUid)
+    override suspend fun insertTombstones(tombstones: List<Tombstone>) = tombstoneDao.insertTombstones(tombstones)
+    override suspend fun insertTombstone(tombstone: Tombstone) = tombstoneDao.insertTombstone(tombstone)
+    override suspend fun deleteTombstoneByNaturalKey(naturalKey: String, agentUid: String) = tombstoneDao.deleteByNaturalKey(naturalKey, agentUid)
+    override suspend fun deleteTombstones(ids: List<Int>) = tombstoneDao.deleteTombstones(ids)
+    override suspend fun deleteTombstonesByAgent(agentUid: String) = tombstoneDao.deleteByAgent(agentUid)
+    override suspend fun pruneOldTombstones(threshold: Long) = tombstoneDao.deleteOldTombstones(threshold)
 }

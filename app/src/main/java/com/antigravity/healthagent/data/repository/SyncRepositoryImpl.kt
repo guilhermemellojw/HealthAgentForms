@@ -1,11 +1,6 @@
 package com.antigravity.healthagent.data.repository
 
 import android.content.Context
-import androidx.room.withTransaction
-import com.antigravity.healthagent.data.local.AppDatabase
-import com.antigravity.healthagent.data.local.dao.DayActivityDao
-import com.antigravity.healthagent.data.local.dao.HouseDao
-import com.antigravity.healthagent.data.local.dao.TombstoneDao
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.Tombstone
@@ -14,7 +9,7 @@ import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.data.sync.SyncScheduler
 import com.antigravity.healthagent.domain.repository.BackupRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
-import com.antigravity.healthagent.utils.withRetry
+import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -34,11 +29,8 @@ class SyncRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
-    private val houseDao: HouseDao,
-    private val dayActivityDao: DayActivityDao,
-    private val tombstoneDao: TombstoneDao,
+    private val houseRepository: HouseRepository,
     private val settingsManager: SettingsManager,
-    private val database: AppDatabase,
     private val backupRepository: BackupRepository,
     private val syncSchedulerProvider: Provider<SyncScheduler>,
     private val syncPushHandler: SyncPushHandler,
@@ -48,12 +40,6 @@ class SyncRepositoryImpl @Inject constructor(
 ) : SyncRepository {
 
     private val syncMutex = Mutex()
-
-    private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        return database.withRetry(maxAttempts = 3) {
-            database.withTransaction { block() }
-        }
-    }
 
     override suspend fun pushLocalDataToCloud(
         houses: List<House>,
