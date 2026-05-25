@@ -137,7 +137,10 @@ class AdminHomologationLockTest {
             generateTestDataUseCase = generateTestDataUseCase,
             cleanupBrokenHousesUseCase = cleanupBrokenHousesUseCase,
             agentRepository = agentRepository,
-            localizationRepository = localizationRepository
+            localizationRepository = localizationRepository,
+            clashDetector = ClashDetector(),
+            dayLockEnforcer = DayLockEnforcer(),
+            roleEnforcer = RoleEnforcer()
         )
 
         // Force viewModel state loading
@@ -199,7 +202,10 @@ class AdminHomologationLockTest {
             generateTestDataUseCase = generateTestDataUseCase,
             cleanupBrokenHousesUseCase = cleanupBrokenHousesUseCase,
             agentRepository = agentRepository,
-            localizationRepository = localizationRepository
+            localizationRepository = localizationRepository,
+            clashDetector = ClashDetector(),
+            dayLockEnforcer = DayLockEnforcer(),
+            roleEnforcer = RoleEnforcer()
         )
 
         testDispatcher.scheduler.advanceUntilIdle()

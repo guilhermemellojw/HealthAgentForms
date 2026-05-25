@@ -59,7 +59,10 @@ class HomeViewModel @Inject constructor(
     private val generateTestDataUseCase: GenerateTestDataUseCase,
     private val cleanupBrokenHousesUseCase: CleanupBrokenHousesUseCase,
     private val agentRepository: AgentRepository,
-    private val localizationRepository: LocalizationRepository
+    private val localizationRepository: LocalizationRepository,
+    private val clashDetector: ClashDetector,
+    private val dayLockEnforcer: DayLockEnforcer,
+    private val roleEnforcer: RoleEnforcer
 ) : ViewModel() {
 
     // --- State Definitions ---
@@ -1559,9 +1562,10 @@ class HomeViewModel @Inject constructor(
     private var lastAddClickTime = 0L
 
     fun addNewHouseAt(afterId: Int) {
-        // ROLE ENFORCEMENT
-        if (_isSupervisor.value && !_isAdmin.value) {
-            _uiEvent.value = "Apenas administradores podem adicionar dados remotamente."
+        // ROLE ENFORCEMENT (Centralized)
+        val roleResult = roleEnforcer.enforce(_isSupervisor.value, _isAdmin.value, "adicionar dados remotamente")
+        if (roleResult is RoleEnforcer.RoleResult.Blocked) {
+            _uiEvent.value = roleResult.message
             soundManager.playWarning()
             return
         }
@@ -1579,14 +1583,19 @@ class HomeViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                val isUnlocked = isWorkdayManualUnlock.value
-                val isAdmin = _isAdmin.value
-                if (uiState.value.isDayClosed && !isUnlocked && !isAdmin) {
-                    _uiEvent.value = "Este dia está FECHADO."
+                val lockResult = dayLockEnforcer.enforce(
+                    isDayClosed = uiState.value.isDayClosed,
+                    isManualUnlock = isWorkdayManualUnlock.value,
+                    isAdmin = _isAdmin.value,
+                    actionDescription = "adicionar"
+                )
+                if (lockResult is DayLockEnforcer.LockResult.Blocked) {
+                    _uiEvent.value = lockResult.message
                     soundManager.playWarning()
                     isAddingHouse = false
                     return@launch
                 }
+                val isAdmin = _isAdmin.value
 
                 val currentDayHouses = houses.value.filter { it.data == _data.value }
                 val targetIndex = if (afterId == -1) -1 else currentDayHouses.indexOfFirst { it.id == afterId }
@@ -1620,35 +1629,10 @@ class HomeViewModel @Inject constructor(
                     listOrder = 0 // Will be set by recalculation
                 )
 
-                // 2.1 Clash Detection (similar to addNewHouse)
-                var finalSequence = houseToInsert.address.sequence
-                var finalComplement = houseToInsert.address.complement
-                
-                // We use latestHouses (including drafts) for safe incrementing
-                val allLatest = houses.value 
-                
-                while (allLatest.any { 
-                    it.data == houseToInsert.data && 
-                    it.agentUid == houseToInsert.agentUid &&
-                    it.agentName.equals(houseToInsert.agentName, ignoreCase = true) &&
-                    it.address.blockNumber.stringNormalize() == houseToInsert.address.blockNumber.stringNormalize() &&
-                    it.address.blockSequence.stringNormalize() == houseToInsert.address.blockSequence.stringNormalize() &&
-                    it.address.streetName.formatStreetName() == houseToInsert.address.streetName.formatStreetName() &&
-                    it.address.number.stringNormalize() == houseToInsert.address.number.stringNormalize() && 
-                    it.address.sequence == finalSequence &&
-                    it.address.complement == finalComplement &&
-                    it.address.bairro.stringNormalize() == houseToInsert.address.bairro.stringNormalize()
-                }) {
-                    if (houseToInsert.address.complement > 0 || houseToInsert.address.number.isNotBlank()) {
-                        finalComplement++
-                    } else {
-                        finalSequence++
-                    }
-                }
-                
-                if (finalSequence != houseToInsert.address.sequence || finalComplement != houseToInsert.address.complement) {
-                    houseToInsert = houseToInsert.copy(address = houseToInsert.address.copy(sequence = finalSequence, complement = finalComplement))
-                }
+                // 2.1 Clash Detection (Centralized)
+                houseToInsert = clashDetector.autoIncrementToAvoidClash(
+                    houseToInsert, houses.value, includeVisitSegment = false
+                )
 
                 // 3. Insert and Reorder
                 val mutableList = currentDayHouses.toMutableList()
@@ -1693,9 +1677,10 @@ class HomeViewModel @Inject constructor(
 
 
     fun addNewHouse() {
-        // ROLE ENFORCEMENT
-        if (_isSupervisor.value && !_isAdmin.value) {
-            _uiEvent.value = "Apenas administradores podem adicionar dados remotamente."
+        // ROLE ENFORCEMENT (Centralized)
+        val roleResult = roleEnforcer.enforce(_isSupervisor.value, _isAdmin.value, "adicionar dados remotamente")
+        if (roleResult is RoleEnforcer.RoleResult.Blocked) {
+            _uiEvent.value = roleResult.message
             soundManager.playWarning()
             return
         }
@@ -1717,22 +1702,26 @@ class HomeViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                // LOCK ENFORCEMENT: Block ANY additions to closed days unless Admin or Manual Override (isUnlocked)
-                val isUnlocked = isWorkdayManualUnlock.value
-                val isAdmin = _isAdmin.value
-                
-                if (uiState.value.isDayClosed && !isUnlocked && !isAdmin) {
-                    _uiEvent.value = "Este dia de trabalho está FECHADO e não permite edições."
+                // LOCK ENFORCEMENT (Centralized)
+                val lockResult = dayLockEnforcer.enforce(
+                    isDayClosed = uiState.value.isDayClosed,
+                    isManualUnlock = isWorkdayManualUnlock.value,
+                    isAdmin = _isAdmin.value,
+                    actionDescription = "adicionar"
+                )
+                if (lockResult is DayLockEnforcer.LockResult.Blocked) {
+                    _uiEvent.value = lockResult.message
                     soundManager.playWarning()
                     isAddingHouse = false
                     return@launch
                 }
+                val isAdmin = _isAdmin.value
 
                 // Pre-check for open limit inside the safe scope
                 val currentTotal = houses.value.count { it.data == _data.value }
                 val safetyLimit = (maxOpenHouses.value * 3).coerceAtLeast(150)
                 
-                if (currentTotal >= safetyLimit && !isUnlocked && !isAdmin) {
+                if (currentTotal >= safetyLimit && !isWorkdayManualUnlock.value && !isAdmin) {
 
                     soundManager.playWarning()
                     _situationLimitConfirmation.value = House(data = _data.value)
@@ -1867,36 +1856,10 @@ class HomeViewModel @Inject constructor(
                     listOrder = maxOrder + 1
                 )
 
-                // Exhaustive Clash Detection: Check ALL fields in the unique index to prevent REPLACE-deletions
-                var finalSequence = houseToInsert.address.sequence
-                var finalComplement = houseToInsert.address.complement
-                
-                // Smarter Auto-Increment: If numbers match, prefer incrementing COMPLEMENT
-                // CRITICAL: We check against 'latestHouses' (DB + Drafts) here to ensure 
-                // the new house skip-increments over even unsaved duplicates.
-                while (latestHouses.any { 
-                    it.data == houseToInsert.data && 
-                    it.agentUid == houseToInsert.agentUid &&
-                    it.agentName.equals(houseToInsert.agentName, ignoreCase = true) &&
-                    it.address.blockNumber.equals(houseToInsert.address.blockNumber, ignoreCase = true) &&
-                    it.address.blockSequence.equals(houseToInsert.address.blockSequence, ignoreCase = true) &&
-                    it.address.streetName.equals(houseToInsert.address.streetName, ignoreCase = true) &&
-                    it.address.number.equals(houseToInsert.address.number, ignoreCase = true) && 
-                    it.address.sequence == finalSequence &&
-                    it.address.complement == finalComplement &&
-                    it.address.bairro.equals(houseToInsert.address.bairro, ignoreCase = true) &&
-                    it.visitSegment == houseToInsert.visitSegment
-                }) {
-                    if (houseToInsert.address.complement > 0 || houseToInsert.address.number.isNotBlank()) {
-                        finalComplement++
-                    } else {
-                        finalSequence++
-                    }
-                }
-                
-                if (finalSequence != houseToInsert.address.sequence || finalComplement != houseToInsert.address.complement) {
-                    houseToInsert = houseToInsert.copy(address = houseToInsert.address.copy(sequence = finalSequence, complement = finalComplement))
-                }
+                // Exhaustive Clash Detection (Centralized)
+                houseToInsert = clashDetector.autoIncrementToAvoidClash(
+                    houseToInsert, latestHouses, includeVisitSegment = true
+                )
 
                 // Add to In-Flight temporarily to prevent duplicate prediction in rapid-fire clicks
                 _housesInFlight.update { it + houseToInsert }
@@ -1963,24 +1926,23 @@ class HomeViewModel @Inject constructor(
     }
 
     fun updateHouse(house: House) {
-        // LOCK ENFORCEMENT
-        val isUnlocked = isWorkdayManualUnlock.value
-        val isAdmin = _isAdmin.value
-        val isSupervisor = _isSupervisor.value
-
-        // ROLE ENFORCEMENT: Non-admin supervisors cannot edit
-        if (isSupervisor && !isAdmin) {
-            return // Silent return as fields are usually disabled in UI
+        // ROLE ENFORCEMENT (Centralized) — silent return since fields are usually disabled in UI
+        if (roleEnforcer.enforce(_isSupervisor.value, _isAdmin.value) is RoleEnforcer.RoleResult.Blocked) {
+            return
         }
 
-        // Early lock check - If day is closed, we shouldn't even reach here from the UI usually (since fields are disabled)
-        // But for safety, we return early WITHOUT a noisy Snackbar during active typing
-        if (uiState.value.isDayClosed && !isUnlocked && !isAdmin && house.id != 0) {
+        // LOCK ENFORCEMENT (Centralized) — silent return during active typing
+        val lockResult = dayLockEnforcer.enforce(
+            isDayClosed = uiState.value.isDayClosed,
+            isManualUnlock = isWorkdayManualUnlock.value,
+            isAdmin = _isAdmin.value
+        )
+        if (lockResult is DayLockEnforcer.LockResult.Blocked && house.id != 0) {
             return
         }
 
         val original = houses.value.find { it.id == house.id }
-        if (original?.editedByAdmin == true && !isAdmin) {
+        if (original?.editedByAdmin == true && !_isAdmin.value) {
             _uiEvent.value = "Este imóvel foi homologado por um administrador e não pode ser editado."
             soundManager.playWarning()
             return
@@ -2014,23 +1976,9 @@ class HomeViewModel @Inject constructor(
             return
         }
 
-        // --- MERGE PREVENTION (DUPLICATE NATURAL KEY) ---
-        // Check if this update would clash with ANOTHER house
+        // --- MERGE PREVENTION (DUPLICATE NATURAL KEY) --- (Centralized)
         val currentHouses = houses.value
-        val clashingHouse = currentHouses.find { 
-                it.id != house.id && 
-                it.data == house.data && 
-                it.agentUid == (house.agentUid ?: _currentUserUid.value) &&
-                it.agentName.equals(house.agentName, ignoreCase = true) &&
-                it.address.blockNumber.equals(house.address.blockNumber, ignoreCase = true) &&
-                it.address.blockSequence.equals(house.address.blockSequence, ignoreCase = true) &&
-                it.address.streetName.equals(house.address.streetName, ignoreCase = true) &&
-                it.address.number.equals(house.address.number, ignoreCase = true) &&
-                it.address.sequence == house.address.sequence &&
-                it.address.complement == house.address.complement &&
-                it.address.bairro.equals(house.address.bairro, ignoreCase = true) &&
-                it.visitSegment == house.visitSegment
-        }
+        val clashingHouse = clashDetector.findClash(house, currentHouses)
 
         // UNIFIED PERSISTENCE (Flicker-Free): Always keep latest typing in Drafts
         val updatedHouse = house.copy(lastUpdated = System.currentTimeMillis())
@@ -2160,9 +2108,10 @@ class HomeViewModel @Inject constructor(
     }
 
     fun deleteHouse(house: House) {
-        // ROLE ENFORCEMENT
-        if (_isSupervisor.value && !_isAdmin.value) {
-            _uiEvent.value = "Apenas administradores podem excluir dados remotamente."
+        // ROLE ENFORCEMENT (Centralized)
+        val roleResult = roleEnforcer.enforce(_isSupervisor.value, _isAdmin.value, "excluir dados remotamente")
+        if (roleResult is RoleEnforcer.RoleResult.Blocked) {
+            _uiEvent.value = roleResult.message
             soundManager.playWarning()
             return
         }
@@ -2174,10 +2123,15 @@ class HomeViewModel @Inject constructor(
             return
         }
 
-        // LOCK ENFORCEMENT
-        val isUnlocked = isWorkdayManualUnlock.value
-        if (uiState.value.isDayClosed && !isUnlocked && !isAdmin) {
-            _uiEvent.value = "Este dia está FECHADO. Desbloqueie para deletar."
+        // LOCK ENFORCEMENT (Centralized)
+        val lockResult = dayLockEnforcer.enforce(
+            isDayClosed = uiState.value.isDayClosed,
+            isManualUnlock = isWorkdayManualUnlock.value,
+            isAdmin = isAdmin,
+            actionDescription = "deletar"
+        )
+        if (lockResult is DayLockEnforcer.LockResult.Blocked) {
+            _uiEvent.value = lockResult.message
             soundManager.playWarning()
             return
         }
@@ -2208,11 +2162,15 @@ class HomeViewModel @Inject constructor(
 
     private var recentlyDeletedHouse: House? = null
     fun restoreDeletedHouse() {
-        // LOCK ENFORCEMENT
-        val isUnlocked = isWorkdayManualUnlock.value
-        val isAdmin = _isAdmin.value
-        if (uiState.value.isDayClosed && !isUnlocked && !isAdmin) {
-            _uiEvent.value = "Este dia está FECHADO. Desbloqueie para restaurar."
+        // LOCK ENFORCEMENT (Centralized)
+        val lockResult = dayLockEnforcer.enforce(
+            isDayClosed = uiState.value.isDayClosed,
+            isManualUnlock = isWorkdayManualUnlock.value,
+            isAdmin = _isAdmin.value,
+            actionDescription = "restaurar"
+        )
+        if (lockResult is DayLockEnforcer.LockResult.Blocked) {
+            _uiEvent.value = lockResult.message
             soundManager.playWarning()
             return
         }
@@ -2221,18 +2179,7 @@ class HomeViewModel @Inject constructor(
             viewModelScope.launch { 
                 // CRITICAL: Check for new collisions that might have happened while it was "deleted"
                 val latestHouses = houses.value.map { _pendingUpdateDrafts.value[it.id] ?: it }
-                val clashing = latestHouses.find { 
-                    it.data == house.data && 
-                    it.agentUid == house.agentUid &&
-                    it.address.blockNumber.equals(house.address.blockNumber, ignoreCase = true) &&
-                    it.address.blockSequence.equals(house.address.blockSequence, ignoreCase = true) &&
-                    it.address.streetName.equals(house.address.streetName, ignoreCase = true) &&
-                    it.address.number.equals(house.address.number, ignoreCase = true) &&
-                    it.address.sequence == house.address.sequence &&
-                    it.address.complement == house.address.complement &&
-                    it.address.bairro.equals(house.address.bairro, ignoreCase = true) &&
-                    it.visitSegment == house.visitSegment
-                }
+                val clashing = clashDetector.findClash(house, latestHouses)
 
                 if (clashing != null) {
                     // Restore as a "Red" draft if a locker exists now
@@ -2260,11 +2207,15 @@ class HomeViewModel @Inject constructor(
     }
 
     fun moveHouse(house: House, moveUp: Boolean) {
-        // LOCK ENFORCEMENT
-        val isUnlocked = isWorkdayManualUnlock.value
-        val isAdmin = _isAdmin.value
-        if (uiState.value.isDayClosed && !isUnlocked && !isAdmin) {
-            _uiEvent.value = "Este dia está FECHADO. Desbloqueie para ordenar."
+        // LOCK ENFORCEMENT (Centralized)
+        val lockResult = dayLockEnforcer.enforce(
+            isDayClosed = uiState.value.isDayClosed,
+            isManualUnlock = isWorkdayManualUnlock.value,
+            isAdmin = _isAdmin.value,
+            actionDescription = "ordenar"
+        )
+        if (lockResult is DayLockEnforcer.LockResult.Blocked) {
+            _uiEvent.value = lockResult.message
             soundManager.playWarning()
             return
         }
@@ -2324,24 +2275,9 @@ class HomeViewModel @Inject constructor(
                 agentUid = _remoteAgentUid.value ?: _currentUserUid.value ?: ""
             )
 
-            // --- CLASH PREVENTION (Moving) ---
-            // Check if moving this house would clash with an EXISTING house on the target date.
-            // We check against both DB and Drafts on that target date.
+            // --- CLASH PREVENTION (Moving) --- (Centralized)
             val latestHouses = houses.value.map { _pendingUpdateDrafts.value[it.id] ?: it }
-            val clashingHouse = latestHouses.find { 
-                it.id != updatedHouse.id && 
-                it.data == updatedHouse.data && 
-                it.agentUid == updatedHouse.agentUid &&
-                it.agentName.equals(updatedHouse.agentName, ignoreCase = true) &&
-                it.address.blockNumber.equals(updatedHouse.address.blockNumber, ignoreCase = true) &&
-                it.address.blockSequence.equals(updatedHouse.address.blockSequence, ignoreCase = true) &&
-                it.address.streetName.equals(updatedHouse.address.streetName, ignoreCase = true) &&
-                it.address.number.equals(updatedHouse.address.number, ignoreCase = true) &&
-                it.address.sequence == updatedHouse.address.sequence &&
-                it.address.complement == updatedHouse.address.complement &&
-                it.address.bairro.equals(updatedHouse.address.bairro, ignoreCase = true) &&
-                it.visitSegment == updatedHouse.visitSegment
-            }
+            val clashingHouse = clashDetector.findClash(updatedHouse, latestHouses)
 
             if (clashingHouse != null) {
                 // MOVE CLASH: Defer resolution by holding in drafts
