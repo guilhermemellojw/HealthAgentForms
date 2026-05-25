@@ -386,7 +386,14 @@ class HomeViewModel @Inject constructor(
 
     fun getHousesForDate(date: String, agentName: String? = null): List<House> {
         val targetName = agentName ?: _agentName.value
-        return houses.value.filter { it.data == date && it.agentName.uppercase() == targetName.uppercase() }
+        val targetUid = _remoteAgentUid.value ?: _currentUserUid.value ?: ""
+        
+        return houses.value.filter { house ->
+            house.data == date && (
+                (targetUid.isNotBlank() && house.agentUid == targetUid) ||
+                (targetName.isNotBlank() && house.agentName.uppercase() == targetName.uppercase())
+            )
+        }
     }
 
     fun deleteProduction(date: String) {

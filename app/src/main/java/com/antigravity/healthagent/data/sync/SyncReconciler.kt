@@ -77,6 +77,8 @@ class SyncReconciler @Inject constructor(
             val combinedLocalHouses = allLocalHouses + teammateHouses
             val allLocalHousesWithKeys = combinedLocalHouses.map { HouseWithKeys(it) }
 
+            val cloudActiveIdentities = cloudHousesWithKeys.map { it.identityKey }.toSet()
+
             val cloudDeletedIdentities = cloudDeletedHouses.mapNotNull { deletedKey ->
                 val parts = deletedKey.split("_")
                 if (parts.size >= 11) {
@@ -96,7 +98,11 @@ class SyncReconciler @Inject constructor(
                 val key = wrapper.naturalKey
                 val identityKey = wrapper.identityKey
 
-                if (key in cloudDeletedHouses || identityKey in cloudDeletedIdentities || "${house.data.replace("/", "-")}|${house.agentName.uppercase()}" in cloudDeletedActivities) {
+                val isRealDeletion = (key in cloudDeletedHouses) || 
+                                     (identityKey in cloudDeletedIdentities && identityKey !in cloudActiveIdentities) ||
+                                     ("${house.data.replace("/", "-")}|${house.agentName.uppercase()}" in cloudDeletedActivities)
+
+                if (isRealDeletion) {
                     val timeSinceLastUpdate = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis() - house.lastUpdated
                     if (house.isSynced) {
                         true
@@ -193,29 +199,28 @@ class SyncReconciler @Inject constructor(
 
                 val housesToUpsert = housesDelta.mapNotNull { cloudWrapper ->
                     val cloudHouse = cloudWrapper.house
+
+                    val isTeammate = cloudHouse.agentUid.isNotBlank() && cloudHouse.agentUid != uid
+                    if (!isTeammate) {
+                        val normalizedDate = cloudHouse.data.replace("/", "-")
+                        val dateKey = "$normalizedDate|$uid"
+                        val dayActivity = localActivities[dateKey]?.firstOrNull()
+                        val cloudActivity = activitiesDelta.find { it.date.replace("/", "-") == normalizedDate }
+
+                        val isCloudUnlocked = cloudActivity?.isManualUnlock == true
+                        val isLocallyClosed = dayActivity?.isClosed == true && dayActivity.isManualUnlock != true
+
+                        if (isLocallyClosed && !isCloudUnlocked && !cloudHouse.editedByAdmin && !isTargetDifferentUser) {
+                            return@mapNotNull null
+                        }
+                    }
+
                     val key = cloudWrapper.naturalKey
                     var existing = localHousesByNaturalKey[key]?.house
 
                     if (existing == null) {
                         val identityKey = cloudWrapper.identityKey
                         existing = localIdentityMap[identityKey]?.find { it.house.agentUid == cloudHouse.agentUid }?.house
-
-                        if (existing == null) {
-                            val isTeammate = cloudHouse.agentUid.isNotBlank() && cloudHouse.agentUid != uid
-                            if (!isTeammate) {
-                                val normalizedDate = cloudHouse.data.replace("/", "-")
-                                val dateKey = "$normalizedDate|$uid"
-                                val dayActivity = localActivities[dateKey]?.firstOrNull()
-                                val cloudActivity = activitiesDelta.find { it.date.replace("/", "-") == normalizedDate }
-
-                                val isCloudUnlocked = cloudActivity?.isManualUnlock == true
-                                val isLocallyClosed = dayActivity?.isClosed == true && dayActivity.isManualUnlock != true
-
-                                if (isLocallyClosed && !isCloudUnlocked && !cloudHouse.editedByAdmin && !isTargetDifferentUser) {
-                                    return@mapNotNull null
-                                }
-                            }
-                        }
                     }
 
                     if (existing != null && !existing.isSynced) {
@@ -230,7 +235,6 @@ class SyncReconciler @Inject constructor(
                         }
                     }
 
-                    val isTeammate = cloudHouse.agentUid.isNotBlank() && cloudHouse.agentUid != uid
                     cloudHouse.copy(
                         id = existing?.id ?: 0,
                         agentName = if (isTeammate) cloudHouse.agentName else finalAgentName,

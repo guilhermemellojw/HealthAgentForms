@@ -579,7 +579,7 @@ fun DebouncedCompactInputBox(
     modifier: Modifier = Modifier,
     keyboardOptions: KeyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
     readOnly: Boolean = false,
-    debounceTime: Long = 500L,
+    debounceTime: Long = 400L,
     isError: Boolean = false,
     enabled: Boolean = true,
     isEasyMode: Boolean = false,
@@ -598,12 +598,29 @@ fun DebouncedCompactInputBox(
         }
     }
 
+    // Local debounce to avoid updating global state on every single keystroke
+    LaunchedEffect(text, key) {
+        if (text != initialValue && isFocused) {
+            delay(debounceTime)
+            onValueChange(text)
+        }
+    }
+
+    // Flush changes immediately when losing focus to prevent any data loss
+    val onFocusChangedInternal = remember(onValueChange, text) {
+        { focused: Boolean ->
+            isFocused = focused
+            if (!focused && text != initialValue) {
+                onValueChange(text)
+            }
+        }
+    }
+
     CompactInputBox(
         label = label,
         value = text,
         onValueChange = { newText ->
             text = newText
-            onValueChange(newText)
         },
         modifier = modifier,
         keyboardOptions = keyboardOptions,
@@ -611,7 +628,7 @@ fun DebouncedCompactInputBox(
         isError = isError,
         enabled = enabled,
         isEasyMode = isEasyMode,
-        onFocusChanged = { isFocused = it },
+        onFocusChanged = onFocusChangedInternal,
         focusRequester = focusRequester
     )
 }

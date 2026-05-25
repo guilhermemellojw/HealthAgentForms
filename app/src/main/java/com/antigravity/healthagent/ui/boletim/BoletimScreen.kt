@@ -597,6 +597,7 @@ private fun shareToWhatsApp(
     val fechados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }
     val recusados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }
     val abandonados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
+    val vazios = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.V }
     val comFoco = houses.count { it.treatment.comFoco }
 
     // Format WhatsApp message
@@ -611,6 +612,7 @@ private fun shareToWhatsApp(
     sb.append("🦟 Com Foco: $comFoco\n")
     sb.append("🚫 Recusados: $recusados\n")
     sb.append("🏚️ Abandonados: $abandonados\n")
+    sb.append("📭 Vazios: $vazios\n")
 
 
     val message = sb.toString().trim()

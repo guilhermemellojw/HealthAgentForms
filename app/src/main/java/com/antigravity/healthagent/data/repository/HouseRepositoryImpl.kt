@@ -617,10 +617,18 @@ class HouseRepositoryImpl @Inject constructor(
             
             if (inspectedHouses.isEmpty() || adminHouses.isEmpty()) return@runInTransactionWithRetry
             
+            val closedDates = dayActivityDao.getDayActivitiesByAgentSnapshot(inspectedUid)
+                .filter { it.isClosed && !it.isManualUnlock }
+                .map { it.date.toDashDate() }
+                .toSet()
+
             // BUG FIX: naturalKey includes agentUid, so they will NEVER match between different users.
             // We must use identityKey (Logical Identity) to detect cross-UID leaks.
             val adminKeys = adminHouses.map { it.generateIdentityKey() }.toSet()
-            val toDelete = inspectedHouses.filter { it.generateIdentityKey() in adminKeys }
+            val toDelete = inspectedHouses.filter { 
+                it.generateIdentityKey() in adminKeys && 
+                it.data.toDashDate() !in closedDates 
+            }
             
             if (toDelete.isNotEmpty()) {
                 android.util.Log.i("HouseRepository", "Surgical clean: removing ${toDelete.size} identity duplicates from $inspectedUid")

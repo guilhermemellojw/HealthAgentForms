@@ -65,30 +65,33 @@ class WeeklySummaryViewModel @Inject constructor(
     })
 
     init {
-        // Observe settings profile cache
+        // Unified observer to prevent race conditions or supervisor overwriting the remote agent name
         viewModelScope.launch {
-            settingsManager.cachedUser.collect { user ->
+            combine(
+                settingsManager.cachedUser,
+                settingsManager.remoteAgentName,
+                settingsManager.remoteAgentUid
+            ) { user, remoteName, remoteUid ->
+                Triple(user, remoteName, remoteUid)
+            }.collect { (user, remoteName, remoteUid) ->
+                val activeRemoteUid = remoteUid?.ifBlank { null }
+                val activeRemoteName = remoteName?.ifBlank { null }
+                
+                if (activeRemoteUid != null && activeRemoteName != null) {
+                    _agentName.value = activeRemoteName.uppercase()
+                    _remoteAgentUid.value = activeRemoteUid
+                } else {
+                    _remoteAgentUid.value = null
+                    user?.let {
+                        val name = it.agentName?.uppercase()?.ifBlank { null }
+                            ?: it.email?.substringBefore("@")?.uppercase()
+                            ?: "DESCONHECIDO"
+                        _agentName.value = name
+                    }
+                }
                 user?.let {
-                    val name = it.agentName?.uppercase()?.ifBlank { null }
-                        ?: it.email?.substringBefore("@")?.uppercase()
-                        ?: "DESCONHECIDO"
-                    _agentName.value = name
                     _currentUserUid.value = it.uid
                     _isAdmin.value = it.role == UserRole.ADMIN
-                }
-            }
-        }
-
-        viewModelScope.launch {
-            settingsManager.remoteAgentUid.collect { uid ->
-                _remoteAgentUid.value = uid
-            }
-        }
-
-        viewModelScope.launch {
-            settingsManager.remoteAgentName.collect { name ->
-                name?.uppercase()?.ifBlank { null }?.let {
-                    _agentName.value = it
                 }
             }
         }
@@ -395,15 +398,23 @@ class WeeklySummaryViewModel @Inject constructor(
             clearOldPdfs(context, "Semanal_")
             val summary = weeklySummary.value
             val weekDates = summary.map { it.date }
-            val currentAgent = _agentName.value
+            val currentAgentName = _agentName.value
             
             // Collect houses for the week
             val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value ?: ""
-            val filteredHouses = repository.getAllHousesOnce(effectiveUid)
-                .filter { it.agentUid == effectiveUid || it.agentName.uppercase() == currentAgent.uppercase() }
+            val rawHouses = repository.getAllHousesOnce(effectiveUid)
+            
+            // Extract the real agent name from the database houses if available, preventing fallback or supervisor names from interfering
+            val resolvedAgentName = rawHouses.firstOrNull { it.agentUid == effectiveUid && it.agentName.isNotBlank() }?.agentName
+                ?: rawHouses.firstOrNull { it.agentName.isNotBlank() }?.agentName
+                ?: currentAgentName
+
+            val filteredHouses = rawHouses.filter { 
+                (it.agentUid == effectiveUid || it.agentName.uppercase() == resolvedAgentName.uppercase()) && weekDates.contains(it.data)
+            }
                 
             val activities = summary.associate { it.date to it.status }
-            SemanalPdfGenerator.generatePdf(context, weekDates, filteredHouses, activities, currentAgent)
+            SemanalPdfGenerator.generatePdf(context, weekDates, filteredHouses, activities, resolvedAgentName)
         }
     }
 
@@ -412,16 +423,24 @@ class WeeklySummaryViewModel @Inject constructor(
             clearOldPdfs(context, "Produção_")
             clearOldPdfs(context, "Boletim_")
             val dates = currentWeekDates.value
-            val currentAgent = _agentName.value
+            val currentAgentName = _agentName.value
             
             val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value ?: ""
-            val filteredHouses = repository.getAllHousesOnce(effectiveUid)
-                .filter { (it.agentUid == effectiveUid || it.agentName.uppercase() == currentAgent.uppercase()) && dates.contains(it.data) }
+            val rawHouses = repository.getAllHousesOnce(effectiveUid)
+            
+            // Extract the real agent name from the database houses if available, preventing fallback or supervisor names from interfering
+            val resolvedAgentName = rawHouses.firstOrNull { it.agentUid == effectiveUid && it.agentName.isNotBlank() }?.agentName
+                ?: rawHouses.firstOrNull { it.agentName.isNotBlank() }?.agentName
+                ?: currentAgentName
+
+            val filteredHouses = rawHouses.filter { 
+                (it.agentUid == effectiveUid || it.agentName.uppercase() == resolvedAgentName.uppercase()) && dates.contains(it.data)
+            }
                 
             val weeklyData = filteredHouses.groupBy { it.data }
             val activities = weeklySummary.value.associate { it.date to it.status }
             
-            BoletimPdfGenerator.generateWeeklyBatchPdf(context, weeklyData, currentAgent, activities, dates)
+            BoletimPdfGenerator.generateWeeklyBatchPdf(context, weeklyData, resolvedAgentName, activities, dates)
         }
     }
 

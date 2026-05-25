@@ -326,12 +326,6 @@ class HouseEditDelegate @Inject constructor(
 
                 val newId = saveHouseUseCase.insertHouse(houseToInsert, mergedList, isAdmin)
 
-                val isStillInFlight = state.housesInFlight.value.any { it.listOrder == houseToInsert.listOrder && it.data == houseToInsert.data }
-                if (!isStillInFlight) {
-                    saveHouseUseCase.deleteHouse(houseToInsert.copy(id = newId.toInt()), mergedList, isAdmin)
-                    return@launch
-                }
-
                 val dbHousesAfter = repository.getHousesByDateAndAgent(state.data.value, currentAgentUid)
                 val currentDrafts = state.pendingUpdateDrafts.value
                 val currentInFlights = state.housesInFlight.value
