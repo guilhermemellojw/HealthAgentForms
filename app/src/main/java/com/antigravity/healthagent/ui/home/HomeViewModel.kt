@@ -40,6 +40,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import com.antigravity.healthagent.utils.normalize
+import com.antigravity.healthagent.domain.logger.AppLogger
 import javax.inject.Inject
 
 @HiltViewModel
@@ -267,7 +268,7 @@ class HomeViewModel @Inject constructor(
             // GUARANTEED CLEANUP: If we were inspecting someone, clear their data now
             if (previousAgentName != null && previousAgentUid != null) {
                 viewModelScope.launch(Dispatchers.IO) {
-                    android.util.Log.i("HomeViewModel", "Guaranteed cleanup: Clearing data for $previousAgentName ($previousAgentUid)")
+                    AppLogger.i("HomeViewModel", "Guaranteed cleanup: Clearing data for $previousAgentName ($previousAgentUid)")
                     syncRepository.clearAgentData(previousAgentUid)
                 }
             }
@@ -288,7 +289,7 @@ class HomeViewModel @Inject constructor(
                         repository.fixEmailNamesForUid(agent.uid, agent.agentName)
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("HomeViewModel", "Error migrating remote agent local data", e)
+                    AppLogger.e("HomeViewModel", "Error migrating remote agent local data", e)
                 }
             }
         }
@@ -1039,7 +1040,7 @@ class HomeViewModel @Inject constructor(
                 repository.normalizeLocalDates()
                 syncRepository.performDataCleanup()
             } catch (ex: Exception) {
-                android.util.Log.e("HomeViewModel", "Error migrating data", ex)
+                AppLogger.e("HomeViewModel", "Error migrating data", ex)
             }
             
             // 1. Fetch Agent Names (with 3s timeout)
@@ -1049,7 +1050,7 @@ class HomeViewModel @Inject constructor(
             } else if (agentNamesResult == null) {
                 // Timeout happened, use default
                 _agentNames.value = com.antigravity.healthagent.utils.AppConstants.AGENT_NAMES
-                android.util.Log.w("HomeViewModel", "Agent names fetch timed out, using defaults")
+                AppLogger.w("HomeViewModel", "Agent names fetch timed out, using defaults")
             }
 
             // 2. Fetch Bairros (with 3s timeout)
@@ -1059,7 +1060,7 @@ class HomeViewModel @Inject constructor(
             } else if (bairrosResult == null) {
                 // Timeout happened, use default
                 _bairrosList.value = com.antigravity.healthagent.utils.AppConstants.BAIRROS
-                android.util.Log.w("HomeViewModel", "Bairros fetch timed out, using defaults")
+                AppLogger.w("HomeViewModel", "Bairros fetch timed out, using defaults")
             }
             
             loadDynamicConfig()
@@ -1138,7 +1139,7 @@ class HomeViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("HomeViewModel", "Error in initial date fetch", e)
+                AppLogger.e("HomeViewModel", "Error in initial date fetch", e)
                 _data.value = dateFormatter.format(Date())
             }
         }
@@ -1232,7 +1233,7 @@ class HomeViewModel @Inject constructor(
                             try {
                                 repository.migrateLocalData(name, user.email ?: "", uid, isCurrentAgent = true)
                             } catch (e: Exception) {
-                                android.util.Log.e("HomeViewModel", "Error migrating UID", e)
+                                AppLogger.e("HomeViewModel", "Error migrating UID", e)
                             }
                         }
                     }
@@ -1666,7 +1667,7 @@ class HomeViewModel @Inject constructor(
 
                 soundManager.playPop()
             } catch (e: Exception) {
-                android.util.Log.e("HomeViewModel", "Error adding house at position", e)
+                AppLogger.e("HomeViewModel", "Error adding house at position", e)
                 _uiEvent.value = "Erro ao inserir: ${e.message}"
                 soundManager.playWarning()
             } finally {
@@ -1826,7 +1827,7 @@ class HomeViewModel @Inject constructor(
                 
                 // CRITICAL IDENTITY GUARD: Ensure we have a valid UID before creating any record.
                 if (myUid == null && activeRemoteUid == null) {
-                    android.util.Log.e("HomeViewModel", "ADD HOUSE FAILED: No UID available.")
+                    AppLogger.e("HomeViewModel", "ADD HOUSE FAILED: No UID available.")
                     _uiEvent.emit("Erro: Identidade não carregada. Aguarde ou faça re-login.")
                     isAddingHouse = false
                     return@launch
@@ -1915,7 +1916,7 @@ class HomeViewModel @Inject constructor(
                 // Unified delayed validation (3s)
                 triggerDelayedValidation()
             } catch (e: Exception) {
-                android.util.Log.e("HomeViewModel", "Error adding new house", e)
+                AppLogger.e("HomeViewModel", "Error adding new house", e)
                 _uiEvent.value = "Erro ao adicionar imóvel: ${e.message}"
                 soundManager.playWarning()
             } finally {
@@ -1988,7 +1989,7 @@ class HomeViewModel @Inject constructor(
         if (clashingHouse != null) {
             // DUPLICATE DETECTED: Still keep as a "draft" in memory so the UI reflects the user's input.
             // But skip DB update to prevent a REPLACE/Merge that would delete the other record.
-            android.util.Log.w("HomeViewModel", "Clash detected for house ${updatedHouse.id} with ${clashingHouse.id}. Skipping DB update.")
+            AppLogger.w("HomeViewModel", "Clash detected for house ${updatedHouse.id} with ${clashingHouse.id}. Skipping DB update.")
             clashDialogJobs[house.id]?.cancel()
             clashDialogJobs.remove(house.id)
         } else {
@@ -2027,7 +2028,7 @@ class HomeViewModel @Inject constructor(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // Normal cancellation, do nothing
             } catch (e: Exception) {
-                android.util.Log.e("HomeViewModel", "Error in debounced update", e)
+                AppLogger.e("HomeViewModel", "Error in debounced update", e)
             }
         }
     }
@@ -2100,7 +2101,7 @@ class HomeViewModel @Inject constructor(
                 // BUG FIX: Clear the draft after successful DB update to allow fresh DB states to flow back to the UI.
                 _pendingUpdateDrafts.update { it - house.id }
             } catch (e: Exception) {
-                android.util.Log.e("HomeViewModel", "Error updating house", e)
+                AppLogger.e("HomeViewModel", "Error updating house", e)
                 _uiEvent.value = "Falha ao atualizar imóvel: ${e.message}"
                 soundManager.playWarning()
             }
@@ -2153,7 +2154,7 @@ class HomeViewModel @Inject constructor(
                 saveHouseUseCase.deleteHouse(house, houses.value, adminBypass)
                 soundManager.playPop()
             } catch (e: Exception) {
-                android.util.Log.e("HomeViewModel", "Error deleting house", e)
+                AppLogger.e("HomeViewModel", "Error deleting house", e)
                 _uiEvent.value = "Erro ao excluir: ${e.message}"
                 soundManager.playWarning()
             }
@@ -2403,7 +2404,7 @@ class HomeViewModel @Inject constructor(
                 }
                 
                 if (misattributed.isNotEmpty()) {
-                    android.util.Log.w("HomeViewModel", "Surgical Cleanup: Removing ${misattributed.size} leaked records.")
+                    AppLogger.w("HomeViewModel", "Surgical Cleanup: Removing ${misattributed.size} leaked records.")
                     misattributed.forEach { repository.deleteHouse(it) }
                 }
                 
@@ -2678,11 +2679,11 @@ class HomeViewModel @Inject constructor(
                     soundManager.playSuccess()
                 }
             } catch (e: IllegalStateException) {
-                android.util.Log.e("HomeViewModel", "Day locked during ripple: ${e.message}")
+                AppLogger.e("HomeViewModel", "Day locked during ripple: ${e.message}")
                 _uiEvent.value = rippleError ?: "Erro: Alguns dias estão bloqueados para Auditoria."
                 soundManager.playWarning()
             } catch (e: Exception) {
-                android.util.Log.e("HomeViewModel", "Error updating day status", e)
+                AppLogger.e("HomeViewModel", "Error updating day status", e)
                 _uiEvent.value = "Erro ao atualizar status: ${e.message}"
                 soundManager.playWarning()
             }
@@ -2718,7 +2719,7 @@ class HomeViewModel @Inject constructor(
                 _uiEvent.value = "Produção excluída com sucesso."
                 soundManager.playPop()
             } catch (e: Exception) {
-                android.util.Log.e("HomeViewModel", "Error deleting production", e)
+                AppLogger.e("HomeViewModel", "Error deleting production", e)
                 _uiEvent.value = "Erro ao excluir produção: ${e.message}"
                 soundManager.playWarning()
             }
@@ -2915,7 +2916,7 @@ class HomeViewModel @Inject constructor(
 
             androidx.work.WorkManager.getInstance(context).enqueue(syncRequest)
         } catch (e: Exception) {
-            android.util.Log.e("HomeViewModel", "Failed to trigger sync", e)
+            AppLogger.e("HomeViewModel", "Failed to trigger sync", e)
             // Fallback: manual sync trigger if background fails or context is missing
             syncDataToCloud()
         }
@@ -2958,7 +2959,7 @@ class HomeViewModel @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("HomeViewModel", "Error clearing old PDFs with prefix $prefix", e)
+            AppLogger.e("HomeViewModel", "Error clearing old PDFs with prefix $prefix", e)
         }
     }
 

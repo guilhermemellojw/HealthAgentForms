@@ -1,7 +1,7 @@
-package com.antigravity.healthagent.util
+package com.antigravity.healthagent.utils
 
 import android.content.Context
-import android.util.Log
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
@@ -18,14 +18,14 @@ object FirestoreExport {
         if (!outputDir.exists()) outputDir.mkdirs()
         exportCollection("houses", outputDir, "cloud_houses.csv")
         exportCollection("day_activities", outputDir, "cloud_activities.csv")
-        Log.i(TAG, "Export completed: ${outputDir.absolutePath}")
+        AppLogger.i(TAG, "Export completed: ${outputDir.absolutePath}")
     }
 
     private suspend fun exportCollection(name: String, dir: File, fileName: String) = withContext(Dispatchers.IO) {
         try {
             val snapshot = firestore.collection(name).get().await()
             if (snapshot.isEmpty) {
-                Log.w(TAG, "Collection $name is empty")
+                AppLogger.w(TAG, "Collection $name is empty")
                 return@withContext
             }
             val csv = File(dir, fileName)
@@ -42,9 +42,9 @@ object FirestoreExport {
                     writer.appendLine(row)
                 }
             }
-            Log.i(TAG, "Exported $name to ${csv.absolutePath}")
+            AppLogger.i(TAG, "Exported $name to ${csv.absolutePath}")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed export $name: ${e.message}", e)
+            AppLogger.e(TAG, "Failed export $name: ${e.message}", e)
         }
     }
 }

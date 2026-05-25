@@ -1,6 +1,7 @@
 package com.antigravity.healthagent.data.repository
 
 import android.content.Context
+import com.antigravity.healthagent.domain.logger.AppLogger
 import androidx.room.withTransaction
 import com.antigravity.healthagent.data.local.AppDatabase
 import com.antigravity.healthagent.data.local.dao.DayActivityDao
@@ -65,7 +66,7 @@ class SyncPullHandler @Inject constructor(
             val settings = snapshot.data ?: emptyMap()
             Result.success(settings)
         } catch (e: Exception) {
-            android.util.Log.w("SyncPullHandler", "fetchSystemSettings offline fallback: ${e.message}")
+            AppLogger.w("SyncPullHandler", "fetchSystemSettings offline fallback: ${e.message}")
             Result.success(emptyMap())
         }
     }
@@ -103,7 +104,7 @@ class SyncPullHandler @Inject constructor(
                         val currentVersion = pInfo?.versionCode ?: 0
                         
                         if (currentVersion < minVersion) {
-                            android.util.Log.e("SyncPullHandler", "Version Enforcement: App version ($currentVersion) is below minimum required ($minVersion)")
+                            AppLogger.e("SyncPullHandler", "Version Enforcement: App version ($currentVersion) is below minimum required ($minVersion)")
                             return@withContext Result.failure(Exception("Versão do aplicativo desatualizada. Por favor, atualize o 'Eu ACE' na Play Store para continuar sincronizando seus dados."))
                         }
                         
@@ -122,7 +123,7 @@ class SyncPullHandler @Inject constructor(
                         val isIncremental = !force && !isTargetDifferentUser && !requireReset && settingsManager.lastSyncTimestamp.first() > 0 && localCount > 0
 
                         if (requireReset) {
-                            android.util.Log.w("SyncPullHandler", "Remote Wipe Triggered for UID: $uid")
+                            AppLogger.w("SyncPullHandler", "Remote Wipe Triggered for UID: $uid")
                             val wipeResult = runInTransactionWithRetry {
                                 houseDao.deleteByAgent(uid)
                                 dayActivityDao.deleteByAgent(uid)
@@ -137,7 +138,7 @@ class SyncPullHandler @Inject constructor(
                                 if (requireResetFromUser) firestore.collection("users").document(uid).update("requireDataReset", false)
                                 if (requireResetFromAgent) firestore.collection("agents").document(uid).update("requireDataReset", false)
                             } else {
-                                android.util.Log.e("SyncPullHandler", "Remote Wipe Failed: ${wipeResult.exceptionOrNull()?.message}")
+                                AppLogger.e("SyncPullHandler", "Remote Wipe Failed: ${wipeResult.exceptionOrNull()?.message}")
                                 return@withContext Result.failure(wipeResult.exceptionOrNull() ?: Exception("Falha ao realizar wipe local"))
                             }
                         }
@@ -165,18 +166,18 @@ class SyncPullHandler @Inject constructor(
                                             
                                             val legacyName = doc.getString("agentName")
                                             if (profileAgentName == null && !legacyName.isNullOrBlank()) {
-                                                android.util.Log.i("SyncPullHandler", "Identity Healing: Adopting legacy agentName '$legacyName' from ${doc.id} for $uid")
+                                                AppLogger.i("SyncPullHandler", "Identity Healing: Adopting legacy agentName '$legacyName' from ${doc.id} for $uid")
                                                 try {
                                                     firestore.collection("agents").document(uid).update("agentName", legacyName)
                                                     firestore.collection("users").document(uid).update("agentName", legacyName)
                                                 } catch (e: Exception) {
-                                                    android.util.Log.w("SyncPullHandler", "Identity Healing failed to update cloud profile: ${e.message}")
+                                                    AppLogger.w("SyncPullHandler", "Identity Healing failed to update cloud profile: ${e.message}")
                                                 }
                                             }
                                         }
                                     }
                                 } catch (e: Exception) {
-                                    android.util.Log.w("SyncPullHandler", "Failed to search legacy agent docs for $dEmail", e)
+                                    AppLogger.w("SyncPullHandler", "Failed to search legacy agent docs for $dEmail", e)
                                 }
                             }
                         }
@@ -245,7 +246,7 @@ class SyncPullHandler @Inject constructor(
                                     val skew = maxCloudTime - currentDeviceTime
                                     if (kotlin.math.abs(skew) > 120000) { // 2 minute threshold
                                         settingsManager.setClockSkewMs(skew)
-                                        android.util.Log.w("SyncPullHandler", "Clock Skew: Device is ${if(skew < 0) "AHEAD" else "BEHIND"} by ${kotlin.math.abs(skew)} ms.")
+                                        AppLogger.w("SyncPullHandler", "Clock Skew: Device is ${if(skew < 0) "AHEAD" else "BEHIND"} by ${kotlin.math.abs(skew)} ms.")
                                     } else {
                                         settingsManager.setClockSkewMs(0L)
                                     }
@@ -307,10 +308,10 @@ class SyncPullHandler @Inject constructor(
                                         }.toSet()
                                         val safeToDeleteTeam = housesDeletedByTeam.filter { it.data.replace("/", "-") !in closedDatesForTeam }
                                         if (closedDatesForTeam.isNotEmpty()) {
-                                            android.util.Log.w("SyncPullHandler", "Team Sync: Preserved ${housesDeletedByTeam.size - safeToDeleteTeam.size} teammate houses in ${closedDatesForTeam.size} closed days.")
+                                            AppLogger.w("SyncPullHandler", "Team Sync: Preserved ${housesDeletedByTeam.size - safeToDeleteTeam.size} teammate houses in ${closedDatesForTeam.size} closed days.")
                                         }
                                         if (safeToDeleteTeam.isNotEmpty()) {
-                                            android.util.Log.i("SyncPullHandler", "Team Sync: Deleting ${safeToDeleteTeam.size} houses removed by colleagues.")
+                                            AppLogger.i("SyncPullHandler", "Team Sync: Deleting ${safeToDeleteTeam.size} houses removed by colleagues.")
                                             runInTransactionWithRetry {
                                                 safeToDeleteTeam.forEach { houseDao.deleteHouse(it) }
                                             }
@@ -326,7 +327,7 @@ class SyncPullHandler @Inject constructor(
                                     teammateHouses.addAll(remainingTeammateHouses)
                                 }
                             } catch (e: Exception) {
-                                android.util.Log.w("SyncPullHandler", "Teamwork sync failed (skipping): ${e.message}")
+                                AppLogger.w("SyncPullHandler", "Teamwork sync failed (skipping): ${e.message}")
                             }
                         }
 
@@ -357,9 +358,9 @@ class SyncPullHandler @Inject constructor(
                                     batch.update(docRef, "deleted_house_ids", com.google.firebase.firestore.FieldValue.arrayRemove(*zombieHouses.toTypedArray()))
                                 }
                                 batch.commit().await()
-                                android.util.Log.i("SyncPullHandler", "Self-Healing: Removed ${zombieActivities.size} zombie activity tombstones and ${zombieHouses.size} house tombstones from Firestore.")
+                                AppLogger.i("SyncPullHandler", "Self-Healing: Removed ${zombieActivities.size} zombie activity tombstones and ${zombieHouses.size} house tombstones from Firestore.")
                             } catch (e: Exception) {
-                                android.util.Log.w("SyncPullHandler", "Self-Healing failed: ${e.message}")
+                                AppLogger.w("SyncPullHandler", "Self-Healing failed: ${e.message}")
                             }
                         }
 
@@ -390,10 +391,10 @@ class SyncPullHandler @Inject constructor(
                                 if (house.isSynced) {
                                     true
                                 } else if (timeSinceLastUpdate > 900000L) {
-                                    android.util.Log.i("SyncPullHandler", "Admin Authority / Ghost Cleanup: Deleting unsynced house ${house.id} due to cloud deletion.")
+                                    AppLogger.i("SyncPullHandler", "Admin Authority / Ghost Cleanup: Deleting unsynced house ${house.id} due to cloud deletion.")
                                     true
                                 } else {
-                                    android.util.Log.i("SyncPullHandler", "Agent Priority: Preserving actively typed house ${house.id} despite cloud deletion.")
+                                    AppLogger.i("SyncPullHandler", "Agent Priority: Preserving actively typed house ${house.id} despite cloud deletion.")
                                     false
                                 }
                             } else false
@@ -402,7 +403,7 @@ class SyncPullHandler @Inject constructor(
                         val allLocalActivities = dayActivityDao.getAllDayActivities(uid)
                         
                         allLocalActivities.filter { it.date.replace("/", "-") in cloudDeletedActivities }.forEach {
-                            android.util.Log.i("SyncPullHandler", "Cloud Deletion Sync: Deleting local activity ${it.date} for $finalAgentName")
+                            AppLogger.i("SyncPullHandler", "Cloud Deletion Sync: Deleting local activity ${it.date} for $finalAgentName")
                             runInTransactionWithRetry {
                                 dayActivityDao.deleteDayActivity(it.date, it.agentUid)
                             }
@@ -416,10 +417,10 @@ class SyncPullHandler @Inject constructor(
                                 if (activity.isSynced) {
                                     true
                                 } else if (timeSinceLastUpdate > 900000L) {
-                                    android.util.Log.i("SyncPullHandler", "Admin Authority / Ghost Cleanup: Deleting unsynced activity ${activity.date} due to cloud deletion.")
+                                    AppLogger.i("SyncPullHandler", "Admin Authority / Ghost Cleanup: Deleting unsynced activity ${activity.date} due to cloud deletion.")
                                     true
                                 } else {
-                                    android.util.Log.i("SyncPullHandler", "Agent Priority: Preserving actively typed activity ${activity.date} despite cloud deletion.")
+                                    AppLogger.i("SyncPullHandler", "Agent Priority: Preserving actively typed activity ${activity.date} despite cloud deletion.")
                                     false
                                 }
                             } else false
@@ -599,7 +600,7 @@ class SyncPullHandler @Inject constructor(
 
                         Result.success(Unit)
                     } catch (e: Exception) {
-                        android.util.Log.e("SyncPullHandler", "Pull failed", e)
+                        AppLogger.e("SyncPullHandler", "Pull failed", e)
                         Result.failure(e)
                     }
                 }
