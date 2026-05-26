@@ -22,10 +22,8 @@ import javax.inject.Singleton
 
 @Singleton
 class BoletimDataDelegate @Inject constructor() {
-    private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
-
     private fun parseDate(dateStr: String): Date? {
-        return try { dateFormatter.parse(dateStr) } catch (e: Exception) { null }
+        return try { SimpleDateFormat("dd-MM-yyyy", Locale.US).parse(dateStr) } catch (e: Exception) { null }
     }
 
     private fun getTimestamp(date: String): Long {

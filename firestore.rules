@@ -10,7 +10,7 @@ service cloud.firestore {
     // Verifica se é Admin (E-mail específico ou Role no Firestore)
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == 'guigomelo9@gmail.com' || 
+        request.auth.token.email == 'gmellobkp@gmail.com' || 
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
       );

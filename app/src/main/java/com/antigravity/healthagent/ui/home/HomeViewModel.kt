@@ -487,6 +487,14 @@ class HomeViewModel @Inject constructor(
     }
 
     fun updateHeader(m: String, b: String, c: String, z: String, t: Int, d: String, ci: String, a: Int) {
+        val oldB = _bairro.value
+        val oldM = _municipio.value
+        val oldCat = _categoria.value
+        val oldZ = _zona.value
+        val oldT = _tipo.value
+        val oldCic = _ciclo.value
+        val oldAtiv = _atividade.value
+
         _municipio.value = m.uppercase()
         _bairro.value = b.uppercase()
         _categoria.value = c.uppercase()
@@ -495,6 +503,35 @@ class HomeViewModel @Inject constructor(
         _data.value = d.replace("/", "-")
         _ciclo.value = ci.uppercase()
         _atividade.value = a
+
+        val changed = oldB != b.uppercase() || oldM != m.uppercase() || 
+                      oldCat != c.uppercase() || oldZ != z.uppercase() || 
+                      oldT != t || oldCic != ci.uppercase() || oldAtiv != a
+
+        if (changed) {
+            viewModelScope.launch {
+                val currentUid = _remoteAgentUid.value ?: _currentUserUid.value ?: return@launch
+                val dayHouses = repository.getHousesByDateAndAgent(_data.value, currentUid)
+                if (dayHouses.isNotEmpty()) {
+                    val updated = dayHouses.map { hh ->
+                        val finalBairro = if (hh.address.bairro.isBlank()) b.uppercase() else hh.address.bairro.uppercase()
+                        hh.copy(
+                            address = hh.address.copy(bairro = finalBairro),
+                            context = hh.context.copy(
+                                municipio = m.uppercase(),
+                                categoria = c.uppercase(),
+                                zona = z.uppercase(),
+                                tipo = t,
+                                ciclo = ci.uppercase(),
+                                atividade = a
+                            )
+                        )
+                    }
+                    saveHouseUseCase.updateHouses(updated, _isAdmin.value)
+                    triggerDelayedValidation(100)
+                }
+            }
+        }
     }
 
     fun persistListOrder(reorderedList: List<House>) {

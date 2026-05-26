@@ -101,7 +101,20 @@ class AccessControlRepositoryImpl @Inject constructor(
 
     override suspend fun changeUserRole(uid: String, role: UserRole): Result<Unit> {
         return try {
-            firestore.collection("users").document(uid).update("role", role.name).await()
+            val batch = firestore.batch()
+            val userRef = firestore.collection("users").document(uid)
+            batch.update(userRef, "role", role.name)
+            
+            val adminRef = firestore.collection("admins").document(uid)
+            if (role == UserRole.ADMIN) {
+                val userDoc = userRef.get().await()
+                val email = userDoc.getString("email") ?: ""
+                batch.set(adminRef, mapOf("email" to email.trim().lowercase()))
+            } else {
+                batch.delete(adminRef)
+            }
+            
+            batch.commit().await()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

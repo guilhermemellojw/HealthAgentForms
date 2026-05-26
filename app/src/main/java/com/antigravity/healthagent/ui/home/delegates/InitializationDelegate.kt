@@ -67,6 +67,23 @@ class InitializationDelegate @Inject constructor(
             }
         }
 
+        // CRITICAL: Auto-load header context ONLY when active date changes
+        scope.launch {
+            viewModel.data.collect { date ->
+                val dayHouses = latestHousesFlow.value.filter { it.data == date }
+                if (dayHouses.isNotEmpty()) {
+                    val ref = dayHouses.first()
+                    viewModel.municipio.value = ref.context.municipio.uppercase()
+                    viewModel.bairro.value = ref.address.bairro.uppercase()
+                    viewModel.categoria.value = ref.context.categoria.uppercase()
+                    viewModel.zona.value = ref.context.zona.uppercase()
+                    viewModel.tipo.value = ref.context.tipo
+                    viewModel.ciclo.value = ref.context.ciclo.uppercase()
+                    viewModel.atividade.value = ref.context.atividade
+                }
+            }
+        }
+
         // CRITICAL: Basic Header Info Observer
         scope.launch {
             combine(
@@ -121,7 +138,50 @@ class InitializationDelegate @Inject constructor(
                 }
                 mapped to totals
             }.collect { (mapped, totals) ->
-                viewModel.uiState.update { it.copy(houses = mapped, dashboardTotals = totals) }
+                viewModel.uiState.update { it.copy(
+                    houses = mapped,
+                    dashboardTotals = totals,
+                    pendingCount = totals.worked
+                ) }
+            }
+        }
+
+        // CRITICAL: Validation Errors and Duplicates Observer
+        scope.launch {
+            combine(
+                viewModel.validationErrorHouseIds,
+                viewModel.isDuplicateIds,
+                latestHousesFlow,
+                viewModel.data
+            ) { errorIds, duplicateIds, houses, d ->
+                val dayHouses = houses.filter { it.data == d }
+                val dayErrorCount = dayHouses.count { it.id in errorIds }
+                Triple(errorIds, duplicateIds, dayErrorCount)
+            }.collect { (errorIds, duplicateIds, dayErrorCount) ->
+                viewModel.uiState.update { current ->
+                    current.copy(
+                        validationErrorHouseIds = errorIds,
+                        isDuplicateIds = duplicateIds,
+                        strictPendingCount = dayErrorCount
+                    )
+                }
+            }
+        }
+
+        // CRITICAL: Day Lock Status Observer
+        scope.launch {
+            combine(
+                viewModel.isDayClosed,
+                viewModel.isWorkdayManualUnlock
+            ) { closed, unlocked ->
+                closed to unlocked
+            }.collect { (closed, unlocked) ->
+                viewModel.uiState.update { current ->
+                    current.copy(
+                        isDayClosed = closed,
+                        isManualUnlock = unlocked
+                    )
+                }
             }
         }
 

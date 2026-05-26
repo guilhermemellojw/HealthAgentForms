@@ -14,7 +14,7 @@ const auth = firebase.auth();
 const db = firebase.firestore();
 
 // Constants
-const BOOTSTRAP_ADMINS = ["guigomelo9@gmail.com"];
+const BOOTSTRAP_ADMINS = ["gmellobkp@gmail.com"];
 const KML_URL = "https://earth.google.com/earth/d/1gHbsFGvKEBwI9N0ZAUAgiFpIjpdwFRWQ";
 const CORS_PROXY = "https://corsproxy.io/?";
 
@@ -49,6 +49,7 @@ const dashboardContent = document.getElementById('dashboard-content');
 let leafletMap = null;
 let currentKmlLayer = null;
 let userProfile = null;
+let currentUserEmail = null;
 
 let selectedYear = new Date().getFullYear();
 let selectedMonth = new Date().getMonth(); // 0-based
@@ -120,6 +121,8 @@ function showDashboard(user) {
     hero.classList.add('hidden');
     features.classList.add('hidden');
     dashboardView.classList.remove('hidden');
+    
+    currentUserEmail = user.email ? user.email.toLowerCase() : "";
     
     loginBtn.textContent = "Sair";
     loginBtn.onclick = () => location.reload();

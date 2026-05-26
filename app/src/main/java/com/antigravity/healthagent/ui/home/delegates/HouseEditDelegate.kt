@@ -97,7 +97,14 @@ class HouseEditDelegate @Inject constructor(
                 }
 
                 var houseToInsert = House(
-                    context = DailyContext(municipio = state.municipio.value),
+                    context = DailyContext(
+                        municipio = state.municipio.value.trim().uppercase(),
+                        categoria = state.categoria.value.trim().uppercase(),
+                        zona = state.zona.value.trim().uppercase(),
+                        tipo = state.tipo.value,
+                        ciclo = state.ciclo.value.trim().uppercase(),
+                        atividade = state.atividade.value
+                    ),
                     address = VisitAddress(
                         blockNumber = template?.address?.blockNumber ?: state.currentBlock.value,
                         blockSequence = template?.address?.blockSequence ?: state.currentBlockSequence.value,
@@ -310,7 +317,14 @@ class HouseEditDelegate @Inject constructor(
                     ),
                     propertyType = prediction.propertyType,
                     situation = prediction.situation,
-                    context = DailyContext(tipo = state.tipo.value, ciclo = state.ciclo.value, municipio = state.municipio.value.trim().uppercase()),
+                    context = DailyContext(
+                        municipio = state.municipio.value.trim().uppercase(),
+                        categoria = state.categoria.value.trim().uppercase(),
+                        zona = state.zona.value.trim().uppercase(),
+                        tipo = state.tipo.value,
+                        ciclo = state.ciclo.value.trim().uppercase(),
+                        atividade = state.atividade.value
+                    ),
                     agentName = currentAgentName.trim().uppercase(),
                     agentUid = currentAgentUid,
                     data = state.data.value,
