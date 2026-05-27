@@ -351,6 +351,12 @@ class HomeViewModel @Inject constructor(
                 _ciclo.value = calculateCicloFromDate(dateStr)
             }
         }
+        viewModelScope.launch {
+            _bairro.collect { currentBairro ->
+                val calculatedTipo = if (currentBairro.uppercase() == "CENTRO") 1 else 2
+                _tipo.value = calculatedTipo
+            }
+        }
     }
 
     // --- Action Routing ---
@@ -521,19 +527,20 @@ class HomeViewModel @Inject constructor(
         val oldAtiv = _atividade.value
 
         val calculatedCic = calculateCicloFromDate(d)
+        val calculatedT = if (b.uppercase() == "CENTRO") 1 else 2
 
         _municipio.value = m.uppercase()
         _bairro.value = b.uppercase()
         _categoria.value = c.uppercase()
         _zona.value = z.uppercase()
-        _tipo.value = t
+        _tipo.value = calculatedT
         _data.value = d.replace("/", "-")
         _ciclo.value = calculatedCic
         _atividade.value = a
 
         val changed = oldB != b.uppercase() || oldM != m.uppercase() || 
                       oldCat != c.uppercase() || oldZ != z.uppercase() || 
-                      oldT != t || oldCic != calculatedCic || oldAtiv != a
+                      oldT != calculatedT || oldCic != calculatedCic || oldAtiv != a
 
         if (changed) {
             viewModelScope.launch {
@@ -548,7 +555,7 @@ class HomeViewModel @Inject constructor(
                                 municipio = m.uppercase(),
                                 categoria = c.uppercase(),
                                 zona = z.uppercase(),
-                                tipo = t,
+                                tipo = calculatedT,
                                 ciclo = calculatedCic,
                                 atividade = a
                             )
