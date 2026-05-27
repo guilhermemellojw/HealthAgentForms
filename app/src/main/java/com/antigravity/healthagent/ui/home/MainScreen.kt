@@ -243,7 +243,7 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
             }
         ) { paddingValues ->
             Box(modifier = Modifier.padding(paddingValues)) {
-                com.antigravity.healthagent.ui.navigation.AppNavigation(
+                 com.antigravity.healthagent.ui.navigation.AppNavigation(
                     isSupervisor = showSupervisorEnvironment,
                     selectedTab = selectedTab,
                     isEasyMode = isEasyMode,
@@ -252,28 +252,37 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
                     weeklySummaryViewModel = weeklySummaryViewModel,
                     onLogout = { loginViewModel.signOut() },
                     onSwitchAccount = { loginViewModel.signOut() },
-                    onOpenSettings = { showSettings = true }
+                    onOpenSettings = { showSettings = true },
+                    onSyncPullActive = { homeViewModel.setSyncPullActive(it) }
                 )
                 
-                // Unified Sync Status Feedback for all screens
+                // Unified Sync Status Feedback for all screens (only for agents)
                 val uiState by homeViewModel.uiState.collectAsState()
+                val isSyncPullActive by homeViewModel.isSyncPullActive.collectAsState()
                 
-                SyncFloatingBalloon(
-                    syncStatus = uiState.syncStatus,
-                    isEasyMode = uiState.isEasyMode,
-                    isSolarMode = uiState.isSolarMode,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .zIndex(3000f)
-                )
+                if (!showSupervisorEnvironment) {
+                    if (selectedTab == 2) {
+                        SyncFloatingBalloon(
+                            syncStatus = uiState.syncStatus,
+                            isEasyMode = uiState.isEasyMode,
+                            isSolarMode = uiState.isSolarMode,
+                            isPullActive = isSyncPullActive,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .zIndex(3000f)
+                        )
+                    }
 
-                SyncStatusOverlay(
-                    syncStatus = uiState.syncStatus,
-                    isEasyMode = uiState.isEasyMode,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .zIndex(4000f)
-                )
+                    if (!isSyncPullActive) {
+                        SyncStatusOverlay(
+                            syncStatus = uiState.syncStatus,
+                            isEasyMode = uiState.isEasyMode,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .zIndex(4000f)
+                        )
+                    }
+                }
             }
         }
     }

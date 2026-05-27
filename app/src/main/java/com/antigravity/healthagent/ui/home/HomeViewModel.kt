@@ -190,6 +190,13 @@ class HomeViewModel @Inject constructor(
     private val _isSyncing = MutableStateFlow(false)
     override val isSyncing: MutableStateFlow<Boolean> get() = _isSyncing
 
+    private val _isSyncPullActive = MutableStateFlow(false)
+    val isSyncPullActive: StateFlow<Boolean> = _isSyncPullActive.asStateFlow()
+
+    fun setSyncPullActive(active: Boolean) {
+        _isSyncPullActive.value = active
+    }
+
     private val _moveConfirmationData = MutableStateFlow<Pair<House, String>?>(null)
     override val moveConfirmationData: MutableStateFlow<Pair<House, String>?> get() = _moveConfirmationData
 
@@ -228,8 +235,21 @@ class HomeViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     // --- DB Flows ---
-    private val allHousesFlow: StateFlow<List<House>> = repository.getAllHousesSnapshotFlow()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val allHousesFlow: StateFlow<List<House>> = combine(
+        _remoteAgentUid,
+        settingsManager.cachedUser,
+        _agentName
+    ) { remoteUid, cachedUser, name ->
+        val uid = remoteUid ?: cachedUser?.uid
+        val effectiveName = if (remoteUid != null) name else (cachedUser?.agentName ?: name)
+        uid to effectiveName
+    }.flatMapLatest { (uid, name) ->
+        if (uid != null) {
+            repository.getPersonalHousesFlow(uid, name)
+        } else {
+            kotlinx.coroutines.flow.flowOf(emptyList())
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val streetSuggestions: StateFlow<List<String>> = combine(_bairro, _agentName, _remoteAgentUid, _currentUserUid) { currentB, name, remoteUid, currentUid ->
         val uid = remoteUid ?: currentUid
@@ -326,6 +346,11 @@ class HomeViewModel @Inject constructor(
             generateHouseKey = ::generateHouseKey,
             calculateDashboardTotals = ::calculateDashboardTotals
         )
+        viewModelScope.launch {
+            _data.collect { dateStr ->
+                _ciclo.value = calculateCicloFromDate(dateStr)
+            }
+        }
     }
 
     // --- Action Routing ---
@@ -495,18 +520,20 @@ class HomeViewModel @Inject constructor(
         val oldCic = _ciclo.value
         val oldAtiv = _atividade.value
 
+        val calculatedCic = calculateCicloFromDate(d)
+
         _municipio.value = m.uppercase()
         _bairro.value = b.uppercase()
         _categoria.value = c.uppercase()
         _zona.value = z.uppercase()
         _tipo.value = t
         _data.value = d.replace("/", "-")
-        _ciclo.value = ci.uppercase()
+        _ciclo.value = calculatedCic
         _atividade.value = a
 
         val changed = oldB != b.uppercase() || oldM != m.uppercase() || 
                       oldCat != c.uppercase() || oldZ != z.uppercase() || 
-                      oldT != t || oldCic != ci.uppercase() || oldAtiv != a
+                      oldT != t || oldCic != calculatedCic || oldAtiv != a
 
         if (changed) {
             viewModelScope.launch {
@@ -522,7 +549,7 @@ class HomeViewModel @Inject constructor(
                                 categoria = c.uppercase(),
                                 zona = z.uppercase(),
                                 tipo = t,
-                                ciclo = ci.uppercase(),
+                                ciclo = calculatedCic,
                                 atividade = a
                             )
                         )
@@ -817,6 +844,16 @@ class HomeViewModel @Inject constructor(
         val c = hh.address.complement.toString().stringNormalize()
         val vs = hh.visitSegment.toString()
         return "$b|$bn|$bs|$sn|$n|${hh.address.sequence}|$c|$vs".uppercase()
+    }
+
+    private fun calculateCicloFromDate(dateStr: String): String {
+        val parts = dateStr.replace("/", "-").split("-")
+        if (parts.size >= 2) {
+            val month = parts[1].toIntOrNull() ?: 1
+            val cicloNum = ((month - 1) / 2) + 1
+            return "${cicloNum}º"
+        }
+        return "1º"
     }
 
     private fun getTimestamp(date: String): Long {

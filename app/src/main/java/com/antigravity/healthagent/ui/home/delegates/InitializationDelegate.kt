@@ -235,6 +235,15 @@ class InitializationDelegate @Inject constructor(
             }
         }
 
+        // Propagate syncStatus to uiState in real time so the float balloon displays it reactively
+        scope.launch {
+            viewModel.syncStatus.collect { status ->
+                viewModel.uiState.update { current ->
+                    current.copy(syncStatus = status)
+                }
+            }
+        }
+
         // PRUNE OBSERVER
         scope.launch {
             allHousesFlow.collect { dbHouses ->

@@ -194,14 +194,12 @@ fun HomeHeader(
                             readOnly = true,
                             enabled = false
                         )
-                        CompactDropdown(
-                            currentValue = ciclo.uppercase(),
-                            options = (1..6).map { "${it}º" },
-                            onOptionSelected = { 
-                                onUpdateHeader(municipio, bairro, "BRR", zona, tipo, data, it.uppercase(), atividade)
-                            },
+                        CompactInputBox(
+                            value = ciclo.uppercase(),
+                            onValueChange = {},
                             label = "Ciclo",
                             modifier = Modifier.weight(1f),
+                            readOnly = true,
                             enabled = false
                         )
                     }

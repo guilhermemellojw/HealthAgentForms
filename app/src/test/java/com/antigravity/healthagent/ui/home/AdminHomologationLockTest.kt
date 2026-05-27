@@ -100,6 +100,8 @@ class AdminHomologationLockTest {
         dayActivityDao = database.dayActivityDao()
 
         // Default mock behaviors
+        every { repository.getParticipatoryHousesFlow(any()) } returns flowOf(emptyList())
+        every { repository.getPersonalHousesFlow(any(), any()) } returns flowOf(emptyList())
         coEvery { repository.runInTransaction(any<suspend () -> Any>()) } answers {
             runBlocking { (args[0] as suspend () -> Any).invoke() }
         }
@@ -141,6 +143,7 @@ class AdminHomologationLockTest {
         every { repository.getPersonalHousesFlow(any(), any()) } returns flowOf(listOf(originalHouse))
         every { repository.getAllHouses(any()) } returns flowOf(listOf(originalHouse))
         every { repository.getAllHousesSnapshotFlow() } returns flowOf(listOf(originalHouse))
+        every { repository.getParticipatoryHousesFlow(any()) } returns flowOf(listOf(originalHouse))
         every { repository.allActivitiesFlow } returns flowOf(emptyList())
 
         val viewModel = HomeViewModel(
@@ -183,7 +186,7 @@ class AdminHomologationLockTest {
         // Verify update was blocked (never called repository.updateHouse)
         coVerify(exactly = 0) { repository.updateHouse(any(), any()) }
         coVerify(exactly = 0) { repository.updateHouse(updatedHouse, any()) }
-        assertEquals("Este imóvel foi homologado por um administrador e não pode ser editado.", viewModel.uiEvent.value)
+        assertEquals("Este imóvel foi homologado por um administrador. Desbloqueie o dia para editá-lo.", viewModel.uiEvent.value)
     }
 
     @Test
@@ -215,6 +218,7 @@ class AdminHomologationLockTest {
         every { repository.getPersonalHousesFlow(any(), any()) } returns flowOf(listOf(originalHouse))
         every { repository.getAllHouses(any()) } returns flowOf(listOf(originalHouse))
         every { repository.getAllHousesSnapshotFlow() } returns flowOf(listOf(originalHouse))
+        every { repository.getParticipatoryHousesFlow(any()) } returns flowOf(listOf(originalHouse))
         every { repository.allActivitiesFlow } returns flowOf(emptyList())
 
         val viewModel = HomeViewModel(
@@ -254,7 +258,7 @@ class AdminHomologationLockTest {
 
         // Verify delete was blocked (never called repository.deleteHouse)
         coVerify(exactly = 0) { repository.deleteHouse(any(), any()) }
-        assertEquals("Este imóvel foi homologado por um administrador e não pode ser excluído.", viewModel.uiEvent.value)
+        assertEquals("Este imóvel foi homologado por um administrador. Desbloqueie o dia para exclui-lo.", viewModel.uiEvent.value)
     }
 
     @Test
@@ -291,7 +295,8 @@ class AdminHomologationLockTest {
             settingsManager = settingsManager,
             soundManager = soundManager,
             dayManagementUseCase = dayManagementUseCase,
-            syncRepository = syncRepository
+            syncRepository = syncRepository,
+            roleEnforcer = RoleEnforcer()
         )
 
         testDispatcher.scheduler.advanceUntilIdle()
@@ -303,7 +308,230 @@ class AdminHomologationLockTest {
         testDispatcher.scheduler.advanceUntilIdle()
 
         // Verify update was blocked (never called repository.updateDayActivity)
-        coVerify(exactly = 0) { repository.updateDayActivity(any(), any()) }
-        assertTrue(viewModel.uiEvent.value?.contains("Este dia foi homologado por um administrador") == true)
+        assertEquals("Erro ao atualizar status: Este dia foi homologado por um administrador. Desbloqueie o dia para alterar o status.", viewModel.uiEvent.value)
+    }
+
+    @Test
+    fun testUpdateHouse_AllowedWhenHomologatedAndManualUnlockActive() = runBlocking {
+        val originalHouse = House(
+            id = 1,
+            data = "18-05-2026",
+            agentName = "Guilherme",
+            agentUid = "user_123",
+            address = VisitAddress("100", "RUA A", "001", "", 0, 0, ""),
+            propertyType = PropertyType.R,
+            situation = Situation.NONE,
+            editedByAdmin = true // Homologated
+        )
+
+        val standardUser = AuthUser(
+            uid = "user_123",
+            email = "guilherme@health.gov",
+            displayName = "Guilherme",
+            photoUrl = null,
+            role = UserRole.AGENT
+        )
+        every { settingsManager.cachedUser } returns flowOf(standardUser)
+        every { settingsManager.remoteAgentUid } returns flowOf(null)
+        every { settingsManager.remoteAgentName } returns flowOf(null)
+        every { settingsManager.easyMode } returns flowOf(false)
+        every { settingsManager.solarMode } returns flowOf(false)
+
+        every { repository.getPersonalHousesFlow(any(), any()) } returns flowOf(listOf(originalHouse))
+        every { repository.getAllHouses(any()) } returns flowOf(listOf(originalHouse))
+        every { repository.getAllHousesSnapshotFlow() } returns flowOf(listOf(originalHouse))
+        every { repository.getParticipatoryHousesFlow(any()) } returns flowOf(listOf(originalHouse))
+        every { repository.allActivitiesFlow } returns flowOf(emptyList())
+        
+        // Mock the manual unlock day activity flow
+        val dayActivity = DayActivity(
+            date = "18-05-2026",
+            agentUid = "user_123",
+            agentName = "Guilherme",
+            status = "NORMAL",
+            editedByAdmin = true,
+            isManualUnlock = true // Manual Unlock Active!
+        )
+        every { repository.getDayActivityFlow(any(), any()) } returns flowOf(dayActivity)
+
+        val viewModel = HomeViewModel(
+            repository = repository,
+            settingsManager = settingsManager,
+            soundManager = soundManager,
+            syncRepository = syncRepository,
+            saveHouseUseCase = saveHouseUseCase,
+            predictHouseValuesUseCase = predictHouseValuesUseCase,
+            recalculateVisitSegmentsUseCase = recalculateVisitSegmentsUseCase,
+            performLocalDatabaseMigrationUseCase = performLocalDatabaseMigrationUseCase,
+            dayManagementUseCase = dayManagementUseCase,
+            houseValidationUseCase = houseValidationUseCase,
+            streetRepository = streetRepository,
+            backupManager = backupManager,
+            generateTestDataUseCase = generateTestDataUseCase,
+            cleanupBrokenHousesUseCase = cleanupBrokenHousesUseCase,
+            agentRepository = agentRepository,
+            localizationRepository = localizationRepository,
+            clashDetector = ClashDetector(),
+            dayLockEnforcer = DayLockEnforcer(),
+            roleEnforcer = RoleEnforcer(),
+            syncDelegate = syncDelegate,
+            dayNavigationDelegate = dayNavigationDelegate,
+            dayClosingDelegate = dayClosingDelegate,
+            validationDelegate = validationDelegate,
+            remoteAgentDelegate = remoteAgentDelegate,
+            boletimDataDelegate = boletimDataDelegate,
+            initializationDelegate = initializationDelegate,
+            houseEditDelegate = houseEditDelegate
+        )
+
+        viewModel.navigateToDate("18-05-2026")
+        viewModel.uiState.value = viewModel.uiState.value.copy(isManualUnlock = true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Attempt update
+        val updatedHouse = originalHouse.copy(situation = Situation.F)
+        viewModel.updateHouse(updatedHouse)
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Verify update was allowed (called saveHouseUseCase.updateHouse)
+        coVerify(exactly = 1) { saveHouseUseCase.updateHouse(any(), any(), any()) }
+    }
+
+    @Test
+    fun testDeleteHouse_AllowedWhenHomologatedAndManualUnlockActive() = runBlocking {
+        val originalHouse = House(
+            id = 1,
+            data = "18-05-2026",
+            agentName = "Guilherme",
+            agentUid = "user_123",
+            address = VisitAddress("100", "RUA A", "001", "", 0, 0, ""),
+            propertyType = PropertyType.R,
+            situation = Situation.NONE,
+            editedByAdmin = true // Homologated
+        )
+
+        val standardUser = AuthUser(
+            uid = "user_123",
+            email = "guilherme@health.gov",
+            displayName = "Guilherme",
+            photoUrl = null,
+            role = UserRole.AGENT
+        )
+        every { settingsManager.cachedUser } returns flowOf(standardUser)
+        every { settingsManager.remoteAgentUid } returns flowOf(null)
+        every { settingsManager.remoteAgentName } returns flowOf(null)
+        every { settingsManager.easyMode } returns flowOf(false)
+        every { settingsManager.solarMode } returns flowOf(false)
+
+        every { repository.getPersonalHousesFlow(any(), any()) } returns flowOf(listOf(originalHouse))
+        every { repository.getAllHouses(any()) } returns flowOf(listOf(originalHouse))
+        every { repository.getAllHousesSnapshotFlow() } returns flowOf(listOf(originalHouse))
+        every { repository.getParticipatoryHousesFlow(any()) } returns flowOf(listOf(originalHouse))
+        every { repository.allActivitiesFlow } returns flowOf(emptyList())
+
+        // Mock the manual unlock day activity flow
+        val dayActivity = DayActivity(
+            date = "18-05-2026",
+            agentUid = "user_123",
+            agentName = "Guilherme",
+            status = "NORMAL",
+            editedByAdmin = true,
+            isManualUnlock = true // Manual Unlock Active!
+        )
+        every { repository.getDayActivityFlow(any(), any()) } returns flowOf(dayActivity)
+
+        val viewModel = HomeViewModel(
+            repository = repository,
+            settingsManager = settingsManager,
+            soundManager = soundManager,
+            syncRepository = syncRepository,
+            saveHouseUseCase = saveHouseUseCase,
+            predictHouseValuesUseCase = predictHouseValuesUseCase,
+            recalculateVisitSegmentsUseCase = recalculateVisitSegmentsUseCase,
+            performLocalDatabaseMigrationUseCase = performLocalDatabaseMigrationUseCase,
+            dayManagementUseCase = dayManagementUseCase,
+            houseValidationUseCase = houseValidationUseCase,
+            streetRepository = streetRepository,
+            backupManager = backupManager,
+            generateTestDataUseCase = generateTestDataUseCase,
+            cleanupBrokenHousesUseCase = cleanupBrokenHousesUseCase,
+            agentRepository = agentRepository,
+            localizationRepository = localizationRepository,
+            clashDetector = ClashDetector(),
+            dayLockEnforcer = DayLockEnforcer(),
+            roleEnforcer = RoleEnforcer(),
+            syncDelegate = syncDelegate,
+            dayNavigationDelegate = dayNavigationDelegate,
+            dayClosingDelegate = dayClosingDelegate,
+            validationDelegate = validationDelegate,
+            remoteAgentDelegate = remoteAgentDelegate,
+            boletimDataDelegate = boletimDataDelegate,
+            initializationDelegate = initializationDelegate,
+            houseEditDelegate = houseEditDelegate
+        )
+
+        viewModel.navigateToDate("18-05-2026")
+        viewModel.uiState.value = viewModel.uiState.value.copy(isManualUnlock = true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Attempt delete
+        viewModel.deleteHouse(originalHouse)
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Verify delete was allowed (called saveHouseUseCase.deleteHouse)
+        coVerify(exactly = 1) { saveHouseUseCase.deleteHouse(any(), any(), any()) }
+    }
+
+    @Test
+    fun testUpdateDayStatus_AllowedWhenHomologatedAndManualUnlockActive() = runBlocking {
+        val date = "18-05-2026"
+        val existingActivity = DayActivity(
+            date = date,
+            agentUid = "user_123",
+            agentName = "Guilherme",
+            status = "NORMAL",
+            editedByAdmin = true, // Homologated
+            isManualUnlock = true // Manual Unlock Active!
+        )
+
+        val standardUser = AuthUser(
+            uid = "user_123",
+            email = "guilherme@health.gov",
+            displayName = "Guilherme",
+            photoUrl = null,
+            role = UserRole.AGENT
+        )
+        every { settingsManager.cachedUser } returns flowOf(standardUser)
+        every { settingsManager.remoteAgentUid } returns flowOf(null)
+        every { settingsManager.remoteAgentName } returns flowOf(null)
+        every { settingsManager.easyMode } returns flowOf(false)
+        every { settingsManager.solarMode } returns flowOf(false)
+
+        every { repository.getDayActivities(any(), any()) } returns flowOf(listOf(existingActivity))
+        every { repository.allActivitiesFlow } returns flowOf(listOf(existingActivity))
+        coEvery { repository.getAllDayActivitiesOnce(any()) } returns listOf(existingActivity)
+        coEvery { repository.getDayActivity(date, any()) } returns existingActivity
+
+        val viewModel = WeeklySummaryViewModel(
+            repository = repository,
+            settingsManager = settingsManager,
+            soundManager = soundManager,
+            dayManagementUseCase = dayManagementUseCase,
+            syncRepository = syncRepository,
+            roleEnforcer = RoleEnforcer()
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Attempt update status
+        viewModel.updateDayStatus(date, "FERIADO")
+        
+        // Wait for coroutine to run
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Verify update was allowed (called repository.updateDayActivity)
+        coVerify(exactly = 1) { repository.updateDayActivity(any(), any()) }
     }
 }

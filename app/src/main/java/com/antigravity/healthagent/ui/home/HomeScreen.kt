@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.graphics.*
@@ -30,6 +31,7 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.model.LatLng
 import com.antigravity.healthagent.data.local.model.House
+import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.ui.components.*
 import com.antigravity.healthagent.ui.home.components.*
 import com.antigravity.healthagent.ui.components.ProductionProgressBar
@@ -64,7 +66,8 @@ fun HomeScreen(
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    onSyncPullActive: (Boolean) -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
@@ -444,12 +447,31 @@ fun HomeScreen(
         containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
         val isSyncing by viewModel.isSyncing.collectAsState()
+        val isRefreshing = uiState.syncStatus is SyncUiState.Syncing || isSyncing
         val pullToRefreshState = rememberPullToRefreshState()
 
+        val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
+        LaunchedEffect(isPullActive) {
+            onSyncPullActive(isPullActive)
+        }
+        DisposableEffect(Unit) {
+            onDispose {
+                onSyncPullActive(false)
+            }
+        }
+
         PullToRefreshBox(
-            isRefreshing = isSyncing,
+            isRefreshing = isRefreshing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
+            indicator = {
+                CustomSyncPullIndicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    isSolarMode = uiState.isSolarMode,
+                    syncStatus = uiState.syncStatus
+                )
+            },
             modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             // Indentation and content will be below
@@ -691,7 +713,7 @@ fun HomeScreen(
                         
                         val focusRequester = remember(house.id) { focusRequesters.getOrPut(house.id) { androidx.compose.ui.focus.FocusRequester() } }
                         val isBaseEnabled = if (uiState.isSupervisor) uiState.isAdmin else (!uiState.isDayClosed || uiState.isManualUnlock)
-                        val isLockedByAdmin = house.editedByAdmin && !uiState.isAdmin
+                        val isLockedByAdmin = house.editedByAdmin && !uiState.isAdmin && !uiState.isManualUnlock
                         HouseRowItem(
                             houseState = houseState,
                             onUpdate = onUpdate,

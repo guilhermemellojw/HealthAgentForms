@@ -5,6 +5,7 @@ import com.antigravity.healthagent.domain.repository.AgentData
 interface AgentRepository {
     suspend fun createAgent(email: String, agentName: String?): Result<Unit>
     suspend fun deleteAgent(uid: String): Result<Unit>
+    suspend fun purgeAgentCompletely(uid: String): Result<Unit>
     suspend fun fetchAgentNames(): Result<List<String>>
     suspend fun addAgentName(name: String): Result<Unit>
     suspend fun deleteAgentName(name: String): Result<Unit>

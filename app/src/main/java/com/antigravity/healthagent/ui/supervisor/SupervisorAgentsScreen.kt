@@ -23,8 +23,11 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
+import androidx.compose.ui.zIndex
 import com.antigravity.healthagent.ui.components.MeshGradient
 import com.antigravity.healthagent.ui.components.PremiumCard
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
+import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
 import java.text.SimpleDateFormat
 import java.util.*
 import android.content.Context
@@ -42,6 +45,7 @@ fun SupervisorAgentsScreen(
     val agents by viewModel.agents.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val syncState by viewModel.syncState.collectAsState()
     val isSolarMode by viewModel.solarMode.collectAsState()
     val selectedYear by viewModel.selectedYear.collectAsState()
     val selectedMonth by viewModel.selectedMonth.collectAsState()
@@ -66,13 +70,24 @@ fun SupervisorAgentsScreen(
         containerColor = Color.Transparent
     ) { paddingValues ->
         val pullToRefreshState = rememberPullToRefreshState()
+        val isRefreshing = syncState is com.antigravity.healthagent.ui.state.SyncUiState.Syncing
+        val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
 
         PullToRefreshBox(
-            isRefreshing = isLoading,
+            isRefreshing = isRefreshing,
             onRefresh = { viewModel.refreshData() },
             state = pullToRefreshState,
             modifier = Modifier.padding(paddingValues).fillMaxSize(),
-            indicator = { /* Hide the simple loading circle as we use a premium overlay */ }
+            indicator = {
+                CustomSyncPullIndicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    isSolarMode = isSolarMode,
+                    syncStatus = syncState,
+                    pullText = "Puxe para atualizar...",
+                    releaseText = "Solte para atualizar!"
+                )
+            }
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 MeshGradient(modifier = Modifier.fillMaxSize())
@@ -226,7 +241,7 @@ fun SupervisorAgentsScreen(
                 }
 
                 // Premium Loading Overlay (Matches Agent Design)
-                com.antigravity.healthagent.ui.components.SupervisorLoadingOverlay(isVisible = isLoading)
+                com.antigravity.healthagent.ui.components.SupervisorLoadingOverlay(isVisible = isLoading && !isRefreshing)
             }
         }
     }

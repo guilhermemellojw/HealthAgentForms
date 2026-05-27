@@ -403,8 +403,8 @@ class HouseEditDelegate @Inject constructor(
         }
 
         val original = latestHousesList.find { it.id == house.id }
-        if (original?.editedByAdmin == true && !state.isAdmin.value) {
-            state.uiEvent.value = "Este imóvel foi homologado por um administrador e não pode ser editado."
+        if (original?.editedByAdmin == true && !state.isAdmin.value && !state.uiState.value.isManualUnlock) {
+            state.uiEvent.value = "Este imóvel foi homologado por um administrador. Desbloqueie o dia para editá-lo."
             soundManager.playWarning()
             return
         }
@@ -510,7 +510,13 @@ class HouseEditDelegate @Inject constructor(
             try {
                 val currentName = state.agentName.value
                 val currentUid = state.remoteAgentUid.value ?: state.currentUserUid.value
-                val houseWithIdentity = house.copy(agentName = currentName, agentUid = currentUid ?: "")
+                
+                // Guard: Do not overwrite coworker/teammate identities during updates
+                val houseWithIdentity = if (house.agentUid.isBlank() || house.agentUid == currentUid) {
+                    house.copy(agentName = currentName, agentUid = currentUid ?: "")
+                } else {
+                    house
+                }
 
                 val dbHouses = repository.getHousesByDateAndAgent(state.data.value, currentUid ?: "")
                 val drafts = state.pendingUpdateDrafts.value
@@ -527,7 +533,13 @@ class HouseEditDelegate @Inject constructor(
                     state.currentBlockSequence.value = result.updatedHouse.address.blockSequence
                     state.currentStreet.value = result.updatedHouse.address.streetName
 
-                    val subsequentWithIdentity = result.subsequentHouses.map { it.copy(agentName = currentName, agentUid = currentUid ?: "") }
+                    val subsequentWithIdentity = result.subsequentHouses.map {
+                        if (it.agentUid.isBlank() || it.agentUid == currentUid) {
+                            it.copy(agentName = currentName, agentUid = currentUid ?: "")
+                        } else {
+                            it
+                        }
+                    }
                     saveHouseUseCase.updateHouses(subsequentWithIdentity + result.updatedHouse, shouldForce)
                 } else {
                     saveHouseUseCase.updateHouse(result.updatedHouse, latestHouses, shouldForce)
@@ -555,8 +567,8 @@ class HouseEditDelegate @Inject constructor(
         }
 
         val isAdmin = state.isAdmin.value
-        if (house.editedByAdmin && !isAdmin) {
-            state.uiEvent.value = "Este imóvel foi homologado por um administrador e não pode ser excluído."
+        if (house.editedByAdmin && !isAdmin && !state.uiState.value.isManualUnlock) {
+            state.uiEvent.value = "Este imóvel foi homologado por um administrador. Desbloqueie o dia para exclui-lo."
             soundManager.playWarning()
             return
         }

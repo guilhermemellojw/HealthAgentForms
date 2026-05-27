@@ -17,6 +17,7 @@ import com.antigravity.healthagent.utils.BoletimPdfGenerator
 import com.antigravity.healthagent.utils.SemanalPdfGenerator
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.ui.state.SyncUiState
+import com.antigravity.healthagent.domain.usecase.RoleEnforcer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -33,7 +34,8 @@ class WeeklySummaryViewModel @Inject constructor(
     private val settingsManager: SettingsManager,
     private val soundManager: SoundManager,
     private val dayManagementUseCase: DayManagementUseCase,
-    private val syncRepository: SyncRepository
+    private val syncRepository: SyncRepository,
+    private val roleEnforcer: RoleEnforcer
 ) : ViewModel() {
 
     private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
@@ -49,6 +51,8 @@ class WeeklySummaryViewModel @Inject constructor(
     private val _remoteAgentUid = MutableStateFlow<String?>(null)
     private val _isAdmin = MutableStateFlow(false)
     val isAdmin: StateFlow<Boolean> = _isAdmin.asStateFlow()
+    private val _isSupervisor = MutableStateFlow(false)
+    val isSupervisor: StateFlow<Boolean> = _isSupervisor.asStateFlow()
 
     private val _uiEvent = MutableStateFlow<String?>(null)
     val uiEvent: StateFlow<String?> = _uiEvent.asStateFlow()
@@ -92,6 +96,7 @@ class WeeklySummaryViewModel @Inject constructor(
                 user?.let {
                     _currentUserUid.value = it.uid
                     _isAdmin.value = it.role == UserRole.ADMIN
+                    _isSupervisor.value = it.role == UserRole.SUPERVISOR
                 }
             }
         }
@@ -149,8 +154,10 @@ class WeeklySummaryViewModel @Inject constructor(
             val activity = activities.find { it.date.replace("/", "-") == date.replace("/", "-") }
             val status = activity?.status?.ifBlank { "NORMAL" } ?: "NORMAL"
             val editedByAdmin = activity?.editedByAdmin ?: false
+            val isClosed = activity?.isClosed ?: false
+            val isManualUnlock = activity?.isManualUnlock ?: false
             
-            DaySummary(date, dayHouses.size, totalWorked, status, editedByAdmin)
+            DaySummary(date, dayHouses.size, totalWorked, status, editedByAdmin, isClosed, isManualUnlock)
         }
     }
     .flowOn(Dispatchers.Default)
@@ -225,6 +232,13 @@ class WeeklySummaryViewModel @Inject constructor(
             var rippleError: String? = null
             _uiEvent.value = "Iniciando atualização de status..."
             try {
+                // 1. Role Enforcement Check
+                val roleResult = roleEnforcer.enforce(_isSupervisor.value, _isAdmin.value, "alterar o status do dia")
+                if (roleResult is RoleEnforcer.RoleResult.Blocked) {
+                    rippleError = roleResult.message
+                    throw Exception(rippleError)
+                }
+
                 var wasWorkingChange: Pair<Boolean, Boolean>? = null
                 val currentUid = _remoteAgentUid.value ?: _currentUserUid.value
                 
@@ -235,10 +249,7 @@ class WeeklySummaryViewModel @Inject constructor(
                         .associateBy { it.date.replace("/", "-") }
                     
                     val existing = allActivities[date]
-                    if (existing?.editedByAdmin == true && !_isAdmin.value) {
-                        rippleError = "Este dia foi homologado por um administrador e não pode ter seu status alterado."
-                        throw Exception(rippleError)
-                    }
+                    
                     val oldStatus = existing?.status ?: "NORMAL"
                     _uiEvent.value = "Status atual: $oldStatus. Novo: $status"
                     
@@ -276,7 +287,7 @@ class WeeklySummaryViewModel @Inject constructor(
                         val updatedStatusMap = allActivities.toMutableMap()
                         updatedStatusMap[date] = updatedActivity
                         
-                        _uiEvent.value = "Calculando efeito cascata (movimentação de imóveis)..."
+                        _uiEvent.value = "Calculando efeito cascata..."
                         val allAgentHouses = repository.getAllHousesOnce(currentUid ?: "")
                         val targetDateObj = try { dateFormatter.parse(date) } catch (e: Exception) { null }
                         
@@ -290,27 +301,32 @@ class WeeklySummaryViewModel @Inject constructor(
                             houseDate != null && !houseDate.before(targetDateObj)
                         }
                         
-                        _uiEvent.value = "Casas identificadas para mover: ${housesToShift.size}"
+                        val activitiesToShift = allActivities.values.filter { act ->
+                            val actDate = try { dateFormatter.parse(act.date.replace("/", "-")) } catch (e: Exception) { null }
+                            actDate != null && actDate.after(targetDateObj) && (act.status.trim().uppercase() == "NORMAL" || act.status.isBlank())
+                        }
                         
-                        if (housesToShift.isNotEmpty()) {
-                            val productionDates = housesToShift.map { it.data }.distinct()
-                            val productionDatesSet = productionDates.map { it.replace("/", "-") }.toSet()
+                        _uiEvent.value = "Identificados: ${housesToShift.size} imóveis e ${activitiesToShift.size} dias para mover."
+                        
+                        if (housesToShift.isNotEmpty() || activitiesToShift.isNotEmpty()) {
+                            val rawDatesToShift = (housesToShift.map { it.data } + activitiesToShift.map { it.date }).distinct()
+                            val rawDatesToShiftSet = rawDatesToShift.map { it.replace("/", "-") }.toSet()
                             val dateToOffset = mutableMapOf<String, Int>()
                             
-                            productionDates.forEach { pDate ->
+                            rawDatesToShift.forEach { rDate ->
                                 var offset = 0
                                 val cal = Calendar.getInstance()
                                 cal.time = targetDateObj
-                                val pDateObj = try { dateFormatter.parse(pDate.replace("/", "-")) } catch (e: Exception) { null } ?: return@forEach
+                                val rDateObj = try { dateFormatter.parse(rDate.replace("/", "-")) } catch (e: Exception) { null } ?: return@forEach
                                 
-                                while (cal.time.before(pDateObj)) {
+                                while (cal.time.before(rDateObj)) {
                                     val currentDateStr = dateFormatter.format(cal.time)
-                                    if (isWorkingDay(cal, allActivities) || productionDatesSet.contains(currentDateStr)) {
+                                    if (isWorkingDay(cal, allActivities) || rawDatesToShiftSet.contains(currentDateStr)) {
                                         offset++
                                     }
                                     cal.add(Calendar.DAY_OF_YEAR, 1)
                                 }
-                                dateToOffset[pDate] = offset
+                                dateToOffset[rDate] = offset
                             }
                             
                             val sortedOffsets = dateToOffset.values.distinct().sorted()
@@ -332,6 +348,7 @@ class WeeklySummaryViewModel @Inject constructor(
                                 daysChecked++
                             }
                             
+                            // 1. Shift and update houses
                             val updatedHouses = housesToShift.mapNotNull { house ->
                                 val offset = dateToOffset[house.data]
                                 val newDate = offsetToNewDate[offset]
@@ -344,12 +361,37 @@ class WeeklySummaryViewModel @Inject constructor(
                                 } else null
                             }
                             
+                            // 2. Shift and update DayActivity records
+                            val updatedActivities = activitiesToShift.mapNotNull { act ->
+                                val offset = dateToOffset[act.date]
+                                val newDate = offsetToNewDate[offset]
+                                if (newDate != null && newDate != act.date.replace("/", "-")) {
+                                    act.copy(
+                                        date = newDate,
+                                        isSynced = false,
+                                        lastUpdated = System.currentTimeMillis()
+                                    )
+                                } else null
+                            }
+                            
+                            // Apply DayActivity shifts
+                            if (activitiesToShift.isNotEmpty()) {
+                                _uiEvent.value = "Ajustando ${activitiesToShift.size} dias homologados..."
+                                activitiesToShift.forEach { act ->
+                                    repository.deleteDayActivity(act.date, act.agentUid)
+                                }
+                                updatedActivities.forEach { act ->
+                                    repository.updateDayActivity(act, force = true)
+                                }
+                            }
+                            
+                            // Apply house shifts
                             if (updatedHouses.isNotEmpty()) {
                                 _uiEvent.value = "Atualizando ${updatedHouses.size} imóveis..."
                                 repository.updateHouses(updatedHouses, force = true)
                                 _uiEvent.value = "Movimentação concluída com sucesso."
-                            } else if (housesToShift.isNotEmpty()) {
-                                _uiEvent.value = "Nenhuma casa precisou mudar de data."
+                            } else if (housesToShift.isNotEmpty() || activitiesToShift.isNotEmpty()) {
+                                _uiEvent.value = "Movimentação concluída (dias ajustados)."
                             }
                         }
                     }
@@ -379,6 +421,50 @@ class WeeklySummaryViewModel @Inject constructor(
             } catch (e: Exception) {
                 android.util.Log.e("WeeklySummaryViewModel", "Error updating day status", e)
                 _uiEvent.value = "Erro ao atualizar status: ${e.message}"
+            }
+        }
+    }
+
+    fun toggleDayLock(date: String) {
+        val normalizedDate = date.replace("/", "-")
+        viewModelScope.launch {
+            try {
+                // Role Enforcement Check
+                val roleResult = roleEnforcer.enforce(_isSupervisor.value, _isAdmin.value, "alterar a trava do dia")
+                if (roleResult is RoleEnforcer.RoleResult.Blocked) {
+                    _uiEvent.value = roleResult.message
+                    soundManager.playWarning()
+                    return@launch
+                }
+
+                val currentUid = _remoteAgentUid.value ?: _currentUserUid.value
+                val existing = repository.getDayActivity(normalizedDate, currentUid)
+                val currentAgent = _agentName.value
+                
+                val activity = existing ?: DayActivity(
+                    date = normalizedDate,
+                    status = "NORMAL",
+                    agentName = currentAgent,
+                    agentUid = currentUid ?: ""
+                )
+                
+                val newManualUnlock = !activity.isManualUnlock
+                val newActivity = activity.copy(
+                    isManualUnlock = newManualUnlock,
+                    isClosed = if (newManualUnlock) false else activity.isClosed
+                )
+                
+                repository.updateDayActivity(newActivity, _isAdmin.value)
+                
+                if (newManualUnlock) {
+                    _uiEvent.value = "Edição extra habilitada para ${date}."
+                } else {
+                    _uiEvent.value = "Edição extra desabilitada para ${date}."
+                }
+                
+                soundManager.playPop()
+            } catch (e: Exception) {
+                _uiEvent.value = "Erro ao alterar trava: ${e.message}"
                 soundManager.playWarning()
             }
         }

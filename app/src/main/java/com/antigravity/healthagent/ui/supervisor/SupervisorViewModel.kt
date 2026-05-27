@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
+import com.antigravity.healthagent.ui.state.SyncUiState
 
 import com.antigravity.healthagent.utils.toNumericDate
 
@@ -103,25 +104,30 @@ class SupervisorViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _syncState = MutableStateFlow<SyncUiState>(SyncUiState.Idle())
+    val syncState: StateFlow<SyncUiState> = _syncState.asStateFlow()
+
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    private val _selectedYear = MutableStateFlow(Calendar.getInstance().get(Calendar.YEAR))
+    private val tz = java.util.TimeZone.getTimeZone("America/Sao_Paulo")
+
+    private val _selectedYear = MutableStateFlow(Calendar.getInstance(tz).get(Calendar.YEAR))
     val selectedYear = _selectedYear.asStateFlow()
 
-    private val _selectedMonth = MutableStateFlow(Calendar.getInstance().get(Calendar.MONTH)) // Default to current month
+    private val _selectedMonth = MutableStateFlow(Calendar.getInstance(tz).get(Calendar.MONTH)) // Default to current month
     val selectedMonth = _selectedMonth.asStateFlow()
 
     private val _selectedWeekIndex = MutableStateFlow(-1) // -1 for "Mês Todo"
     val selectedWeekIndex = _selectedWeekIndex.asStateFlow()
 
-    val availableYears = (2025..Calendar.getInstance().get(Calendar.YEAR)).reversed().toList()
+    val availableYears = (2025..Calendar.getInstance(tz).get(Calendar.YEAR)).reversed().toList()
     
     val availableMonths = listOf("Ano Todo", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
 
     fun getFilteredMonths(): List<String> {
-        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-        val currentMonth = Calendar.getInstance().get(Calendar.MONTH)
+        val currentYear = Calendar.getInstance(tz).get(Calendar.YEAR)
+        val currentMonth = Calendar.getInstance(tz).get(Calendar.MONTH)
         
         return if (_selectedYear.value >= currentYear) {
             // Only months up to now + "Ano Todo"
@@ -134,8 +140,8 @@ class SupervisorViewModel @Inject constructor(
     fun updateYear(year: Int) {
         _selectedYear.value = year
         // If selecting a year that makes current month invalid, reset to current month or "Ano Todo"
-        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-        val currentMonth = Calendar.getInstance().get(Calendar.MONTH)
+        val currentYear = Calendar.getInstance(tz).get(Calendar.YEAR)
+        val currentMonth = Calendar.getInstance(tz).get(Calendar.MONTH)
         if (year == currentYear && _selectedMonth.value > currentMonth) {
             _selectedMonth.value = currentMonth
         }
@@ -167,7 +173,7 @@ class SupervisorViewModel @Inject constructor(
         if (weekIndex != -1 && weeks.isNotEmpty()) {
             val week = weeks.getOrNull(weekIndex)
             if (week != null) {
-                val sdf = SimpleDateFormat("dd/MM", Locale.US)
+                val sdf = SimpleDateFormat("dd/MM", Locale.US).apply { timeZone = tz }
                 return@combine "${sdf.format(week.start)} - ${sdf.format(week.end)}"
             }
         }
@@ -194,6 +200,11 @@ class SupervisorViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AggregateSummary())
 
     init {
+        viewModelScope.launch {
+            settingsManager.lastSyncTimestamp.collect { ts ->
+                _syncState.value = SyncUiState.Idle(lastSyncTime = if (ts > 0L) ts else null)
+            }
+        }
         refreshData()
     }
 
@@ -224,11 +235,12 @@ class SupervisorViewModel @Inject constructor(
     val focusedAgentUid: StateFlow<String?> = _focusedAgentUid.asStateFlow()
 
     fun refreshData() {
+        if (_syncState.value is SyncUiState.Syncing) return
+        _syncState.value = SyncUiState.Syncing(progress = 0.5f, message = "Atualizando dados...", lastSyncTime = _syncState.value.lastSyncTime)
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
             
-            val calendar = Calendar.getInstance()
             val year = _selectedYear.value
             val month = _selectedMonth.value
             val weekIndex = _selectedWeekIndex.value
@@ -239,6 +251,24 @@ class SupervisorViewModel @Inject constructor(
                 val week = weeks.getOrNull(weekIndex)
                 if (week != null) {
                     week.start.time to week.end.time
+                } else {
+                    -1L to -1L
+                }
+            } else if (month != -1) {
+                // For whole month: if it is the CURRENT month/year, we MUST fetch raw data
+                // because we force recalculation from raw data.
+                val now = Calendar.getInstance(tz)
+                val isCurrentMonthYear = (month == now.get(Calendar.MONTH) && year == now.get(Calendar.YEAR))
+                if (isCurrentMonthYear) {
+                    val cal = Calendar.getInstance(tz)
+                    cal.set(year, month, 1, 0, 0, 0)
+                    cal.set(Calendar.MILLISECOND, 0)
+                    val start = cal.timeInMillis
+                    
+                    cal.set(year, month, cal.getActualMaximum(Calendar.DAY_OF_MONTH), 23, 59, 59)
+                    cal.set(Calendar.MILLISECOND, 999)
+                    val end = cal.timeInMillis
+                    start to end
                 } else {
                     -1L to -1L
                 }
@@ -255,14 +285,27 @@ class SupervisorViewModel @Inject constructor(
                 "-$monthStr-$year"
             }
 
-            // fetchAllAgentsData handles delta agent fetch + targeted summary fetch + optional raw data fetch
-            val result = agentRepository.fetchAllAgentsData(since, until, datePattern)
-            if (result.isSuccess) {
-                _rawAgents.value = result.getOrNull() ?: emptyList()
-            } else {
-                _errorMessage.value = result.exceptionOrNull()?.message ?: "Erro desconhecido ao carregar dados"
+            try {
+                // fetchAllAgentsData handles delta agent fetch + targeted summary fetch + optional raw data fetch
+                val result = agentRepository.fetchAllAgentsData(since, until, datePattern)
+                if (result.isSuccess) {
+                    _rawAgents.value = result.getOrNull() ?: emptyList()
+                    val now = System.currentTimeMillis()
+                    settingsManager.setLastSyncTimestamp(now)
+                    _syncState.value = SyncUiState.Success(lastSyncTime = now)
+                } else {
+                    val errMsg = result.exceptionOrNull()?.message ?: "Erro desconhecido ao carregar dados"
+                    _errorMessage.value = errMsg
+                    _syncState.value = SyncUiState.Error(message = errMsg, lastSyncTime = _syncState.value.lastSyncTime)
+                }
+            } catch (e: Exception) {
+                val errMsg = e.message ?: "Erro ao atualizar dados"
+                _errorMessage.value = errMsg
+                _syncState.value = SyncUiState.Error(message = errMsg, lastSyncTime = _syncState.value.lastSyncTime)
+            } finally {
+                _isLoading.value = false
+                _syncState.value = SyncUiState.Idle(lastSyncTime = _syncState.value.lastSyncTime)
             }
-            _isLoading.value = false
         }
     }
 
@@ -315,7 +358,7 @@ class SupervisorViewModel @Inject constructor(
 
     private fun generateWeeksForMonth(year: Int, month: Int): List<WeekRange> {
         val weeks = mutableListOf<WeekRange>()
-        val cal = Calendar.getInstance()
+        val cal = Calendar.getInstance(tz)
         cal.set(year, month, 1, 0, 0, 0)
         cal.set(Calendar.MILLISECOND, 0)
         
@@ -324,21 +367,21 @@ class SupervisorViewModel @Inject constructor(
             cal.add(Calendar.DAY_OF_MONTH, -1)
         }
         
-        val maxDayOfMonth = Calendar.getInstance().apply { set(year, month, 1) }.getActualMaximum(Calendar.DAY_OF_MONTH)
-        val endOfMonth = Calendar.getInstance().apply {
+        val maxDayOfMonth = Calendar.getInstance(tz).apply { set(year, month, 1) }.getActualMaximum(Calendar.DAY_OF_MONTH)
+        val endOfMonth = Calendar.getInstance(tz).apply {
             set(year, month, maxDayOfMonth, 23, 59, 59)
             set(Calendar.MILLISECOND, 999)
         }
 
-        val sdf = SimpleDateFormat("dd/MM", Locale.US)
-        val now = Calendar.getInstance().timeInMillis
+        val sdf = SimpleDateFormat("dd/MM", Locale.US).apply { timeZone = tz }
+        val now = Calendar.getInstance(tz).timeInMillis
 
         var weekNum = 1
         while (cal.timeInMillis <= endOfMonth.timeInMillis) {
             val start = cal.time
             if (start.time > now) break
             
-            val weekEnd = Calendar.getInstance().apply {
+            val weekEnd = Calendar.getInstance(tz).apply {
                 time = start
                 add(Calendar.DAY_OF_MONTH, 6)
                 set(Calendar.HOUR_OF_DAY, 23)
@@ -386,7 +429,7 @@ class SupervisorViewModel @Inject constructor(
     }
 
     fun nextWeek() {
-        val cal = Calendar.getInstance().apply {
+        val cal = Calendar.getInstance(tz).apply {
             time = _currentWeekStart.value
             add(Calendar.DAY_OF_YEAR, 7)
         }
@@ -394,7 +437,7 @@ class SupervisorViewModel @Inject constructor(
     }
 
     fun previousWeek() {
-        val cal = Calendar.getInstance().apply {
+        val cal = Calendar.getInstance(tz).apply {
             time = _currentWeekStart.value
             add(Calendar.DAY_OF_YEAR, -7)
         }
@@ -402,7 +445,7 @@ class SupervisorViewModel @Inject constructor(
     }
 
     private fun getMondayOfCurrentWeek(): Date {
-        val cal = Calendar.getInstance()
+        val cal = Calendar.getInstance(tz)
         cal.set(Calendar.HOUR_OF_DAY, 0)
         cal.set(Calendar.MINUTE, 0)
         cal.set(Calendar.SECOND, 0)
@@ -445,6 +488,20 @@ class SupervisorViewModel @Inject constructor(
             c.get(Calendar.YEAR).toLong() * 10000 + (c.get(Calendar.MONTH) + 1).toLong() * 100 + c.get(Calendar.DAY_OF_MONTH).toLong()
         } else Long.MAX_VALUE
 
+        val year = _selectedYear.value
+        val month = _selectedMonth.value
+
+        val selectedMonthStartNumeric = if (month != -1) {
+            year.toLong() * 10000 + (month + 1).toLong() * 100 + 1
+        } else 0L
+
+        val selectedMonthEndNumeric = if (month != -1) {
+            year.toLong() * 10000 + (month + 1).toLong() * 100 + 31
+        } else Long.MAX_VALUE
+
+        val selectedYearStartNumeric = year.toLong() * 10000 + 101
+        val selectedYearEndNumeric = year.toLong() * 10000 + 1231
+
         // Define the date filter
         val dateFilter: (String) -> Boolean = { dateStr ->
             val numericDate = dateStr.toNumericDate()
@@ -455,8 +512,12 @@ class SupervisorViewModel @Inject constructor(
                 } else if (weekStart != null && weekEnd != null) {
                     // If in weekly view, also check range
                     numericDate in startNumeric..endNumeric
+                } else if (month != -1) {
+                    // Restrict strictly to selected month of the selected year
+                    numericDate in selectedMonthStartNumeric..selectedMonthEndNumeric
                 } else {
-                    true // In monthly/yearly view, any date <= limit is fine
+                    // Restrict strictly to the selected year
+                    numericDate in selectedYearStartNumeric..selectedYearEndNumeric
                 }
             } else false // Malformed date: hide it
         }
@@ -477,7 +538,7 @@ class SupervisorViewModel @Inject constructor(
         val recusadosDetails = mutableListOf<StatDetail>()
         var activeAgentsCount = 0
 
-        val now = Calendar.getInstance()
+        val now = Calendar.getInstance(tz)
         val currentYear = now.get(Calendar.YEAR)
         val currentMonth = now.get(Calendar.MONTH)
         

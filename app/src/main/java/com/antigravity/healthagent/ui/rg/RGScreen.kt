@@ -12,6 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import com.antigravity.healthagent.ui.state.SyncUiState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -21,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.ui.components.HouseRowItem
 import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.rg.RgViewModel
 import android.widget.Toast
@@ -42,7 +45,8 @@ fun RGScreen(
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    onSyncPullActive: (Boolean) -> Unit = {}
 ) {
     val rgBlocks by viewModel.rgBlocks.collectAsState()
     val selectedRgBlock by viewModel.selectedRgBlock.collectAsState()
@@ -135,10 +139,29 @@ fun RGScreen(
         val currentUserUid by viewModel.currentUserUid.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
 
+        val isRefreshing = syncState is SyncUiState.Syncing
+        val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
+        LaunchedEffect(isPullActive) {
+            onSyncPullActive(isPullActive)
+        }
+        DisposableEffect(Unit) {
+            onDispose {
+                onSyncPullActive(false)
+            }
+        }
+
         PullToRefreshBox(
-            isRefreshing = syncState is SyncUiState.Syncing,
+            isRefreshing = isRefreshing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
+            indicator = {
+                CustomSyncPullIndicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    isSolarMode = isSolarMode,
+                    syncStatus = syncState
+                )
+            },
             modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {

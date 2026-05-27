@@ -8,6 +8,7 @@ import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.channels.awaitClose
@@ -19,6 +20,7 @@ import javax.inject.Singleton
 class AgentRepositoryImpl @Inject constructor(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
+    private val storage: FirebaseStorage,
     private val agentCacheDao: com.antigravity.healthagent.data.local.dao.AgentCacheDao
 ) : AgentRepository {
 
@@ -99,6 +101,50 @@ class AgentRepositoryImpl @Inject constructor(
             Result.success(Unit)
         } catch (e: Exception) {
             android.util.Log.e("AgentRepository", "Delete agent production failed", e)
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun purgeAgentCompletely(uid: String): Result<Unit> {
+        return try {
+            agentCacheDao.deleteAgentCache(uid)
+            agentCacheDao.deleteAgentSummaries(uid)
+
+            val agentRef = firestore.collection("agents").document(uid)
+
+            val houses = agentRef.collection("houses").get().await()
+            val activities = agentRef.collection("day_activities").get().await()
+            val summaries = agentRef.collection("monthly_summaries").get().await()
+            val backups = agentRef.collection("backups").get().await()
+            
+            val operations = (houses.documents + activities.documents + summaries.documents + backups.documents)
+                .map { it.reference }.toMutableList()
+            
+            if (operations.isNotEmpty()) {
+                operations.chunked(400).forEach { chunk ->
+                    val batch = firestore.batch()
+                    for (ref in chunk) {
+                        batch.delete(ref)
+                    }
+                    batch.commit().await()
+                }
+            }
+            
+            agentRef.delete().await()
+
+            try {
+                val storageRef = storage.reference.child("backups/$uid")
+                val listResult = storageRef.listAll().await()
+                listResult.items.forEach { fileRef ->
+                    fileRef.delete().await()
+                }
+            } catch (storageEx: Exception) {
+                android.util.Log.e("AgentRepository", "Failed to clear storage backups for $uid", storageEx)
+            }
+            
+            Result.success(Unit)
+        } catch (e: Exception) {
+            android.util.Log.e("AgentRepository", "Purge agent completely failed", e)
             Result.failure(e)
         }
     }
@@ -295,18 +341,29 @@ class AgentRepositoryImpl @Inject constructor(
                                 // Fetch houses in range using production dates (DD-MM-YYYY)
                                 // This respects Firebase limits while ensuring historical accuracy
                                 val dateStrings = getDateStringsInRange(sinceTimestamp, untilTimestamp)
-                                val houseDocs = agentRef.collection("houses")
-                                    .whereIn("data", dateStrings)
-                                    .get().await()
                                 
-                                houses = houseDocs.documents.mapNotNull { it.toHouseSafe(uid, agent.agentName ?: "") }
+                                val housesAccumulated = mutableListOf<com.antigravity.healthagent.data.local.model.House>()
+                                dateStrings.chunked(30).forEach { batch ->
+                                    if (batch.isNotEmpty()) {
+                                        val houseDocs = agentRef.collection("houses")
+                                            .whereIn("data", batch)
+                                            .get().await()
+                                        housesAccumulated.addAll(houseDocs.documents.mapNotNull { it.toHouseSafe(uid, agent.agentName ?: "") })
+                                    }
+                                }
+                                houses = housesAccumulated
 
                                 // Fetch activities in range
-                                val activityDocs = agentRef.collection("day_activities")
-                                    .whereIn("date", dateStrings)
-                                    .get().await()
-                                
-                                activities = activityDocs.documents.mapNotNull { it.toDayActivitySafe(uid, agent.agentName ?: "") }
+                                val activitiesAccumulated = mutableListOf<com.antigravity.healthagent.data.local.model.DayActivity>()
+                                dateStrings.chunked(30).forEach { batch ->
+                                    if (batch.isNotEmpty()) {
+                                        val activityDocs = agentRef.collection("day_activities")
+                                            .whereIn("date", batch)
+                                            .get().await()
+                                        activitiesAccumulated.addAll(activityDocs.documents.mapNotNull { it.toDayActivitySafe(uid, agent.agentName ?: "") })
+                                    }
+                                }
+                                activities = activitiesAccumulated
                             } catch (e: Exception) {
                                 android.util.Log.e("AgentRepository", "Raw data fetch error for $uid: ${e.message}")
                             }
@@ -663,14 +720,15 @@ class AgentRepositoryImpl @Inject constructor(
 
     private fun getDateStringsInRange(start: Long, end: Long): List<String> {
         val dates = mutableListOf<String>()
-        val cal = java.util.Calendar.getInstance()
+        val tz = java.util.TimeZone.getTimeZone("America/Sao_Paulo")
+        val cal = java.util.Calendar.getInstance(tz)
         cal.timeInMillis = start
         cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
         cal.set(java.util.Calendar.MINUTE, 0)
         cal.set(java.util.Calendar.SECOND, 0)
         cal.set(java.util.Calendar.MILLISECOND, 0)
 
-        val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US)
+        val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US).apply { timeZone = tz }
         
         // Safety: limit to 31 days to ensure full months are covered while staying within Firestore whereIn limits
         var count = 0

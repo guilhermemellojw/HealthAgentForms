@@ -29,11 +29,13 @@ fun SyncFloatingBalloon(
     syncStatus: SyncUiState,
     isEasyMode: Boolean = false,
     isSolarMode: Boolean = false,
+    isPullActive: Boolean = false,
+    topPadding: androidx.compose.ui.unit.Dp = 72.dp,
     modifier: Modifier = Modifier
 ) {
     // Entrance/Exit Animation
     AnimatedVisibility(
-        visible = (syncStatus.lastSyncTime ?: 0L) > 0,
+        visible = (syncStatus.lastSyncTime ?: 0L) > 0 && !isPullActive,
         enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
         exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top),
         modifier = modifier.fillMaxWidth()
@@ -57,26 +59,37 @@ fun SyncFloatingBalloon(
             label = "alpha"
         )
 
+        val isLightTheme = MaterialTheme.colorScheme.background.red > 0.5f
+
         Box(
             modifier = Modifier
-                .padding(top = 72.dp)
+                .padding(top = topPadding)
                 .fillMaxWidth(),
             contentAlignment = Alignment.TopCenter
         ) {
             Surface(
-                color = if (isSolarMode) MaterialTheme.colorScheme.surface.copy(alpha = 0.95f) else Color.Black.copy(alpha = 0.85f),
+                color = if (isSolarMode || isLightTheme) {
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                } else {
+                    Color(0xCC1A1A1A) // Premium semi-transparent dark grey matching the pull indicator
+                },
                 shape = RoundedCornerShape(100.dp),
                 border = androidx.compose.foundation.BorderStroke(
-                    width = 1.dp,
+                    width = 1.5.dp,
                     brush = Brush.linearGradient(
                         colors = listOf(
-                            Color.White.copy(alpha = 0.6f),
-                            Color.White.copy(alpha = 0.1f)
+                            MaterialTheme.colorScheme.primary, // App primary color neon glow
+                            MaterialTheme.colorScheme.secondary  // App secondary color neon glow
                         )
                     )
                 ),
                 modifier = Modifier
-                    .shadow(elevation = 8.dp, shape = RoundedCornerShape(100.dp), spotColor = Color.Black.copy(alpha = 0.2f))
+                    .shadow(
+                        elevation = 12.dp,
+                        shape = RoundedCornerShape(100.dp),
+                        ambientColor = if (isLightTheme) Color.Black.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary,
+                        spotColor = if (isLightTheme) Color.Black.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary
+                    )
                     .widthIn(min = 180.dp)
             ) {
                 Row(
@@ -91,7 +104,7 @@ fun SyncFloatingBalloon(
                         modifier = Modifier
                             .size(18.dp)
                             .graphicsLayer { alpha = iconAlpha },
-                        tint = if (isSolarMode) MaterialTheme.colorScheme.primary else Color(0xFF4CAF50)
+                        tint = MaterialTheme.colorScheme.primary
                     )
                     
                     Spacer(Modifier.width(10.dp))
@@ -100,7 +113,7 @@ fun SyncFloatingBalloon(
                         text = "Sincronizado: $dateStr às $timeStr",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.ExtraBold,
-                        color = if (isSolarMode) MaterialTheme.colorScheme.onSurface else Color.White,
+                        color = MaterialTheme.colorScheme.primary,
                         letterSpacing = 0.5.sp,
                         fontSize = if (isEasyMode) 13.sp else 11.sp
                     )

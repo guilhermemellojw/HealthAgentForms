@@ -30,6 +30,8 @@ import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.UserRole
 import kotlinx.coroutines.flow.combine
 import android.net.Uri
+import com.antigravity.healthagent.ui.state.SyncUiState
+
 
 @HiltViewModel
 class AdminViewModel @Inject constructor(
@@ -47,6 +49,9 @@ class AdminViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow<AdminUiState>(AdminUiState.Loading)
     val uiState: StateFlow<AdminUiState> = _uiState.asStateFlow()
+
+    private val _syncState = MutableStateFlow<SyncUiState>(SyncUiState.Idle())
+    val syncState: StateFlow<SyncUiState> = _syncState.asStateFlow()
 
     private val _users = MutableStateFlow<List<AuthUser>>(emptyList())
     val users: StateFlow<List<AuthUser>> = _users.asStateFlow()
@@ -236,17 +241,35 @@ class AdminViewModel @Inject constructor(
                 _accessRequests.value = requests
             }
         }
+
+        viewModelScope.launch {
+            settingsManager.lastSyncTimestamp.collect { ts ->
+                _syncState.value = SyncUiState.Idle(lastSyncTime = if (ts > 0L) ts else null)
+            }
+        }
     }
 
     fun refreshAll() {
+        if (_syncState.value is SyncUiState.Syncing) return
+        _syncState.value = SyncUiState.Syncing(progress = 0.5f, message = "Atualizando dados...", lastSyncTime = _syncState.value.lastSyncTime)
         viewModelScope.launch {
             _isLoading.value = true
-            loadAgentsData(_selectedYear.value, _selectedMonth.value)
-            loadUsers()
-            loadAgentNames()
-            loadBairros()
-            loadSystemSettings()
-            _isLoading.value = false
+            try {
+                loadAgentsData(_selectedYear.value, _selectedMonth.value)
+                loadUsers()
+                loadAgentNames()
+                loadBairros()
+                loadSystemSettings()
+                
+                val now = System.currentTimeMillis()
+                settingsManager.setLastSyncTimestamp(now)
+                _syncState.value = SyncUiState.Success(lastSyncTime = now)
+            } catch (e: Exception) {
+                _syncState.value = SyncUiState.Error(message = e.message ?: "Erro ao atualizar dados", lastSyncTime = _syncState.value.lastSyncTime)
+            } finally {
+                _isLoading.value = false
+                _syncState.value = SyncUiState.Idle(lastSyncTime = _syncState.value.lastSyncTime)
+            }
         }
     }
 

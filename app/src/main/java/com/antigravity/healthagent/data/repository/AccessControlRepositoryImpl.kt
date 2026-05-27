@@ -177,8 +177,8 @@ class AccessControlRepositoryImpl @Inject constructor(
 
     override suspend fun deleteUser(uid: String): Result<Unit> {
         return try {
-            agentRepository.deleteAgent(uid).onFailure { error -> 
-                android.util.Log.e("AccessControlRepository", "Failed to delete agent data: ${error.message}")
+            agentRepository.purgeAgentCompletely(uid).onFailure { error -> 
+                android.util.Log.e("AccessControlRepository", "Failed to purge agent data completely: ${error.message}")
             }
 
             val batch = firestore.batch()

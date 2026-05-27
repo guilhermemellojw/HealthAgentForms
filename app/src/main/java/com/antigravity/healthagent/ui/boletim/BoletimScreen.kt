@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
+import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.ui.home.HomeViewModel
 import com.antigravity.healthagent.ui.home.BoletimSummary
 import com.antigravity.healthagent.ui.home.BlockSummary
@@ -56,6 +57,7 @@ import com.antigravity.healthagent.ui.components.MeshGradient
 import com.antigravity.healthagent.ui.components.SyncStatusOverlay
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
 import com.antigravity.healthagent.utils.formatStreetName
 
 
@@ -66,7 +68,8 @@ fun BoletimScreen(
     onOpenSettings: () -> Unit = {},
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
-    onSwitchAccount: () -> Unit = {}
+    onSwitchAccount: () -> Unit = {},
+    onSyncPullActive: (Boolean) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val boletimList by viewModel.boletimList.collectAsState()
@@ -262,12 +265,31 @@ fun BoletimScreen(
         }
     ) { paddingValues ->
         val isSyncing by viewModel.isSyncing.collectAsState()
+        val isRefreshing = uiState.syncStatus is SyncUiState.Syncing || isSyncing
         val pullToRefreshState = rememberPullToRefreshState()
 
+        val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
+        LaunchedEffect(isPullActive) {
+            onSyncPullActive(isPullActive)
+        }
+        DisposableEffect(Unit) {
+            onDispose {
+                onSyncPullActive(false)
+            }
+        }
+
         PullToRefreshBox(
-            isRefreshing = isSyncing,
+            isRefreshing = isRefreshing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
+            indicator = {
+                CustomSyncPullIndicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    isSolarMode = uiState.isSolarMode,
+                    syncStatus = uiState.syncStatus
+                )
+            },
             modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
@@ -548,10 +570,9 @@ fun BoletimScreen(
                         )
                     }
                 }
-            }
-
         }
     }
+}
 }
 }
 }

@@ -146,14 +146,20 @@ class AuthRepositoryImpl @Inject constructor(
         workManager.cancelAllWorkByTag("sync")
         
         // 2. IMMEDIATE FIREBASE SIGNOUT (Safety First)
-        // We sign out here to ensure that any subsequent login immediately sees a fresh context
         auth.signOut()
 
         // 3. CLEAR SESSION SETTINGS (UI Sync)
         settingsManager.clearSessionSettings()
         
-        // 4. ENQUEUE BACKGROUND DATABASE WIPE
-        // We still use LogoutWorker to ensure the database is wiped even if the app is killed.
+        // 4. SYNCHRONOUS DATABASE WIPE
+        try {
+            syncRepository.clearLocalData()
+            android.util.Log.i("AuthRepository", "Immediate synchronous database wipe completed.")
+        } catch (e: Exception) {
+            android.util.Log.e("AuthRepository", "Immediate database wipe failed: ${e.message}")
+        }
+        
+        // 5. ENQUEUE BACKGROUND DATABASE WIPE (Double-check safety)
         val logoutRequest = androidx.work.OneTimeWorkRequestBuilder<com.antigravity.healthagent.data.sync.LogoutWorker>()
             .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
@@ -438,13 +444,42 @@ class AuthRepositoryImpl @Inject constructor(
                 // 1. House Migration & Reclamation
                 val misattributedHouses = houseDao.getHousesToReclaim(user.email ?: "", emailPrefix, user.uid, properName)
                 for (house in misattributedHouses) {
-                    val hasClash = houseDao.checkClash(
-                        user.uid, house.data, house.address.blockNumber, house.address.blockSequence, 
-                        house.address.streetName, house.address.number, house.address.sequence, house.address.complement, house.address.bairro, house.visitSegment
-                    ) > 0
+                    val dateDash = house.data.replace("/", "-")
+                    val conflicts = houseDao.getHousesByDateAndAgent(house.data, user.uid)
+                    val conflict = conflicts.find { conflict ->
+                        conflict.address.blockNumber.equals(house.address.blockNumber, ignoreCase = true) &&
+                        conflict.address.blockSequence.equals(house.address.blockSequence, ignoreCase = true) &&
+                        conflict.address.streetName.equals(house.address.streetName, ignoreCase = true) &&
+                        conflict.address.number.equals(house.address.number, ignoreCase = true) &&
+                        conflict.address.sequence == house.address.sequence &&
+                        conflict.address.complement == house.address.complement &&
+                        conflict.address.bairro.equals(house.address.bairro, ignoreCase = true) &&
+                        conflict.visitSegment == house.visitSegment
+                    }
                     
-                    if (hasClash) {
-                        houseDao.deleteHouseById(house.id)
+                    if (conflict != null) {
+                        val isHouseClosed = activityDao.getDayActivity(dateDash, house.agentUid)?.let { it.isClosed && !it.isManualUnlock } ?: false
+                        val isConflictClosed = activityDao.getDayActivity(dateDash, user.uid)?.let { it.isClosed && !it.isManualUnlock } ?: false
+                        
+                        if (isHouseClosed || isConflictClosed) {
+                            // CLOSED-DAY GUARD: skip deletion of duplicate conflict or house
+                            if (!isHouseClosed) {
+                                houseDao.updateHouseIdentity(house.id, user.uid, properName)
+                            }
+                        } else {
+                            // MERGE LOGIC: Prefer the house that has actual fieldwork data (treatment)
+                            val localHasWork = house.treatment.a1 > 0 || house.treatment.a2 > 0 || house.treatment.comFoco || house.observation.isNotBlank()
+                            val conflictHasWork = conflict.treatment.a1 > 0 || conflict.treatment.a2 > 0 || conflict.treatment.comFoco || conflict.observation.isNotBlank()
+                            
+                            if (localHasWork && !conflictHasWork) {
+                                android.util.Log.i("AuthRepository", "Migration: Overwriting empty cloud skeleton with local production for ${house.id}")
+                                houseDao.deleteHouse(conflict)
+                                houseDao.updateHouseIdentity(house.id, user.uid, properName)
+                            } else {
+                                // Conflict already has work or local is also empty
+                                houseDao.deleteHouseById(house.id)
+                            }
+                        }
                     } else {
                         houseDao.updateHouseIdentity(house.id, user.uid, properName)
                     }
@@ -577,13 +612,42 @@ class AuthRepositoryImpl @Inject constructor(
             // 1. House Migration
             val housesToReclaim = houseDao.getHousesToReclaim(email, emailPrefix, targetUid, properName)
             for (house in housesToReclaim) {
-                val hasClash = houseDao.checkClash(
-                    targetUid, house.data, house.address.blockNumber, house.address.blockSequence, 
-                    house.address.streetName, house.address.number, house.address.sequence, house.address.complement, house.address.bairro, house.visitSegment
-                ) > 0
+                val dateDash = house.data.replace("/", "-")
+                val conflicts = houseDao.getHousesByDateAndAgent(house.data, targetUid)
+                val conflict = conflicts.find { conflict ->
+                    conflict.address.blockNumber.equals(house.address.blockNumber, ignoreCase = true) &&
+                    conflict.address.blockSequence.equals(house.address.blockSequence, ignoreCase = true) &&
+                    conflict.address.streetName.equals(house.address.streetName, ignoreCase = true) &&
+                    conflict.address.number.equals(house.address.number, ignoreCase = true) &&
+                    conflict.address.sequence == house.address.sequence &&
+                    conflict.address.complement == house.address.complement &&
+                    conflict.address.bairro.equals(house.address.bairro, ignoreCase = true) &&
+                    conflict.visitSegment == house.visitSegment
+                }
                 
-                if (hasClash) {
-                    houseDao.deleteHouseById(house.id)
+                if (conflict != null) {
+                    val isHouseClosed = activityDao.getDayActivity(dateDash, house.agentUid)?.let { it.isClosed && !it.isManualUnlock } ?: false
+                    val isConflictClosed = activityDao.getDayActivity(dateDash, targetUid)?.let { it.isClosed && !it.isManualUnlock } ?: false
+                    
+                    if (isHouseClosed || isConflictClosed) {
+                        // CLOSED-DAY GUARD: skip deletion of duplicate conflict or house
+                        if (!isHouseClosed) {
+                            houseDao.updateHouseIdentity(house.id, targetUid, properName)
+                        }
+                    } else {
+                        // MERGE LOGIC: Prefer the house that has actual fieldwork data (treatment)
+                        val localHasWork = house.treatment.a1 > 0 || house.treatment.a2 > 0 || house.treatment.comFoco || house.observation.isNotBlank()
+                        val conflictHasWork = conflict.treatment.a1 > 0 || conflict.treatment.a2 > 0 || conflict.treatment.comFoco || conflict.observation.isNotBlank()
+                        
+                        if (localHasWork && !conflictHasWork) {
+                            android.util.Log.i("AuthRepository", "Migration: Overwriting empty cloud skeleton with local production for ${house.id}")
+                            houseDao.deleteHouse(conflict)
+                            houseDao.updateHouseIdentity(house.id, targetUid, properName)
+                        } else {
+                            // Conflict already has work or local is also empty
+                            houseDao.deleteHouseById(house.id)
+                        }
+                    }
                 } else {
                     houseDao.updateHouseIdentity(house.id, targetUid, properName)
                 }

@@ -32,6 +32,8 @@ import androidx.compose.ui.graphics.Color
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.MeshGradient
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
+import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyRow
@@ -42,6 +44,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.zIndex
 
 // --- Helper Components ---
 
@@ -436,13 +439,27 @@ fun AdminDashboardScreen(
                     }
                 }
                 
+                val syncState by viewModel.syncState.collectAsState()
+                val isSolarMode by viewModel.solarMode.collectAsState()
+                
                 val pullToRefreshState = rememberPullToRefreshState()
-                val isRefreshing by viewModel.isLoading.collectAsState()
+                val isRefreshing = syncState is com.antigravity.healthagent.ui.state.SyncUiState.Syncing
+                val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
 
                 PullToRefreshBox(
                     isRefreshing = isRefreshing,
                     onRefresh = { viewModel.refreshAll() },
                     state = pullToRefreshState,
+                    indicator = {
+                        CustomSyncPullIndicator(
+                            state = pullToRefreshState,
+                            isRefreshing = isRefreshing,
+                            isSolarMode = isSolarMode,
+                            syncStatus = syncState,
+                            pullText = "Puxe para atualizar...",
+                            releaseText = "Solte para atualizar!"
+                        )
+                    },
                     modifier = Modifier.weight(1f).fillMaxWidth()
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {

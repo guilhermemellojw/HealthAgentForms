@@ -38,9 +38,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.antigravity.healthagent.utils.formatStreetName
@@ -92,7 +94,8 @@ fun QuarteiroesScreen(
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    onSyncPullActive: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -192,10 +195,27 @@ fun QuarteiroesScreen(
         val isLoading by viewModel.isLoading.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
 
+        val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isLoading
+        LaunchedEffect(isPullActive) {
+            onSyncPullActive(isPullActive)
+        }
+        DisposableEffect(Unit) {
+            onDispose {
+                onSyncPullActive(false)
+            }
+        }
+
         PullToRefreshBox(
             isRefreshing = isLoading,
             onRefresh = { viewModel.refreshData() },
             state = pullToRefreshState,
+            indicator = {
+                CustomSyncPullIndicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isLoading,
+                    isSolarMode = false
+                )
+            },
             modifier = Modifier.padding(padding).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {

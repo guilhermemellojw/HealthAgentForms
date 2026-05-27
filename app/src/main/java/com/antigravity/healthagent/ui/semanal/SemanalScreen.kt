@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.DoorFront
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
@@ -40,6 +41,7 @@ import com.antigravity.healthagent.ui.home.DaySummary
 import com.antigravity.healthagent.utils.AppConstants
 import kotlinx.coroutines.launch
 import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
 import com.antigravity.healthagent.ui.components.PremiumCard
 
 
@@ -56,7 +58,8 @@ fun SemanalScreen(
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    onSyncPullActive: (Boolean) -> Unit = {}
 ) {
     val weeklySummary by viewModel.weeklySummary.collectAsState()
     val weeklySummaryTotals by viewModel.weeklySummaryTotals.collectAsState()
@@ -187,10 +190,29 @@ fun SemanalScreen(
         val syncState by viewModel.syncState.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
 
+        val isRefreshing = syncState is SyncUiState.Syncing
+        val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
+        LaunchedEffect(isPullActive) {
+            onSyncPullActive(isPullActive)
+        }
+        DisposableEffect(Unit) {
+            onDispose {
+                onSyncPullActive(false)
+            }
+        }
+
         PullToRefreshBox(
-            isRefreshing = syncState is SyncUiState.Syncing,
+            isRefreshing = isRefreshing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
+            indicator = {
+                CustomSyncPullIndicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    isSolarMode = isSolarMode,
+                    syncStatus = syncState
+                )
+            },
             modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
@@ -307,10 +329,11 @@ fun SemanalScreen(
                                 day = day,
                                 options = activityOptions,
                                 onStatusChange = { viewModel.updateDayStatus(day.date, it) },
+                                onToggleLock = { viewModel.toggleDayLock(day.date) },
                                 onClick = { onNavigateToDate(day.date) },
                                 isEasyMode = isEasyMode,
                                 isSolarMode = isSolarMode,
-                                enabled = !day.editedByAdmin || isAdmin
+                                enabled = true
                             )
                         }
 
@@ -443,6 +466,7 @@ fun WeeklyDayRow(
     day: DaySummary,
     options: List<String>,
     onStatusChange: (String) -> Unit,
+    onToggleLock: () -> Unit,
     onClick: () -> Unit,
     isEasyMode: Boolean = false,
     isSolarMode: Boolean = false,
@@ -474,16 +498,18 @@ fun WeeklyDayRow(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(modifier = Modifier.weight(1.2f)) {
+            Column(modifier = Modifier.weight(1.6f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = dayOfWeek.uppercase(),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Black,
-                        fontSize = if (isEasyMode) 12.sp else 10.sp
+                        fontSize = if (isEasyMode) 12.sp else 10.sp,
+                        maxLines = 1,
+                        softWrap = false
                     )
                     if (day.editedByAdmin) {
                         Spacer(Modifier.width(4.dp))
@@ -500,14 +526,16 @@ fun WeeklyDayRow(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = if (isEasyMode) 18.sp else 16.sp
+                    fontSize = if (isEasyMode) 18.sp else 16.sp,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
 
             Surface(
                 color = Color.Transparent,
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.width(if (isEasyMode) 72.dp else 64.dp).height(if (isEasyMode) 56.dp else 50.dp)
+                modifier = Modifier.width(if (isEasyMode) 60.dp else 48.dp).height(if (isEasyMode) 56.dp else 50.dp)
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -535,10 +563,29 @@ fun WeeklyDayRow(
                 currentValue = day.status.ifEmpty { "NORMAL" },
                 options = options,
                 onOptionSelected = onStatusChange,
-                modifier = Modifier.weight(2f),
+                modifier = Modifier.weight(2.2f),
                 isEasyMode = isEasyMode,
                 enabled = enabled
             )
+
+            if (day.isClosed || day.editedByAdmin) {
+                val isLocked = (day.isClosed && !day.isManualUnlock) || (day.editedByAdmin && !day.isManualUnlock)
+                IconButton(
+                    onClick = onToggleLock,
+                    modifier = Modifier.size(if (isEasyMode) 44.dp else 36.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                        contentDescription = if (isLocked) "Desbloquear" else "Bloquear",
+                        tint = if (isLocked) MaterialTheme.colorScheme.error else androidx.compose.ui.graphics.Color(0xFF4CAF50),
+                        modifier = Modifier.size(if (isEasyMode) 24.dp else 20.dp)
+                    )
+                }
+            } else {
+                Spacer(
+                    modifier = Modifier.size(if (isEasyMode) 44.dp else 36.dp)
+                )
+            }
         }
     }
 }
