@@ -80,6 +80,12 @@ class InitializationDelegate @Inject constructor(
                     viewModel.tipo.value = ref.context.tipo
                     viewModel.ciclo.value = ref.context.ciclo.uppercase()
                     viewModel.atividade.value = ref.context.atividade
+
+                    // SURGICAL: Auto-load block and street from the last house of the day to ensure property prediction continuity
+                    val lastRef = dayHouses.last()
+                    viewModel.currentBlock.value = lastRef.address.blockNumber.uppercase()
+                    viewModel.currentBlockSequence.value = lastRef.address.blockSequence.uppercase()
+                    viewModel.currentStreet.value = lastRef.address.streetName
                 }
             }
         }
@@ -89,14 +95,15 @@ class InitializationDelegate @Inject constructor(
             combine(
                 viewModel.data, viewModel.agentName, viewModel.municipio, viewModel.bairro,
                 viewModel.zona, viewModel.ciclo, viewModel.tipo, viewModel.atividade,
-                viewModel.isSupervisor, viewModel.isAdmin
+                viewModel.isSupervisor, viewModel.isAdmin, viewModel.currentBlock,
+                viewModel.currentBlockSequence, viewModel.currentStreet
             ) { args ->
-                Triple(args[0] as String, args[1] as String, args)
-            }.collect { (date, name, args) ->
+                args
+            }.collect { args ->
                 viewModel.uiState.update { current ->
                     current.copy(
-                        data = date,
-                        agentName = name,
+                        data = args[0] as String,
+                        agentName = args[1] as String,
                         municipality = args[2] as String,
                         neighborhood = args[3] as String,
                         zone = args[4] as String,
@@ -104,7 +111,10 @@ class InitializationDelegate @Inject constructor(
                         type = args[6] as Int,
                         activity = args[7] as Int,
                         isSupervisor = args[8] as Boolean,
-                        isAdmin = args[9] as Boolean
+                        isAdmin = args[9] as Boolean,
+                        currentBlock = args[10] as String,
+                        currentBlockSequence = args[11] as String,
+                        currentStreet = args[12] as String
                     )
                 }
             }

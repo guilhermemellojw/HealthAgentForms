@@ -22,11 +22,17 @@ class PredictHouseValuesUseCase @Inject constructor() {
         blockNumber: String,
         streetName: String
     ): HousePrediction {
+        // SURGICAL: Chronological isolation. We locate the maximum listOrder for the currentDate.
+        // If the day is reopened and has houses, any prediction should only consider houses
+        // at or before this maximum order to prevent chronological leaks from future days.
+        val maxOrderForDate = houses.filter { it.data == currentDate }.maxOfOrNull { it.listOrder }
+
         val contextHouses = houses.filter { 
             val hBlock = it.address.blockNumber.trim().uppercase()
             val hStreet = it.address.streetName.trim().formatStreetName()
             hBlock == blockNumber && hStreet == streetName && 
-            (it.address.number.isNotBlank() || it.address.sequence > 0 || it.address.complement > 0)
+            (it.address.number.isNotBlank() || it.address.sequence > 0 || it.address.complement > 0) &&
+            (maxOrderForDate == null || it.listOrder <= maxOrderForDate)
         }.sortedBy { it.listOrder }
 
         if (contextHouses.isEmpty()) {
