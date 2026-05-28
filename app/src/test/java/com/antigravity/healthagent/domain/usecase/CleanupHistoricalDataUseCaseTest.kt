@@ -126,10 +126,10 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun pruneOldTombstones(): Result<Unit> = Result.success(Unit)
         override suspend fun deleteHousesSurgically(agentUid: String, houses: List<House>): Result<Unit> = Result.success(Unit)
     }
-
     private val mockAgentRepository = object : AgentRepository {
         override suspend fun createAgent(email: String, agentName: String?): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAgent(uid: String): Result<Unit> = Result.success(Unit)
+        override suspend fun purgeAgentCompletely(uid: String): Result<Unit> = Result.success(Unit)
         override suspend fun fetchAgentNames(): Result<List<String>> = Result.success(emptyList())
         override suspend fun addAgentName(name: String): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAgentName(name: String): Result<Unit> = Result.success(Unit)
@@ -139,7 +139,6 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun clearSyncError(uid: String): Result<Unit> = Result.success(Unit)
         override suspend fun transferAgentData(fromUid: String, toUid: String): Result<Unit> = Result.success(Unit)
         override fun observeAgentProduction(uid: String, datePattern: String?): Flow<AgentData> = flowOf()
-
     }
 
     private val useCase = CleanupHistoricalDataUseCase(mockHouseRepository, mockSyncRepository, mockAgentRepository)

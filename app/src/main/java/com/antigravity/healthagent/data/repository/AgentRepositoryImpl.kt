@@ -372,8 +372,14 @@ class AgentRepositoryImpl @Inject constructor(
                         // Final AgentData for this agent
                         val summary = if (isYearOnly) {
                             val targetStr = cleanMonthYear!!
+                            val tz = java.util.TimeZone.getTimeZone("America/Sao_Paulo")
+                            val now = java.util.Calendar.getInstance(tz)
+                            val isCurrentYear = targetStr == now.get(java.util.Calendar.YEAR).toString()
+                            val currentMonthStr = String.format("%02d", now.get(java.util.Calendar.MONTH) + 1)
+                            
                             val yearSummaries = agentCacheDao.getSummariesForAgent(uid)
                                 .filter { it.monthYear.endsWith("-$targetStr") || it.monthYear.endsWith("/$targetStr") }
+                                .filter { !isCurrentYear || (!it.monthYear.startsWith("$currentMonthStr-") && !it.monthYear.startsWith("$currentMonthStr/")) }
                             
                             if (yearSummaries.isNotEmpty()) {
                                 val sitCounts = mutableMapOf<String, Int>()

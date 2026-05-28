@@ -575,6 +575,17 @@ function filterByPeriod(items, dateField) {
         });
     }
 
+    if (selectedWeekIndex !== -1) {
+        const weeks = getWeeksForMonth(selectedYear, selectedMonth);
+        const week = weeks[selectedWeekIndex];
+        if (week) {
+            return currentItems.filter(item => {
+                const date = parseDate((item[dateField] || "").replace(/\//g, "-"));
+                return date >= week.start && date <= week.end;
+            });
+        }
+    }
+
     const monthStr = String(selectedMonth + 1).padStart(2, '0');
     const targetSuffix = `-${monthStr}-${selectedYear}`;
     
@@ -582,15 +593,6 @@ function filterByPeriod(items, dateField) {
         const dateStr = (item[dateField] || "").replace(/\//g, "-");
         return dateStr.endsWith(targetSuffix);
     });
-
-    if (selectedWeekIndex !== -1) {
-        const weeks = getWeeksForMonth(selectedYear, selectedMonth);
-        const week = weeks[selectedWeekIndex];
-        filtered = filtered.filter(item => {
-            const date = parseDate((item[dateField] || "").replace(/\//g, "-"));
-            return date >= week.start && date <= week.end;
-        });
-    }
 
     return filtered;
 }
@@ -603,22 +605,36 @@ function parseDate(dateStr) {
 
 function getWeeksForMonth(year, month) {
     const weeks = [];
-    let date = new Date(year, month, 1);
-    let weekNum = 1;
+    
+    // Start at the 1st of the month
+    let date = new Date(year, month, 1, 0, 0, 0, 0);
+    
+    // Find the Sunday that starts the week containing the 1st of the month
+    while (date.getDay() !== 0) { // 0 is Sunday
+        date.setDate(date.getDate() - 1);
+    }
+    
+    const maxDay = new Date(year, month + 1, 0).getDate();
+    const endOfMonth = new Date(year, month, maxDay, 23, 59, 59, 999);
+    
     const now = new Date();
-
-    while (date.getMonth() === month && date <= now) {
+    let weekNum = 1;
+    
+    while (date <= endOfMonth) {
         const start = new Date(date);
-        const end = new Date(date);
-        end.setDate(date.getDate() + 6);
-        if (end.getMonth() !== month) {
-            end.setDate(0); // Last day of month
-        }
+        if (start > now) break;
+        
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
         
         const label = `Semana ${weekNum} (${formatSmallDate(start)} - ${formatSmallDate(end)})`;
         weeks.push({ label, start, end });
         
-        date.setDate(date.getDate() + 7);
+        // Advance to next Sunday 00:00:00
+        date = new Date(end);
+        date.setDate(date.getDate() + 1);
+        date.setHours(0, 0, 0, 0);
         weekNum++;
     }
     return weeks;

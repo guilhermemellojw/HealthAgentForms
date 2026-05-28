@@ -273,9 +273,24 @@ class SupervisorViewModel @Inject constructor(
                     -1L to -1L
                 }
             } else {
-                // For whole month or whole year, we prefer summaries only (lazy load houses/activities) 
-                // Passing -1 ensures the repository skips fetching raw houses/activities
-                -1L to -1L
+                // For whole year ("Ano Todo"):
+                // If it is the CURRENT year, we must fetch raw data for the current month
+                // so we can recalculate the current month's totals with the embargo limit.
+                val now = Calendar.getInstance(tz)
+                if (year == now.get(Calendar.YEAR)) {
+                    val currentMonth = now.get(Calendar.MONTH)
+                    val cal = Calendar.getInstance(tz)
+                    cal.set(year, currentMonth, 1, 0, 0, 0)
+                    cal.set(Calendar.MILLISECOND, 0)
+                    val start = cal.timeInMillis
+                    
+                    cal.set(year, currentMonth, cal.getActualMaximum(Calendar.DAY_OF_MONTH), 23, 59, 59)
+                    cal.set(Calendar.MILLISECOND, 999)
+                    val end = cal.timeInMillis
+                    start to end
+                } else {
+                    -1L to -1L
+                }
             }
 
             val datePattern = if (month == -1) {
@@ -349,7 +364,15 @@ class SupervisorViewModel @Inject constructor(
                     // Safe ONLY if year < current OR (year == current AND month < current)
                     val isSafe = sYear < cYear || (sYear == cYear && sMonth < cMonth)
                     if (isSafe) s else null
-                } else null
+                } else {
+                    // Yearly summary (e.g. "2026")
+                    try {
+                        val sYear = s.monthYear.toInt()
+                        if (sYear <= cYear) s else null
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
             }
 
             agent.copy(houses = filteredHouses, activities = filteredActivities, summary = updatedSummary)
@@ -554,7 +577,15 @@ class SupervisorViewModel @Inject constructor(
                     val sYear = parts[1].toInt()
                     // Safe ONLY if year < current OR (year == current AND month < current)
                     sYear < currentYear || (sYear == currentYear && sMonth < currentMonth)
-                } else false
+                } else {
+                    // Yearly summary (e.g. "2026")
+                    try {
+                        val sYear = summary.monthYear.toInt()
+                        sYear <= currentYear
+                    } catch (e: Exception) {
+                        false
+                    }
+                }
             } else false
 
             val useSummary = summary != null && (weekStart == null || weekEnd == null) && isSummarySafe
@@ -564,43 +595,63 @@ class SupervisorViewModel @Inject constructor(
                     activeAgentsCount++
                     val displayName = pickBestDisplayName(agent.agentName, agent.email)
                     
-                    val visitCount = summary.totalHouses
+                    var visitCount = summary.totalHouses
+                    var workedCount = (summary.situationCounts["NONE"] ?: 0) + (summary.situationCounts["EMPTY"] ?: 0)
+                    var fCount = summary.focusCount
+                    var tCount = summary.treatedCount
+                    var fclosedCount = summary.situationCounts["F"] ?: 0
+                    var abandonedCount = summary.situationCounts["A"] ?: 0
+                    var recusadosCount = summary.situationCounts["REC"] ?: 0
+                    var vaziosCount = summary.situationCounts["V"] ?: 0
+
+                    val isCurrentYearSummary = !summary.monthYear.contains("-") && summary.monthYear.toInt() == currentYear
+                    if (isCurrentYearSummary) {
+                        // Current year! Add the current month's raw houses (which are fetched and filtered by dateFilter/embargo)
+                        val currentMonthHouses = agent.houses.filter { dateFilter(it.data) }
+                        
+                        visitCount += currentMonthHouses.size
+                        workedCount += currentMonthHouses.count { 
+                            it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE || 
+                            it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY 
+                        }
+                        fCount += currentMonthHouses.count { it.treatment.comFoco }
+                        tCount += currentMonthHouses.count { it.treatment.hasAnyTreatment }
+                        fclosedCount += currentMonthHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }
+                        abandonedCount += currentMonthHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
+                        recusadosCount += currentMonthHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }
+                        vaziosCount += currentMonthHouses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.V }
+                    }
+
                     if (visitCount > 0) {
                         totalVisits += visitCount
                         visitsDetails.add(StatDetail(displayName, agent.email, agent.uid, visitCount, agent.photoUrl))
                     }
 
-                    val workedCount = (summary.situationCounts["NONE"] ?: 0) + (summary.situationCounts["EMPTY"] ?: 0)
                     if (workedCount > 0) {
                         totalWorked += workedCount
                         housesDetails.add(StatDetail(displayName, agent.email, agent.uid, workedCount, agent.photoUrl))
                     }
                     
-                    val fCount = summary.focusCount
                     if (fCount > 0) {
                         totalFoci += fCount
                         fociDetails.add(StatDetail(displayName, agent.email, agent.uid, fCount, agent.photoUrl))
                     }
                     
-                    val tCount = summary.treatedCount
                     if (tCount > 0) {
                         totalTratados += tCount
                         tratadosDetails.add(StatDetail(displayName, agent.email, agent.uid, tCount, agent.photoUrl))
                     }
 
-                    val fclosedCount = summary.situationCounts["F"] ?: 0
                     if (fclosedCount > 0) {
                         totalFechados += fclosedCount
                         fechadosDetails.add(StatDetail(displayName, agent.email, agent.uid, fclosedCount, agent.photoUrl))
                     }
 
-                    val abandonedCount = summary.situationCounts["A"] ?: 0
                     if (abandonedCount > 0) {
                         totalAbandonados += abandonedCount
                         abandonadosDetails.add(StatDetail(displayName, agent.email, agent.uid, abandonedCount, agent.photoUrl))
                     }
 
-                    val recusadosCount = summary.situationCounts["REC"] ?: 0
                     if (recusadosCount > 0) {
                         totalRecusados += recusadosCount
                         recusadosDetails.add(StatDetail(displayName, agent.email, agent.uid, recusadosCount, agent.photoUrl))
