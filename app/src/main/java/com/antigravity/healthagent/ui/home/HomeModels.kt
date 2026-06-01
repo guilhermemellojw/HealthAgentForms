@@ -1,5 +1,8 @@
 package com.antigravity.healthagent.ui.home
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class AuditSummary(
     val date: String,
     val totalWorked: Int,
@@ -19,11 +22,13 @@ data class AuditSummary(
     val totalLarvicide: Double
 )
 
+@Immutable
 data class DayErrorSummary(
     val date: String, 
     val errorCount: Int
 )
 
+@Immutable
 data class WeeklySummaryTotals(
     val totalHouses: Int = 0,
     val totalTratados: Int = 0,
@@ -35,6 +40,7 @@ data class WeeklySummaryTotals(
     val totalVacant: Int = 0
 )
 
+@Immutable
 data class DashboardTotals(
     val totalHouses: Int = 0,
     val a1: Int = 0,
@@ -55,6 +61,7 @@ data class DashboardTotals(
     val vacant: Int = 0
 )
 
+@Immutable
 data class DaySummary(
     val date: String,
     val totalHouses: Int, // Total Visited
@@ -65,6 +72,7 @@ data class DaySummary(
     val isManualUnlock: Boolean = false
 )
 
+@Immutable
 data class BoletimSummary(
     val date: String,
     val agentName: String,
@@ -73,6 +81,7 @@ data class BoletimSummary(
     val status: String = ""
 )
 
+@Immutable
 data class BlockSummary(
     val number: String,
     val sequence: String,
@@ -84,6 +93,7 @@ data class BlockSummary(
     val focos: Int = 0
 )
 
+@Immutable
 data class HouseUiState(
     val house: com.antigravity.healthagent.data.local.model.House,
     val invalidFields: Set<String>,
@@ -100,6 +110,7 @@ data class HouseUiState(
     val errorLabels: List<String> = emptyList()
 )
 
+@Immutable
 data class BlockSegment(
     val blockNumber: String,
     val blockSequence: String,

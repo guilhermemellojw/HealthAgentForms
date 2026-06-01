@@ -612,7 +612,7 @@ fun HomeScreen(
                         Box(
                             modifier = Modifier
                                 .let {
-                                    if (isReorderMode) it.animateItemPlacement() else it
+                                    if (isReorderMode) it.animateItem() else it
                                 }
                                 .graphicsLayer {
                                     alpha = if (isDragging) 0f else 1f
