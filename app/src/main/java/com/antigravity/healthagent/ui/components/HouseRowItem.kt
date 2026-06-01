@@ -52,7 +52,8 @@ fun HouseRowItem(
     isEasyMode: Boolean = false,
     isSolarMode: Boolean = false,
     focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
-    onGetLocation: (callback: (com.google.android.gms.maps.model.LatLng) -> Unit) -> Unit = {}
+    onGetLocation: (callback: (com.google.android.gms.maps.model.LatLng) -> Unit) -> Unit = {},
+    isAdmin: Boolean = false
 ) {
     val haptic = LocalHapticFeedback.current
     val house = houseState.house
@@ -211,7 +212,7 @@ fun HouseRowItem(
                     }
             ) {
                 if (!enabled) {
-                    val isTeamworkProtection = houseState.isMine.not() && !houseState.highlightErrors
+                    val isTeamworkProtection = houseState.isMine.not() && !houseState.highlightErrors && !isAdmin
                     val isHomologated = house.editedByAdmin
                     
                     val bannerColor = when {

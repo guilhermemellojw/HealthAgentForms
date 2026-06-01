@@ -719,5 +719,109 @@ class AdminHomologationLockTest {
         // PropertyType predicted was EMPTY, so it should fallback to lastHouseInDay.propertyType (PropertyType.TB)
         assertEquals(PropertyType.TB, capturedHouse.captured.propertyType)
     }
+
+    @Test
+    fun testAdminRemoteInspection_BypassesTeamworkProtection() = runBlocking {
+        val state = FakeHomeState()
+        state.isSupervisor.value = true
+        state.isAdmin.value = true // ADMIN ROLE
+        state.remoteAgentUid.value = "remote_user"
+
+        val templateHouse = House(
+            id = 1,
+            data = "01-06-2026",
+            agentName = "AGENT_REMOTE",
+            agentUid = "remote_user",
+            address = com.antigravity.healthagent.domain.model.VisitAddress(
+                blockNumber = "20",
+                blockSequence = "B",
+                streetName = "RUA DO TEMPLATE",
+                number = "100",
+                sequence = 2,
+                complement = 1,
+                bairro = "TEMPLATE_NEIGHBORHOOD"
+            ),
+            context = com.antigravity.healthagent.domain.model.DailyContext(
+                municipio = "TEMPLATE_MUNICIPIO",
+                categoria = "TEMPLATE_CAT",
+                zona = "TEMPLATE_ZONA",
+                tipo = 3,
+                ciclo = "2/2026",
+                atividade = 4
+            ),
+            propertyType = PropertyType.C
+        )
+
+        val latestHouses = listOf(templateHouse)
+
+        every { predictHouseValuesUseCase.predictBasedOnHistory(any(), any()) } returns PredictHouseValuesUseCase.HousePrediction(
+            number = "101",
+            sequence = 2,
+            complement = 1,
+            propertyType = PropertyType.EMPTY,
+            situation = Situation.NONE
+        )
+        every { recalculateVisitSegmentsUseCase.recalculateVisitSegments(any()) } answers { firstArg() }
+
+        val capturedHouse = slot<House>()
+        coEvery { repository.insertHouse(capture(capturedHouse), any()) } returns 2L
+
+        val testScope = kotlinx.coroutines.CoroutineScope(testDispatcher)
+        houseEditDelegate.addNewHouseAt(
+            scope = testScope,
+            state = state,
+            afterId = 1,
+            latestHousesList = latestHouses,
+            isDayClosed = false
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Admin should successfully add the house despite it being a remote agent's template
+        assertTrue(capturedHouse.isCaptured)
+        assertEquals("remote_user", capturedHouse.captured.agentUid)
+    }
+
+    @Test
+    fun testNormalSupervisorRemoteInspection_BlockedByTeamworkProtection() = runBlocking {
+        val state = FakeHomeState()
+        state.isSupervisor.value = true
+        state.isAdmin.value = false // NORMAL SUPERVISOR (NOT ADMIN)
+        state.remoteAgentUid.value = "remote_user"
+
+        val templateHouse = House(
+            id = 1,
+            data = "01-06-2026",
+            agentName = "AGENT_REMOTE",
+            agentUid = "remote_user",
+            address = com.antigravity.healthagent.domain.model.VisitAddress(
+                blockNumber = "20",
+                blockSequence = "B",
+                streetName = "RUA DO TEMPLATE",
+                number = "100",
+                sequence = 2,
+                complement = 1,
+                bairro = "TEMPLATE_NEIGHBORHOOD"
+            ),
+            propertyType = PropertyType.C
+        )
+
+        val latestHouses = listOf(templateHouse)
+
+        val testScope = kotlinx.coroutines.CoroutineScope(testDispatcher)
+        houseEditDelegate.addNewHouseAt(
+            scope = testScope,
+            state = state,
+            afterId = 1,
+            latestHousesList = latestHouses,
+            isDayClosed = false
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Should be blocked and not capture any insert
+        coVerify(exactly = 0) { repository.insertHouse(any(), any()) }
+        assertEquals("Apenas administradores podem adicionar dados remotamente.", state.uiEvent.value)
+    }
 }
 

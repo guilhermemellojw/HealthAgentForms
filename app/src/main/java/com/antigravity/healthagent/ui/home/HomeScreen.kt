@@ -712,7 +712,7 @@ fun HomeScreen(
                         }
                         
                         val focusRequester = remember(house.id) { focusRequesters.getOrPut(house.id) { androidx.compose.ui.focus.FocusRequester() } }
-                        val isBaseEnabled = if (uiState.isSupervisor) uiState.isAdmin else (!uiState.isDayClosed || uiState.isManualUnlock)
+                        val isBaseEnabled = uiState.isAdmin || (!uiState.isSupervisor && (!uiState.isDayClosed || uiState.isManualUnlock))
                         val isLockedByAdmin = house.editedByAdmin && !uiState.isAdmin && !uiState.isManualUnlock
                         HouseRowItem(
                             houseState = houseState,
@@ -728,11 +728,12 @@ fun HomeScreen(
                             isSolarMode = uiState.isSolarMode,
                             focusRequester = focusRequester,
                             onGetLocation = onGetLocation,
-                            enabled = isBaseEnabled && houseState.isMine && !isLockedByAdmin
+                            enabled = isBaseEnabled && (houseState.isMine || uiState.isAdmin) && !isLockedByAdmin,
+                            isAdmin = uiState.isAdmin
                         )
                         }
 
-                        if (!isSearchActive && uiState.isEditingToolsEnabled && (uiState.isAdmin || (!uiState.isDayClosed || uiState.isManualUnlock) && !uiState.isSupervisor) && houseState.isMine) {
+                        if (!isSearchActive && uiState.isEditingToolsEnabled && (uiState.isAdmin || (!uiState.isDayClosed || uiState.isManualUnlock) && !uiState.isSupervisor) && (houseState.isMine || uiState.isAdmin)) {
                             Spacer(Modifier.height(8.dp))
                             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 AddBetweenButton(
@@ -762,19 +763,20 @@ fun HomeScreen(
                         .fillMaxWidth()
                 ) {
                      HouseRowItem(
-                        houseState = ghostHouse,
-                        onUpdate = {},
-                        onDelete = {},
-                        isReorderMode = true,
-                        onMoveUp = {},
-                        onMoveDown = {},
-                        onEnableReorder = {},
-                        onMoveDate = {},
-                        getStreetSuggestions = { emptyList() },
-                        enabled = !uiState.isDayClosed,
-                        isEasyMode = uiState.isEasyMode,
-                        focusRequester = null
-                    )
+                         houseState = ghostHouse,
+                         onUpdate = {},
+                         onDelete = {},
+                         isReorderMode = true,
+                         onMoveUp = {},
+                         onMoveDown = {},
+                         onEnableReorder = {},
+                         onMoveDate = {},
+                         getStreetSuggestions = { emptyList() },
+                         enabled = !uiState.isDayClosed,
+                         isEasyMode = uiState.isEasyMode,
+                         focusRequester = null,
+                         isAdmin = uiState.isAdmin
+                     )
                 }
             }
             
