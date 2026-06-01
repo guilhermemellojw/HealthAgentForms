@@ -42,6 +42,9 @@ interface HouseDao {
     @Query("SELECT * FROM houses WHERE id = :id")
     suspend fun getHouseById(id: Long): House?
 
+    @Query("SELECT * FROM houses WHERE id IN (:ids)")
+    suspend fun getHousesByIds(ids: List<Int>): List<House>
+
     @Query("SELECT * FROM houses WHERE agentUid = :agentUid ORDER BY id DESC LIMIT 1")
     suspend fun getLastHouseForAgent(agentUid: String): House?
 

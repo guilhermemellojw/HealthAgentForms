@@ -179,17 +179,47 @@ class HouseRepositoryImpl @Inject constructor(
         syncSchedulerProvider.get().scheduleSync()
     }
 
+    private fun hasHouseDataChanged(a: House, b: House): Boolean {
+        return a.address != b.address ||
+               a.treatment != b.treatment ||
+               a.context != b.context ||
+               a.geo != b.geo ||
+               a.propertyType != b.propertyType ||
+               a.situation != b.situation ||
+               a.data != b.data ||
+               a.agentName != b.agentName ||
+               a.localidadeConcluida != b.localidadeConcluida ||
+               a.quarteiraoConcluido != b.quarteiraoConcluido ||
+               a.listOrder != b.listOrder ||
+               a.visitSegment != b.visitSegment ||
+               a.agentUid != b.agentUid ||
+               a.observation != b.observation ||
+               a.createdAt != b.createdAt
+    }
+
     override suspend fun updateHouses(houses: List<House>, force: Boolean) {
         if (houses.isEmpty()) return
         
         // Ensure all affected days are not locked
         val distinctContexts = houses.map { Triple(it.data, it.agentName, it.agentUid) }.distinct()
-        distinctContexts.forEach { (date, agent, uid) ->
+        distinctContexts.forEach { (date, _, uid) ->
             ensureDayNotLocked(date, uid, force)
         }
         
         runInTransactionWithRetry {
-            houses.forEach { house ->
+            val existingHouses = houseDao.getHousesByIds(houses.map { it.id })
+            val existingMap = existingHouses.associateBy { it.id }
+
+            val changedHouses = houses.filter { house ->
+                val existing = existingMap[house.id]
+                existing == null || hasHouseDataChanged(house, existing)
+            }
+
+            if (changedHouses.isEmpty()) {
+                return@runInTransactionWithRetry
+            }
+
+            changedHouses.forEach { house ->
                 // Check for potential clashes, but don't block the update in batch mode (allow temporary duplicates during reordering)
                 val clashCount = houseDao.checkNaturalKeyConflict(
                     excludeId = house.id,
@@ -209,7 +239,7 @@ class HouseRepositoryImpl @Inject constructor(
                     android.util.Log.w("HouseRepository", "Batch update created a temporary address conflict for house ${house.id}")
                 }
 
-                val existing = houseDao.getHouseById(house.id.toLong())
+                val existing = existingMap[house.id]
                 if (existing != null) {
                     val oldKey = existing.generateNaturalKey()
                     val newKey = house.generateNaturalKey()
@@ -220,7 +250,7 @@ class HouseRepositoryImpl @Inject constructor(
                     tombstoneDao.deleteByNaturalKey(newKey, house.agentUid)
                 }
             }
-            val healedHouses = houses.map { house ->
+            val healedHouses = changedHouses.map { house ->
                 val finalSituation = house.situation.heal()
 
                 house.copy(

@@ -268,9 +268,8 @@ fun HomeScreen(
             // Delay slightly more to ensure item is rendered/measured and animations start
             kotlinx.coroutines.delay(100)
             if (uiState.houses.isNotEmpty()) {
-                val newHouse = uiState.houses.last()
                 // Scroll to the new house (index = uiState.houses.size because index 0 is the header)
-                listState.animateScrollToItem(uiState.houses.size)
+                listState.scrollToItem(uiState.houses.size)
             }
         }
         previousHouseCount = uiState.houses.size

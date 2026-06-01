@@ -211,172 +211,174 @@ class HouseEditDelegate @Inject constructor(
             return
         }
 
+        val lockResult = dayLockEnforcer.enforce(
+            isDayClosed = isDayClosed,
+            isManualUnlock = state.uiState.value.isManualUnlock,
+            isAdmin = state.isAdmin.value,
+            actionDescription = "adicionar"
+        )
+        if (lockResult is DayLockEnforcer.LockResult.Blocked) {
+            state.uiEvent.value = lockResult.message
+            soundManager.playWarning()
+            isAddingHouse = false
+            return
+        }
+        val isAdmin = state.isAdmin.value
+
+        val currentTotal = latestHousesList.count { it.data == state.data.value }
+        val safetyLimit = (maxOpenHouses * 3).coerceAtLeast(150)
+
+        if (currentTotal >= safetyLimit && !state.uiState.value.isManualUnlock && !isAdmin) {
+            soundManager.playWarning()
+            state.situationLimitConfirmation.value = House(data = state.data.value)
+            isAddingHouse = false
+            return
+        }
+
+        val drafts = state.pendingUpdateDrafts.value
+        val inFlights = state.housesInFlight.value
+
+        val mergedList: List<House> = (dbHousesList.map { drafts[it.id] ?: it } + inFlights)
+        val clashingDraftIds = state.isDuplicateIds.value
+        val hasClashes = clashingDraftIds.isNotEmpty()
+
+        if (hasClashes) {
+            state.uiEvent.value = "Resolva os conflitos (em vermelho) antes de adicionar um novo imóvel."
+            soundManager.playWarning()
+            onHouseClick(clashingDraftIds.first())
+            isAddingHouse = false
+            return
+        }
+
+        val myUid = state.currentUserUid.value
+        val activeRemoteUid = state.remoteAgentUid.value
+
+        if (myUid == null && activeRemoteUid == null) {
+            AppLogger.e("HomeViewModel", "ADD HOUSE FAILED: No UID available.")
+            state.uiEvent.value = "Erro: Identidade não carregada. Aguarde ou faça re-login."
+            isAddingHouse = false
+            return
+        }
+
+        val currentAgentUid = activeRemoteUid ?: myUid!!
+        val currentAgentName = state.agentName.value
+
+        val isDayEmpty = mergedList.none { it.data == state.data.value }
+        var prediction: PredictHouseValuesUseCase.HousePrediction
+        var initialBlock = state.currentBlock.value
+        var initialStreet = state.currentStreet.value
+        var initialBlockSeq = state.currentBlockSequence.value
+
+        if (isDayEmpty) {
+            val lastGlobalHouse = mergedList.maxByOrNull { it.listOrder }
+
+            if (lastGlobalHouse != null) {
+                initialBlock = lastGlobalHouse.address.blockNumber
+                initialStreet = lastGlobalHouse.address.streetName
+                initialBlockSeq = lastGlobalHouse.address.blockSequence
+
+                state.currentBlock.value = initialBlock
+                state.currentStreet.value = initialStreet
+                state.currentBlockSequence.value = initialBlockSeq
+                state.bairro.value = lastGlobalHouse.address.bairro
+                state.municipio.value = lastGlobalHouse.context.municipio
+                state.agentName.value = lastGlobalHouse.agentName
+
+                prediction = predictHouseValuesUseCase.predictBasedOnHistory(mergedList, lastGlobalHouse)
+            } else {
+                prediction = PredictHouseValuesUseCase.HousePrediction("", 0, 0, PropertyType.EMPTY, Situation.NONE)
+            }
+        } else {
+            prediction = predictHouseValuesUseCase.predictNextHouseValues(
+                mergedList,
+                state.data.value,
+                state.currentBlock.value.trim().uppercase(),
+                state.currentStreet.value.trim().formatStreetName()
+            )
+        }
+
+        val lastHouseRef = if (isDayEmpty) {
+            mergedList.maxByOrNull { it.listOrder }
+        } else {
+            mergedList.filter { it.data == state.data.value }.maxByOrNull { it.listOrder }
+        }
+
+        val finalPropertyType = if (prediction.propertyType != PropertyType.EMPTY) {
+            prediction.propertyType
+        } else if (lastHouseRef?.propertyType != null && lastHouseRef.propertyType != PropertyType.EMPTY) {
+            lastHouseRef.propertyType
+        } else {
+            PropertyType.R
+        }
+
+        val finalBairro = lastHouseRef?.address?.bairro?.takeIf { it.isNotBlank() } ?: state.bairro.value.trim().uppercase()
+        val finalMunicipio = lastHouseRef?.context?.municipio?.takeIf { it.isNotBlank() } ?: state.municipio.value.trim().uppercase()
+        val finalCategoria = lastHouseRef?.context?.categoria?.takeIf { it.isNotBlank() } ?: state.categoria.value.trim().uppercase()
+        val finalZona = lastHouseRef?.context?.zona?.takeIf { it.isNotBlank() } ?: state.zona.value.trim().uppercase()
+        val finalTipo = lastHouseRef?.context?.tipo ?: state.tipo.value
+        val finalCiclo = lastHouseRef?.context?.ciclo?.takeIf { it.isNotBlank() } ?: state.ciclo.value.trim().uppercase()
+        val finalAtividade = lastHouseRef?.context?.atividade ?: state.atividade.value
+
+        val maxOrder = mergedList.maxOfOrNull { it.listOrder } ?: 0L
+        val currentDayHouses = mergedList.filter { it.data == state.data.value }.sortedBy { it.listOrder }
+        val newStreet = initialStreet.trim().formatStreetName()
+
+        val dayHouses = currentDayHouses.sortedBy { it.listOrder }
+        validateCurrentDay(false)
+
+        var predictedSegment = 0
+        var lastStreetName = ""
+        dayHouses.forEach { h ->
+            val s = h.address.streetName.trim().uppercase()
+            if (lastStreetName.isNotEmpty() && s != lastStreetName) {
+                predictedSegment++
+            }
+            lastStreetName = s
+        }
+        if (lastStreetName.isNotEmpty() && newStreet.uppercase() != lastStreetName) {
+            predictedSegment++
+        }
+
+        var houseToInsert = House(
+            id = 0,
+            address = VisitAddress(
+                blockNumber = initialBlock.trim().uppercase(),
+                blockSequence = initialBlockSeq.trim().uppercase(),
+                streetName = initialStreet.trim().formatStreetName(),
+                number = prediction.number.trim().uppercase(),
+                sequence = prediction.sequence,
+                complement = prediction.complement,
+                bairro = finalBairro
+            ),
+            propertyType = finalPropertyType,
+            situation = prediction.situation,
+            context = DailyContext(
+                municipio = finalMunicipio,
+                categoria = finalCategoria,
+                zona = finalZona,
+                tipo = finalTipo,
+                ciclo = finalCiclo,
+                atividade = finalAtividade
+            ),
+            agentName = currentAgentName.trim().uppercase(),
+            agentUid = currentAgentUid,
+            data = state.data.value,
+            visitSegment = predictedSegment,
+            listOrder = maxOrder + 1
+        )
+
+        houseToInsert = clashDetector.autoIncrementToAvoidClash(
+            houseToInsert, mergedList, includeVisitSegment = true
+        )
+
         markAsRecentlyEdited(scope, state, 0)
+        state.housesInFlight.update { it + houseToInsert }
+
+        // RELEASE THE UI SEMAPHORE LOCK IMMEDIATELY
+        isAddingHouse = false
 
         scope.launch {
             try {
-                val lockResult = dayLockEnforcer.enforce(
-                    isDayClosed = isDayClosed,
-                    isManualUnlock = state.uiState.value.isManualUnlock,
-                    isAdmin = state.isAdmin.value,
-                    actionDescription = "adicionar"
-                )
-                if (lockResult is DayLockEnforcer.LockResult.Blocked) {
-                    state.uiEvent.value = lockResult.message
-                    soundManager.playWarning()
-                    isAddingHouse = false
-                    return@launch
-                }
-                val isAdmin = state.isAdmin.value
-
-                val currentTotal = latestHousesList.count { it.data == state.data.value }
-                val safetyLimit = (maxOpenHouses * 3).coerceAtLeast(150)
-
-                if (currentTotal >= safetyLimit && !state.uiState.value.isManualUnlock && !isAdmin) {
-                    soundManager.playWarning()
-                    state.situationLimitConfirmation.value = House(data = state.data.value)
-                    isAddingHouse = false
-                    return@launch
-                }
-
-                val drafts = state.pendingUpdateDrafts.value
-                val inFlights = state.housesInFlight.value
-
-                val mergedList: List<House> = (dbHousesList.map { drafts[it.id] ?: it } + inFlights)
-                val isDayEmpty = mergedList.none { it.data == state.data.value }
-                var prediction: PredictHouseValuesUseCase.HousePrediction
-                var initialBlock = state.currentBlock.value
-                var initialStreet = state.currentStreet.value
-                var initialBlockSeq = state.currentBlockSequence.value
-
-                if (isDayEmpty) {
-                    val lastGlobalHouse = mergedList.maxByOrNull { it.listOrder }
-
-                    if (lastGlobalHouse != null) {
-                        initialBlock = lastGlobalHouse.address.blockNumber
-                        initialStreet = lastGlobalHouse.address.streetName
-                        initialBlockSeq = lastGlobalHouse.address.blockSequence
-
-                        state.currentBlock.value = initialBlock
-                        state.currentStreet.value = initialStreet
-                        state.currentBlockSequence.value = initialBlockSeq
-                        state.bairro.value = lastGlobalHouse.address.bairro
-                        state.municipio.value = lastGlobalHouse.context.municipio
-                        state.agentName.value = lastGlobalHouse.agentName
-
-                        prediction = predictHouseValuesUseCase.predictBasedOnHistory(mergedList, lastGlobalHouse)
-                    } else {
-                        prediction = PredictHouseValuesUseCase.HousePrediction("", 0, 0, PropertyType.EMPTY, Situation.NONE)
-                    }
-                } else {
-                    prediction = predictHouseValuesUseCase.predictNextHouseValues(
-                        mergedList,
-                        state.data.value,
-                        state.currentBlock.value.trim().uppercase(),
-                        state.currentStreet.value.trim().formatStreetName()
-                    )
-                }
-
-                val lastHouseRef = if (isDayEmpty) {
-                    mergedList.maxByOrNull { it.listOrder }
-                } else {
-                    mergedList.filter { it.data == state.data.value }.maxByOrNull { it.listOrder }
-                }
-
-                val finalPropertyType = if (prediction.propertyType != PropertyType.EMPTY) {
-                    prediction.propertyType
-                } else if (lastHouseRef?.propertyType != null && lastHouseRef.propertyType != PropertyType.EMPTY) {
-                    lastHouseRef.propertyType
-                } else {
-                    PropertyType.R
-                }
-
-                val finalBairro = lastHouseRef?.address?.bairro?.takeIf { it.isNotBlank() } ?: state.bairro.value.trim().uppercase()
-                val finalMunicipio = lastHouseRef?.context?.municipio?.takeIf { it.isNotBlank() } ?: state.municipio.value.trim().uppercase()
-                val finalCategoria = lastHouseRef?.context?.categoria?.takeIf { it.isNotBlank() } ?: state.categoria.value.trim().uppercase()
-                val finalZona = lastHouseRef?.context?.zona?.takeIf { it.isNotBlank() } ?: state.zona.value.trim().uppercase()
-                val finalTipo = lastHouseRef?.context?.tipo ?: state.tipo.value
-                val finalCiclo = lastHouseRef?.context?.ciclo?.takeIf { it.isNotBlank() } ?: state.ciclo.value.trim().uppercase()
-                val finalAtividade = lastHouseRef?.context?.atividade ?: state.atividade.value
-
-                val maxOrder = mergedList.maxOfOrNull { it.listOrder } ?: 0L
-                val currentDayHouses = mergedList.filter { it.data == state.data.value }.sortedBy { it.listOrder }
-                val newStreet = initialStreet.trim().formatStreetName()
-
-                val dayHouses = currentDayHouses.sortedBy { it.listOrder }
-                validateCurrentDay(false)
-
-                val clashingDraftIds = state.isDuplicateIds.value
-                val hasClashes = clashingDraftIds.isNotEmpty()
-
-                if (hasClashes) {
-                    state.uiEvent.value = "Resolva os conflitos (em vermelho) antes de adicionar um novo imóvel."
-                    soundManager.playWarning()
-                    onHouseClick(clashingDraftIds.first())
-                    isAddingHouse = false
-                    return@launch
-                }
-
-                var predictedSegment = 0
-                var lastStreetName = ""
-                dayHouses.forEach { h ->
-                    val s = h.address.streetName.trim().uppercase()
-                    if (lastStreetName.isNotEmpty() && s != lastStreetName) {
-                        predictedSegment++
-                    }
-                    lastStreetName = s
-                }
-                if (lastStreetName.isNotEmpty() && newStreet.uppercase() != lastStreetName) {
-                    predictedSegment++
-                }
-
-                val myUid = state.currentUserUid.value
-                val activeRemoteUid = state.remoteAgentUid.value
-
-                if (myUid == null && activeRemoteUid == null) {
-                    AppLogger.e("HomeViewModel", "ADD HOUSE FAILED: No UID available.")
-                    state.uiEvent.value = "Erro: Identidade não carregada. Aguarde ou faça re-login."
-                    isAddingHouse = false
-                    return@launch
-                }
-
-                val currentAgentUid = activeRemoteUid ?: myUid!!
-                val currentAgentName = state.agentName.value
-
-                var houseToInsert = House(
-                    id = 0,
-                    address = VisitAddress(
-                        blockNumber = initialBlock.trim().uppercase(),
-                        blockSequence = initialBlockSeq.trim().uppercase(),
-                        streetName = initialStreet.trim().formatStreetName(),
-                        number = prediction.number.trim().uppercase(),
-                        sequence = prediction.sequence,
-                        complement = prediction.complement,
-                        bairro = finalBairro
-                    ),
-                    propertyType = finalPropertyType,
-                    situation = prediction.situation,
-                    context = DailyContext(
-                        municipio = finalMunicipio,
-                        categoria = finalCategoria,
-                        zona = finalZona,
-                        tipo = finalTipo,
-                        ciclo = finalCiclo,
-                        atividade = finalAtividade
-                    ),
-                    agentName = currentAgentName.trim().uppercase(),
-                    agentUid = currentAgentUid,
-                    data = state.data.value,
-                    visitSegment = predictedSegment,
-                    listOrder = maxOrder + 1
-                )
-
-                houseToInsert = clashDetector.autoIncrementToAvoidClash(
-                    houseToInsert, mergedList, includeVisitSegment = true
-                )
-
-                state.housesInFlight.update { it + houseToInsert }
-
                 val newId = saveHouseUseCase.insertHouse(houseToInsert, mergedList, isAdmin)
 
                 val dbHousesAfter = repository.getHousesByDateAndAgent(state.data.value, currentAgentUid)
@@ -412,9 +414,9 @@ class HouseEditDelegate @Inject constructor(
                 AppLogger.e("HomeViewModel", "Error adding new house", e)
                 state.uiEvent.value = "Erro ao adicionar imóvel: ${e.message}"
                 soundManager.playWarning()
-            } finally {
-                delay(100)
-                isAddingHouse = false
+                state.housesInFlight.update { list ->
+                    list.filter { it.listOrder != houseToInsert.listOrder || it.data != houseToInsert.data }
+                }
             }
         }
     }

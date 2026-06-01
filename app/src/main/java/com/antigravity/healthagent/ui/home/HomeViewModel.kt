@@ -297,7 +297,9 @@ class HomeViewModel @Inject constructor(
         } catch (e: Exception) {
             emptyList()
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }
+    .flowOn(Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val currentWeekDates: StateFlow<List<String>> = _currentWeekStart.map { start ->
         val dates = mutableListOf<String>()
