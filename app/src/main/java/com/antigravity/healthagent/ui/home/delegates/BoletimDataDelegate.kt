@@ -22,12 +22,18 @@ import javax.inject.Singleton
 
 @Singleton
 class BoletimDataDelegate @Inject constructor() {
-    private fun parseDate(dateStr: String): Date? {
-        return try { SimpleDateFormat("dd-MM-yyyy", Locale.US).parse(dateStr) } catch (e: Exception) { null }
-    }
-
-    private fun getTimestamp(date: String): Long {
-        return parseDate(date)?.time ?: 0L
+    private fun getFastTimestamp(date: String): Long {
+        return try {
+            val parts = if (date.contains("-")) date.split("-") else date.split("/")
+            if (parts.size == 3) {
+                val day = parts[0].toIntOrNull() ?: 0
+                val month = parts[1].toIntOrNull() ?: 0
+                val year = parts[2].toIntOrNull() ?: 0
+                (year * 10000 + month * 100 + day).toLong()
+            } else 0L
+        } catch (e: Exception) {
+            0L
+        }
     }
 
     fun getBoletimListFlow(
@@ -39,7 +45,7 @@ class BoletimDataDelegate @Inject constructor() {
     ): StateFlow<List<BoletimSummary>> {
         val globalSortedVisits = allHousesFlow.map { all ->
             all.sortedWith(compareBy(
-                { getTimestamp(it.data) },
+                { getFastTimestamp(it.data) },
                 { it.agentName },
                 { it.listOrder },
                 { it.id }
@@ -61,7 +67,7 @@ class BoletimDataDelegate @Inject constructor() {
                     house.agentName.uppercase().contains(name)
                 ))
             }
-            val groupedByDate = personalHouses.groupBy { it.data }.toList().sortedByDescending { parseDate(it.first)?.time ?: 0L }
+            val groupedByDate = personalHouses.groupBy { it.data }.toList().sortedByDescending { getFastTimestamp(it.first) }
 
             groupedByDate.map { (date, houses) ->
                 val blocks = houses.groupBy { "${it.address.blockNumber}-${it.address.blockSequence}-${it.address.bairro}" }

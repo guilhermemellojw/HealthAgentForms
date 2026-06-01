@@ -723,7 +723,7 @@ fun HomeScreen(
                             onMoveDown = onMoveDown,
                             onEnableReorder = onEnableReorder,
                             onMoveDate = onMoveDate,
-                            streetSuggestions = streetSuggestions,
+                            getStreetSuggestions = { streetSuggestions },
                             isEasyMode = uiState.isEasyMode,
                             isSolarMode = uiState.isSolarMode,
                             focusRequester = focusRequester,
@@ -770,7 +770,7 @@ fun HomeScreen(
                         onMoveDown = {},
                         onEnableReorder = {},
                         onMoveDate = {},
-                        streetSuggestions = emptyList(),
+                        getStreetSuggestions = { emptyList() },
                         enabled = !uiState.isDayClosed,
                         isEasyMode = uiState.isEasyMode,
                         focusRequester = null

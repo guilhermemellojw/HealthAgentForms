@@ -20,6 +20,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -96,14 +97,30 @@ class HouseEditDelegate @Inject constructor(
                     PredictHouseValuesUseCase.HousePrediction("", 0, 0, PropertyType.R, Situation.NONE)
                 }
 
+                val finalPropertyType = if (prediction.propertyType != PropertyType.EMPTY) {
+                    prediction.propertyType
+                } else if (template?.propertyType != null && template.propertyType != PropertyType.EMPTY) {
+                    template.propertyType
+                } else {
+                    PropertyType.R
+                }
+
+                val finalBairro = template?.address?.bairro?.takeIf { it.isNotBlank() } ?: state.bairro.value.uppercase()
+                val finalMunicipio = template?.context?.municipio?.takeIf { it.isNotBlank() } ?: state.municipio.value.trim().uppercase()
+                val finalCategoria = template?.context?.categoria?.takeIf { it.isNotBlank() } ?: state.categoria.value.trim().uppercase()
+                val finalZona = template?.context?.zona?.takeIf { it.isNotBlank() } ?: state.zona.value.trim().uppercase()
+                val finalTipo = template?.context?.tipo ?: state.tipo.value
+                val finalCiclo = template?.context?.ciclo?.takeIf { it.isNotBlank() } ?: state.ciclo.value.trim().uppercase()
+                val finalAtividade = template?.context?.atividade ?: state.atividade.value
+
                 var houseToInsert = House(
                     context = DailyContext(
-                        municipio = state.municipio.value.trim().uppercase(),
-                        categoria = state.categoria.value.trim().uppercase(),
-                        zona = state.zona.value.trim().uppercase(),
-                        tipo = state.tipo.value,
-                        ciclo = state.ciclo.value.trim().uppercase(),
-                        atividade = state.atividade.value
+                        municipio = finalMunicipio,
+                        categoria = finalCategoria,
+                        zona = finalZona,
+                        tipo = finalTipo,
+                        ciclo = finalCiclo,
+                        atividade = finalAtividade
                     ),
                     address = VisitAddress(
                         blockNumber = template?.address?.blockNumber ?: state.currentBlock.value,
@@ -112,9 +129,9 @@ class HouseEditDelegate @Inject constructor(
                         number = prediction.number,
                         sequence = prediction.sequence,
                         complement = prediction.complement,
-                        bairro = state.bairro.value.uppercase()
+                        bairro = finalBairro
                     ),
-                    propertyType = prediction.propertyType,
+                    propertyType = finalPropertyType,
                     situation = prediction.situation,
                     data = state.data.value,
                     agentName = state.agentName.value.uppercase(),
@@ -260,6 +277,28 @@ class HouseEditDelegate @Inject constructor(
                     )
                 }
 
+                val lastHouseRef = if (isDayEmpty) {
+                    mergedList.maxByOrNull { it.listOrder }
+                } else {
+                    mergedList.filter { it.data == state.data.value }.maxByOrNull { it.listOrder }
+                }
+
+                val finalPropertyType = if (prediction.propertyType != PropertyType.EMPTY) {
+                    prediction.propertyType
+                } else if (lastHouseRef?.propertyType != null && lastHouseRef.propertyType != PropertyType.EMPTY) {
+                    lastHouseRef.propertyType
+                } else {
+                    PropertyType.R
+                }
+
+                val finalBairro = lastHouseRef?.address?.bairro?.takeIf { it.isNotBlank() } ?: state.bairro.value.trim().uppercase()
+                val finalMunicipio = lastHouseRef?.context?.municipio?.takeIf { it.isNotBlank() } ?: state.municipio.value.trim().uppercase()
+                val finalCategoria = lastHouseRef?.context?.categoria?.takeIf { it.isNotBlank() } ?: state.categoria.value.trim().uppercase()
+                val finalZona = lastHouseRef?.context?.zona?.takeIf { it.isNotBlank() } ?: state.zona.value.trim().uppercase()
+                val finalTipo = lastHouseRef?.context?.tipo ?: state.tipo.value
+                val finalCiclo = lastHouseRef?.context?.ciclo?.takeIf { it.isNotBlank() } ?: state.ciclo.value.trim().uppercase()
+                val finalAtividade = lastHouseRef?.context?.atividade ?: state.atividade.value
+
                 val maxOrder = mergedList.maxOfOrNull { it.listOrder } ?: 0L
                 val currentDayHouses = mergedList.filter { it.data == state.data.value }.sortedBy { it.listOrder }
                 val newStreet = initialStreet.trim().formatStreetName()
@@ -313,17 +352,17 @@ class HouseEditDelegate @Inject constructor(
                         number = prediction.number.trim().uppercase(),
                         sequence = prediction.sequence,
                         complement = prediction.complement,
-                        bairro = state.bairro.value.trim().uppercase()
+                        bairro = finalBairro
                     ),
-                    propertyType = prediction.propertyType,
+                    propertyType = finalPropertyType,
                     situation = prediction.situation,
                     context = DailyContext(
-                        municipio = state.municipio.value.trim().uppercase(),
-                        categoria = state.categoria.value.trim().uppercase(),
-                        zona = state.zona.value.trim().uppercase(),
-                        tipo = state.tipo.value,
-                        ciclo = state.ciclo.value.trim().uppercase(),
-                        atividade = state.atividade.value
+                        municipio = finalMunicipio,
+                        categoria = finalCategoria,
+                        zona = finalZona,
+                        tipo = finalTipo,
+                        ciclo = finalCiclo,
+                        atividade = finalAtividade
                     ),
                     agentName = currentAgentName.trim().uppercase(),
                     agentUid = currentAgentUid,

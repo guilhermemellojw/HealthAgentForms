@@ -88,13 +88,21 @@ class GetBoletimSummaryUseCase @Inject constructor() {
                     status = activity?.status ?: ""
                 )
             }
-        }.flatten().sortedWith(compareByDescending { 
-            try {
-                java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US).parse(it.date)?.time ?: 0L
-            } catch (_: Exception) {
-                0L
-            }
-        })
+        }.flatten().sortedWith(compareByDescending { getFastTimestamp(it.date) })
+    }
+
+    private fun getFastTimestamp(date: String): Long {
+        return try {
+            val parts = if (date.contains("-")) date.split("-") else date.split("/")
+            if (parts.size == 3) {
+                val day = parts[0].toIntOrNull() ?: 0
+                val month = parts[1].toIntOrNull() ?: 0
+                val year = parts[2].toIntOrNull() ?: 0
+                (year * 10000 + month * 100 + day).toLong()
+            } else 0L
+        } catch (e: Exception) {
+            0L
+        }
     }
 
     /**

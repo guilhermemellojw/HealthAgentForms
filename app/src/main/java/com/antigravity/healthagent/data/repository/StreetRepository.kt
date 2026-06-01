@@ -8,6 +8,8 @@ import com.antigravity.healthagent.utils.formatStreetName
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,7 +46,7 @@ class StreetRepository @Inject constructor(
                 .filter { it.isNotBlank() }
                 .distinct()
                 .sorted()
-        }
+        }.flowOn(Dispatchers.Default)
     }
 
     suspend fun saveCustomStreet(name: String, bairro: String) {

@@ -534,4 +534,190 @@ class AdminHomologationLockTest {
         // Verify update was allowed (called repository.updateDayActivity)
         coVerify(exactly = 1) { repository.updateDayActivity(any(), any()) }
     }
+
+    class FakeHomeState : HomeState {
+        override val data = MutableStateFlow("01-06-2026")
+        override val agentName = MutableStateFlow("Guilherme")
+        override val remoteAgent = MutableStateFlow<String?>(null)
+        override val remoteAgentUid = MutableStateFlow<String?>(null)
+        override val currentUserUid = MutableStateFlow<String?>("user_123")
+        override val uiEvent = MutableStateFlow<String?>(null)
+        override val syncStatus = MutableStateFlow<com.antigravity.healthagent.ui.state.SyncUiState>(com.antigravity.healthagent.ui.state.SyncUiState.Idle())
+        override val pendingUpdateDrafts = MutableStateFlow<Map<Int, House>>(emptyMap())
+        override val housesInFlight = MutableStateFlow<List<House>>(emptyList())
+        override val recentlyEditedHouseIds = MutableStateFlow<Map<Int, Long>>(emptyMap())
+        override val highlightedHouseId = MutableStateFlow<Int?>(null)
+        override val showClosingAudit = MutableStateFlow<com.antigravity.healthagent.ui.home.AuditSummary?>(null)
+        override val showGoalReached = MutableStateFlow(false)
+        override val showHistoryUnlockConfirmation = MutableStateFlow(false)
+        override val validationErrorHouseIds = MutableStateFlow<Set<Int>>(emptySet())
+        override val isDuplicateIds = MutableStateFlow<Set<Int>>(emptySet())
+        override val integrityDialogMessage = MutableStateFlow<String?>(null)
+        override val showMultiDayErrorDialog = MutableStateFlow(false)
+        override val validationErrorDetails = MutableStateFlow<List<com.antigravity.healthagent.domain.usecase.HouseValidationUseCase.ErrorDetail>>(emptyList())
+        override val scrollToHouseId = MutableStateFlow<Int?>(null)
+        override val situationLimitConfirmation = MutableStateFlow<House?>(null)
+        override val moveConfirmationData = MutableStateFlow<Pair<House, String>?>(null)
+        override val duplicateHouseConfirmation = MutableStateFlow<House?>(null)
+        override val isSupervisor = MutableStateFlow(false)
+        override val isAdmin = MutableStateFlow(false)
+        override val isSyncing = MutableStateFlow(false)
+
+        override val currentBlock = MutableStateFlow("10")
+        override val currentBlockSequence = MutableStateFlow("A")
+        override val currentStreet = MutableStateFlow("RUA A")
+        override val uiState = MutableStateFlow(com.antigravity.healthagent.ui.home.HomeUiState())
+
+        override val municipio = MutableStateFlow("BOM JARDIM")
+        override val bairro = MutableStateFlow("CENTRO")
+        override val categoria = MutableStateFlow("RESIDENCIAL")
+        override val zona = MutableStateFlow("URBANA")
+        override val ciclo = MutableStateFlow("1/2026")
+        override val tipo = MutableStateFlow(1)
+        override val atividade = MutableStateFlow(2)
+    }
+
+    @Test
+    fun testAddNewHouseAt_InheritsBairroAndContextFromTemplate() = runBlocking {
+        val state = FakeHomeState()
+
+        val templateHouse = House(
+            id = 1,
+            data = "01-06-2026",
+            agentName = "GUILHERME",
+            agentUid = "user_123",
+            address = com.antigravity.healthagent.domain.model.VisitAddress(
+                blockNumber = "20",
+                blockSequence = "B",
+                streetName = "RUA DO TEMPLATE",
+                number = "100",
+                sequence = 2,
+                complement = 1,
+                bairro = "TEMPLATE_NEIGHBORHOOD"
+            ),
+            context = com.antigravity.healthagent.domain.model.DailyContext(
+                municipio = "TEMPLATE_MUNICIPIO",
+                categoria = "TEMPLATE_CAT",
+                zona = "TEMPLATE_ZONA",
+                tipo = 3,
+                ciclo = "2/2026",
+                atividade = 4
+            ),
+            propertyType = PropertyType.C
+        )
+
+        val latestHouses = listOf(templateHouse)
+
+        every { predictHouseValuesUseCase.predictBasedOnHistory(any(), any()) } returns PredictHouseValuesUseCase.HousePrediction(
+            number = "101",
+            sequence = 2,
+            complement = 1,
+            propertyType = PropertyType.EMPTY, // Will test the PropertyType fallback to template
+            situation = Situation.NONE
+        )
+
+        every { recalculateVisitSegmentsUseCase.recalculateVisitSegments(any()) } answers { firstArg() }
+
+        // We capture the house inserted via repository.insertHouse
+        val capturedHouse = slot<House>()
+        coEvery { repository.insertHouse(capture(capturedHouse), any()) } returns 2L
+
+        val testScope = kotlinx.coroutines.CoroutineScope(testDispatcher)
+        houseEditDelegate.addNewHouseAt(
+            scope = testScope,
+            state = state,
+            afterId = 1,
+            latestHousesList = latestHouses,
+            isDayClosed = false
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Verify that the saved house has successfully inherited bairro, context and incremented prediction values
+        assertEquals("101", capturedHouse.captured.address.number)
+        assertEquals("TEMPLATE_NEIGHBORHOOD", capturedHouse.captured.address.bairro)
+        assertEquals("TEMPLATE_MUNICIPIO", capturedHouse.captured.context.municipio)
+        assertEquals("TEMPLATE_CAT", capturedHouse.captured.context.categoria)
+        assertEquals("TEMPLATE_ZONA", capturedHouse.captured.context.zona)
+        assertEquals(3, capturedHouse.captured.context.tipo)
+        assertEquals("2/2026", capturedHouse.captured.context.ciclo)
+        assertEquals(4, capturedHouse.captured.context.atividade)
+        
+        // PropertyType predicted was EMPTY, so it should fallback to template propertyType (PropertyType.C)
+        assertEquals(PropertyType.C, capturedHouse.captured.propertyType)
+    }
+
+    @Test
+    fun testAddNewHouse_InheritsBairroAndPropertyTypeFromLastHouseOfCurrentDay() = runBlocking {
+        val state = FakeHomeState()
+
+        val lastHouseInDay = House(
+            id = 1,
+            data = "01-06-2026",
+            agentName = "GUILHERME",
+            agentUid = "user_123",
+            address = com.antigravity.healthagent.domain.model.VisitAddress(
+                blockNumber = "10",
+                blockSequence = "A",
+                streetName = "RUA A",
+                number = "100",
+                sequence = 0,
+                complement = 0,
+                bairro = "LAST_HOUSE_BAIRRO"
+            ),
+            context = com.antigravity.healthagent.domain.model.DailyContext(
+                municipio = "LAST_HOUSE_MUNICIPIO",
+                categoria = "LAST_HOUSE_CAT",
+                zona = "LAST_HOUSE_ZONA",
+                tipo = 2,
+                ciclo = "2/2026",
+                atividade = 5
+            ),
+            propertyType = PropertyType.TB,
+            listOrder = 1
+        )
+
+        val latestHouses = listOf(lastHouseInDay)
+
+        every { predictHouseValuesUseCase.predictNextHouseValues(any(), any(), any(), any()) } returns PredictHouseValuesUseCase.HousePrediction(
+            number = "101",
+            sequence = 0,
+            complement = 0,
+            propertyType = PropertyType.EMPTY, // Empty prediction
+            situation = Situation.NONE
+        )
+
+        // Capture saved house
+        val capturedHouse = slot<House>()
+        coEvery { saveHouseUseCase.insertHouse(capture(capturedHouse), any(), any()) } returns 2
+
+        val testScope = kotlinx.coroutines.CoroutineScope(testDispatcher)
+        houseEditDelegate.addNewHouse(
+            scope = testScope,
+            state = state,
+            latestHousesList = latestHouses,
+            dbHousesList = latestHouses,
+            maxOpenHouses = 5,
+            isDayClosed = false,
+            validateCurrentDay = { true },
+            triggerDelayedValidation = {},
+            onHouseClick = {}
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // Verify that the saved house inherited bairro, context, and propertyType fallbacks from the last house of the day
+        assertEquals("101", capturedHouse.captured.address.number)
+        assertEquals("LAST_HOUSE_BAIRRO", capturedHouse.captured.address.bairro)
+        assertEquals("LAST_HOUSE_MUNICIPIO", capturedHouse.captured.context.municipio)
+        assertEquals("LAST_HOUSE_CAT", capturedHouse.captured.context.categoria)
+        assertEquals("LAST_HOUSE_ZONA", capturedHouse.captured.context.zona)
+        assertEquals(2, capturedHouse.captured.context.tipo)
+        assertEquals("2/2026", capturedHouse.captured.context.ciclo)
+        assertEquals(5, capturedHouse.captured.context.atividade)
+        
+        // PropertyType predicted was EMPTY, so it should fallback to lastHouseInDay.propertyType (PropertyType.TB)
+        assertEquals(PropertyType.TB, capturedHouse.captured.propertyType)
+    }
 }
+

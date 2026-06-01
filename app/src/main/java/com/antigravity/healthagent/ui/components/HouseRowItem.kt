@@ -46,7 +46,7 @@ fun HouseRowItem(
     onMoveDown: () -> Unit = {},
     onEnableReorder: () -> Unit = {},
     onMoveDate: () -> Unit = {},
-    streetSuggestions: List<String> = emptyList(),
+    getStreetSuggestions: () -> List<String> = { emptyList() },
     enabled: Boolean = true,
 
     isEasyMode: Boolean = false,
@@ -91,7 +91,7 @@ fun HouseRowItem(
             currentQuarteiraoConcluido = house.quarteiraoConcluido,
             currentLocalidadeConcluida = house.localidadeConcluida,
             invalidFields = invalidFields,
-            streetSuggestions = streetSuggestions,
+            streetSuggestions = getStreetSuggestions(),
             onDismiss = { showContextDialog = false },
             onConfirm = { block, blockSeq, street, bairro, qConcluido, lConcluido ->
                 onUpdate(house.copy(address = house.address.copy(

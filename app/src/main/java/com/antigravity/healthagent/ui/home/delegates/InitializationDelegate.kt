@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -147,7 +148,7 @@ class InitializationDelegate @Inject constructor(
                     )
                 }
                 mapped to totals
-            }.collect { (mapped, totals) ->
+            }.flowOn(Dispatchers.Default).collect { (mapped, totals) ->
                 viewModel.uiState.update { it.copy(
                     houses = mapped,
                     dashboardTotals = totals,
@@ -167,7 +168,7 @@ class InitializationDelegate @Inject constructor(
                 val dayHouses = houses.filter { it.data == d }
                 val dayErrorCount = dayHouses.count { it.id in errorIds }
                 Triple(errorIds, duplicateIds, dayErrorCount)
-            }.collect { (errorIds, duplicateIds, dayErrorCount) ->
+            }.flowOn(Dispatchers.Default).collect { (errorIds, duplicateIds, dayErrorCount) ->
                 viewModel.uiState.update { current ->
                     current.copy(
                         validationErrorHouseIds = errorIds,

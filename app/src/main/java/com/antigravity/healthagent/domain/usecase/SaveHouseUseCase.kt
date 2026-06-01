@@ -9,6 +9,8 @@ import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.normalize
 import com.antigravity.healthagent.utils.removeAccents
 import com.antigravity.healthagent.utils.toDashDate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 class SaveHouseUseCase @Inject constructor(
@@ -17,8 +19,8 @@ class SaveHouseUseCase @Inject constructor(
     private val recalculateVisitSegmentsUseCase: RecalculateVisitSegmentsUseCase
 ) {
 
-    suspend fun insertHouse(house: House, allHouses: List<House>, force: Boolean = false): Long {
-        return repository.runInTransaction {
+    suspend fun insertHouse(house: House, allHouses: List<House>, force: Boolean = false): Long = withContext(Dispatchers.IO) {
+        repository.runInTransaction {
             val sanitized = sanitizeHouse(house)
             val id = repository.insertHouse(sanitized, force)
             
@@ -32,7 +34,7 @@ class SaveHouseUseCase @Inject constructor(
         }
     }
 
-    suspend fun updateHouse(house: House, allHouses: List<House>, force: Boolean = false) {
+    suspend fun updateHouse(house: House, allHouses: List<House>, force: Boolean = false) = withContext(Dispatchers.IO) {
         repository.runInTransaction {
             val sanitized = sanitizeHouse(house)
             val originalHouse = allHouses.find { it.id == house.id }
@@ -53,12 +55,12 @@ class SaveHouseUseCase @Inject constructor(
         }
     }
 
-    suspend fun updateHouses(houses: List<House>, force: Boolean = false) {
+    suspend fun updateHouses(houses: List<House>, force: Boolean = false) = withContext(Dispatchers.IO) {
         // Assume these are already recalculated if coming from a flow that does it
         repository.updateHouses(houses, force)
     }
 
-    suspend fun deleteHouse(house: House, allHouses: List<House>, force: Boolean = false) {
+    suspend fun deleteHouse(house: House, allHouses: List<House>, force: Boolean = false) = withContext(Dispatchers.IO) {
         repository.runInTransaction {
             val normalizedData = house.data.toDashDate()
             val dayHouses = allHouses.filter { it.data.toDashDate() == normalizedData }
@@ -69,7 +71,7 @@ class SaveHouseUseCase @Inject constructor(
         }
     }
 
-    suspend fun deleteProduction(date: String, agentUid: String, force: Boolean = false) {
+    suspend fun deleteProduction(date: String, agentUid: String, force: Boolean = false) = withContext(Dispatchers.IO) {
         repository.deleteProduction(date, agentUid, force)
     }
 
@@ -83,7 +85,7 @@ class SaveHouseUseCase @Inject constructor(
         house: House,
         allHouses: List<House>,
         baselineHouse: House? = null
-    ): HouseUpdateResult {
+    ): HouseUpdateResult = withContext(Dispatchers.IO) {
         val originalHouse = baselineHouse ?: allHouses.find { it.id == house.id }
         
         // 1. Sanitize Data
@@ -170,7 +172,7 @@ class SaveHouseUseCase @Inject constructor(
             original == null || original != dayHouse
         }
         
-        return HouseUpdateResult(finalUpdatedHouse, housesThatChanged, localizationChanged)
+        HouseUpdateResult(finalUpdatedHouse, housesThatChanged, localizationChanged)
     }
 
     private fun sanitizeHouse(house: House): House {

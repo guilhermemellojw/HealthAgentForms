@@ -250,6 +250,10 @@ class WeeklySummaryViewModel @Inject constructor(
                     
                     val existing = allActivities[date]
                     
+                    if (existing?.editedByAdmin == true && !_isAdmin.value && !existing.isManualUnlock) {
+                        throw Exception("Este dia foi homologado por um administrador. Desbloqueie o dia para alterar o status.")
+                    }
+                    
                     val oldStatus = existing?.status ?: "NORMAL"
                     _uiEvent.value = "Status atual: $oldStatus. Novo: $status"
                     
