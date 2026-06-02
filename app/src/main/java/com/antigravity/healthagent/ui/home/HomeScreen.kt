@@ -590,7 +590,14 @@ fun HomeScreen(
                 // Item 2..N: Houses
                 itemsIndexed(
                     items = uiHouses, 
-                    key = { _, state -> state.house.id },
+                    key = { _, state -> 
+                        val house = state.house
+                        if (house.id != 0) {
+                            house.id.toString()
+                        } else {
+                            "in_flight_${house.listOrder}_${house.createdAt}"
+                        }
+                    },
                     contentType = { _, _ -> "house" }
                 ) { index, houseState ->
                     Column {
