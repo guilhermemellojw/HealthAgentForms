@@ -402,9 +402,8 @@ class HouseEditDelegate @Inject constructor(
                     )
                 }
 
-                state.housesInFlight.update { list ->
-                    list.filter { it.listOrder != houseToInsert.listOrder || it.data != houseToInsert.data }
-                }
+                // Let InitializationDelegate's prune observer remove the house from flight
+                // once it is confirmed in the database emission.
 
                 soundManager.playPop()
 
@@ -525,7 +524,8 @@ class HouseEditDelegate @Inject constructor(
         state.duplicateHouseConfirmation.value?.let { house ->
             clashDialogJobs[house.id]?.cancel()
             clashDialogJobs.remove(house.id)
-            state.pendingUpdateDrafts.update { it - house.id }
+            // Let InitializationDelegate's prune observer remove the draft re-actively
+            // once Room emits the updated values.
             performUpdateHouse(scope, state, house, forceMerge = true)
             state.duplicateHouseConfirmation.value = null
         }
@@ -590,7 +590,8 @@ class HouseEditDelegate @Inject constructor(
                     state.validationErrorHouseIds.value = state.validationErrorHouseIds.value - house.id
                 }
 
-                state.pendingUpdateDrafts.update { it - house.id }
+                // Let InitializationDelegate's prune observer remove the draft re-actively 
+                // once Room emits the updated values.
             } catch (e: Exception) {
                 AppLogger.e("HomeViewModel", "Error updating house", e)
                 state.uiEvent.value = "Falha ao atualizar imóvel: ${e.message}"
