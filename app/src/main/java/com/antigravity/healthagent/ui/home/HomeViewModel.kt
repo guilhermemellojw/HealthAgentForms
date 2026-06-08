@@ -625,7 +625,6 @@ class HomeViewModel @Inject constructor(
         scope = viewModelScope,
         state = this,
         latestHousesList = houses.value,
-        dbHousesList = allHousesFlow.value,
         maxOpenHouses = maxOpenHouses.value,
         isDayClosed = isDayClosed.value,
         validateCurrentDay = { validateCurrentDay(it) },

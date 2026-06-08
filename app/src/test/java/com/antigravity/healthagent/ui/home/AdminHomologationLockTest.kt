@@ -696,7 +696,6 @@ class AdminHomologationLockTest {
             scope = testScope,
             state = state,
             latestHousesList = latestHouses,
-            dbHousesList = latestHouses,
             maxOpenHouses = 5,
             isDayClosed = false,
             validateCurrentDay = { true },

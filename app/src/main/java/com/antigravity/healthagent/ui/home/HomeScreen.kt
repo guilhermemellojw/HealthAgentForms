@@ -227,6 +227,7 @@ fun HomeScreen(
 
     // Drag State (Overlay Strategy)
     val uiHouses = remember { mutableStateListOf<HouseUiState>() }
+    val displayHouses = if (isReorderMode) uiHouses else uiState.houses
     var draggingHouse by remember { mutableStateOf<HouseUiState?>(null) }
     var ghostY by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var initialTouchY by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
@@ -234,8 +235,8 @@ fun HomeScreen(
     // Focus Management for new houses
     val focusRequesters = remember { mutableMapOf<Int, androidx.compose.ui.focus.FocusRequester>() }
 
-    LaunchedEffect(uiState.houses) {
-        if (draggingHouse == null) {
+    LaunchedEffect(uiState.houses, isReorderMode) {
+        if (isReorderMode && draggingHouse == null) {
             // Stability: Prevent showing empty state by reconciling instead of clearing.
             val target = uiState.houses
             
@@ -258,27 +259,42 @@ fun HomeScreen(
         }
     }
 
+    LaunchedEffect(isReorderMode) {
+        if (isReorderMode) {
+            uiHouses.clear()
+            uiHouses.addAll(uiState.houses)
+        } else {
+            uiHouses.clear()
+        }
+    }
+
     // Auto-scroll when new house added (if not searching)
     // Auto-Scroll Logic
     var lastAddRequestTime by remember { mutableLongStateOf(0L) }
     var previousHouseCount by remember { mutableIntStateOf(uiState.houses.size) }
 
     LaunchedEffect(uiState.houses.size) {
-        if (uiState.houses.size > previousHouseCount && System.currentTimeMillis() - lastAddRequestTime < 2000) {
-            // Delay slightly more to ensure item is rendered/measured and animations start
-            kotlinx.coroutines.delay(100)
+        val prevCount = previousHouseCount
+        previousHouseCount = uiState.houses.size
+        
+        if (uiState.houses.size > prevCount && System.currentTimeMillis() - lastAddRequestTime < 2000) {
+            // Delay ligeiramente maior para garantir estabilização do layout
+            kotlinx.coroutines.delay(150)
             if (uiState.houses.isNotEmpty()) {
-                // Scroll to the new house (index = uiState.houses.size because index 0 is the header)
-                listState.scrollToItem(uiState.houses.size)
+                val lastIndex = uiState.houses.size
+                val isAlreadyVisible = listState.layoutInfo.visibleItemsInfo.any { it.index == lastIndex }
+                
+                if (!isAlreadyVisible && !listState.isScrollInProgress) {
+                    listState.animateScrollToItem(lastIndex)
+                }
             }
         }
-        previousHouseCount = uiState.houses.size
     }
 
     // Auto-scroll to validation error house
     LaunchedEffect(scrollToHouseId) {
         scrollToHouseId?.let { id ->
-            val indexInUi = uiHouses.indexOfFirst { it.house.id == id }
+            val indexInUi = displayHouses.indexOfFirst { it.house.id == id }
             if (indexInUi != -1) {
                 // Delay slightly to ensure layout is ready
                 kotlinx.coroutines.delay(100)
@@ -414,7 +430,7 @@ fun HomeScreen(
                 uiState = uiState,
                 listState = listState,
                 strictPendingHousesCount = strictPendingHousesCount,
-                uiHouses = uiHouses,
+                uiHouses = displayHouses,
                 maxOpenHouses = maxOpenHouses,
                 onAddHouse = {
                     haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
@@ -570,7 +586,7 @@ fun HomeScreen(
                 }
                 
                 // Empty State
-                if (uiHouses.isEmpty()) {
+                if (displayHouses.isEmpty()) {
                     item {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                             Spacer(Modifier.height(16.dp))
@@ -589,7 +605,7 @@ fun HomeScreen(
 
                 // Item 2..N: Houses
                 itemsIndexed(
-                    items = uiHouses, 
+                    items = displayHouses, 
                     key = { _, state -> 
                         val house = state.house
                         if (house.id != 0) {
@@ -629,6 +645,9 @@ fun HomeScreen(
                                         it.pointerInput(house.id) {
                                             detectDragGesturesAfterLongPress(
                                                 onDragStart = { offset ->
+                                                    if (uiHouses.isEmpty()) {
+                                                        uiHouses.addAll(uiState.houses)
+                                                     }
                                                     val visibleItems = listState.layoutInfo.visibleItemsInfo
                                                     val currentHouse = uiHouses.find { it.house.id == house.id }
                                                     val index = if (currentHouse != null) uiHouses.indexOf(currentHouse) + 1 else -1

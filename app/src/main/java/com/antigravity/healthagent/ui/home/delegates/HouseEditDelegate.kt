@@ -59,7 +59,7 @@ class HouseEditDelegate @Inject constructor(
         }
 
         val currentTime = System.currentTimeMillis()
-        if (isAddingHouse || currentTime - lastAddClickTime < 300) return
+        if (isAddingHouse || currentTime - lastAddClickTime < 100) return
 
         isAddingHouse = true
         lastAddClickTime = currentTime
@@ -185,7 +185,6 @@ class HouseEditDelegate @Inject constructor(
         scope: CoroutineScope,
         state: HomeState,
         latestHousesList: List<House>,
-        dbHousesList: List<House>,
         maxOpenHouses: Int,
         isDayClosed: Boolean,
         validateCurrentDay: (Boolean) -> Boolean,
@@ -200,7 +199,7 @@ class HouseEditDelegate @Inject constructor(
         }
 
         val currentTime = System.currentTimeMillis()
-        if (isAddingHouse || currentTime - lastAddClickTime < 300) return
+        if (isAddingHouse || currentTime - lastAddClickTime < 100) return
 
         isAddingHouse = true
         lastAddClickTime = currentTime
@@ -235,10 +234,6 @@ class HouseEditDelegate @Inject constructor(
             return
         }
 
-        val drafts = state.pendingUpdateDrafts.value
-        val inFlights = state.housesInFlight.value
-
-        val mergedList: List<House> = (dbHousesList.map { drafts[it.id] ?: it } + inFlights)
         val clashingDraftIds = state.isDuplicateIds.value
         val hasClashes = clashingDraftIds.isNotEmpty()
 
@@ -263,14 +258,19 @@ class HouseEditDelegate @Inject constructor(
         val currentAgentUid = activeRemoteUid ?: myUid!!
         val currentAgentName = state.agentName.value
 
-        val isDayEmpty = mergedList.none { it.data == state.data.value }
+        val currentInFlights = state.housesInFlight.value
+        val fullyUpToDateHouses = (latestHousesList.filter { it.id != 0 } + currentInFlights).distinctBy {
+            if (it.id != 0) it.id.toString() else "in_flight_${it.listOrder}"
+        }
+
+        val isDayEmpty = fullyUpToDateHouses.none { it.data == state.data.value }
         var prediction: PredictHouseValuesUseCase.HousePrediction
         var initialBlock = state.currentBlock.value
         var initialStreet = state.currentStreet.value
         var initialBlockSeq = state.currentBlockSequence.value
 
         if (isDayEmpty) {
-            val lastGlobalHouse = mergedList.maxByOrNull { it.listOrder }
+            val lastGlobalHouse = fullyUpToDateHouses.maxByOrNull { it.listOrder }
 
             if (lastGlobalHouse != null) {
                 initialBlock = lastGlobalHouse.address.blockNumber
@@ -284,13 +284,13 @@ class HouseEditDelegate @Inject constructor(
                 state.municipio.value = lastGlobalHouse.context.municipio
                 state.agentName.value = lastGlobalHouse.agentName
 
-                prediction = predictHouseValuesUseCase.predictBasedOnHistory(mergedList, lastGlobalHouse)
+                prediction = predictHouseValuesUseCase.predictBasedOnHistory(fullyUpToDateHouses, lastGlobalHouse)
             } else {
                 prediction = PredictHouseValuesUseCase.HousePrediction("", 0, 0, PropertyType.EMPTY, Situation.NONE)
             }
         } else {
             prediction = predictHouseValuesUseCase.predictNextHouseValues(
-                mergedList,
+                fullyUpToDateHouses,
                 state.data.value,
                 state.currentBlock.value.trim().uppercase(),
                 state.currentStreet.value.trim().formatStreetName()
@@ -298,9 +298,9 @@ class HouseEditDelegate @Inject constructor(
         }
 
         val lastHouseRef = if (isDayEmpty) {
-            mergedList.maxByOrNull { it.listOrder }
+            fullyUpToDateHouses.maxByOrNull { it.listOrder }
         } else {
-            mergedList.filter { it.data == state.data.value }.maxByOrNull { it.listOrder }
+            fullyUpToDateHouses.filter { it.data == state.data.value }.maxByOrNull { it.listOrder }
         }
 
         val finalPropertyType = if (prediction.propertyType != PropertyType.EMPTY) {
@@ -319,16 +319,13 @@ class HouseEditDelegate @Inject constructor(
         val finalCiclo = lastHouseRef?.context?.ciclo?.takeIf { it.isNotBlank() } ?: state.ciclo.value.trim().uppercase()
         val finalAtividade = lastHouseRef?.context?.atividade ?: state.atividade.value
 
-        val maxOrder = mergedList.maxOfOrNull { it.listOrder } ?: 0L
-        val currentDayHouses = mergedList.filter { it.data == state.data.value }.sortedBy { it.listOrder }
+        val maxOrder = fullyUpToDateHouses.maxOfOrNull { it.listOrder } ?: 0L
+        val currentDayHouses = fullyUpToDateHouses.filter { it.data == state.data.value }.sortedBy { it.listOrder }
         val newStreet = initialStreet.trim().formatStreetName()
-
-        val dayHouses = currentDayHouses.sortedBy { it.listOrder }
-        validateCurrentDay(false)
 
         var predictedSegment = 0
         var lastStreetName = ""
-        dayHouses.forEach { h ->
+        currentDayHouses.forEach { h ->
             val s = h.address.streetName.trim().uppercase()
             if (lastStreetName.isNotEmpty() && s != lastStreetName) {
                 predictedSegment++
@@ -368,7 +365,7 @@ class HouseEditDelegate @Inject constructor(
         )
 
         houseToInsert = clashDetector.autoIncrementToAvoidClash(
-            houseToInsert, mergedList, includeVisitSegment = true
+            houseToInsert, fullyUpToDateHouses, includeVisitSegment = true
         )
 
         markAsRecentlyEdited(scope, state, 0)
@@ -379,7 +376,7 @@ class HouseEditDelegate @Inject constructor(
 
         scope.launch {
             try {
-                val newId = saveHouseUseCase.insertHouse(houseToInsert, mergedList, isAdmin)
+                val newId = saveHouseUseCase.insertHouse(houseToInsert, latestHousesList, isAdmin)
 
                 val dbHousesAfter = repository.getHousesByDateAndAgent(state.data.value, currentAgentUid)
                 val currentDrafts = state.pendingUpdateDrafts.value
@@ -401,9 +398,6 @@ class HouseEditDelegate @Inject constructor(
                         isAdmin
                     )
                 }
-
-                // Let InitializationDelegate's prune observer remove the house from flight
-                // once it is confirmed in the database emission.
 
                 soundManager.playPop()
 
