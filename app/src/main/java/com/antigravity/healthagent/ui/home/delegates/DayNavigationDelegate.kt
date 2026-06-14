@@ -11,10 +11,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
+import com.antigravity.healthagent.domain.logger.AppLogger
+import com.antigravity.healthagent.utils.DateUtils
 import java.util.Calendar
 import java.util.Date
-import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,7 +25,7 @@ class DayNavigationDelegate @Inject constructor(
     private val clashDetector: ClashDetector,
     private val soundManager: SoundManager
 ) {
-    private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+    private val dateFormatter get() = DateUtils.DASH_DATE.get()
 
     fun moveDateBackward(scope: CoroutineScope, state: HomeState) {
         scope.launch {
@@ -207,7 +207,7 @@ class DayNavigationDelegate @Inject constructor(
 
             } catch (e: Exception) {
                 state.uiEvent.value = "Erro ao mover produção: ${e.message}"
-                e.printStackTrace()
+                AppLogger.e("DayNavigationDelegate", "Erro ao mover produção", e)
             }
         }
     }

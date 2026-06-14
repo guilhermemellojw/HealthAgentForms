@@ -1,17 +1,15 @@
 package com.antigravity.healthagent.ui.home.delegates
 
 import com.antigravity.healthagent.data.local.model.House
-import com.antigravity.healthagent.data.local.model.Situation
-import com.antigravity.healthagent.domain.model.DailyContext
-import com.antigravity.healthagent.domain.model.VisitAddress
-import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.domain.repository.HouseRepository
+import com.antigravity.healthagent.domain.usecase.AddNewHouseUseCase
+import com.antigravity.healthagent.domain.usecase.UpdateHouseUseCase
 import com.antigravity.healthagent.domain.usecase.SaveHouseUseCase
-import com.antigravity.healthagent.domain.usecase.PredictHouseValuesUseCase
 import com.antigravity.healthagent.domain.usecase.RecalculateVisitSegmentsUseCase
 import com.antigravity.healthagent.domain.usecase.ClashDetector
 import com.antigravity.healthagent.domain.usecase.DayLockEnforcer
 import com.antigravity.healthagent.domain.usecase.RoleEnforcer
+import com.antigravity.healthagent.domain.usecase.CheckWorkedHouseLimitUseCase
 import com.antigravity.healthagent.utils.SoundManager
 import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.utils.formatStreetName
@@ -20,7 +18,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.Dispatchers
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -30,11 +27,13 @@ import javax.inject.Singleton
 class HouseEditDelegate @Inject constructor(
     private val repository: HouseRepository,
     private val saveHouseUseCase: SaveHouseUseCase,
-    private val predictHouseValuesUseCase: PredictHouseValuesUseCase,
+    private val addNewHouseUseCase: AddNewHouseUseCase,
+    private val updateHouseUseCase: UpdateHouseUseCase,
     private val recalculateVisitSegmentsUseCase: RecalculateVisitSegmentsUseCase,
     private val clashDetector: ClashDetector,
     private val dayLockEnforcer: DayLockEnforcer,
     private val roleEnforcer: RoleEnforcer,
+    private val checkWorkedHouseLimitUseCase: CheckWorkedHouseLimitUseCase,
     private val soundManager: SoundManager
 ) {
     private var isAddingHouse = false
@@ -44,6 +43,9 @@ class HouseEditDelegate @Inject constructor(
     private val houseUpdateJobs = ConcurrentHashMap<Int, Job>()
     private var recentlyDeletedHouse: House? = null
 
+    // ──────────────────────────────────────────────────────────────
+    // ADD HOUSE AT SPECIFIC POSITION (Insert between existing rows)
+    // ──────────────────────────────────────────────────────────────
     fun addNewHouseAt(
         scope: CoroutineScope,
         state: HomeState,
@@ -51,16 +53,8 @@ class HouseEditDelegate @Inject constructor(
         latestHousesList: List<House>,
         isDayClosed: Boolean
     ) {
-        val roleResult = roleEnforcer.enforce(state.isSupervisor.value, state.isAdmin.value, "adicionar dados remotamente")
-        if (roleResult is RoleEnforcer.RoleResult.Blocked) {
-            state.uiEvent.value = roleResult.message
-            soundManager.playWarning()
-            return
-        }
-
         val currentTime = System.currentTimeMillis()
         if (isAddingHouse || currentTime - lastAddClickTime < 100) return
-
         isAddingHouse = true
         lastAddClickTime = currentTime
 
@@ -72,105 +66,9 @@ class HouseEditDelegate @Inject constructor(
 
         scope.launch {
             try {
-                val lockResult = dayLockEnforcer.enforce(
-                    isDayClosed = isDayClosed,
-                    isManualUnlock = state.uiState.value.isManualUnlock,
-                    isAdmin = state.isAdmin.value,
-                    actionDescription = "adicionar"
-                )
-                if (lockResult is DayLockEnforcer.LockResult.Blocked) {
-                    state.uiEvent.value = lockResult.message
-                    soundManager.playWarning()
-                    isAddingHouse = false
-                    return@launch
-                }
-                val isAdmin = state.isAdmin.value
-
-                val currentDayHouses = latestHousesList.filter { it.data == state.data.value }
-                val targetIndex = if (afterId == -1) -1 else currentDayHouses.indexOfFirst { it.id == afterId }
-
-                val template = if (targetIndex != -1) currentDayHouses[targetIndex] else currentDayHouses.firstOrNull()
-
-                val prediction = if (template != null) {
-                    predictHouseValuesUseCase.predictBasedOnHistory(latestHousesList, template)
-                } else {
-                    PredictHouseValuesUseCase.HousePrediction("", 0, 0, PropertyType.R, Situation.NONE)
-                }
-
-                val finalPropertyType = if (prediction.propertyType != PropertyType.EMPTY) {
-                    prediction.propertyType
-                } else if (template?.propertyType != null && template.propertyType != PropertyType.EMPTY) {
-                    template.propertyType
-                } else {
-                    PropertyType.R
-                }
-
-                val finalBairro = template?.address?.bairro?.takeIf { it.isNotBlank() } ?: state.bairro.value.uppercase()
-                val finalMunicipio = template?.context?.municipio?.takeIf { it.isNotBlank() } ?: state.municipio.value.trim().uppercase()
-                val finalCategoria = template?.context?.categoria?.takeIf { it.isNotBlank() } ?: state.categoria.value.trim().uppercase()
-                val finalZona = template?.context?.zona?.takeIf { it.isNotBlank() } ?: state.zona.value.trim().uppercase()
-                val finalTipo = template?.context?.tipo ?: state.tipo.value
-                val finalCiclo = template?.context?.ciclo?.takeIf { it.isNotBlank() } ?: state.ciclo.value.trim().uppercase()
-                val finalAtividade = template?.context?.atividade ?: state.atividade.value
-
-                var houseToInsert = House(
-                    context = DailyContext(
-                        municipio = finalMunicipio,
-                        categoria = finalCategoria,
-                        zona = finalZona,
-                        tipo = finalTipo,
-                        ciclo = finalCiclo,
-                        atividade = finalAtividade
-                    ),
-                    address = VisitAddress(
-                        blockNumber = template?.address?.blockNumber ?: state.currentBlock.value,
-                        blockSequence = template?.address?.blockSequence ?: state.currentBlockSequence.value,
-                        streetName = template?.address?.streetName ?: state.currentStreet.value,
-                        number = prediction.number,
-                        sequence = prediction.sequence,
-                        complement = prediction.complement,
-                        bairro = finalBairro
-                    ),
-                    propertyType = finalPropertyType,
-                    situation = prediction.situation,
-                    data = state.data.value,
-                    agentName = state.agentName.value.uppercase(),
-                    agentUid = state.remoteAgentUid.value ?: state.currentUserUid.value ?: "",
-                    listOrder = 0
-                )
-
-                houseToInsert = clashDetector.autoIncrementToAvoidClash(
-                    houseToInsert, latestHousesList, includeVisitSegment = false
-                )
-
-                val mutableList = currentDayHouses.toMutableList()
-                if (targetIndex == -1) {
-                    mutableList.add(0, houseToInsert)
-                } else {
-                    mutableList.add(targetIndex + 1, houseToInsert)
-                }
-
-                val updatedList = mutableList.mapIndexed { index, h -> h.copy(listOrder = index.toLong()) }
-                val recalculated = recalculateVisitSegmentsUseCase.recalculateVisitSegments(updatedList)
-
-                val newlyAdded = recalculated.find { it.id == 0 }
-                val others = recalculated.filter { it.id != 0 }
-
-                if (others.isNotEmpty()) {
-                    repository.updateHouses(others, isAdmin)
-                }
-                if (newlyAdded != null) {
-                    val newId = repository.insertHouse(newlyAdded, isAdmin)
-                    state.highlightedHouseId.value = newId.toInt()
-                    scope.launch {
-                        delay(2000)
-                        if (state.highlightedHouseId.value == newId.toInt()) {
-                            state.highlightedHouseId.value = null
-                        }
-                    }
-                }
-
-                soundManager.playPop()
+                val params = buildAddParams(state, latestHousesList, isDayClosed, afterId = afterId)
+                val result = addNewHouseUseCase.execute(params)
+                handleAddResult(result, scope, state)
             } catch (e: Exception) {
                 AppLogger.e("HomeViewModel", "Error adding house at position", e)
                 state.uiEvent.value = "Erro ao inserir: ${e.message}"
@@ -181,6 +79,9 @@ class HouseEditDelegate @Inject constructor(
         }
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // ADD HOUSE (Append to end of the day's list)
+    // ──────────────────────────────────────────────────────────────
     fun addNewHouse(
         scope: CoroutineScope,
         state: HomeState,
@@ -191,56 +92,13 @@ class HouseEditDelegate @Inject constructor(
         triggerDelayedValidation: () -> Unit,
         onHouseClick: (Int) -> Unit
     ) {
-        val roleResult = roleEnforcer.enforce(state.isSupervisor.value, state.isAdmin.value, "adicionar dados remotamente")
-        if (roleResult is RoleEnforcer.RoleResult.Blocked) {
-            state.uiEvent.value = roleResult.message
-            soundManager.playWarning()
-            return
-        }
-
         val currentTime = System.currentTimeMillis()
         if (isAddingHouse || currentTime - lastAddClickTime < 100) return
-
         isAddingHouse = true
         lastAddClickTime = currentTime
 
         if (state.agentName.value.isBlank()) {
             state.uiEvent.value = "Aguardando carregamento do perfil..."
-            isAddingHouse = false
-            return
-        }
-
-        val lockResult = dayLockEnforcer.enforce(
-            isDayClosed = isDayClosed,
-            isManualUnlock = state.uiState.value.isManualUnlock,
-            isAdmin = state.isAdmin.value,
-            actionDescription = "adicionar"
-        )
-        if (lockResult is DayLockEnforcer.LockResult.Blocked) {
-            state.uiEvent.value = lockResult.message
-            soundManager.playWarning()
-            isAddingHouse = false
-            return
-        }
-        val isAdmin = state.isAdmin.value
-
-        val currentTotal = latestHousesList.count { it.data == state.data.value }
-        val safetyLimit = (maxOpenHouses * 3).coerceAtLeast(150)
-
-        if (currentTotal >= safetyLimit && !state.uiState.value.isManualUnlock && !isAdmin) {
-            soundManager.playWarning()
-            state.situationLimitConfirmation.value = House(data = state.data.value)
-            isAddingHouse = false
-            return
-        }
-
-        val clashingDraftIds = state.isDuplicateIds.value
-        val hasClashes = clashingDraftIds.isNotEmpty()
-
-        if (hasClashes) {
-            state.uiEvent.value = "Resolva os conflitos (em vermelho) antes de adicionar um novo imóvel."
-            soundManager.playWarning()
-            onHouseClick(clashingDraftIds.first())
             isAddingHouse = false
             return
         }
@@ -255,118 +113,42 @@ class HouseEditDelegate @Inject constructor(
             return
         }
 
-        val currentAgentUid = activeRemoteUid ?: myUid!!
-        val currentAgentName = state.agentName.value
+        // Pre-flight clash check (UI-level feedback before hitting the UseCase)
+        val clashingDraftIds = state.isDuplicateIds.value
+        if (clashingDraftIds.isNotEmpty()) {
+            state.uiEvent.value = "Resolva os conflitos (em vermelho) antes de adicionar um novo imóvel."
+            soundManager.playWarning()
+            onHouseClick(clashingDraftIds.first())
+            isAddingHouse = false
+            return
+        }
 
+        val currentAgentUid = activeRemoteUid ?: myUid!!
+
+        // Build in-flight houses for fully up-to-date state
         val currentInFlights = state.housesInFlight.value
         val fullyUpToDateHouses = (latestHousesList.filter { it.id != 0 } + currentInFlights).distinctBy {
             if (it.id != 0) it.id.toString() else "in_flight_${it.listOrder}"
         }
 
+        // Propagate context from last global house if day is empty
         val isDayEmpty = fullyUpToDateHouses.none { it.data == state.data.value }
-        var prediction: PredictHouseValuesUseCase.HousePrediction
-        var initialBlock = state.currentBlock.value
-        var initialStreet = state.currentStreet.value
-        var initialBlockSeq = state.currentBlockSequence.value
-
         if (isDayEmpty) {
             val lastGlobalHouse = fullyUpToDateHouses.maxByOrNull { it.listOrder }
-
             if (lastGlobalHouse != null) {
-                initialBlock = lastGlobalHouse.address.blockNumber
-                initialStreet = lastGlobalHouse.address.streetName
-                initialBlockSeq = lastGlobalHouse.address.blockSequence
-
-                state.currentBlock.value = initialBlock
-                state.currentStreet.value = initialStreet
-                state.currentBlockSequence.value = initialBlockSeq
+                state.currentBlock.value = lastGlobalHouse.address.blockNumber
+                state.currentStreet.value = lastGlobalHouse.address.streetName
+                state.currentBlockSequence.value = lastGlobalHouse.address.blockSequence
                 state.bairro.value = lastGlobalHouse.address.bairro
                 state.municipio.value = lastGlobalHouse.context.municipio
                 state.agentName.value = lastGlobalHouse.agentName
-
-                prediction = predictHouseValuesUseCase.predictBasedOnHistory(fullyUpToDateHouses, lastGlobalHouse)
-            } else {
-                prediction = PredictHouseValuesUseCase.HousePrediction("", 0, 0, PropertyType.EMPTY, Situation.NONE)
             }
-        } else {
-            prediction = predictHouseValuesUseCase.predictNextHouseValues(
-                fullyUpToDateHouses,
-                state.data.value,
-                state.currentBlock.value.trim().uppercase(),
-                state.currentStreet.value.trim().formatStreetName()
-            )
         }
 
-        val lastHouseRef = if (isDayEmpty) {
-            fullyUpToDateHouses.maxByOrNull { it.listOrder }
-        } else {
-            fullyUpToDateHouses.filter { it.data == state.data.value }.maxByOrNull { it.listOrder }
-        }
+        val params = buildAddParams(state, fullyUpToDateHouses, isDayClosed, afterId = -2, maxOpenHouses = maxOpenHouses)
 
-        val finalPropertyType = if (prediction.propertyType != PropertyType.EMPTY) {
-            prediction.propertyType
-        } else if (lastHouseRef?.propertyType != null && lastHouseRef.propertyType != PropertyType.EMPTY) {
-            lastHouseRef.propertyType
-        } else {
-            PropertyType.R
-        }
-
-        val finalBairro = lastHouseRef?.address?.bairro?.takeIf { it.isNotBlank() } ?: state.bairro.value.trim().uppercase()
-        val finalMunicipio = lastHouseRef?.context?.municipio?.takeIf { it.isNotBlank() } ?: state.municipio.value.trim().uppercase()
-        val finalCategoria = lastHouseRef?.context?.categoria?.takeIf { it.isNotBlank() } ?: state.categoria.value.trim().uppercase()
-        val finalZona = lastHouseRef?.context?.zona?.takeIf { it.isNotBlank() } ?: state.zona.value.trim().uppercase()
-        val finalTipo = lastHouseRef?.context?.tipo ?: state.tipo.value
-        val finalCiclo = lastHouseRef?.context?.ciclo?.takeIf { it.isNotBlank() } ?: state.ciclo.value.trim().uppercase()
-        val finalAtividade = lastHouseRef?.context?.atividade ?: state.atividade.value
-
-        val maxOrder = fullyUpToDateHouses.maxOfOrNull { it.listOrder } ?: 0L
-        val currentDayHouses = fullyUpToDateHouses.filter { it.data == state.data.value }.sortedBy { it.listOrder }
-        val newStreet = initialStreet.trim().formatStreetName()
-
-        var predictedSegment = 0
-        var lastStreetName = ""
-        currentDayHouses.forEach { h ->
-            val s = h.address.streetName.trim().uppercase()
-            if (lastStreetName.isNotEmpty() && s != lastStreetName) {
-                predictedSegment++
-            }
-            lastStreetName = s
-        }
-        if (lastStreetName.isNotEmpty() && newStreet.uppercase() != lastStreetName) {
-            predictedSegment++
-        }
-
-        var houseToInsert = House(
-            id = 0,
-            address = VisitAddress(
-                blockNumber = initialBlock.trim().uppercase(),
-                blockSequence = initialBlockSeq.trim().uppercase(),
-                streetName = initialStreet.trim().formatStreetName(),
-                number = prediction.number.trim().uppercase(),
-                sequence = prediction.sequence,
-                complement = prediction.complement,
-                bairro = finalBairro
-            ),
-            propertyType = finalPropertyType,
-            situation = prediction.situation,
-            context = DailyContext(
-                municipio = finalMunicipio,
-                categoria = finalCategoria,
-                zona = finalZona,
-                tipo = finalTipo,
-                ciclo = finalCiclo,
-                atividade = finalAtividade
-            ),
-            agentName = currentAgentName.trim().uppercase(),
-            agentUid = currentAgentUid,
-            data = state.data.value,
-            visitSegment = predictedSegment,
-            listOrder = maxOrder + 1
-        )
-
-        houseToInsert = clashDetector.autoIncrementToAvoidClash(
-            houseToInsert, fullyUpToDateHouses, includeVisitSegment = true
-        )
+        // Generate the house optimistically (for in-flight display)
+        val houseToInsert = addNewHouseUseCase.generateHouseToInsert(params)
 
         markAsRecentlyEdited(scope, state, 0)
         state.housesInFlight.update { it + houseToInsert }
@@ -376,44 +158,66 @@ class HouseEditDelegate @Inject constructor(
 
         scope.launch {
             try {
-                val newId = saveHouseUseCase.insertHouse(houseToInsert, latestHousesList, isAdmin)
+                val result = addNewHouseUseCase.execute(params, preparedHouse = houseToInsert)
 
-                val dbHousesAfter = repository.getHousesByDateAndAgent(state.data.value, currentAgentUid)
-                val currentDrafts = state.pendingUpdateDrafts.value
-                val currentInFlights = state.housesInFlight.value
-                val refreshedLatestHouses = (dbHousesAfter.map { currentDrafts[it.id] ?: it } + currentInFlights)
+                when (result) {
+                    is AddNewHouseUseCase.Result.Success -> {
+                        val newId = result.newId
 
-                val finalInFlightState = state.housesInFlight.value.find {
-                    it.listOrder == houseToInsert.listOrder && it.data == houseToInsert.data
+                        // Reconcile in-flight state with actual DB state
+                        val dbHousesAfter = repository.getHousesByDateAndAgent(state.data.value, currentAgentUid)
+                        val currentDrafts = state.pendingUpdateDrafts.value
+                        val currentInFlightsNow = state.housesInFlight.value
+                        val refreshedLatestHouses = (dbHousesAfter.map { currentDrafts[it.id] ?: it } + currentInFlightsNow)
+
+                        val finalInFlightState = state.housesInFlight.value.find {
+                            it.listOrder == houseToInsert.listOrder && it.data == houseToInsert.data
+                        }
+
+                        if (finalInFlightState != null &&
+                            (finalInFlightState.address.number != houseToInsert.address.number ||
+                             finalInFlightState.address.sequence != houseToInsert.address.sequence ||
+                             finalInFlightState.address.complement != houseToInsert.address.complement)) {
+                            saveHouseUseCase.updateHouse(
+                                finalInFlightState.copy(id = newId.toInt()),
+                                refreshedLatestHouses,
+                                params.isAdmin
+                            )
+                        }
+
+                        soundManager.playPop()
+                        markAsRecentlyEdited(scope, state, newId.toInt())
+                        triggerDelayedValidation()
+                    }
+                    is AddNewHouseUseCase.Result.Blocked -> {
+                        state.uiEvent.value = result.message
+                        soundManager.playWarning()
+                        removeInFlight(state, houseToInsert)
+                    }
+                    is AddNewHouseUseCase.Result.LimitReached -> {
+                        soundManager.playWarning()
+                        state.situationLimitConfirmation.value = result.houseTemplate
+                        removeInFlight(state, houseToInsert)
+                    }
+                    is AddNewHouseUseCase.Result.Error -> {
+                        AppLogger.e("HomeViewModel", "Error adding new house", result.exception)
+                        state.uiEvent.value = "Erro ao adicionar imóvel: ${result.exception.message}"
+                        soundManager.playWarning()
+                        removeInFlight(state, houseToInsert)
+                    }
                 }
-
-                if (finalInFlightState != null &&
-                    (finalInFlightState.address.number != houseToInsert.address.number ||
-                     finalInFlightState.address.sequence != houseToInsert.address.sequence ||
-                     finalInFlightState.address.complement != houseToInsert.address.complement)) {
-
-                      saveHouseUseCase.updateHouse(
-                        finalInFlightState.copy(id = newId.toInt()),
-                        refreshedLatestHouses,
-                        isAdmin
-                    )
-                }
-
-                soundManager.playPop()
-
-                markAsRecentlyEdited(scope, state, newId.toInt())
-                triggerDelayedValidation()
             } catch (e: Exception) {
                 AppLogger.e("HomeViewModel", "Error adding new house", e)
                 state.uiEvent.value = "Erro ao adicionar imóvel: ${e.message}"
                 soundManager.playWarning()
-                state.housesInFlight.update { list ->
-                    list.filter { it.listOrder != houseToInsert.listOrder || it.data != houseToInsert.data }
-                }
+                removeInFlight(state, houseToInsert)
             }
         }
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // UPDATE HOUSE
+    // ──────────────────────────────────────────────────────────────
     fun updateHouse(
         scope: CoroutineScope,
         state: HomeState,
@@ -443,19 +247,19 @@ class HouseEditDelegate @Inject constructor(
             return
         }
 
-        val houseIsWorked = (house.situation == Situation.NONE || house.situation == Situation.EMPTY)
-        val originalIsWorked = original != null && (original.situation == Situation.NONE || original.situation == Situation.EMPTY)
-
-        if (houseIsWorked && !originalIsWorked) {
-            val workedCount = latestHousesList.count { it.data == state.data.value && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
-            val isUnlocked = state.uiState.value.isManualUnlock
-            val isAdmin = state.isAdmin.value
-
-            if (workedCount >= maxOpenHouses && maxOpenHouses > 0 && !isUnlocked && !isAdmin) {
-                soundManager.playWarning()
-                state.situationLimitConfirmation.value = house
-                return
-            }
+        val limitResult = checkWorkedHouseLimitUseCase(
+            house = house,
+            original = original,
+            dayHouses = latestHousesList,
+            currentDate = state.data.value,
+            maxOpenHouses = maxOpenHouses,
+            isAdmin = state.isAdmin.value,
+            isManualUnlock = state.uiState.value.isManualUnlock
+        )
+        if (limitResult is CheckWorkedHouseLimitUseCase.Result.LimitExceeded) {
+            soundManager.playWarning()
+            state.situationLimitConfirmation.value = house
+            return
         }
 
         if (house.id == 0) {
@@ -545,7 +349,7 @@ class HouseEditDelegate @Inject constructor(
             try {
                 val currentName = state.agentName.value
                 val currentUid = state.remoteAgentUid.value ?: state.currentUserUid.value
-                
+
                 // Guard: Do not overwrite coworker/teammate identities during updates
                 val houseWithIdentity = if (house.agentUid.isBlank() || house.agentUid == currentUid) {
                     house.copy(agentName = currentName, agentUid = currentUid ?: "")
@@ -594,6 +398,9 @@ class HouseEditDelegate @Inject constructor(
         }
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // DELETE HOUSE
+    // ──────────────────────────────────────────────────────────────
     fun deleteHouse(scope: CoroutineScope, state: HomeState, house: House, latestHousesList: List<House>, isDayClosed: Boolean) {
         val roleResult = roleEnforcer.enforce(state.isSupervisor.value, state.isAdmin.value, "excluir dados remotamente")
         if (roleResult is RoleEnforcer.RoleResult.Blocked) {
@@ -641,6 +448,9 @@ class HouseEditDelegate @Inject constructor(
         }
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // RESTORE DELETED HOUSE
+    // ──────────────────────────────────────────────────────────────
     fun restoreDeletedHouse(scope: CoroutineScope, state: HomeState, latestHousesList: List<House>, isDayClosed: Boolean) {
         val lockResult = dayLockEnforcer.enforce(
             isDayClosed = isDayClosed,
@@ -672,6 +482,9 @@ class HouseEditDelegate @Inject constructor(
         }
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // REORDER / MOVE HOUSE
+    // ──────────────────────────────────────────────────────────────
     fun persistListOrder(scope: CoroutineScope, state: HomeState, reorderedList: List<House>, triggerDelayedValidation: (Long) -> Unit) {
         scope.launch {
             val adminBypass = state.isAdmin.value
@@ -709,6 +522,75 @@ class HouseEditDelegate @Inject constructor(
                 }
                 persistListOrder(scope, state, list, triggerDelayedValidation)
             }
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // PRIVATE HELPERS
+    // ──────────────────────────────────────────────────────────────
+    private fun buildAddParams(
+        state: HomeState,
+        latestHousesList: List<House>,
+        isDayClosed: Boolean,
+        afterId: Int,
+        maxOpenHouses: Int = 0
+    ): AddNewHouseUseCase.Params {
+        val currentAgentUid = state.remoteAgentUid.value ?: state.currentUserUid.value ?: ""
+        return AddNewHouseUseCase.Params(
+            agentName = state.agentName.value,
+            agentUid = currentAgentUid,
+            currentDate = state.data.value,
+            blockNumber = state.currentBlock.value,
+            streetName = state.currentStreet.value,
+            blockSequence = state.currentBlockSequence.value,
+            bairro = state.bairro.value,
+            municipio = state.municipio.value,
+            categoria = state.categoria.value,
+            zona = state.zona.value,
+            tipo = state.tipo.value,
+            ciclo = state.ciclo.value,
+            atividade = state.atividade.value,
+            afterId = afterId,
+            latestHousesList = latestHousesList,
+            isDayClosed = isDayClosed,
+            isManualUnlock = state.uiState.value.isManualUnlock,
+            isAdmin = state.isAdmin.value,
+            isSupervisor = state.isSupervisor.value,
+            maxOpenHouses = maxOpenHouses
+        )
+    }
+
+    private fun handleAddResult(result: AddNewHouseUseCase.Result, scope: CoroutineScope, state: HomeState) {
+        when (result) {
+            is AddNewHouseUseCase.Result.Success -> {
+                state.highlightedHouseId.value = result.newId.toInt()
+                scope.launch {
+                    delay(2000)
+                    if (state.highlightedHouseId.value == result.newId.toInt()) {
+                        state.highlightedHouseId.value = null
+                    }
+                }
+                soundManager.playPop()
+            }
+            is AddNewHouseUseCase.Result.Blocked -> {
+                state.uiEvent.value = result.message
+                soundManager.playWarning()
+            }
+            is AddNewHouseUseCase.Result.LimitReached -> {
+                soundManager.playWarning()
+                state.situationLimitConfirmation.value = result.houseTemplate
+            }
+            is AddNewHouseUseCase.Result.Error -> {
+                AppLogger.e("HomeViewModel", "Error adding house", result.exception)
+                state.uiEvent.value = "Erro ao inserir: ${result.exception.message}"
+                soundManager.playWarning()
+            }
+        }
+    }
+
+    private fun removeInFlight(state: HomeState, house: House) {
+        state.housesInFlight.update { list ->
+            list.filter { it.listOrder != house.listOrder || it.data != house.data }
         }
     }
 

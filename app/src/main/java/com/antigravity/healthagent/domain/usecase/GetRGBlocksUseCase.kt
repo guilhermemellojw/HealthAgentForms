@@ -6,7 +6,6 @@ import com.antigravity.healthagent.ui.home.BlockSegment
 import com.antigravity.healthagent.utils.normalize
 import com.antigravity.healthagent.utils.healBairro
 import com.antigravity.healthagent.utils.healAgentName
-import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
 
@@ -20,7 +19,7 @@ import javax.inject.Inject
  * 3. Sorting: Use createdAt to interleave multiple agents and days in chronological order.
  */
 class GetRGBlocksUseCase @Inject constructor() {
-    private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+    private val dateFormatter get() = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get()
 
     private fun getTimestamp(date: String): Long {
         if (date.isBlank()) return 0L

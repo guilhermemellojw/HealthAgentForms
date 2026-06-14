@@ -23,7 +23,6 @@ import com.antigravity.healthagent.domain.repository.BackupMetadata
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.MeshGradient
 import com.antigravity.healthagent.ui.components.PremiumCard
-import java.text.SimpleDateFormat
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -127,7 +126,7 @@ fun AdminTimelineScreen(
             onDismissRequest = { showConfirmDialog = false },
             title = { Text("Restaurar Snapshot") },
             text = {
-                val date = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(selectedBackup!!.timestamp))
+                val date = com.antigravity.healthagent.utils.DateUtils.DATE_TIME_SLASH.get().format(Date(selectedBackup!!.timestamp))
                 Text("Deseja restaurar o estado de produção de $date?\n\nIsso irá substituir os dados ATUAIS da nuvem por esta versão. O agente receberá um aviso para resetar o app local.")
             },
             confirmButton = {
@@ -152,10 +151,10 @@ fun TimelineItem(
     onRestore: () -> Unit
 ) {
     val date = remember(backup.timestamp) {
-        SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(backup.timestamp))
+        com.antigravity.healthagent.utils.DateUtils.SLASH_DATE_FULL.get().format(Date(backup.timestamp))
     }
     val time = remember(backup.timestamp) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(backup.timestamp))
+        com.antigravity.healthagent.utils.DateUtils.TIME_SLASH.get().format(Date(backup.timestamp))
     }
 
     PremiumCard(modifier = Modifier.fillMaxWidth()) {

@@ -6,6 +6,7 @@ import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.repository.AccessRequest
 import com.antigravity.healthagent.domain.repository.AgentRepository
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Source
@@ -75,19 +76,19 @@ class AccessControlRepositoryImpl @Inject constructor(
                         .get().await()
                     
                     for (realUserDoc in realUsers.documents) {
-                        if (realUserDoc.id != uid && !realUserDoc.id.startsWith("pre_")) {
+                        if (realUserDoc.id != uid && !realUserDoc.id.startsWith(com.antigravity.healthagent.utils.AppConstants.PRE_PREFIX)) {
                             val realUid = realUserDoc.id
-                            android.util.Log.i("AccessControlRepository", "Admin authorizing pre-registered profile. Auto-migrating to real UID: $realUid")
+                            AppLogger.i("AccessControlRepository", "Admin authorizing pre-registered profile. Auto-migrating to real UID: $realUid")
                             firestore.collection("users").document(realUid).update("isAuthorized", true).await()
                             authRepository.migratePreRegistration(normalizedEmail, realUid)
                         }
                     }
-                } else if (!uid.startsWith("pre_")) {
+                } else if (!uid.startsWith(com.antigravity.healthagent.utils.AppConstants.PRE_PREFIX)) {
                     // Admin authorized the real user card.
                     // Check if there is a pre-registered profile to migrate
                     val preUserDoc = firestore.collection("users").document(preDocId).get().await()
                     if (preUserDoc.exists()) {
-                        android.util.Log.i("AccessControlRepository", "Admin authorizing real user account. Auto-migrating from pre-registered profile $preDocId")
+                        AppLogger.i("AccessControlRepository", "Admin authorizing real user account. Auto-migrating from pre-registered profile $preDocId")
                         authRepository.migratePreRegistration(normalizedEmail, uid)
                     }
                 }
@@ -106,12 +107,25 @@ class AccessControlRepositoryImpl @Inject constructor(
             batch.update(userRef, "role", role.name)
             
             val adminRef = firestore.collection("admins").document(uid)
-            if (role == UserRole.ADMIN) {
-                val userDoc = userRef.get().await()
-                val email = userDoc.getString("email") ?: ""
-                batch.set(adminRef, mapOf("email" to email.trim().lowercase()))
-            } else {
-                batch.delete(adminRef)
+            val supervisorRef = firestore.collection("supervisors").document(uid)
+            
+            when (role) {
+                UserRole.ADMIN -> {
+                    val userDoc = userRef.get().await()
+                    val email = userDoc.getString("email") ?: ""
+                    batch.set(adminRef, mapOf("email" to email.trim().lowercase()))
+                    batch.delete(supervisorRef)
+                }
+                UserRole.SUPERVISOR -> {
+                    val userDoc = userRef.get().await()
+                    val email = userDoc.getString("email") ?: ""
+                    batch.set(supervisorRef, mapOf("email" to email.trim().lowercase()))
+                    batch.delete(adminRef)
+                }
+                else -> {
+                    batch.delete(adminRef)
+                    batch.delete(supervisorRef)
+                }
             }
             
             batch.commit().await()
@@ -178,7 +192,7 @@ class AccessControlRepositoryImpl @Inject constructor(
     override suspend fun deleteUser(uid: String): Result<Unit> {
         return try {
             agentRepository.purgeAgentCompletely(uid).onFailure { error -> 
-                android.util.Log.e("AccessControlRepository", "Failed to purge agent data completely: ${error.message}")
+                AppLogger.e("AccessControlRepository", "Failed to purge agent data completely: ${error.message}")
             }
 
             val batch = firestore.batch()
@@ -210,7 +224,7 @@ class AccessControlRepositoryImpl @Inject constructor(
                     userRef.set(newUser).await()
                 }
             } catch (e: Exception) {
-                android.util.Log.w("AccessControlRepository", "Could not ensure user profile: ${e.message}")
+                AppLogger.w("AccessControlRepository", "Could not ensure user profile: ${e.message}")
             }
 
             val request = mapOf(

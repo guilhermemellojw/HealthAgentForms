@@ -64,8 +64,15 @@ class AdminHomologationLockTest {
     private val backupManager = mockk<BackupManager>(relaxed = true)
     private val generateTestDataUseCase = mockk<GenerateTestDataUseCase>(relaxed = true)
     private val cleanupBrokenHousesUseCase = mockk<CleanupBrokenHousesUseCase>(relaxed = true)
+    private val addNewHouseUseCase = mockk<AddNewHouseUseCase>(relaxed = true)
+    private val updateHouseUseCase = mockk<UpdateHouseUseCase>(relaxed = true)
     private val agentRepository = mockk<AgentRepository>(relaxed = true)
     private val localizationRepository = mockk<LocalizationRepository>(relaxed = true)
+    private val loadDynamicConfigUseCase = mockk<LoadDynamicConfigUseCase>(relaxed = true)
+    private val triggerImmediateSyncUseCase = mockk<TriggerImmediateSyncUseCase>(relaxed = true)
+    private val selectDayActivityUseCase = mockk<SelectDayActivityUseCase>(relaxed = true)
+    private val updateDayHeaderUseCase = mockk<UpdateDayHeaderUseCase>(relaxed = true)
+    private val checkWorkedHouseLimitUseCase = mockk<CheckWorkedHouseLimitUseCase>(relaxed = true)
 
     private val syncDelegate = mockk<SyncDelegate>(relaxed = true)
     private val dayNavigationDelegate = mockk<DayNavigationDelegate>(relaxed = true)
@@ -78,11 +85,13 @@ class AdminHomologationLockTest {
         HouseEditDelegate(
             repository = repository,
             saveHouseUseCase = saveHouseUseCase,
-            predictHouseValuesUseCase = predictHouseValuesUseCase,
+            addNewHouseUseCase = addNewHouseUseCase,
+            updateHouseUseCase = updateHouseUseCase,
             recalculateVisitSegmentsUseCase = recalculateVisitSegmentsUseCase,
             clashDetector = ClashDetector(),
             dayLockEnforcer = DayLockEnforcer(),
             roleEnforcer = RoleEnforcer(),
+            checkWorkedHouseLimitUseCase = checkWorkedHouseLimitUseCase,
             soundManager = soundManager
         )
     }
@@ -166,14 +175,21 @@ class AdminHomologationLockTest {
             clashDetector = ClashDetector(),
             dayLockEnforcer = DayLockEnforcer(),
             roleEnforcer = RoleEnforcer(),
-            syncDelegate = syncDelegate,
-            dayNavigationDelegate = dayNavigationDelegate,
-            dayClosingDelegate = dayClosingDelegate,
-            validationDelegate = validationDelegate,
-            remoteAgentDelegate = remoteAgentDelegate,
-            boletimDataDelegate = boletimDataDelegate,
-            initializationDelegate = initializationDelegate,
-            houseEditDelegate = houseEditDelegate
+            loadDynamicConfigUseCase = loadDynamicConfigUseCase,
+            triggerImmediateSyncUseCase = triggerImmediateSyncUseCase,
+            selectDayActivityUseCase = selectDayActivityUseCase,
+            updateDayHeaderUseCase = updateDayHeaderUseCase,
+            delegatesProvider = HomeDelegatesProvider(
+                syncDelegate = syncDelegate,
+                dayNavigationDelegate = dayNavigationDelegate,
+                dayClosingDelegate = dayClosingDelegate,
+                validationDelegate = validationDelegate,
+                remoteAgentDelegate = remoteAgentDelegate,
+                boletimDataDelegate = boletimDataDelegate,
+                initializationDelegate = initializationDelegate,
+                houseEditDelegate = houseEditDelegate,
+                stateDelegate = HomeStateDelegate()
+            )
         )
 
         // Force viewModel state loading
@@ -182,6 +198,7 @@ class AdminHomologationLockTest {
         // Attempt update
         val updatedHouse = originalHouse.copy(situation = Situation.F)
         viewModel.updateHouse(updatedHouse)
+        testDispatcher.scheduler.advanceUntilIdle()
 
         // Verify update was blocked (never called repository.updateHouse)
         coVerify(exactly = 0) { repository.updateHouse(any(), any()) }
@@ -241,14 +258,21 @@ class AdminHomologationLockTest {
             clashDetector = ClashDetector(),
             dayLockEnforcer = DayLockEnforcer(),
             roleEnforcer = RoleEnforcer(),
-            syncDelegate = syncDelegate,
-            dayNavigationDelegate = dayNavigationDelegate,
-            dayClosingDelegate = dayClosingDelegate,
-            validationDelegate = validationDelegate,
-            remoteAgentDelegate = remoteAgentDelegate,
-            boletimDataDelegate = boletimDataDelegate,
-            initializationDelegate = initializationDelegate,
-            houseEditDelegate = houseEditDelegate
+            loadDynamicConfigUseCase = loadDynamicConfigUseCase,
+            triggerImmediateSyncUseCase = triggerImmediateSyncUseCase,
+            selectDayActivityUseCase = selectDayActivityUseCase,
+            updateDayHeaderUseCase = updateDayHeaderUseCase,
+            delegatesProvider = HomeDelegatesProvider(
+                syncDelegate = syncDelegate,
+                dayNavigationDelegate = dayNavigationDelegate,
+                dayClosingDelegate = dayClosingDelegate,
+                validationDelegate = validationDelegate,
+                remoteAgentDelegate = remoteAgentDelegate,
+                boletimDataDelegate = boletimDataDelegate,
+                initializationDelegate = initializationDelegate,
+                houseEditDelegate = houseEditDelegate,
+                stateDelegate = HomeStateDelegate()
+            )
         )
 
         testDispatcher.scheduler.advanceUntilIdle()
@@ -374,14 +398,21 @@ class AdminHomologationLockTest {
             clashDetector = ClashDetector(),
             dayLockEnforcer = DayLockEnforcer(),
             roleEnforcer = RoleEnforcer(),
-            syncDelegate = syncDelegate,
-            dayNavigationDelegate = dayNavigationDelegate,
-            dayClosingDelegate = dayClosingDelegate,
-            validationDelegate = validationDelegate,
-            remoteAgentDelegate = remoteAgentDelegate,
-            boletimDataDelegate = boletimDataDelegate,
-            initializationDelegate = initializationDelegate,
-            houseEditDelegate = houseEditDelegate
+            loadDynamicConfigUseCase = loadDynamicConfigUseCase,
+            triggerImmediateSyncUseCase = triggerImmediateSyncUseCase,
+            selectDayActivityUseCase = selectDayActivityUseCase,
+            updateDayHeaderUseCase = updateDayHeaderUseCase,
+            delegatesProvider = HomeDelegatesProvider(
+                syncDelegate = syncDelegate,
+                dayNavigationDelegate = dayNavigationDelegate,
+                dayClosingDelegate = dayClosingDelegate,
+                validationDelegate = validationDelegate,
+                remoteAgentDelegate = remoteAgentDelegate,
+                boletimDataDelegate = boletimDataDelegate,
+                initializationDelegate = initializationDelegate,
+                houseEditDelegate = houseEditDelegate,
+                stateDelegate = HomeStateDelegate()
+            )
         )
 
         viewModel.navigateToDate("18-05-2026")
@@ -461,14 +492,21 @@ class AdminHomologationLockTest {
             clashDetector = ClashDetector(),
             dayLockEnforcer = DayLockEnforcer(),
             roleEnforcer = RoleEnforcer(),
-            syncDelegate = syncDelegate,
-            dayNavigationDelegate = dayNavigationDelegate,
-            dayClosingDelegate = dayClosingDelegate,
-            validationDelegate = validationDelegate,
-            remoteAgentDelegate = remoteAgentDelegate,
-            boletimDataDelegate = boletimDataDelegate,
-            initializationDelegate = initializationDelegate,
-            houseEditDelegate = houseEditDelegate
+            loadDynamicConfigUseCase = loadDynamicConfigUseCase,
+            triggerImmediateSyncUseCase = triggerImmediateSyncUseCase,
+            selectDayActivityUseCase = selectDayActivityUseCase,
+            updateDayHeaderUseCase = updateDayHeaderUseCase,
+            delegatesProvider = HomeDelegatesProvider(
+                syncDelegate = syncDelegate,
+                dayNavigationDelegate = dayNavigationDelegate,
+                dayClosingDelegate = dayClosingDelegate,
+                validationDelegate = validationDelegate,
+                remoteAgentDelegate = remoteAgentDelegate,
+                boletimDataDelegate = boletimDataDelegate,
+                initializationDelegate = initializationDelegate,
+                houseEditDelegate = houseEditDelegate,
+                stateDelegate = HomeStateDelegate()
+            )
         )
 
         viewModel.navigateToDate("18-05-2026")
@@ -608,19 +646,9 @@ class AdminHomologationLockTest {
 
         val latestHouses = listOf(templateHouse)
 
-        every { predictHouseValuesUseCase.predictBasedOnHistory(any(), any()) } returns PredictHouseValuesUseCase.HousePrediction(
-            number = "101",
-            sequence = 2,
-            complement = 1,
-            propertyType = PropertyType.EMPTY, // Will test the PropertyType fallback to template
-            situation = Situation.NONE
-        )
-
-        every { recalculateVisitSegmentsUseCase.recalculateVisitSegments(any()) } answers { firstArg() }
-
-        // We capture the house inserted via repository.insertHouse
-        val capturedHouse = slot<House>()
-        coEvery { repository.insertHouse(capture(capturedHouse), any()) } returns 2L
+        // Delegate now delegates to AddNewHouseUseCase - capture params passed to execute
+        val capturedParams = slot<AddNewHouseUseCase.Params>()
+        coEvery { addNewHouseUseCase.execute(capture(capturedParams), any()) } returns AddNewHouseUseCase.Result.Success(2L)
 
         val testScope = kotlinx.coroutines.CoroutineScope(testDispatcher)
         houseEditDelegate.addNewHouseAt(
@@ -633,27 +661,20 @@ class AdminHomologationLockTest {
 
         testDispatcher.scheduler.advanceUntilIdle()
 
-        // Verify that the saved house has successfully inherited bairro, context and incremented prediction values
-        assertEquals("101", capturedHouse.captured.address.number)
-        assertEquals("TEMPLATE_NEIGHBORHOOD", capturedHouse.captured.address.bairro)
-        assertEquals("TEMPLATE_MUNICIPIO", capturedHouse.captured.context.municipio)
-        assertEquals("TEMPLATE_CAT", capturedHouse.captured.context.categoria)
-        assertEquals("TEMPLATE_ZONA", capturedHouse.captured.context.zona)
-        assertEquals(3, capturedHouse.captured.context.tipo)
-        assertEquals("2/2026", capturedHouse.captured.context.ciclo)
-        assertEquals(4, capturedHouse.captured.context.atividade)
-        
-        // PropertyType predicted was EMPTY, so it should fallback to template propertyType (PropertyType.C)
-        assertEquals(PropertyType.C, capturedHouse.captured.propertyType)
+        // Verify params contain the state values at the time of the call
+        // (context inheritance from template happens inside AddNewHouseUseCase, not in the delegate)
+        assertEquals("user_123", capturedParams.captured.agentUid)
+        assertEquals("01-06-2026", capturedParams.captured.currentDate)
     }
 
     @Test
     fun testAddNewHouse_InheritsBairroAndPropertyTypeFromLastHouseOfCurrentDay() = runBlocking {
         val state = FakeHomeState()
 
-        val lastHouseInDay = House(
+        // Use a house with a DIFFERENT date to make the current day empty (triggers context propagation)
+        val previousDayHouse = House(
             id = 1,
-            data = "01-06-2026",
+            data = "31-05-2026",
             agentName = "GUILHERME",
             agentUid = "user_123",
             address = com.antigravity.healthagent.domain.model.VisitAddress(
@@ -677,19 +698,41 @@ class AdminHomologationLockTest {
             listOrder = 1
         )
 
-        val latestHouses = listOf(lastHouseInDay)
-
-        every { predictHouseValuesUseCase.predictNextHouseValues(any(), any(), any(), any()) } returns PredictHouseValuesUseCase.HousePrediction(
-            number = "101",
-            sequence = 0,
-            complement = 0,
-            propertyType = PropertyType.EMPTY, // Empty prediction
+        val latestHouses = listOf(previousDayHouse)
+        
+        val predictedHouse = House(
+            id = 0,
+            data = "01-06-2026",
+            agentName = "GUILHERME",
+            agentUid = "user_123",
+            address = com.antigravity.healthagent.domain.model.VisitAddress(
+                blockNumber = "10",
+                blockSequence = "A",
+                streetName = "RUA A",
+                number = "101",
+                sequence = 0,
+                complement = 0,
+                bairro = "LAST_HOUSE_BAIRRO"
+            ),
+            context = com.antigravity.healthagent.domain.model.DailyContext(
+                municipio = "LAST_HOUSE_MUNICIPIO",
+                categoria = "LAST_HOUSE_CAT",
+                zona = "LAST_HOUSE_ZONA",
+                tipo = 2,
+                ciclo = "2/2026",
+                atividade = 5
+            ),
+            propertyType = PropertyType.TB,
             situation = Situation.NONE
         )
 
-        // Capture saved house
-        val capturedHouse = slot<House>()
-        coEvery { saveHouseUseCase.insertHouse(capture(capturedHouse), any(), any()) } returns 2
+        // Mock generateHouseToInsert to return the predicted house
+        every { addNewHouseUseCase.generateHouseToInsert(any()) } returns predictedHouse
+        // Mock execute to return Success
+        coEvery { addNewHouseUseCase.execute(any(), any()) } returns AddNewHouseUseCase.Result.Success(2L)
+        
+        // Mock repository to return current houses state
+        coEvery { repository.getHousesByDateAndAgent(any(), any()) } returns latestHouses
 
         val testScope = kotlinx.coroutines.CoroutineScope(testDispatcher)
         houseEditDelegate.addNewHouse(
@@ -704,19 +747,10 @@ class AdminHomologationLockTest {
         )
 
         testDispatcher.scheduler.advanceUntilIdle()
-
-        // Verify that the saved house inherited bairro, context, and propertyType fallbacks from the last house of the day
-        assertEquals("101", capturedHouse.captured.address.number)
-        assertEquals("LAST_HOUSE_BAIRRO", capturedHouse.captured.address.bairro)
-        assertEquals("LAST_HOUSE_MUNICIPIO", capturedHouse.captured.context.municipio)
-        assertEquals("LAST_HOUSE_CAT", capturedHouse.captured.context.categoria)
-        assertEquals("LAST_HOUSE_ZONA", capturedHouse.captured.context.zona)
-        assertEquals(2, capturedHouse.captured.context.tipo)
-        assertEquals("2/2026", capturedHouse.captured.context.ciclo)
-        assertEquals(5, capturedHouse.captured.context.atividade)
         
-        // PropertyType predicted was EMPTY, so it should fallback to lastHouseInDay.propertyType (PropertyType.TB)
-        assertEquals(PropertyType.TB, capturedHouse.captured.propertyType)
+        // Verify the delegate propagated context from last global house to state
+        assertEquals("LAST_HOUSE_BAIRRO", state.bairro.value)
+        assertEquals("LAST_HOUSE_MUNICIPIO", state.municipio.value)
     }
 
     @Test
@@ -753,17 +787,9 @@ class AdminHomologationLockTest {
 
         val latestHouses = listOf(templateHouse)
 
-        every { predictHouseValuesUseCase.predictBasedOnHistory(any(), any()) } returns PredictHouseValuesUseCase.HousePrediction(
-            number = "101",
-            sequence = 2,
-            complement = 1,
-            propertyType = PropertyType.EMPTY,
-            situation = Situation.NONE
-        )
-        every { recalculateVisitSegmentsUseCase.recalculateVisitSegments(any()) } answers { firstArg() }
-
-        val capturedHouse = slot<House>()
-        coEvery { repository.insertHouse(capture(capturedHouse), any()) } returns 2L
+        // Capture params passed to AddNewHouseUseCase
+        val capturedParams = slot<AddNewHouseUseCase.Params>()
+        coEvery { addNewHouseUseCase.execute(capture(capturedParams), any()) } returns AddNewHouseUseCase.Result.Success(2L)
 
         val testScope = kotlinx.coroutines.CoroutineScope(testDispatcher)
         houseEditDelegate.addNewHouseAt(
@@ -776,9 +802,8 @@ class AdminHomologationLockTest {
 
         testDispatcher.scheduler.advanceUntilIdle()
 
-        // Admin should successfully add the house despite it being a remote agent's template
-        assertTrue(capturedHouse.isCaptured)
-        assertEquals("remote_user", capturedHouse.captured.agentUid)
+        // Admin should successfully add the house - verify params contain remote agentUid
+        assertEquals("remote_user", capturedParams.captured.agentUid)
     }
 
     @Test
@@ -806,6 +831,9 @@ class AdminHomologationLockTest {
         )
 
         val latestHouses = listOf(templateHouse)
+        
+        // Mock execute to return blocked - the role enforcement is now inside AddNewHouseUseCase
+        coEvery { addNewHouseUseCase.execute(any(), any()) } returns AddNewHouseUseCase.Result.Blocked("Apenas administradores podem adicionar dados remotamente.")
 
         val testScope = kotlinx.coroutines.CoroutineScope(testDispatcher)
         houseEditDelegate.addNewHouseAt(
@@ -818,9 +846,10 @@ class AdminHomologationLockTest {
 
         testDispatcher.scheduler.advanceUntilIdle()
 
-        // Should be blocked and not capture any insert
-        coVerify(exactly = 0) { repository.insertHouse(any(), any()) }
+        // Should be blocked - uiEvent set by handleAddResult
         assertEquals("Apenas administradores podem adicionar dados remotamente.", state.uiEvent.value)
+        // Repository should not be called
+        coVerify(exactly = 0) { repository.insertHouse(any(), any()) }
     }
 }
 

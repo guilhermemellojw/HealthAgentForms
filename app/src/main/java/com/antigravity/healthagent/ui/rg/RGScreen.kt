@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.ui.state.SyncUiState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -122,7 +123,7 @@ fun RGScreen(
                                  }
                                  sharePdf(context, file)
                              } catch (e: Exception) {
-                                 e.printStackTrace()
+                                 AppLogger.e("RGScreen", "Erro ao gerar PDF", e)
                                  Toast.makeText(context, "Erro ao gerar PDF: ${e.message}", Toast.LENGTH_SHORT).show()
                              }
                         }

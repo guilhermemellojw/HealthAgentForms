@@ -3,6 +3,7 @@ package com.antigravity.healthagent.data.repository
 import com.antigravity.healthagent.data.local.dao.HouseDao
 import com.antigravity.healthagent.data.local.dao.DayActivityDao
 import androidx.room.withTransaction
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.DayActivity
 import kotlinx.coroutines.flow.Flow
@@ -17,7 +18,7 @@ import com.antigravity.healthagent.data.local.model.TombstoneType
 import com.antigravity.healthagent.utils.withRetry
 import com.antigravity.healthagent.utils.normalize
 import com.antigravity.healthagent.utils.toDashDate
-import com.antigravity.healthagent.data.local.model.heal
+import com.antigravity.healthagent.domain.model.heal
 import com.antigravity.healthagent.data.local.model.Situation
 
 class HouseRepositoryImpl @Inject constructor(
@@ -32,15 +33,6 @@ class HouseRepositoryImpl @Inject constructor(
     private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
         return database.withRetry {
             database.withTransaction { block() }
-        }
-    }
-
-    private suspend fun ensureDayNotLocked(originalDate: String, agentUid: String? = "", force: Boolean = false) {
-        if (force) return // Admin bypass
-        val date = originalDate.toDashDate()
-        val activity = dayActivityDao.getDayActivity(date, agentUid ?: "")
-        if (activity?.isClosed == true && !activity.isManualUnlock) {
-            throw IllegalStateException("Este dia ($date) está bloqueado para edições (Auditoria Concluída).")
         }
     }
 
@@ -79,7 +71,7 @@ class HouseRepositoryImpl @Inject constructor(
     
     private fun healOrphanHouse(house: House, correctUid: String): House {
         if (house.agentUid.isBlank() && correctUid.isNotBlank()) {
-            android.util.Log.i("HouseRepository", "Healing orphan house ${house.id} with UID $correctUid")
+            AppLogger.i("HouseRepository", "Healing orphan house ${house.id} with UID $correctUid")
             return house.copy(agentUid = correctUid, isSynced = false)
         }
         return house
@@ -94,34 +86,12 @@ class HouseRepositoryImpl @Inject constructor(
     override fun getParticipatoryHousesFlow(agentUid: String): Flow<List<House>> = houseDao.getParticipatoryHousesFlow(agentUid)
 
     override suspend fun insertHouse(house: House, force: Boolean): Long {
-        ensureDayNotLocked(house.data, house.agentUid, force)
         val id = runInTransactionWithRetry {
-            val clashCount = houseDao.checkNaturalKeyConflict(
-                excludeId = 0,
-                date = house.data,
-                agentUid = house.agentUid,
-                blockNumber = house.address.blockNumber,
-                blockSequence = house.address.blockSequence,
-                streetName = house.address.streetName,
-                number = house.address.number,
-                sequence = house.address.sequence,
-                complement = house.address.complement,
-                bairro = house.address.bairro,
-                visitSegment = house.visitSegment
-            )
-            if (clashCount > 0 && !force) {
-                throw IllegalStateException("Este endereço (${house.address.streetName}, ${house.address.number}) já existe neste bairro/quarteirão para este dia.")
-            }
-
-            // Healing logic: Prevent EMPTY from being stored locally
-            val finalSituation = house.situation.heal()
-
             // CRITICAL: Cleanup any stale local tombstone for this same house key
             tombstoneDao.deleteByNaturalKey(house.generateNaturalKey(), house.agentUid)
             
             // ADMIN AUTHORITY: Mark as edited by admin if forced
             val houseToInsert = house.copy(
-                situation = finalSituation,
                 isSynced = false, 
                 editedByAdmin = force,
                 lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
@@ -135,7 +105,6 @@ class HouseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun updateHouse(house: House, force: Boolean) {
-        ensureDayNotLocked(house.data, house.agentUid, force)
         runInTransactionWithRetry {
             // Check for potential clashes, but don't block manual correction (allow temporary duplicates to be flagged in UI)
             val clashCount = houseDao.checkNaturalKeyConflict(
@@ -152,7 +121,7 @@ class HouseRepositoryImpl @Inject constructor(
                 visitSegment = house.visitSegment
             )
             if (clashCount > 0) {
-                android.util.Log.w("HouseRepository", "Manual update created an address conflict for house ${house.id}. UI will flag this.")
+                AppLogger.w("HouseRepository", "Manual update created an address conflict for house ${house.id}. UI will flag this.")
             }
 
             val existing = houseDao.getHouseById(house.id.toLong())
@@ -166,11 +135,7 @@ class HouseRepositoryImpl @Inject constructor(
                 tombstoneDao.deleteByNaturalKey(newKey, house.agentUid)
             }
 
-            // Healing logic: Prevent EMPTY from being stored locally
-            val finalSituation = house.situation.heal()
-
             houseDao.updateHouse(house.copy(
-                situation = finalSituation,
                 isSynced = false, 
                 editedByAdmin = force,
                 lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
@@ -199,12 +164,6 @@ class HouseRepositoryImpl @Inject constructor(
 
     override suspend fun updateHouses(houses: List<House>, force: Boolean) {
         if (houses.isEmpty()) return
-        
-        // Ensure all affected days are not locked
-        val distinctContexts = houses.map { Triple(it.data, it.agentName, it.agentUid) }.distinct()
-        distinctContexts.forEach { (date, _, uid) ->
-            ensureDayNotLocked(date, uid, force)
-        }
         
         runInTransactionWithRetry {
             val existingHouses = houseDao.getHousesByIds(houses.map { it.id })
@@ -236,7 +195,7 @@ class HouseRepositoryImpl @Inject constructor(
                 )
                 // We log it but don't throw, letting the UI validation (Red Highlight) handle the user notification.
                 if (clashCount > 0) {
-                    android.util.Log.w("HouseRepository", "Batch update created a temporary address conflict for house ${house.id}")
+                    AppLogger.w("HouseRepository", "Batch update created a temporary address conflict for house ${house.id}")
                 }
 
                 val existing = existingMap[house.id]
@@ -250,25 +209,20 @@ class HouseRepositoryImpl @Inject constructor(
                     tombstoneDao.deleteByNaturalKey(newKey, house.agentUid)
                 }
             }
-            val healedHouses = changedHouses.map { house ->
-                val finalSituation = house.situation.heal()
-
+            val preparedHouses = changedHouses.map { house ->
                 house.copy(
-                    situation = finalSituation,
                     isSynced = false, 
                     editedByAdmin = force,
                     lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                 )
             }
-            houseDao.upsertHouses(healedHouses)
+            houseDao.upsertHouses(preparedHouses)
         }
         syncSchedulerProvider.get().scheduleSync()
     }
 
     override suspend fun updateHousesDate(oldDate: String, newDate: String, agentUid: String, force: Boolean) {
         val finalUid = agentUid
-        ensureDayNotLocked(oldDate, finalUid, force)
-        ensureDayNotLocked(newDate, finalUid, force)
         
         runInTransactionWithRetry {
             val houses = houseDao.getHousesByDateAndAgent(oldDate, finalUid)
@@ -281,7 +235,6 @@ class HouseRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteHouse(house: House, force: Boolean) {
-        ensureDayNotLocked(house.data, house.agentUid, force)
         runInTransactionWithRetry {
             houseDao.deleteHouse(house)
             tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = house.generateNaturalKey(), agentUid = house.agentUid, dataDate = house.data))
@@ -406,7 +359,6 @@ class HouseRepositoryImpl @Inject constructor(
     override suspend fun deleteProduction(originalDate: String, agentUid: String?, force: Boolean) {
         val date = originalDate.toDashDate()
         val finalUid = agentUid ?: ""
-        ensureDayNotLocked(date, finalUid, force)
         runInTransactionWithRetry {
             // 1. Get all houses for this date to record tombstones
             val housesToDelete = houseDao.getHousesByDateAndAgent(date, finalUid)
@@ -429,8 +381,6 @@ class HouseRepositoryImpl @Inject constructor(
     override suspend fun deleteByAgentAndDates(dates: List<String>, agentUid: String?, force: Boolean) {
         val normalizedDates = dates.map { it.toDashDate() }
         val finalUid = agentUid ?: ""
-        // Lock Check: Verify all dates
-        normalizedDates.forEach { ensureDayNotLocked(it, finalUid, force) }
 
         runInTransactionWithRetry {
             // 1. Get all houses and activities for these dates to record tombstones
@@ -503,7 +453,7 @@ class HouseRepositoryImpl @Inject constructor(
             try {
                 database.openHelper.writableDatabase.execSQL("DELETE FROM sqlite_sequence")
             } catch (e: Exception) {
-                android.util.Log.w("HouseRepository", "Failed to reset sqlite_sequence: ${e.message}")
+                AppLogger.w("HouseRepository", "Failed to reset sqlite_sequence: ${e.message}")
             }
         }
     }
@@ -550,7 +500,7 @@ class HouseRepositoryImpl @Inject constructor(
                                 val conflictHasWork = conflict.treatment.a1 > 0 || conflict.treatment.a2 > 0 || conflict.treatment.comFoco || conflict.observation.isNotBlank()
                                 
                                 if (localHasWork && !conflictHasWork) {
-                                    android.util.Log.i("HouseRepository", "Migration: Overwriting empty cloud skeleton with local production for ${house.id}")
+                                    AppLogger.i("HouseRepository", "Migration: Overwriting empty cloud skeleton with local production for ${house.id}")
                                     houseDao.deleteHouse(conflict)
                                     houseDao.updateHouseIdentity(house.id, targetUid, agentName)
                                 } else {
@@ -587,7 +537,7 @@ class HouseRepositoryImpl @Inject constructor(
                 // 3. Final Deduplication Pass
                 deduplicateAgentData(targetUid)
             } catch (e: Exception) {
-                android.util.Log.e("HouseRepository", "Error during migration", e)
+                AppLogger.e("HouseRepository", "Error during migration", e)
             }
         }
     }
@@ -628,7 +578,7 @@ class HouseRepositoryImpl @Inject constructor(
                 }.toSet()
                 val safeToDeleteDedup = toDelete.filter { it.data.toDashDate() !in closedDatesForDedup }
                 if (closedDatesForDedup.isNotEmpty()) {
-                    android.util.Log.w("HouseRepository", "Dedup: Preserved ${toDelete.size - safeToDeleteDedup.size} duplicates in ${closedDatesForDedup.size} closed days.")
+                    AppLogger.w("HouseRepository", "Dedup: Preserved ${toDelete.size - safeToDeleteDedup.size} duplicates in ${closedDatesForDedup.size} closed days.")
                 }
                 safeToDeleteDedup.forEach { houseDao.deleteHouse(it) }
                 if (safeToDeleteDedup.isNotEmpty()) {
@@ -661,7 +611,7 @@ class HouseRepositoryImpl @Inject constructor(
             }
             
             if (toDelete.isNotEmpty()) {
-                android.util.Log.i("HouseRepository", "Surgical clean: removing ${toDelete.size} identity duplicates from $inspectedUid")
+                AppLogger.i("HouseRepository", "Surgical clean: removing ${toDelete.size} identity duplicates from $inspectedUid")
                 toDelete.forEach { houseDao.deleteHouse(it) }
             }
 

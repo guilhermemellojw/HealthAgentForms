@@ -3,6 +3,8 @@ package com.antigravity.healthagent.ui.home.delegates
 import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
+import com.antigravity.healthagent.domain.usecase.CleanMisattributedDataUseCase
+import com.antigravity.healthagent.domain.usecase.DeduplicateAgentDataUseCase
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.utils.SoundManager
 import com.antigravity.healthagent.domain.logger.AppLogger
@@ -17,7 +19,9 @@ class RemoteAgentDelegate @Inject constructor(
     private val repository: HouseRepository,
     private val syncRepository: SyncRepository,
     private val settingsManager: SettingsManager,
-    private val soundManager: SoundManager
+    private val soundManager: SoundManager,
+    private val cleanMisattributedDataUseCase: CleanMisattributedDataUseCase,
+    private val deduplicateAgentDataUseCase: DeduplicateAgentDataUseCase
 ) {
 
     fun setRemoteAgent(
@@ -48,7 +52,7 @@ class RemoteAgentDelegate @Inject constructor(
 
             // SURGICAL FIX: Immediately remove any of my work that might be misattributed to this agent
             scope.launch(Dispatchers.IO) {
-                repository.cleanMisattributedData(agent.uid, state.currentUserUid.value ?: "")
+                cleanMisattributedDataUseCase(agent.uid, state.currentUserUid.value ?: "")
             }
         } else {
             // Restoring local state
@@ -105,11 +109,11 @@ class RemoteAgentDelegate @Inject constructor(
                 val currentUid = state.remoteAgentUid.value ?: state.currentUserUid.value
 
                 if (currentAgent.isNotBlank() && (currentUid ?: "").isNotBlank()) {
-                    repository.deduplicateAgentData(currentUid ?: "")
+                    deduplicateAgentDataUseCase(currentUid ?: "")
 
                     // If we are inspecting, also do a cross-identity surgical clean
                     if (state.remoteAgentUid.value != null) {
-                        repository.cleanMisattributedData(currentUid ?: "", state.currentUserUid.value ?: "")
+                        cleanMisattributedDataUseCase(currentUid ?: "", state.currentUserUid.value ?: "")
                     }
 
                     state.uiEvent.value = "Deduplicação concluída. Imóveis conflitantes removidos."

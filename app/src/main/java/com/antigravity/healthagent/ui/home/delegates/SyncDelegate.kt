@@ -15,9 +15,8 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
+import com.antigravity.healthagent.utils.DateUtils
 import java.util.Date
-import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,7 +29,7 @@ class SyncDelegate @Inject constructor(
     private val generateTestDataUseCase: GenerateTestDataUseCase,
     private val soundManager: SoundManager
 ) {
-    private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+    private val dateFormatter get() = DateUtils.DASH_DATE.get()
 
     fun syncDataToCloud(scope: CoroutineScope, state: HomeState, maxOpenHouses: Int) {
         if (state.pendingUpdateDrafts.value.isNotEmpty()) {

@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.ui.home.HomeViewModel
 import com.antigravity.healthagent.ui.home.BoletimSummary
@@ -87,7 +88,7 @@ fun BoletimScreen(
             if (parts.size == 3) {
                 calendar.set(parts[2].toInt(), parts[1].toInt() - 1, parts[0].toInt())
             }
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) { AppLogger.e("BoletimScreen", "Erro no DatePickerDialog", e) }
 
         DatePickerDialog(
             context,
@@ -127,7 +128,7 @@ fun BoletimScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var deleteDate by remember { mutableStateOf("") }
     
-    val dateSdf = remember { java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US) }
+    val dateSdf = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get()
     
     fun isDateOld(dateStr: String): Boolean {
         return try {
@@ -462,7 +463,7 @@ fun BoletimScreen(
                                                 context.startActivity(Intent.createChooser(intent, "Compartilhar FAD"))
                                             } catch (e: Exception) {
                                                 scope.launch { snackbarHostState.showSnackbar("Erro ao gerar PDF") }
-                                                e.printStackTrace()
+                                                AppLogger.e("BoletimScreen", "Erro ao gerar PDF", e)
                                             }
                                         }
                                     }
@@ -489,7 +490,7 @@ fun BoletimScreen(
                                                 shareToWhatsApp(context, shareName, summary.date, houses)
                                             } catch (e: Exception) {
                                                 Toast.makeText(context, "Erro ao compartilhar.", Toast.LENGTH_SHORT).show()
-                                                e.printStackTrace()
+                                                AppLogger.e("BoletimScreen", "Erro ao compartilhar WhatsApp", e)
                                             }
                                         }
                                     }

@@ -45,7 +45,7 @@ class DayClosingDelegate @Inject constructor(
             val dbHouses = repository.getHousesByDateAndAgent(state.data.value, uid)
             val workedCount = dbHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
 
-            val todayStr = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US).format(java.util.Date())
+            val todayStr = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get().format(java.util.Date())
             val isToday = state.data.value == todayStr
 
             if (isToday && workedCount < maxOpenHouses) {

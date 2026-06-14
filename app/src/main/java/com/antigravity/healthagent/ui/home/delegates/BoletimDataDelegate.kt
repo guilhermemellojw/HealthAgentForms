@@ -14,9 +14,8 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
-import java.text.SimpleDateFormat
+import com.antigravity.healthagent.utils.DateUtils
 import java.util.Date
-import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 

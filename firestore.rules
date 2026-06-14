@@ -50,9 +50,9 @@ service cloud.firestore {
     }
     
     // 3. Permissão de Grupo de Coleções (Collection Group)
-    // Permite que qualquer agente logado execute a busca unificada por bairros/quarteirões.
+    // Permite apenas que a equipe Staff execute a busca unificada por bairros/quarteirões.
     match /{path=**}/houses/{houseId} {
-      allow read: if isSignedIn();
+      allow read: if isStaff();
     }
 
     // 4. Catch-all para Admin

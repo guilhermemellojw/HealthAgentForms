@@ -30,7 +30,7 @@ class BackupRepositoryImpl @Inject constructor(
             val tempFile = File(context.cacheDir, "temp_backup_$timestamp.json")
 
             // 1. Serialize to temp file
-            backupManager.exportToFile(tempFile, data)
+            backupManager.exportToFile(context, tempFile, data)
 
             // 2. Upload to Firebase Storage
             val storageRef = storage.reference.child(storagePath)

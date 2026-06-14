@@ -3,6 +3,7 @@ package com.antigravity.healthagent.domain.usecase
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.toDashDate
+import com.antigravity.healthagent.domain.logger.AppLogger
 import javax.inject.Inject
 
 class PerformLocalDatabaseMigrationUseCase @Inject constructor(
@@ -32,7 +33,7 @@ class PerformLocalDatabaseMigrationUseCase @Inject constructor(
         val housesToUpdate = allHouses.filter { it.data.contains("/") }
         
         if (housesToUpdate.isNotEmpty()) {
-            android.util.Log.i("HouseManagement", "Migrating ${housesToUpdate.size} legacy date formats (/) to standard (-)")
+            AppLogger.i("HouseManagement", "Migrating ${housesToUpdate.size} legacy date formats (/) to standard (-)")
             val updatedHouses = housesToUpdate.map { it.copy(data = it.data.toDashDate()) }
             repository.updateHouses(updatedHouses, force = true)
         }
@@ -41,7 +42,7 @@ class PerformLocalDatabaseMigrationUseCase @Inject constructor(
         val activitiesToUpdate = allActivities.filter { it.date.contains("/") }
         
         if (activitiesToUpdate.isNotEmpty()) {
-             android.util.Log.i("HouseManagement", "Migrating ${activitiesToUpdate.size} legacy activity dates (/) to standard (-)")
+             AppLogger.i("HouseManagement", "Migrating ${activitiesToUpdate.size} legacy activity dates (/) to standard (-)")
              activitiesToUpdate.forEach { activity ->
                  val newDate = activity.date.toDashDate()
                   repository.runInTransaction {

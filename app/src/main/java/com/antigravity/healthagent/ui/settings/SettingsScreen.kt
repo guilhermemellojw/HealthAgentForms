@@ -36,6 +36,7 @@ import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.MeshGradient
 import com.antigravity.healthagent.ui.components.SyncStatusOverlay
+import com.antigravity.healthagent.ui.components.settings.*
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -148,7 +149,7 @@ fun SettingsScreen(
                 TextButton(onClick = {
                     val selection = datePickerState.selectedDateMillis
                     if (selection != null) {
-                        val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US)
+                        val sdf = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get()
                         selectedCleanupDate = sdf.format(java.util.Date(selection))
                         showCleanupPicker = false
                         showCleanupConfirm = true
@@ -637,180 +638,4 @@ fun SettingsScreen(
     }
 }
 
-@Composable
-fun SettingsSection(
-    title: String,
-    icon: ImageVector,
-    isSolarMode: Boolean = false,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    PremiumCard(
-        modifier = Modifier.fillMaxWidth(),
-        isSolarMode = isSolarMode
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 16.dp)) {
-                Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            }
-            content()
-        }
-    }
-}
 
-@Composable
-fun SoundSelectionGroup(
-    title: String,
-    description: String,
-    popSound: String,
-    successSound: String,
-    celebrationSound: String,
-    warningSound: String,
-    expandedCategory: String?,
-    onExpandToggle: (String) -> Unit,
-    onSoundSelect: (String, String) -> Unit,
-    onSystemPickerClick: (com.antigravity.healthagent.utils.SoundCategory, String) -> Unit,
-    onCustomFileClick: (com.antigravity.healthagent.utils.SoundCategory) -> Unit,
-    onTestSound: (String) -> Unit,
-    context: android.content.Context,
-    viewModel: SettingsViewModel
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(bottom = 16.dp)
-    ) {
-        Icon(Icons.Default.NotificationsActive, null, tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.width(12.dp))
-        Column {
-            Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(text = description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-    
-    Spacer(modifier = Modifier.height(16.dp))
-    
-    val sounds = listOf(
-        Triple("POP", "Som de Clique (Adicionar Imóvel)", popSound),
-        Triple("SUCCESS", "Som de Sucesso (Fechar Dia)", successSound),
-        Triple("CELEBRATION", "Som de Celebração (Meta)", celebrationSound),
-        Triple("WARNING", "Som de Alerta (Erros)", warningSound)
-    )
-    
-    sounds.forEachIndexed { index, (id, label, currentUri) ->
-        val isExpanded = expandedCategory == id
-        val currentTitle = remember(currentUri) { viewModel.getSoundTitle(currentUri, context) }
-        
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .clickable { onExpandToggle(id) }
-                .padding(vertical = 8.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                    Text(currentTitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                }
-                Icon(
-                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-            
-            if (isExpanded) {
-                Column(modifier = Modifier.padding(top = 8.dp).animateContentSize()) {
-                    Row(modifier = Modifier.fillMaxWidth().clickable { onSoundSelect(id, "SILENT") }, verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = currentUri == "SILENT", onClick = { onSoundSelect(id, "SILENT") })
-                        Text("Silencioso", style = MaterialTheme.typography.bodyMedium)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth().clickable { 
-                        onSystemPickerClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id), currentUri) 
-                    }, verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = currentUri.startsWith("content://"), onClick = { 
-                            onSystemPickerClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id), currentUri) 
-                        })
-                        Text("Som do Sistema", style = MaterialTheme.typography.bodyMedium)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth().clickable { 
-                        onCustomFileClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id)) 
-                    }, verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = currentUri.startsWith("file://"), onClick = { 
-                            onCustomFileClick(com.antigravity.healthagent.utils.SoundCategory.valueOf(id)) 
-                        })
-                        Text("Personalizado", style = MaterialTheme.typography.bodyMedium)
-                    }
-                    
-                    if (currentUri != "SILENT") {
-                        TextButton(
-                            onClick = { onTestSound(currentUri) },
-                            modifier = Modifier.align(Alignment.End)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Testar")
-                        }
-                    }
-                }
-            }
-        }
-        
-        if (index < sounds.size - 1) {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-        }
-    }
-}
-
-@Composable
-fun SettingsItemCard(
-    onClick: () -> Unit,
-    headline: String,
-    supportingText: String,
-    leadingIcon: ImageVector,
-    isSolarMode: Boolean = false,
-    color: Color = MaterialTheme.colorScheme.primary,
-    textColor: Color = MaterialTheme.colorScheme.onSurface,
-    badgeCount: Int? = null
-) {
-    val containerColor = if (isSolarMode) {
-        MaterialTheme.colorScheme.surface
-    } else {
-        color.copy(alpha = 0.08f)
-    }
-
-    val borderColor = if (isSolarMode) {
-        color.copy(alpha = 0.5f)
-    } else {
-        color.copy(alpha = 0.15f)
-    }
-
-    Surface(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onClick() },
-        color = containerColor,
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, borderColor)
-    ) {
-        ListItem(
-            headlineContent = { Text(headline, fontWeight = FontWeight.Bold, color = textColor) },
-            supportingContent = { Text(supportingText, style = MaterialTheme.typography.bodySmall) },
-            leadingContent = { Icon(leadingIcon, null, tint = color) },
-            trailingContent = {
-                if (badgeCount != null) {
-                    Badge(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError
-                    ) {
-                        Text(badgeCount.toString())
-                    }
-                }
-            },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-        )
-    }
-}

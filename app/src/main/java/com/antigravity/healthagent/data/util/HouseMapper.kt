@@ -4,6 +4,7 @@ import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.google.firebase.firestore.DocumentSnapshot
 import com.antigravity.healthagent.utils.normalize
 import com.antigravity.healthagent.utils.formatStreetName
@@ -11,13 +12,11 @@ import com.antigravity.healthagent.utils.toDashDate
 
 fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): House? {
     return try {
-        // 1. Manually extract critical metadata to bypass @Exclude and handle mismatches
         val firestoreLastUpdated = this.getTimestamp("lastUpdated")?.toDate()?.time ?: 0L
         val rawData = (this.getString("data") ?: "").replace("/", "-")
         val sourceName = this.getString("agentName") ?: agentName
         val rawAgentName = normalizeAgentName(sourceName)
         
-        // 2. Robust Construction: Always construct manually to ensure @Embedded Room fields map correctly
         val baseHouse = House(
             address = com.antigravity.healthagent.domain.model.VisitAddress(
                 blockNumber = (this.getString("blockNumber") ?: "").normalize(),
@@ -67,9 +66,8 @@ fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): Hous
                 focusCaptureTime = (this.get("focusCaptureTime") as? Number)?.toLong()
             ),
             editedByAdmin = this.getBoolean("editedByAdmin") ?: false
-        ).copy(id = 0) // RESET ID to allow local auto-generation
+        ).copy(id = 0)
 
-        // Extract createdAt robustly
         val createdAtRaw = this.get("createdAt")
         val createdAt = when(createdAtRaw) {
             is com.google.firebase.Timestamp -> createdAtRaw.toDate().time
@@ -77,7 +75,6 @@ fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): Hous
             else -> baseHouse.createdAt
         }
 
-        // Healing logic: Default EMPTY to NONE for situation
         val rawSituation = this.getString("situation")
         val coercedSituation = coerceSituation(rawSituation)
         val finalSituation = if (coercedSituation == Situation.EMPTY) Situation.NONE else coercedSituation
@@ -85,7 +82,7 @@ fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): Hous
         val finalHouse = baseHouse.apply {
             this.cloudId = this@toHouseSafe.id
         }.copy(
-            agentUid = agentUid, // FORÇA o uso do UID atual/ativo para evitar que dados legados fiquem invisíveis
+            agentUid = agentUid,
             agentName = rawAgentName,
             data = rawData,
             createdAt = createdAt,
@@ -96,20 +93,19 @@ fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): Hous
             this.cloudId = this@toHouseSafe.id
         }
 
-        // SURGICAL FILTER: Discard "Zombies" (Houses without core address info)
         val isBroken = finalHouse.address.streetName.isBlank() && 
                        finalHouse.address.bairro.isBlank() && 
                        finalHouse.address.number.isBlank() && 
                        finalHouse.address.sequence <= 0
         
         if (isBroken) {
-            android.util.Log.w("FirestoreMapper", "Discarded broken house from cloud: ${this.id}")
+            AppLogger.w("HouseMapper", "Discarded broken house from cloud: ${this.id}")
             return null
         }
 
         return finalHouse
     } catch (e: Exception) {
-        android.util.Log.e("FirestoreMapper", "toHouseSafe CRITICAL error for doc ${this.id}: ${e.message}")
+        AppLogger.e("HouseMapper", "toHouseSafe CRITICAL error for doc ${this.id}: ${e.message}")
         null
     }
 }
@@ -140,22 +136,72 @@ fun DocumentSnapshot.toDayActivitySafe(uid: String, agentName: String = ""): Day
             isClosed = isClosed,
             isManualUnlock = isManualUnlock,
             lastUpdated = lastUpdated, 
-            agentUid = uid, // FORÇA o uso do UID atual/ativo
+            agentUid = uid,
             agentName = finalAgentName,
             editedByAdmin = this.getBoolean("editedByAdmin") ?: activity.editedByAdmin
         )
     } catch (e: Exception) {
-        android.util.Log.e("FirestoreMapper", "toDayActivitySafe: Error mapping ${this.id}", e)
+        AppLogger.e("HouseMapper", "toDayActivitySafe: Error mapping ${this.id}", e)
         null
     }
 }
 
+fun House.toFirestoreMap(): Map<String, Any?> {
+    return mapOf(
+        "blockNumber" to address.blockNumber,
+        "streetName" to address.streetName,
+        "number" to address.number,
+        "sequence" to address.sequence,
+        "complement" to address.complement,
+        "bairro" to address.bairro,
+        "blockSequence" to address.blockSequence,
+        "propertyType" to propertyType.name,
+        "situation" to situation.name,
+        "municipio" to context.municipio,
+        "categoria" to context.categoria,
+        "zona" to context.zona,
+        "tipo" to context.tipo,
+        "data" to data.toDashDate(),
+        "ciclo" to context.ciclo,
+        "atividade" to context.atividade,
+        "agentName" to agentName.uppercase(),
+        "a1" to treatment.a1, "a2" to treatment.a2, "b" to treatment.b, "c" to treatment.c,
+        "d1" to treatment.d1, "d2" to treatment.d2, "e" to treatment.e,
+        "eliminados" to treatment.eliminados,
+        "larvicida" to treatment.larvicida,
+        "comFoco" to treatment.comFoco,
+        "localidadeConcluida" to localidadeConcluida,
+        "quarteiraoConcluido" to quarteiraoConcluido,
+        "listOrder" to listOrder,
+        "visitSegment" to visitSegment,
+        "agentUid" to agentUid,
+        "lastSyncTime" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
+        "createdAt" to createdAt,
+        "observation" to observation,
+        "latitude" to geo.latitude,
+        "longitude" to geo.longitude,
+        "focusCaptureTime" to geo.focusCaptureTime,
+        "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+        "editedByAdmin" to editedByAdmin
+    )
+}
+
+fun DayActivity.toFirestoreMap(): Map<String, Any?> {
+    return mapOf(
+        "date" to date.replace("/", "-"),
+        "status" to status,
+        "isClosed" to isClosed,
+        "isManualUnlock" to isManualUnlock,
+        "agentName" to agentName.uppercase(),
+        "agentUid" to agentUid,
+        "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+        "editedByAdmin" to editedByAdmin
+    )
+}
+
 private fun normalizeAgentName(name: String): String {
     if (name.isBlank()) return ""
-    // If it's an email, take the part before @ to avoid displaying emails as names in the UI
     val effectiveName = if (name.contains("@")) name.substringBefore("@") else name
-    
-    // SURGICAL FIX: Stop stripping accents from names.
     return effectiveName.trim()
         .uppercase()
         .replace(Regex("\\s+"), " ")

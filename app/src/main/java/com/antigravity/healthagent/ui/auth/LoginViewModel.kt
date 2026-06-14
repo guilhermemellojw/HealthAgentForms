@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.antigravity.healthagent.domain.repository.AuthRepository
 import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.AccessRequest
+import com.antigravity.healthagent.domain.logger.AppLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,7 +47,7 @@ class LoginViewModel @Inject constructor(
                         try {
                             syncRepository.pullCloudDataToLocal()
                         } catch (e: Exception) {
-                            android.util.Log.e("LoginViewModel", "Background sync failed", e)
+                            AppLogger.e("LoginViewModel", "Background sync failed", e)
                         }
                     }
                 }

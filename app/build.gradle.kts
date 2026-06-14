@@ -37,7 +37,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -49,6 +50,7 @@ android {
         jvmTarget = "17"
     }
     buildFeatures {
+        buildConfig = true
         compose = true
     }
     composeOptions {
@@ -74,6 +76,10 @@ android {
             isReturnDefaultValues = true
         }
     }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -141,6 +147,8 @@ dependencies {
     testImplementation("androidx.test:rules:1.6.1")
     testImplementation("androidx.test.ext:junit-ktx:1.2.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    testImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
     androidTestImplementation(platform("androidx.compose:compose-bom:2023.08.00"))
@@ -160,6 +168,9 @@ dependencies {
     // Splash Screen
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("com.google.android.material:material:1.11.0")
+
+    // Security & Cryptography
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 }
     // Custom task for data audit (local export + comparison)
     val exportLocalDb by tasks.registering(Exec::class) {

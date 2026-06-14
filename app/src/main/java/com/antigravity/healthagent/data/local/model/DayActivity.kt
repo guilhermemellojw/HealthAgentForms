@@ -22,17 +22,4 @@ data class DayActivity(
      */
     @get:com.google.firebase.firestore.Exclude
     @ColumnInfo(defaultValue = "0") val lastUpdated: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
-) {
-    fun toFirestoreMap(): Map<String, Any?> {
-        return mapOf(
-            "date" to date.replace("/", "-"),
-            "status" to status,
-            "isClosed" to isClosed,
-            "isManualUnlock" to isManualUnlock,
-            "agentName" to agentName.uppercase(),
-            "agentUid" to agentUid,
-            "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-            "editedByAdmin" to editedByAdmin
-        )
-    }
-}
+)

@@ -2,9 +2,10 @@ package com.antigravity.healthagent.domain.usecase
 
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.domain.model.heal
 import com.antigravity.healthagent.domain.model.TreatmentData
 import com.antigravity.healthagent.domain.repository.HouseRepository
-import com.antigravity.healthagent.data.repository.StreetRepository
+import com.antigravity.healthagent.domain.repository.StreetRepository
 import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.normalize
 import com.antigravity.healthagent.utils.removeAccents
@@ -16,10 +17,12 @@ import javax.inject.Inject
 class SaveHouseUseCase @Inject constructor(
     private val repository: HouseRepository,
     private val streetRepository: StreetRepository,
-    private val recalculateVisitSegmentsUseCase: RecalculateVisitSegmentsUseCase
+    private val recalculateVisitSegmentsUseCase: RecalculateVisitSegmentsUseCase,
+    private val dayLockEnforcerUseCase: DayLockEnforcerUseCase
 ) {
 
     suspend fun insertHouse(house: House, allHouses: List<House>, force: Boolean = false): Long = withContext(Dispatchers.IO) {
+        dayLockEnforcerUseCase.ensureDayNotLocked(house.data, house.agentUid, force)
         repository.runInTransaction {
             val sanitized = sanitizeHouse(house)
             val id = repository.insertHouse(sanitized, force)
@@ -35,6 +38,7 @@ class SaveHouseUseCase @Inject constructor(
     }
 
     suspend fun updateHouse(house: House, allHouses: List<House>, force: Boolean = false) = withContext(Dispatchers.IO) {
+        dayLockEnforcerUseCase.ensureDayNotLocked(house.data, house.agentUid, force)
         repository.runInTransaction {
             val sanitized = sanitizeHouse(house)
             val originalHouse = allHouses.find { it.id == house.id }
@@ -61,6 +65,7 @@ class SaveHouseUseCase @Inject constructor(
     }
 
     suspend fun deleteHouse(house: House, allHouses: List<House>, force: Boolean = false) = withContext(Dispatchers.IO) {
+        dayLockEnforcerUseCase.ensureDayNotLocked(house.data, house.agentUid, force)
         repository.runInTransaction {
             val normalizedData = house.data.toDashDate()
             val dayHouses = allHouses.filter { it.data.toDashDate() == normalizedData }
@@ -72,6 +77,7 @@ class SaveHouseUseCase @Inject constructor(
     }
 
     suspend fun deleteProduction(date: String, agentUid: String, force: Boolean = false) = withContext(Dispatchers.IO) {
+        dayLockEnforcerUseCase.ensureDayNotLocked(date, agentUid, force)
         repository.deleteProduction(date, agentUid, force)
     }
 
@@ -179,7 +185,7 @@ class SaveHouseUseCase @Inject constructor(
         val totalDeposits = house.treatment.totalDeposits
         val hasTreatment = totalDeposits > 0 || house.treatment.eliminados > 0 || house.treatment.larvicida > 0.0
 
-        var situation = house.situation
+        var situation = house.situation.heal()
         val treatment = house.treatment
         var a1 = treatment.a1
         var a2 = treatment.a2

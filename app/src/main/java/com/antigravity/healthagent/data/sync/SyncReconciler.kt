@@ -23,10 +23,6 @@ class SyncReconciler @Inject constructor(
         val identityKey: String = house.generateIdentityKey()
     )
 
-    private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        return houseRepository.runInTransaction { block() }
-    }
-
     suspend fun reconcile(
         uid: String,
         finalAgentName: String,
@@ -118,7 +114,7 @@ class SyncReconciler @Inject constructor(
 
             allLocalActivities.filter { it.date.replace("/", "-") in cloudDeletedActivities && it.date.replace("/", "-") !in closedDates }.forEach {
                 AppLogger.i("SyncReconciler", "Cloud Deletion Sync: Deleting local activity ${it.date} for $finalAgentName")
-                runInTransactionWithRetry {
+                houseRepository.runInTransaction {
                     houseRepository.deleteDayActivity(it.date, it.agentUid)
                 }
             }
@@ -156,7 +152,7 @@ class SyncReconciler @Inject constructor(
                 dateKey !in cloudDeletedActivities && dateKey !in localActivityTombstoneKeys
             }
 
-            runInTransactionWithRetry {
+            houseRepository.runInTransaction {
                 if (housesToDelete.isNotEmpty()) {
                     val tombstonesToInsert = mutableListOf<Tombstone>()
                     for (house in housesToDelete) {

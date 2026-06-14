@@ -28,7 +28,6 @@ import com.antigravity.healthagent.ui.components.MeshGradient
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
 import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
-import java.text.SimpleDateFormat
 import java.util.*
 import android.content.Context
 import android.net.Uri
@@ -260,7 +259,7 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
 
     val lastSync = remember(displayAgent.lastSyncTime) {
         if (displayAgent.lastSyncTime > 0) {
-            SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(displayAgent.lastSyncTime))
+            com.antigravity.healthagent.utils.DateUtils.DATE_TIME_FULL.get().format(Date(displayAgent.lastSyncTime))
         } else "Nunca"
     }
 
@@ -459,7 +458,7 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                     Spacer(modifier = Modifier.height(8.dp))
 
                     val sortedActivities = remember(displayAgent.activities) {
-                        val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+                        val sdf = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get()
                         displayAgent.activities.sortedByDescending { activity ->
                             try {
                                 val normalized = activity.date.replace("/", "-")

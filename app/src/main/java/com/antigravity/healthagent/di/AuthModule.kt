@@ -8,6 +8,8 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ktx.firestore
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.ktx.storage
 import com.google.firebase.ktx.Firebase
@@ -16,6 +18,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Singleton
 
 @Module
@@ -57,6 +60,12 @@ abstract class AuthModule {
         @Singleton
         fun provideFirebaseStorage(): FirebaseStorage {
             return Firebase.storage
+        }
+
+        @Provides
+        @Singleton
+        fun provideFusedLocationClient(@ApplicationContext context: android.content.Context): FusedLocationProviderClient {
+            return LocationServices.getFusedLocationProviderClient(context)
         }
     }
 }

@@ -18,11 +18,12 @@ class SaveHouseUseCaseTest {
     private val repository = mockk<HouseRepository>(relaxed = true)
     private val streetRepository = mockk<StreetRepository>(relaxed = true)
     private val recalcUseCase = mockk<RecalculateVisitSegmentsUseCase>(relaxed = true)
+    private val dayLockEnforcerUseCase = mockk<DayLockEnforcerUseCase>(relaxed = true)
     private lateinit var useCase: SaveHouseUseCase
 
     @Before
     fun setup() {
-        useCase = SaveHouseUseCase(repository, streetRepository, recalcUseCase)
+        useCase = SaveHouseUseCase(repository, streetRepository, recalcUseCase, dayLockEnforcerUseCase)
 
         // Default: runInTransaction just executes the lambda
         coEvery { repository.runInTransaction(any<suspend () -> Any>()) } coAnswers {

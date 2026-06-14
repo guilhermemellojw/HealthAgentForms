@@ -78,45 +78,7 @@ data class House(
     }
 
 
-    fun toFirestoreMap(): Map<String, Any?> {
-        return mapOf(
-            "blockNumber" to address.blockNumber,
-            "streetName" to address.streetName,
-            "number" to address.number,
-            "sequence" to address.sequence,
-            "complement" to address.complement,
-            "bairro" to address.bairro,
-            "blockSequence" to address.blockSequence,
-            "propertyType" to propertyType.name,
-            "situation" to situation.name,
-            "municipio" to context.municipio,
-            "categoria" to context.categoria,
-            "zona" to context.zona,
-            "tipo" to context.tipo,
-            "data" to data.toDashDate(),
-            "ciclo" to context.ciclo,
-            "atividade" to context.atividade,
-            "agentName" to agentName.uppercase(),
-            "a1" to treatment.a1, "a2" to treatment.a2, "b" to treatment.b, "c" to treatment.c,
-            "d1" to treatment.d1, "d2" to treatment.d2, "e" to treatment.e,
-            "eliminados" to treatment.eliminados,
-            "larvicida" to treatment.larvicida,
-            "comFoco" to treatment.comFoco,
-            "localidadeConcluida" to localidadeConcluida,
-            "quarteiraoConcluido" to quarteiraoConcluido,
-            "listOrder" to listOrder,
-            "visitSegment" to visitSegment,
-            "agentUid" to agentUid,
-            "lastSyncTime" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
-            "createdAt" to createdAt,
-            "observation" to observation,
-            "latitude" to geo.latitude,
-            "longitude" to geo.longitude,
-            "focusCaptureTime" to geo.focusCaptureTime,
-            "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-            "editedByAdmin" to editedByAdmin
-        )
-    }
+
 
     @get:com.google.firebase.firestore.Exclude
     val hasAnyTreatment: Boolean 

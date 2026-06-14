@@ -34,7 +34,7 @@ class HealthAgentApp : Application(), Configuration.Provider {
                     .setMinimumLoggingLevel(android.util.Log.DEBUG)
                     .build()
             } catch (e: Exception) {
-                android.util.Log.e("HealthAgentApp", "Error initializing WorkManager Configuration found", e)
+                com.antigravity.healthagent.domain.logger.AppLogger.e("HealthAgentApp", "Error initializing WorkManager Configuration found", e)
                 Configuration.Builder()
                     .setMinimumLoggingLevel(android.util.Log.DEBUG)
                     .build()
@@ -51,7 +51,7 @@ class HealthAgentApp : Application(), Configuration.Provider {
         com.antigravity.healthagent.context.AppContextHolder.setContext(this)
         com.antigravity.healthagent.utils.TimeManager.initialize(this)
         FirebaseApp.initializeApp(this)
-        com.google.firebase.firestore.FirebaseFirestore.setLoggingEnabled(true)
+        if (BuildConfig.DEBUG) com.google.firebase.firestore.FirebaseFirestore.setLoggingEnabled(true)
         
         // Schedule periodic sync
         schedulePeriodicSync()

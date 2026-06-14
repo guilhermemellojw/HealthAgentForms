@@ -21,7 +21,6 @@ import com.antigravity.healthagent.ui.state.SyncUiState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
-import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
@@ -41,10 +40,10 @@ fun SyncFloatingBalloon(
         modifier = modifier.fillMaxWidth()
     ) {
         val timeStr = remember(syncStatus.lastSyncTime) {
-            SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(syncStatus.lastSyncTime ?: 0L))
+            com.antigravity.healthagent.utils.DateUtils.TIME_SLASH.get().format(Date(syncStatus.lastSyncTime ?: 0L))
         }
         val dateStr = remember(syncStatus.lastSyncTime) {
-            SimpleDateFormat("dd/MM", Locale("pt", "BR")).format(Date(syncStatus.lastSyncTime ?: 0L))
+            com.antigravity.healthagent.utils.DateUtils.SLASH_DATE.get().format(Date(syncStatus.lastSyncTime ?: 0L))
         }
 
         // Pulse Animation for the icon

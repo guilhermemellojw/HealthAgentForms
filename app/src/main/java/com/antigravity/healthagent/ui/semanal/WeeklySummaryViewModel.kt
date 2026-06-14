@@ -23,8 +23,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.antigravity.healthagent.domain.logger.AppLogger
+import com.antigravity.healthagent.utils.DateUtils
 import java.io.File
-import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
 
@@ -38,8 +39,8 @@ class WeeklySummaryViewModel @Inject constructor(
     private val roleEnforcer: RoleEnforcer
 ) : ViewModel() {
 
-    private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
-    private val displayDateFormatter = SimpleDateFormat("dd/MM", Locale.US)
+    private val dateFormatter get() = DateUtils.DASH_DATE.get()
+    private val displayDateFormatter get() = DateUtils.SLASH_DATE.get()
 
     private val _syncState = MutableStateFlow<SyncUiState>(SyncUiState.Idle())
     val syncState: StateFlow<SyncUiState> = _syncState.asStateFlow()
@@ -58,9 +59,11 @@ class WeeklySummaryViewModel @Inject constructor(
     val uiEvent: StateFlow<String?> = _uiEvent.asStateFlow()
 
     val isEasyMode: StateFlow<Boolean> = settingsManager.easyMode
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val isSolarMode: StateFlow<Boolean> = settingsManager.solarMode
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val _currentWeekStart = MutableStateFlow(Calendar.getInstance().apply {
@@ -419,11 +422,11 @@ class WeeklySummaryViewModel @Inject constructor(
                     soundManager.playSuccess()
                 }
             } catch (e: IllegalStateException) {
-                android.util.Log.e("WeeklySummaryViewModel", "Day locked during ripple: ${e.message}")
+                AppLogger.e("WeeklySummaryViewModel", "Day locked during ripple: ${e.message}")
                 _uiEvent.value = rippleError ?: "Erro: Alguns dias estão bloqueados para Auditoria."
                 soundManager.playWarning()
             } catch (e: Exception) {
-                android.util.Log.e("WeeklySummaryViewModel", "Error updating day status", e)
+                AppLogger.e("WeeklySummaryViewModel", "Error updating day status", e)
                 _uiEvent.value = "Erro ao atualizar status: ${e.message}"
             }
         }
@@ -542,7 +545,7 @@ class WeeklySummaryViewModel @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("WeeklySummaryViewModel", "Error clearing old PDFs with prefix $prefix", e)
+            AppLogger.e("WeeklySummaryViewModel", "Error clearing old PDFs with prefix $prefix", e)
         }
     }
 
@@ -564,7 +567,7 @@ class WeeklySummaryViewModel @Inject constructor(
                     _syncState.value = SyncUiState.Success(System.currentTimeMillis())
                 }
             } catch (e: Exception) {
-                android.util.Log.e("WeeklySummaryViewModel", "Sync failed", e)
+                AppLogger.e("WeeklySummaryViewModel", "Sync failed", e)
                 _syncState.value = SyncUiState.Error(e.message ?: "Erro na sincronização")
             } finally {
                 kotlinx.coroutines.delay(2000)

@@ -1,7 +1,7 @@
 package com.antigravity.healthagent.ui.home
 
 import com.antigravity.healthagent.data.local.model.House
-import com.antigravity.healthagent.data.local.model.heal
+import com.antigravity.healthagent.domain.model.heal
 import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
 import com.antigravity.healthagent.utils.formatStreetName
 

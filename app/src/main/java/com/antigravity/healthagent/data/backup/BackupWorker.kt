@@ -12,7 +12,6 @@ import dagger.assisted.AssistedInject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStreamWriter
-import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.google.gson.GsonBuilder
@@ -48,7 +47,7 @@ class BackupWorker @AssistedInject constructor(
             )
 
             // Create filename with timestamp and agent name
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
+            val timestamp = com.antigravity.healthagent.utils.DateUtils.TIMESTAMP_FILE.get().format(Date())
             val safeName = currentName.replace(" ", "_").uppercase()
             val filename = "backup_${safeName}_$timestamp.json"
 
@@ -68,7 +67,7 @@ class BackupWorker @AssistedInject constructor(
 
             val file = File(backupDir, filename)
             
-            BackupManager().exportToFile(file, backupData)
+            BackupManager().exportToFile(applicationContext, file, backupData)
             
             AppLogger.d("BackupWorker", "Backup saved to ${file.absolutePath}")
 

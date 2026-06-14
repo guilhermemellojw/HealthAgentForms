@@ -155,11 +155,12 @@ fun RGHouseRow(
 
 @Composable
 private fun RGSeparator(isEasyMode: Boolean = false, isSolarMode: Boolean = false) {
-    Text(
-        text = "|",
-        style = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+    VerticalDivider(
+        modifier = Modifier
+            .height(if (isEasyMode) 28.dp else 20.dp)
+            .padding(horizontal = if (isEasyMode) 6.dp else 4.dp),
+        thickness = 1.dp,
         color = if (isSolarMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) 
                 else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-        modifier = Modifier.padding(horizontal = if (isEasyMode) 6.dp else 4.dp)
     )
 }

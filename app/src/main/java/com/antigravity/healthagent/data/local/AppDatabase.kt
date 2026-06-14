@@ -21,7 +21,7 @@ import com.antigravity.healthagent.data.local.model.Tombstone
         com.antigravity.healthagent.data.local.model.CachedAgentSummary::class
     ], 
     version = 38, 
-    exportSchema = false
+    exportSchema = true
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {

@@ -1,7 +1,6 @@
 package com.antigravity.healthagent.ui.auth
 
 import android.app.Activity
-import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -316,9 +315,9 @@ fun LoginScreen(
                                                     viewModel.signInWithGoogle(googleIdTokenCredential.idToken)
                                                 }
                                             } catch (e: androidx.credentials.exceptions.GetCredentialCancellationException) {
-                                                Log.i("LoginScreen", "User cancelled")
+                                                com.antigravity.healthagent.domain.logger.AppLogger.i("LoginScreen", "User cancelled")
                                             } catch (e: Exception) {
-                                                Log.e("LoginScreen", "Login error", e)
+                                                com.antigravity.healthagent.domain.logger.AppLogger.e("LoginScreen", "Login error", e)
                                                 viewModel.setError("Erro no login: ${e.message}")
                                             }
                                         }

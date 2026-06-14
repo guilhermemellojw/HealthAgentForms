@@ -16,6 +16,7 @@ import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.domain.repository.AuthRepository
 import com.antigravity.healthagent.domain.repository.MapRepository
 import com.antigravity.healthagent.data.util.KmlStorageService
+import com.antigravity.healthagent.domain.logger.AppLogger
 import kotlinx.coroutines.flow.*
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.MapType
@@ -132,7 +133,7 @@ class QuarteiroesViewModel @Inject constructor(
                             }
                         },
                         onFailure = { e ->
-                            e.printStackTrace()
+                            AppLogger.e("QuarteiroesViewModel", "Falha ao ler KML", e)
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                 android.widget.Toast.makeText(context, "Erro ao ler KML: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
                             }
@@ -140,10 +141,10 @@ class QuarteiroesViewModel @Inject constructor(
                     )
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                AppLogger.e("QuarteiroesViewModel", "Erro ao abrir arquivo KML", e)
                 if (e is SecurityException || e.message?.contains("Permission Denial", ignoreCase = true) == true) {
                     if (uri.scheme != "file") {
-                         android.util.Log.e("QuarteiroesViewModel", "Permission denied on external URI, internal copy failure.")
+                         AppLogger.e("QuarteiroesViewModel", "Permission denied on external URI, internal copy failure.")
                     } else {
                          mapRepository.clearKmlConfig()
                          _kmlFolders.value = emptyList()

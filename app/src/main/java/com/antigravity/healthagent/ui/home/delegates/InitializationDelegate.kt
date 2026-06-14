@@ -6,6 +6,7 @@ import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
 import com.antigravity.healthagent.domain.usecase.PerformLocalDatabaseMigrationUseCase
+import com.antigravity.healthagent.domain.usecase.NormalizeLocalDatesUseCase
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.ui.home.DashboardTotals
 import com.antigravity.healthagent.ui.home.HomeViewModel
@@ -26,6 +27,7 @@ import javax.inject.Singleton
 @Singleton
 class InitializationDelegate @Inject constructor(
     private val performLocalDatabaseMigrationUseCase: PerformLocalDatabaseMigrationUseCase,
+    private val normalizeLocalDatesUseCase: NormalizeLocalDatesUseCase,
     private val repository: HouseRepository,
     private val settingsManager: SettingsManager,
     private val houseValidationUseCase: HouseValidationUseCase
@@ -333,7 +335,7 @@ class InitializationDelegate @Inject constructor(
                 performLocalDatabaseMigrationUseCase.migrateStreetNamesToFormat()
                 performLocalDatabaseMigrationUseCase.migrateBairrosToUppercase()
                 performLocalDatabaseMigrationUseCase.migrateDateFormats()
-                repository.normalizeLocalDates()
+                normalizeLocalDatesUseCase()
             } catch (e: Exception) {
                 AppLogger.e("HomeViewModel", "Error running migrations", e)
             }

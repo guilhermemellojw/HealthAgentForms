@@ -15,7 +15,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
+import com.antigravity.healthagent.domain.logger.AppLogger
+import com.antigravity.healthagent.utils.DateUtils
 import java.util.*
 import javax.inject.Inject
 
@@ -28,7 +29,7 @@ class RgViewModel @Inject constructor(
     private val syncDataUseCase: SyncDataUseCase
 ) : ViewModel() {
 
-    private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+    private val dateFormatter get() = DateUtils.DASH_DATE.get()
 
     private val _agentName = MutableStateFlow("")
     private val _currentUserUid = MutableStateFlow<String?>(null)
@@ -49,8 +50,10 @@ class RgViewModel @Inject constructor(
     val syncState: StateFlow<SyncUiState> = _syncState.asStateFlow()
 
     val isSolarMode: StateFlow<Boolean> = settingsManager.solarMode
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val isEasyMode: StateFlow<Boolean> = settingsManager.easyMode
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     
     // Default or dynamically observed from database/settings
@@ -237,7 +240,7 @@ class RgViewModel @Inject constructor(
                     _syncState.value = SyncUiState.Success(System.currentTimeMillis())
                 }
             } catch (e: Exception) {
-                android.util.Log.e("RgViewModel", "Sync failed", e)
+                AppLogger.e("RgViewModel", "Sync failed", e)
                 _syncState.value = SyncUiState.Error(e.message ?: "Erro na sincronização")
             } finally {
                 kotlinx.coroutines.delay(2000)

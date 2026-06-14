@@ -3,7 +3,6 @@ package com.antigravity.healthagent.domain.usecase
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.AgentRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
-import java.text.SimpleDateFormat
 import java.util.Locale
 import javax.inject.Inject
 
@@ -22,7 +21,7 @@ class CleanupHistoricalDataUseCase @Inject constructor(
     suspend operator fun invoke(beforeDate: String, agentName: String, agentUid: String, isGlobal: Boolean = false): Result<Unit> {
         return try {
             val normalizedBeforeDate = beforeDate.replace("/", "-")
-            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+            val sdf = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get()
             val limitDate = try { sdf.parse(normalizedBeforeDate) } catch (e: Exception) { null } 
                 ?: return Result.failure(Exception("Formato de data inválido. Use DD-MM-YYYY."))
 

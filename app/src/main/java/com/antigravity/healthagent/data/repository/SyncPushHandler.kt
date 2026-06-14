@@ -1,5 +1,7 @@
 package com.antigravity.healthagent.data.repository
 
+import com.antigravity.healthagent.domain.logger.AppLogger
+
 import android.content.Context
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
@@ -8,6 +10,7 @@ import com.antigravity.healthagent.data.local.model.TombstoneType
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.data.util.toDayActivitySafe
 import com.antigravity.healthagent.data.util.toHouseSafe
+import com.antigravity.healthagent.data.util.toFirestoreMap
 import com.antigravity.healthagent.utils.toDashDate
 import com.antigravity.healthagent.utils.toSlashDate
 import com.google.firebase.auth.FirebaseAuth
@@ -35,10 +38,6 @@ class SyncPushHandler @Inject constructor(
     private val settingsManager: SettingsManager
 ) {
 
-    private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        return houseRepository.runInTransaction { block() }
-    }
-
     suspend fun pushLocalDataToCloud(
         houses: List<House>,
         activities: List<DayActivity>,
@@ -58,7 +57,7 @@ class SyncPushHandler @Inject constructor(
                         val hasSyncHistory = settingsManager.lastSyncTimestamp.first() > 0
 
                         if (targetUid == null && (agentDocSnapshot?.getBoolean("requireDataReset") == true || (hasSyncHistory && !agentDocExists))) {
-                            android.util.Log.w("SyncPushHandler", "Push blocked for $uid: Remote wipe pending or data purged.")
+                            AppLogger.w("SyncPushHandler", "Push blocked for $uid: Remote wipe pending or data purged.")
                             return@withContext Result.failure(Exception("Sincronização bloqueada: Uma limpeza de dados foi solicitada. Por favor, realize um 'Receber Dados' primeiro."))
                         }
 
@@ -84,7 +83,7 @@ class SyncPushHandler @Inject constructor(
 
                         // Optimistic return if nothing to do (and not a forced replacement)
                         if (unsyncedHouses.isEmpty() && unsyncedActivities.isEmpty() && tombstones.isEmpty() && !shouldReplace) {
-                            android.util.Log.i("SyncPushHandler", "Push: Nothing to sync (incremental).")
+                            AppLogger.i("SyncPushHandler", "Push: Nothing to sync (incremental).")
                             return@withContext Result.success(Unit)
                         }
 
@@ -98,7 +97,7 @@ class SyncPushHandler @Inject constructor(
                             
                             val crossUidHouses = housesToPush.filter { it.agentUid.isNotBlank() && it.agentUid != uid }
                             if (crossUidHouses.isNotEmpty()) {
-                                android.util.Log.e("SyncPushHandler", "IDENTITY LEAK PREVENTED: Filtered out ${crossUidHouses.size} houses with mismatching UIDs.")
+                                AppLogger.e("SyncPushHandler", "IDENTITY LEAK PREVENTED: Filtered out ${crossUidHouses.size} houses with mismatching UIDs.")
                             }
                             
                             housesToPush = if (isProxyPush) {
@@ -117,7 +116,7 @@ class SyncPushHandler @Inject constructor(
 
                             val crossUidActivities = activitiesToPush.filter { it.agentUid.isNotBlank() && it.agentUid != uid }
                             if (crossUidActivities.isNotEmpty()) {
-                                android.util.Log.e("SyncPushHandler", "IDENTITY LEAK PREVENTED: Filtered out ${crossUidActivities.size} activities with mismatching UIDs.")
+                                AppLogger.e("SyncPushHandler", "IDENTITY LEAK PREVENTED: Filtered out ${crossUidActivities.size} activities with mismatching UIDs.")
                             }
                             
                             activitiesToPush = if (isProxyPush) {
@@ -189,7 +188,7 @@ class SyncPushHandler @Inject constructor(
 
                         if (shouldReplace && targetUid != null && targetUid != auth.currentUser?.uid) {
                             metadata["requireDataReset"] = true
-                            android.util.Log.i("SyncPushHandler", "Admin Restore: Signalling target device ($uid) for local reset.")
+                            AppLogger.i("SyncPushHandler", "Admin Restore: Signalling target device ($uid) for local reset.")
                         }
 
                         if (targetUid == null || (existingEmail.isNullOrBlank() && userEmail != "Remote Sync")) {
@@ -228,7 +227,7 @@ class SyncPushHandler @Inject constructor(
                                 }
                                 
                                 batch.commit().await()
-                                runInTransactionWithRetry {
+                                houseRepository.runInTransaction {
                                     houseRepository.deleteTombstones(chunk.map { it.id })
                                 }
                                 cloudDeletedHouses.clear()
@@ -265,7 +264,7 @@ class SyncPushHandler @Inject constructor(
                                             }
                                         }
                                     } catch (e: Exception) {
-                                        android.util.Log.w("SyncPushHandler", "Cloud Deduplication context skip for $date: ${e.message}")
+                                        AppLogger.w("SyncPushHandler", "Cloud Deduplication context skip for $date: ${e.message}")
                                     }
                                 }
                             }
@@ -290,7 +289,7 @@ class SyncPushHandler @Inject constructor(
                                 batch.update(userDocRef, "deleted_house_ids", FieldValue.arrayRemove(*pushedKeys.toTypedArray()))
                                 
                                 batch.commit().await()
-                                runInTransactionWithRetry {
+                                houseRepository.runInTransaction {
                                     chunk.forEach { house ->
                                         houseRepository.markHouseAsSynced(house.id, house.lastUpdated, uid, officialAgentName)
                                     }
@@ -321,7 +320,7 @@ class SyncPushHandler @Inject constructor(
                                 batch.update(userDocRef, "deleted_activity_dates", FieldValue.arrayRemove(*datesToRemove.toTypedArray()))
                                 
                                 batch.commit().await()
-                                runInTransactionWithRetry {
+                                houseRepository.runInTransaction {
                                     chunk.forEach { activity ->
                                         houseRepository.markActivityAsSynced(activity.date, officialAgentName, uid, activity.lastUpdated)
                                     }
@@ -341,7 +340,7 @@ class SyncPushHandler @Inject constructor(
 
                         for (monthYear in monthsToUpdate) {
                             val isProxyPush = targetUid != null && targetUid != auth.currentUser?.uid
-                            val todayInt = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date()).toInt()
+                            val todayInt = com.antigravity.healthagent.utils.DateUtils.COMPACT_DATE.get().format(java.util.Date()).toInt()
                             
                             val housesInMonthRaw = if (isProxyPush && !shouldReplace) {
                                 val monthParts = monthYear.split("-")
@@ -445,15 +444,15 @@ class SyncPushHandler @Inject constructor(
                                     androidx.work.ExistingWorkPolicy.REPLACE, 
                                     workRequest
                                 )
-                                android.util.Log.i("SyncPushHandler", "Timeline Backup worker enqueued for $uid")
+                                AppLogger.i("SyncPushHandler", "Timeline Backup worker enqueued for $uid")
                             } catch (e: Exception) {
-                                android.util.Log.w("SyncPushHandler", "Timeline Backup enqueue failed (non-critical): ${e.message}")
+                                AppLogger.w("SyncPushHandler", "Timeline Backup enqueue failed (non-critical): ${e.message}")
                             }
                         }
 
                         Result.success(Unit)
                     } catch (e: Exception) {
-                        android.util.Log.e("SyncPushHandler", "Push failed: ${e.message}", e)
+                        AppLogger.e("SyncPushHandler", "Push failed: ${e.message}", e)
                         Result.failure(e)
                     }
                 }

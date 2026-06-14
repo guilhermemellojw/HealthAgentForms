@@ -3,6 +3,7 @@ package com.antigravity.healthagent.domain.model
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.data.util.toFirestoreMap
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

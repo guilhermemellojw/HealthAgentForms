@@ -161,7 +161,7 @@ class RestoreDataUseCase @Inject constructor(
     }
 
     private fun findNextAvailableDate(startDate: String, existingDates: List<String>): String {
-        val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US)
+        val sdf = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get()
         val calendar = java.util.Calendar.getInstance()
         try {
             calendar.time = sdf.parse(startDate.replace("/", "-")) ?: java.util.Date()
