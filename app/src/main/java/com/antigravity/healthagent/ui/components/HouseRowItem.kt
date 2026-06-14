@@ -214,7 +214,7 @@ fun HouseRowItem(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 18.dp, end = 12.dp, bottom = 12.dp, top = 2.dp),
+                        .padding(start = 18.dp, end = 12.dp, bottom = 6.dp, top = 4.dp),
                     verticalAlignment = Alignment.Top
                 ) {
                     HouseRowInputs(

@@ -50,7 +50,7 @@ fun HouseRowInputs(
 
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -61,7 +61,7 @@ fun HouseRowInputs(
                 label = "NÚMERO",
                 initialValue = house.address.number,
                 onValueChange = { onUpdate(house.copy(address = house.address.copy(number = it))) },
-                modifier = Modifier.weight(1.2f),
+                modifier = Modifier.weight(1.0f),
                 isError = highlightErrors && isMissingNumbers,
                 enabled = enabled,
                 focusRequester = focusRequester,
@@ -81,7 +81,7 @@ fun HouseRowInputs(
                     keyboardType = KeyboardType.Number,
                     imeAction = ImeAction.Next
                 ),
-                modifier = Modifier.weight(0.5f),
+                modifier = Modifier.weight(0.8f),
                 isError = highlightErrors && isMissingNumbers,
                 enabled = enabled,
                 key = house.createdAt
@@ -96,7 +96,7 @@ fun HouseRowInputs(
                     keyboardType = KeyboardType.Number,
                     imeAction = ImeAction.Done
                 ),
-                modifier = Modifier.weight(0.5f),
+                modifier = Modifier.weight(0.8f),
                 enabled = enabled,
                 key = house.createdAt
             )

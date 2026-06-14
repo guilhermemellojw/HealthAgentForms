@@ -53,7 +53,11 @@ fun ObservationDialog(
                         capitalization = KeyboardCapitalization.Sentences,
                         imeAction = ImeAction.Done
                     ),
-                    maxLines = 10
+                    maxLines = 10,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                    )
                 )
             }
         },

@@ -70,7 +70,11 @@ fun ContextDialog(
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp),
-                        textStyle = TextStyle(fontSize = if (isEasyMode) 18.sp else 16.sp)
+                        textStyle = TextStyle(fontSize = if (isEasyMode) 18.sp else 16.sp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        )
                     )
                     
                     Text(
@@ -121,7 +125,10 @@ fun ContextDialog(
                             imeAction = ImeAction.Done
                         ),
                         modifier = Modifier.menuAnchor().fillMaxWidth(),
-                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        ),
                         shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp),
                         textStyle = TextStyle(fontSize = if (isEasyMode) 18.sp else 16.sp)
                     )
