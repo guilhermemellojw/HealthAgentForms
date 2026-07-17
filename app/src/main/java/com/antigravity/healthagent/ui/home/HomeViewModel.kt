@@ -181,16 +181,44 @@ class HomeViewModel @Inject constructor(
     }.distinctUntilChanged()
     .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    val latestHouses: StateFlow<List<House>> = combine(
-        allHousesFlow,
-        pendingUpdateDrafts,
-        housesInFlight
-    ) { dbHouses, drafts, inFlights ->
-        (dbHouses.map { drafts[it.id] ?: it } + inFlights).sortedBy { it.listOrder }
-    }
-    .flowOn(Dispatchers.Default)
-    .distinctUntilChanged()
-    .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        val latestHouses: StateFlow<List<House>> = combine(
+            allHousesFlow,
+            pendingUpdateDrafts,
+            housesInFlight
+        ) { dbHouses, drafts, inFlights ->
+            val combined = (dbHouses.map { drafts[it.id] ?: it } + inFlights.filter { inFlight ->
+                !dbHouses.any { db -> db.generateIdentityKey() == inFlight.generateIdentityKey() }
+            }).sortedBy { it.listOrder }
+            combined.firstOrNull()?.let { first ->
+                AppLogger.d("PERSIST_DEBUG", "COMBINE: count=${combined.size} first_id=${first.id} first_pt=${first.propertyType.code}")
+            }
+            combined.find { it.id == 1608 }?.let { h ->
+                AppLogger.d("PERSIST_DEBUG", "COMBINE_H1608: n=${h.address.number} pt=${h.propertyType.code} src=" + (if (drafts.containsKey(1608)) "DRAFT" else "DB"))
+            }
+            combined
+        }
+        .flowOn(Dispatchers.Default)
+        .distinctUntilChanged { old, new ->
+            if (old.size != new.size) false
+            else old.zip(new).all { (a, b) ->
+                a.id == b.id &&
+                a.address == b.address &&
+                a.treatment == b.treatment &&
+                a.context == b.context &&
+                a.propertyType == b.propertyType &&
+                a.situation == b.situation &&
+                a.observation == b.observation &&
+                a.listOrder == b.listOrder &&
+                a.visitSegment == b.visitSegment &&
+                a.data == b.data &&
+                a.agentName == b.agentName &&
+                a.agentUid == b.agentUid &&
+                a.geo == b.geo &&
+                a.localidadeConcluida == b.localidadeConcluida &&
+                a.quarteiraoConcluido == b.quarteiraoConcluido
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val houses: StateFlow<List<House>> = latestHouses
 
@@ -246,23 +274,7 @@ class HomeViewModel @Inject constructor(
     val customActivities: StateFlow<Set<String>> = settingsManager.customActivities
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
-    private val _houseUpdateQueue = MutableSharedFlow<House>(extraBufferCapacity = 64)
 
-    private val houseUpdateJob = viewModelScope.launch {
-        _houseUpdateQueue
-            .debounce(300)
-            .collect { house ->
-                houseEditDelegate.updateHouse(
-                    scope = viewModelScope,
-                    state = this@HomeViewModel,
-                    house = house,
-                    latestHousesList = houses.value,
-                    maxOpenHouses = maxOpenHouses.value,
-                    isDayClosed = isDayClosed.value,
-                    triggerDelayedValidation = { triggerDelayedValidation() }
-                )
-            }
-    }
 
     init {
         initializationDelegate.initialize(
@@ -553,7 +565,28 @@ class HomeViewModel @Inject constructor(
     )
 
     fun updateHouse(house: House) {
-        _houseUpdateQueue.tryEmit(house)
+        houseEditDelegate.updateHouse(
+            scope = viewModelScope,
+            state = this,
+            house = house,
+            latestHousesList = houses.value,
+            maxOpenHouses = maxOpenHouses.value,
+            isDayClosed = isDayClosed.value,
+            triggerDelayedValidation = { triggerDelayedValidation() }
+        )
+    }
+
+    fun updateHouseField(houseId: Int, update: (House) -> House) {
+        houseEditDelegate.updateHouseField(
+            scope = viewModelScope,
+            state = this,
+            houseId = houseId,
+            latestHousesList = houses.value,
+            maxOpenHouses = maxOpenHouses.value,
+            isDayClosed = isDayClosed.value,
+            triggerDelayedValidation = { triggerDelayedValidation() },
+            update = update
+        )
     }
 
     fun confirmDuplicateMerge() = houseEditDelegate.confirmDuplicateMerge(viewModelScope, this)

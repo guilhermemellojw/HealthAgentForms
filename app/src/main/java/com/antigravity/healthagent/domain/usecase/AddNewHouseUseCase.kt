@@ -205,7 +205,7 @@ class AddNewHouseUseCase @Inject constructor(
             if (params.afterId >= -1) {
                 // Re-order and recalculate logic for addNewHouseAt
                 val targetIndex = if (params.afterId == -1) -1 else currentDayHouses.indexOfFirst { it.id == params.afterId }
-                val mutableList = currentDayHouses.sortedBy { it.listOrder }.toMutableList()
+                val mutableList = currentDayHouses.filter { it.id != 0 }.sortedBy { it.listOrder }.toMutableList()
                 if (targetIndex == -1) {
                     mutableList.add(0, houseToInsert)
                 } else {

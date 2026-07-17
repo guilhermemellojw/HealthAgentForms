@@ -10,6 +10,7 @@ import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.normalize
 import com.antigravity.healthagent.utils.removeAccents
 import com.antigravity.healthagent.utils.toDashDate
+import com.antigravity.healthagent.domain.logger.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -25,12 +26,27 @@ class SaveHouseUseCase @Inject constructor(
         dayLockEnforcerUseCase.ensureDayNotLocked(house.data, house.agentUid, force)
         repository.runInTransaction {
             val sanitized = sanitizeHouse(house)
+
+            // DUPLICATE GUARD: Prevent DB-level duplicates from stale in-memory state
+            // (e.g. rapid adds where Room Flow hasn't emitted yet)
+            val normalizedData = sanitized.data.toDashDate()
+            val existingHouses = repository.getHousesByDateAndAgent(normalizedData, sanitized.agentUid)
+            val existingDuplicate = existingHouses.find {
+                it.generateIdentityKey() == sanitized.generateIdentityKey()
+            }
+            if (existingDuplicate != null) {
+                AppLogger.w("PERSIST_DEBUG", "DUPLICATE_GUARD: Skipped insert. Existing id=${existingDuplicate.id} key=${sanitized.generateIdentityKey()}")
+                return@runInTransaction existingDuplicate.id.toLong()
+            }
+
             val id = repository.insertHouse(sanitized, force)
             
-            val normalizedData = sanitized.data.toDashDate()
-            val dayHouses = allHouses.filter { it.data.toDashDate() == normalizedData }
-            val withNewHouse = (dayHouses + sanitized.copy(id = id.toInt())).sortedBy { it.listOrder }
-            val recalculated = recalculateVisitSegmentsUseCase.recalculateVisitSegments(withNewHouse)
+            // Re-query DB inside transaction to avoid in-flight houses (id=0)
+            // leaking into the upsert and creating duplicates
+            val dbHousesToday = repository.getHousesByDateAndAgent(normalizedData, sanitized.agentUid)
+            val recalculated = recalculateVisitSegmentsUseCase.recalculateVisitSegments(
+                dbHousesToday.sortedBy { it.listOrder }
+            )
             repository.updateHouses(recalculated, force)
             streetRepository.saveCustomStreet(sanitized.address.streetName, sanitized.address.bairro)
             id
@@ -38,25 +54,34 @@ class SaveHouseUseCase @Inject constructor(
     }
 
     suspend fun updateHouse(house: House, allHouses: List<House>, force: Boolean = false) = withContext(Dispatchers.IO) {
-        dayLockEnforcerUseCase.ensureDayNotLocked(house.data, house.agentUid, force)
+        AppLogger.d("PERSIST_DEBUG", "SAVE_UPDATEHOUSE_ENTER: id=${house.id} n='${house.address.number}' s=${house.address.sequence} c=${house.address.complement} pt=${house.propertyType.code} force=$force")
+        try {
+            dayLockEnforcerUseCase.ensureDayNotLocked(house.data, house.agentUid, force)
+        } catch (e: Exception) {
+            AppLogger.e("PERSIST_DEBUG", "SAVE_DAYLOCKED: date=${house.data} uid=${house.agentUid} msg=${e.message}")
+            throw e
+        }
         repository.runInTransaction {
             val sanitized = sanitizeHouse(house)
-            val originalHouse = allHouses.find { it.id == house.id }
+            val affectedDate = sanitized.data.toDashDate()
             
-            val affectedDates = mutableSetOf(sanitized.data.toDashDate())
-            originalHouse?.let { affectedDates.add(it.data.toDashDate()) }
+            // Re-query current DB state INSIDE the transaction to prevent
+            // concurrent writes from overwriting each other's changes.
+            val dbHousesToday = repository.getHousesByDateAndAgent(affectedDate, sanitized.agentUid)
             
-            val housesToUpdate = allHouses.filter { it.data.toDashDate() in affectedDates }.map {
-                if (it.id == house.id) sanitized else it
-            }
+            val housesToUpdate = dbHousesToday.map { if (it.id == house.id) sanitized else it }
             
-            val finalUpdated = housesToUpdate.groupBy { it.data }.flatMap { (date, dayHouses) ->
-                recalculateVisitSegmentsUseCase.recalculateVisitSegments(dayHouses.sortedBy { it.listOrder })
-            }
+            val finalUpdated = recalculateVisitSegmentsUseCase.recalculateVisitSegments(
+                housesToUpdate.sortedBy { it.listOrder }
+            )
             
-            repository.updateHouses(finalUpdated, force)
+            val finalTarget = finalUpdated.find { it.id == house.id } ?: sanitized
+            
+            AppLogger.d("PERSIST_DEBUG", "SAVE_UPDATEHOUSE_WRITE: id=${sanitized.id} n='${sanitized.address.number}' s=${sanitized.address.sequence} c=${sanitized.address.complement} pt=${sanitized.propertyType.code}")
+            repository.updateHouse(finalTarget, force)
             streetRepository.saveCustomStreet(sanitized.address.streetName, sanitized.address.bairro)
         }
+        AppLogger.d("PERSIST_DEBUG", "SAVE_UPDATEHOUSE_EXIT: id=${house.id}")
     }
 
     suspend fun updateHouses(houses: List<House>, force: Boolean = false) = withContext(Dispatchers.IO) {
@@ -236,7 +261,7 @@ class SaveHouseUseCase @Inject constructor(
             data = house.data.toDashDate().trim(),
             isSynced = false, // Force re-sync on every local edit
             lastUpdated = if (house.lastUpdated > 0) house.lastUpdated else System.currentTimeMillis(),
-            treatment = TreatmentData(a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e, eliminados = elims, larvicida = larv)
+            treatment = TreatmentData(a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e, eliminados = elims, larvicida = larv, comFoco = house.treatment.comFoco)
         )
     }
 }

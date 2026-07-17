@@ -20,7 +20,7 @@ import com.antigravity.healthagent.data.local.model.Tombstone
         com.antigravity.healthagent.data.local.model.CachedAgent::class,
         com.antigravity.healthagent.data.local.model.CachedAgentSummary::class
     ], 
-    version = 38, 
+    version = 39, 
     exportSchema = true
 )
 @TypeConverters(Converters::class)

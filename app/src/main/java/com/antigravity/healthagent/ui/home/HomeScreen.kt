@@ -500,7 +500,7 @@ fun HomeScreen(
                     onSelectDate = { datePickerDialog.show() },
                     onMoveDateBackward = { viewModel.moveDateBackward() },
                     onMoveDateForward = { viewModel.moveDateForward() },
-                    onHouseUpdate = { viewModel.updateHouse(it) },
+                    onHouseUpdate = { id, updater -> viewModel.updateHouseField(id, updater) },
                     onHouseDelete = { viewModel.deleteHouse(it) },
                     onHouseRestore = { viewModel.restoreDeletedHouse() },
                     onMoveHouse = { house, moveUp -> viewModel.moveHouse(house, moveUp) },

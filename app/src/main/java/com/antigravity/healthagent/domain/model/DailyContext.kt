@@ -1,5 +1,8 @@
 package com.antigravity.healthagent.domain.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class DailyContext(
     val municipio: String = "Bom Jardim",
     val categoria: String = "BRR",

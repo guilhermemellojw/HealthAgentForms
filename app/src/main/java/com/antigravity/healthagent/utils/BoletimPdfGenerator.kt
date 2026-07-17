@@ -54,7 +54,7 @@ object BoletimPdfGenerator {
                 pdfDocument.finishPage(page2)
             }
         } finally {
-            logoBitmap?.recycle()
+            // Don't recycle — managed by BitmapCache
         }
 
         val sanitizedAgent = agentName.trim().replace(" ", "_").replace("/", "-")
@@ -137,7 +137,7 @@ object BoletimPdfGenerator {
             }
             pdfDocument.finishPage(semanalPage)
         } finally {
-            logoBitmap?.recycle()
+            // Don't recycle — managed by BitmapCache
         }
 
         val rangeStart = weekDates.firstOrNull() ?: ""

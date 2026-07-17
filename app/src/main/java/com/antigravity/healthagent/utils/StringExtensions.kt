@@ -13,10 +13,10 @@ import android.graphics.Paint
  * Example: "JOAO DE SOUZA" -> "Joao de Souza"
  * Example: "AVENIDA BR 101" -> "Avenida BR 101"
  */
+private val LOWER_CASE_PREPOSITIONS = setOf("de", "da", "do", "das", "dos", "e", "di")
+
 fun String.formatStreetName(): String {
     if (this.isBlank()) return this
-
-    val lowerCaseWords = setOf("de", "da", "do", "das", "dos", "e", "di")
     
     return this.lowercase()
         .split(" ")
@@ -24,7 +24,7 @@ fun String.formatStreetName(): String {
         .joinToString(" ") { word ->
             word.split("-").joinToString("-") { part ->
                 when {
-                    part in lowerCaseWords -> part
+                    part in LOWER_CASE_PREPOSITIONS -> part
                     part.length == 2 -> part.uppercase(Locale.getDefault())
                     else -> part.replaceFirstChar { 
                         if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() 
@@ -110,10 +110,8 @@ fun String.abbreviateMiddleNames(): String {
 
     val middle = words.subList(startIndex + 1, words.size - 1)
 
-    val lowerCaseWords = setOf("de", "da", "do", "das", "dos", "e", "di")
-
     val abbreviatedMiddle = middle.joinToString(" ") { word ->
-        if (lowerCaseWords.contains(word.lowercase())) {
+        if (LOWER_CASE_PREPOSITIONS.contains(word.lowercase())) {
             word // Keep prepositions as is
         } else {
             "${word.first()}." // Abbreviate others
@@ -170,13 +168,16 @@ fun String.fitToWidth(paint: android.graphics.Paint, maxWidth: Float): String {
     }
 }
 
+private val NORMALIZE_WHITESPACE_REGEX = Regex("\\s+")
+private val NORMALIZE_DASH_REGEX = Regex("-+")
+
 fun String.normalize(): String {
     // SURGICAL FIX: Stop stripping accents! We only want to standardize separators and casing.
     return this.trim()
         .replace("/", "-")
         .replace(".", "-")
-        .replace(Regex("\\s+"), " ")
-        .replace(Regex("-+"), "-")
+        .replace(NORMALIZE_WHITESPACE_REGEX, " ")
+        .replace(NORMALIZE_DASH_REGEX, "-")
         .uppercase()
 }
 

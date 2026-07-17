@@ -1,5 +1,6 @@
 package com.antigravity.healthagent.ui.home
 
+import androidx.compose.runtime.Immutable
 import com.antigravity.healthagent.data.local.model.House
 
 
@@ -15,6 +16,7 @@ data class BackupConfirmation(
     val isFullRestore: Boolean
 )
 
+@Immutable
 data class HomeUiState(
     val houses: List<HouseUiState> = emptyList(),
     val dashboardTotals: DashboardTotals = DashboardTotals(),

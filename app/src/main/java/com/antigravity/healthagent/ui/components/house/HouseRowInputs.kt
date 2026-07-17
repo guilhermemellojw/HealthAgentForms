@@ -31,10 +31,23 @@ private val propertyTypeDisplayOptions = PropertyType.entries.filter { it != Pro
 private val situationOptions = Situation.entries.filter { it != Situation.EMPTY }.map { it.code }
 private val situationDisplayOptions = Situation.entries.filter { it != Situation.EMPTY }.map { it.displayValue }
 
+private val KeyboardOptionsChars = KeyboardOptions(
+    capitalization = KeyboardCapitalization.Characters,
+    imeAction = ImeAction.Next
+)
+private val KeyboardOptionsNumber = KeyboardOptions(
+    keyboardType = KeyboardType.Number,
+    imeAction = ImeAction.Next
+)
+private val KeyboardOptionsNumberDone = KeyboardOptions(
+    keyboardType = KeyboardType.Number,
+    imeAction = ImeAction.Done
+)
+
 @Composable
 fun HouseRowInputs(
     houseState: HouseUiState,
-    onUpdate: (House) -> Unit,
+    onUpdate: ((House) -> House) -> Unit,
     enabled: Boolean,
     focusRequester: androidx.compose.ui.focus.FocusRequester?,
     modifier: Modifier = Modifier
@@ -60,15 +73,12 @@ fun HouseRowInputs(
             DebouncedCompactInputBox(
                 label = "NÚMERO",
                 initialValue = house.address.number,
-                onValueChange = { onUpdate(house.copy(address = house.address.copy(number = it))) },
+                onValueChange = { newValue -> onUpdate { h -> h.copy(address = h.address.copy(number = newValue)) } },
                 modifier = Modifier.weight(1.0f),
                 isError = highlightErrors && isMissingNumbers,
                 enabled = enabled,
                 focusRequester = focusRequester,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Characters,
-                    imeAction = ImeAction.Next
-                ),
+                keyboardOptions = KeyboardOptionsChars,
                 key = house.createdAt
             )
 
@@ -76,11 +86,8 @@ fun HouseRowInputs(
             DebouncedCompactInputBox(
                 label = "SEQUÊNCIA",
                 initialValue = if (house.address.sequence == 0) "" else house.address.sequence.toString(),
-                onValueChange = { onUpdate(house.copy(address = house.address.copy(sequence = it.trim().toIntOrNull() ?: 0))) },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Number,
-                    imeAction = ImeAction.Next
-                ),
+                onValueChange = { newValue -> onUpdate { h -> h.copy(address = h.address.copy(sequence = newValue.trim().toIntOrNull() ?: 0)) } },
+                keyboardOptions = KeyboardOptionsNumber,
                 modifier = Modifier.weight(0.8f),
                 isError = highlightErrors && isMissingNumbers,
                 enabled = enabled,
@@ -91,11 +98,8 @@ fun HouseRowInputs(
             DebouncedCompactInputBox(
                 label = "COMPLEMENTO",
                 initialValue = if (house.address.complement == 0) "" else house.address.complement.toString(),
-                onValueChange = { onUpdate(house.copy(address = house.address.copy(complement = it.trim().toIntOrNull() ?: 0))) },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Number,
-                    imeAction = ImeAction.Done
-                ),
+                onValueChange = { newValue -> onUpdate { h -> h.copy(address = h.address.copy(complement = newValue.trim().toIntOrNull() ?: 0)) } },
+                keyboardOptions = KeyboardOptionsNumberDone,
                 modifier = Modifier.weight(0.8f),
                 enabled = enabled,
                 key = house.createdAt
@@ -108,8 +112,8 @@ fun HouseRowInputs(
                 options = propertyTypeOptions,
                 displayOptions = propertyTypeDisplayOptions,
                 onOptionSelected = { selected ->
-                    PropertyType.entries.find { it.code == selected }?.let {
-                        onUpdate(house.copy(propertyType = it))
+                    PropertyType.entries.find { it.code == selected }?.let { pt ->
+                        onUpdate { h -> h.copy(propertyType = pt) }
                     }
                 },
                 modifier = Modifier.weight(1f),
@@ -124,9 +128,9 @@ fun HouseRowInputs(
                 options = situationOptions,
                 displayOptions = situationDisplayOptions,
                 onOptionSelected = { selected ->
-                    Situation.entries.find { it.code == selected }?.let {
+                    Situation.entries.find { it.code == selected }?.let { sit ->
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onUpdate(house.copy(situation = it))
+                        onUpdate { h -> h.copy(situation = sit) }
                     }
                 },
                 modifier = Modifier.weight(1f),

@@ -621,6 +621,13 @@ private fun shareToWhatsApp(
     val abandonados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
     val vazios = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.V }
     val comFoco = houses.count { it.treatment.comFoco }
+    val bairros = houses
+        .filter { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE || it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY }
+        .map { it.address.bairro.uppercase() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .sorted()
+    val totalLarvicida = houses.sumOf { it.treatment.larvicida }
 
     // Format WhatsApp message
     val sb = StringBuilder()
@@ -635,6 +642,11 @@ private fun shareToWhatsApp(
     sb.append("🚫 Recusados: $recusados\n")
     sb.append("🏚️ Abandonados: $abandonados\n")
     sb.append("📭 Vazios: $vazios\n")
+    sb.append("🧪 Larvicida: ${String.format(java.util.Locale("pt", "BR"), "%.1f", totalLarvicida)}g\n")
+
+    if (bairros.isNotEmpty()) {
+        sb.append("\n📍 *Bairro(s):* ${bairros.joinToString("/ ")}\n")
+    }
 
 
     val message = sb.toString().trim()

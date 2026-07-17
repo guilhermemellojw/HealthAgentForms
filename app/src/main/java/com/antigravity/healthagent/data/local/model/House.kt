@@ -1,6 +1,7 @@
 package com.antigravity.healthagent.data.local.model
 
 import androidx.room.*
+import androidx.compose.runtime.Immutable
 import com.antigravity.healthagent.domain.model.DailyContext
 import com.antigravity.healthagent.domain.model.GeoCapture
 import com.antigravity.healthagent.domain.model.TreatmentData
@@ -14,11 +15,12 @@ import com.antigravity.healthagent.utils.toDashDate
     indices = [
         Index(
             value = ["agentUid", "agentName", "data", "blockNumber", "blockSequence", "streetName", "number", "sequence", "complement", "bairro", "visitSegment"],
-            unique = true
+            unique = false
         ),
         Index(value = ["data", "agentUid"])
     ]
 )
+@Immutable
 data class House(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     @Embedded val address: VisitAddress = VisitAddress(),

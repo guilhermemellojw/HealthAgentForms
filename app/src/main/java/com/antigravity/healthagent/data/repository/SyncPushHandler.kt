@@ -43,6 +43,7 @@ class SyncPushHandler @Inject constructor(
         activities: List<DayActivity>,
         targetUid: String?,
         shouldReplace: Boolean,
+        isFullWipe: Boolean = false,
         syncMutex: Mutex
     ): Result<Unit> {
         val result = withTimeoutOrNull(600000L) {
@@ -146,7 +147,30 @@ class SyncPushHandler @Inject constructor(
                             "appVersionName" to (pInfo?.versionName ?: "Unknown")
                         )
 
-                        if (shouldReplace) {
+                        if (isFullWipe) {
+                            AppLogger.w("SyncPushHandler", "Executando FULL WIPE na nuvem para o agente $uid")
+                            val toDelete = mutableListOf<DocumentReference>()
+                            
+                            val houseDocs = userDocRef.collection("houses").get().await()
+                            toDelete.addAll(houseDocs.documents.map { it.reference })
+                            
+                            val activityDocs = userDocRef.collection("day_activities").get().await()
+                            toDelete.addAll(activityDocs.documents.map { it.reference })
+                            
+                            val summaryDocs = userDocRef.collection("monthly_summaries").get().await()
+                            toDelete.addAll(summaryDocs.documents.map { it.reference })
+
+                            if (toDelete.isNotEmpty()) {
+                                toDelete.chunked(400).forEach { chunk ->
+                                    val batch = firestore.batch()
+                                    chunk.forEach { batch.delete(it) }
+                                    batch.commit().await()
+                                }
+                            }
+
+                            metadata["deleted_house_ids"] = FieldValue.delete()
+                            metadata["deleted_activity_dates"] = FieldValue.delete()
+                        } else if (shouldReplace) {
                             val backupDates = (
                                 housesToPush.map { it.data.toDashDate() } + 
                                 activitiesToPush.map { it.date.toDashDate() } +

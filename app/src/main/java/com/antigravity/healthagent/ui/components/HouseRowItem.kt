@@ -29,7 +29,7 @@ import androidx.compose.ui.draw.drawBehind
 @Composable
 fun HouseRowItem(
     houseState: HouseUiState,
-    onUpdate: (House) -> Unit,
+    onUpdate: ((House) -> House) -> Unit,
     onDelete: (House) -> Unit,
     isReorderMode: Boolean = false,
     onMoveUp: () -> Unit = {},
@@ -85,7 +85,7 @@ fun HouseRowItem(
             streetSuggestions = getStreetSuggestions(),
             onDismiss = { showContextDialog = false },
             onConfirm = { block, blockSeq, street, bairro, qConcluido, lConcluido ->
-                onUpdate(house.copy(address = house.address.copy(
+                onUpdate { h -> h.copy(address = h.address.copy(
                     blockNumber = block, 
                     blockSequence = blockSeq,
                     streetName = street, 
@@ -93,7 +93,7 @@ fun HouseRowItem(
                 ),
                 quarteiraoConcluido = qConcluido,
                 localidadeConcluida = lConcluido
-                ))
+                )}
                 showContextDialog = false
             },
             isEasyMode = isEasyMode
@@ -105,7 +105,7 @@ fun HouseRowItem(
             house = house,
             onDismiss = { showTreatmentDialog = false },
             onConfirm = { updatedHouse ->
-                onUpdate(updatedHouse)
+                onUpdate { updatedHouse }
                 showTreatmentDialog = false
             },
             isEasyMode = isEasyMode,
@@ -129,7 +129,7 @@ fun HouseRowItem(
             currentObservation = house.observation,
             onDismiss = { showObservationDialog = false },
             onConfirm = { 
-                onUpdate(house.copy(observation = it))
+                onUpdate { h -> h.copy(observation = it) }
                 showObservationDialog = false
             }
         )

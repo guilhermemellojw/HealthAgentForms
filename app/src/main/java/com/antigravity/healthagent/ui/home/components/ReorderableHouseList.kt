@@ -52,7 +52,7 @@ fun ReorderableHouseList(
     onSelectDate: () -> Unit,
     onMoveDateBackward: () -> Unit,
     onMoveDateForward: () -> Unit,
-    onHouseUpdate: (House) -> Unit,
+    onHouseUpdate: (Int, (House) -> House) -> Unit,
     onHouseDelete: (House) -> Unit,
     onHouseRestore: () -> Unit,
     onMoveHouse: (House, moveUp: Boolean) -> Unit,
@@ -75,6 +75,17 @@ fun ReorderableHouseList(
     val focusRequesters = remember { mutableMapOf<Int, androidx.compose.ui.focus.FocusRequester>() }
 
     var overscrollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    // Extract stable primitives from uiState so lambdas capture only stable types,
+    // avoiding recomposition when only unstable nested objects change.
+    val isAdmin = uiState.isAdmin
+    val isEasyMode = uiState.isEasyMode
+    val isSolarMode = uiState.isSolarMode
+    val isDayClosed = uiState.isDayClosed
+    val isManualUnlock = uiState.isManualUnlock
+    val isSupervisor = uiState.isSupervisor
+    val isEditingToolsEnabled = uiState.isEditingToolsEnabled
+    val uiHousesSnapshot = uiState.houses
 
     fun checkForOverScroll(viewportY: Float) {
         checkForOverScroll(
@@ -164,7 +175,7 @@ fun ReorderableHouseList(
                 item {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         Spacer(Modifier.height(16.dp))
-                        if (!isSearchActive && uiState.isEditingToolsEnabled && (uiState.isAdmin || (!uiState.isDayClosed || uiState.isManualUnlock) && !uiState.isSupervisor)) {
+                        if (!isSearchActive && isEditingToolsEnabled && (isAdmin || (!isDayClosed || isManualUnlock) && !isSupervisor)) {
                             AddBetweenButton(onClick = { onAddNewHouseAt(-1) })
                             Spacer(Modifier.height(16.dp))
                         }
@@ -191,7 +202,7 @@ fun ReorderableHouseList(
                 contentType = { _, _ -> "house" }
             ) { index, houseState ->
                 Column {
-                    if (index == 0 && !isSearchActive && uiState.isEditingToolsEnabled && (uiState.isAdmin || (!uiState.isDayClosed || uiState.isManualUnlock) && !uiState.isSupervisor)) {
+                    if (index == 0 && !isSearchActive && isEditingToolsEnabled && (isAdmin || (!isDayClosed || isManualUnlock) && !isSupervisor)) {
                         Spacer(Modifier.height(8.dp))
                         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                             AddBetweenButton(
@@ -215,12 +226,12 @@ fun ReorderableHouseList(
                                 alpha = if (isDragging) 0f else 1f
                             }
                             .let {
-                                if (!uiState.isEasyMode && !uiState.isDayClosed) {
+                                if (!isEasyMode && !isDayClosed) {
                                     it.pointerInput(house.id) {
                                         detectDragGesturesAfterLongPress(
                                             onDragStart = { offset ->
                                                 if (uiHouses.isEmpty()) {
-                                                    uiHouses.addAll(uiState.houses)
+                                                    uiHouses.addAll(uiHousesSnapshot)
                                                 }
                                                 val visibleItems = listState.layoutInfo.visibleItemsInfo
                                                 val currentHouse = uiHouses.find { it.house.id == house.id }
@@ -268,14 +279,14 @@ fun ReorderableHouseList(
                                                 ghostY = 0f
                                                 overscrollJob?.cancel()
                                                 uiHouses.clear()
-                                                uiHouses.addAll(uiState.houses)
+                                                uiHouses.addAll(uiHousesSnapshot)
                                             }
                                         )
                                     }
                                 } else it
                             }
                     ) {
-                        val onUpdate = remember(house.id) { { h: House -> onHouseUpdate(h); Unit } }
+                        val onUpdate = remember(house.id) { { updater: (House) -> House -> onHouseUpdate(house.id, updater); Unit } }
                         val onDelete = remember(house.id) {
                             { h: House ->
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -295,7 +306,7 @@ fun ReorderableHouseList(
                         }
                         val onMoveUp = remember(house.id) { { onMoveHouse(house, true); Unit } }
                         val onMoveDown = remember(house.id) { { onMoveHouse(house, false); Unit } }
-                        val onEnableReorder = remember(uiState.isEasyMode, house.id) {
+                        val onEnableReorder = remember(isEasyMode, house.id) {
                             {
                                 val nextMode = !isReorderMode
                                 onReorderModeChange(nextMode)
@@ -311,8 +322,8 @@ fun ReorderableHouseList(
                         }
 
                         val focusRequester = remember(house.id) { focusRequesters.getOrPut(house.id) { androidx.compose.ui.focus.FocusRequester() } }
-                        val isBaseEnabled = uiState.isAdmin || (!uiState.isSupervisor && (!uiState.isDayClosed || uiState.isManualUnlock))
-                        val isLockedByAdmin = house.editedByAdmin && !uiState.isAdmin && !uiState.isManualUnlock
+                        val isBaseEnabled = isAdmin || (!isSupervisor && (!isDayClosed || isManualUnlock))
+                        val isLockedByAdmin = house.editedByAdmin && !isAdmin && !isManualUnlock
 
                         HouseRowItem(
                             houseState = houseState,
@@ -323,17 +334,17 @@ fun ReorderableHouseList(
                             onMoveDown = onMoveDown,
                             onEnableReorder = onEnableReorder,
                             onMoveDate = onMoveDate,
-                            getStreetSuggestions = { streetSuggestions },
-                            isEasyMode = uiState.isEasyMode,
-                            isSolarMode = uiState.isSolarMode,
+                            getStreetSuggestions = remember(streetSuggestions) { { streetSuggestions } },
+                            isEasyMode = isEasyMode,
+                            isSolarMode = isSolarMode,
                             focusRequester = focusRequester,
                             onGetLocation = onGetLocation,
-                            enabled = isBaseEnabled && (houseState.isMine || uiState.isAdmin) && !isLockedByAdmin,
-                            isAdmin = uiState.isAdmin
+                            enabled = isBaseEnabled && (houseState.isMine || isAdmin) && !isLockedByAdmin,
+                            isAdmin = isAdmin
                         )
                     }
 
-                    if (!isSearchActive && uiState.isEditingToolsEnabled && (uiState.isAdmin || (!uiState.isDayClosed || uiState.isManualUnlock) && !uiState.isSupervisor) && (houseState.isMine || uiState.isAdmin)) {
+                    if (!isSearchActive && isEditingToolsEnabled && (isAdmin || (!isDayClosed || isManualUnlock) && !isSupervisor) && (houseState.isMine || isAdmin)) {
                         Spacer(Modifier.height(8.dp))
                         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                             AddBetweenButton(
@@ -370,10 +381,10 @@ fun ReorderableHouseList(
                     onEnableReorder = {},
                     onMoveDate = {},
                     getStreetSuggestions = { emptyList() },
-                    enabled = !uiState.isDayClosed,
-                    isEasyMode = uiState.isEasyMode,
+                    enabled = !isDayClosed,
+                    isEasyMode = isEasyMode,
                     focusRequester = null,
-                    isAdmin = uiState.isAdmin
+                    isAdmin = isAdmin
                 )
             }
         }

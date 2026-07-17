@@ -3,7 +3,6 @@ package com.antigravity.healthagent.domain.usecase
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
-import com.antigravity.healthagent.domain.model.TreatmentData
 import com.antigravity.healthagent.utils.normalize
 import com.antigravity.healthagent.utils.formatStreetName
 import javax.inject.Inject
@@ -94,7 +93,7 @@ class HouseValidationUseCase @Inject constructor() {
         if (house.propertyType == PropertyType.EMPTY) invalidFields.add("propertyType")
 
         // Treatment logic
-        val treatment = extractTreatmentData(house)
+        val treatment = house.treatment
         val isWorked = house.situation == Situation.NONE || house.situation == Situation.EMPTY
         val totalDeposits = treatment.a1 + treatment.a2 + treatment.b + treatment.c + treatment.d1 + treatment.d2 + treatment.e
 
@@ -112,12 +111,6 @@ class HouseValidationUseCase @Inject constructor() {
 
         return invalidFields
     }
-
-    private fun extractTreatmentData(house: House) = TreatmentData(
-        a1 = house.treatment.a1, a2 = house.treatment.a2, b = house.treatment.b, c = house.treatment.c,
-        d1 = house.treatment.d1, d2 = house.treatment.d2, e = house.treatment.e,
-        eliminados = house.treatment.eliminados, larvicida = house.treatment.larvicida, comFoco = house.treatment.comFoco
-    )
 
     private fun generateIdentitySignature(house: House): String {
         return "${house.address.generateAddressSignature()}|${house.visitSegment}".uppercase()

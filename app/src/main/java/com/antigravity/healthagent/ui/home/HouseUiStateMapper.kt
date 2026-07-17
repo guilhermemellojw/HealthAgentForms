@@ -62,7 +62,7 @@ object HouseUiStateMapper {
             isHighlighted = isHighlighted,
             isMine = isMine,
             fullIdDisplay = fullIdDisplay,
-            errorLabels = errorLabels
+            errorLabels = errorLabels.toList()
         )
     }
 }

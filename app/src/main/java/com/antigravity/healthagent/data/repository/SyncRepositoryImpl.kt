@@ -45,13 +45,15 @@ class SyncRepositoryImpl @Inject constructor(
         houses: List<House>,
         activities: List<DayActivity>,
         targetUid: String?,
-        shouldReplace: Boolean
+        shouldReplace: Boolean,
+        isFullWipe: Boolean
     ): Result<Unit> {
         return syncPushHandler.pushLocalDataToCloud(
             houses = houses,
             activities = activities,
             targetUid = targetUid,
             shouldReplace = shouldReplace,
+            isFullWipe = isFullWipe,
             syncMutex = syncMutex
         )
     }

@@ -105,7 +105,7 @@ class CleanupHistoricalDataUseCaseTest {
     }
 
     private val mockSyncRepository = object : SyncRepository {
-        override suspend fun pushLocalDataToCloud(houses: List<House>, activities: List<DayActivity>, targetUid: String?, shouldReplace: Boolean): Result<Unit> = Result.success(Unit)
+        override suspend fun pushLocalDataToCloud(houses: List<House>, activities: List<DayActivity>, targetUid: String?, shouldReplace: Boolean, isFullWipe: Boolean): Result<Unit> = Result.success(Unit)
         override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> = Result.success(Unit)
         override suspend fun clearLocalData(): Result<Unit> = Result.success(Unit)
         override suspend fun clearAgentData(agentUid: String): Result<Unit> = Result.success(Unit)

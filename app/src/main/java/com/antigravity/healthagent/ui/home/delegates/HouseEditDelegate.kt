@@ -41,6 +41,7 @@ class HouseEditDelegate @Inject constructor(
 
     private val clashDialogJobs = ConcurrentHashMap<Int, Job>()
     private val houseUpdateJobs = ConcurrentHashMap<Int, Job>()
+    private val houseWriteJobs = ConcurrentHashMap<Int, Job>()
     private var recentlyDeletedHouse: House? = null
 
     // ──────────────────────────────────────────────────────────────
@@ -93,7 +94,7 @@ class HouseEditDelegate @Inject constructor(
         onHouseClick: (Int) -> Unit
     ) {
         val currentTime = System.currentTimeMillis()
-        if (isAddingHouse || currentTime - lastAddClickTime < 100) return
+        if (isAddingHouse || currentTime - lastAddClickTime < 300) return
         isAddingHouse = true
         lastAddClickTime = currentTime
 
@@ -153,9 +154,6 @@ class HouseEditDelegate @Inject constructor(
         markAsRecentlyEdited(scope, state, 0)
         state.housesInFlight.update { it + houseToInsert }
 
-        // RELEASE THE UI SEMAPHORE LOCK IMMEDIATELY
-        isAddingHouse = false
-
         scope.launch {
             try {
                 val result = addNewHouseUseCase.execute(params, preparedHouse = houseToInsert)
@@ -185,6 +183,8 @@ class HouseEditDelegate @Inject constructor(
                             )
                         }
 
+                        removeInFlight(state, houseToInsert)
+
                         soundManager.playPop()
                         markAsRecentlyEdited(scope, state, newId.toInt())
                         triggerDelayedValidation()
@@ -211,6 +211,8 @@ class HouseEditDelegate @Inject constructor(
                 state.uiEvent.value = "Erro ao adicionar imóvel: ${e.message}"
                 soundManager.playWarning()
                 removeInFlight(state, houseToInsert)
+            } finally {
+                isAddingHouse = false
             }
         }
     }
@@ -276,19 +278,38 @@ class HouseEditDelegate @Inject constructor(
         val updatedHouse = house.copy(lastUpdated = System.currentTimeMillis())
         state.pendingUpdateDrafts.update { it + (updatedHouse.id to updatedHouse) }
 
-        if (clashingHouse != null) {
-            AppLogger.w("HomeViewModel", "Clash detected for house ${updatedHouse.id} with ${clashingHouse.id}. Skipping DB update.")
-            clashDialogJobs[house.id]?.cancel()
-            clashDialogJobs.remove(house.id)
-        } else {
-            clashDialogJobs[house.id]?.cancel()
-            clashDialogJobs.remove(house.id)
+        AppLogger.d("PERSIST_DEBUG", "DRAFT_SET: house=${updatedHouse.id} pt=${updatedHouse.propertyType.code} lastUpdated=${updatedHouse.lastUpdated}")
 
-            performUpdateHouseWithDebounce(scope, state, updatedHouse, original)
+        if (clashingHouse != null) {
+            AppLogger.w("PERSIST_DEBUG", "CLASH: house=${updatedHouse.id} n=${updatedHouse.address.number} s=${updatedHouse.address.sequence} c=${updatedHouse.address.complement} pt=${updatedHouse.propertyType.code} clashes with house=${clashingHouse.id} n=${clashingHouse.address.number} s=${clashingHouse.address.sequence} c=${clashingHouse.address.complement}")
         }
+
+        clashDialogJobs[house.id]?.cancel()
+        clashDialogJobs.remove(house.id)
+
+        AppLogger.d("PERSIST_DEBUG", "SCHEDULE: house=${updatedHouse.id} n=${updatedHouse.address.number} s=${updatedHouse.address.sequence} c=${updatedHouse.address.complement} pt=${updatedHouse.propertyType.code}")
+        performUpdateHouseWithDebounce(scope, state, updatedHouse, original)
 
         markAsRecentlyEdited(scope, state, updatedHouse.id)
         triggerDelayedValidation()
+    }
+
+    fun updateHouseField(
+        scope: CoroutineScope,
+        state: HomeState,
+        houseId: Int,
+        latestHousesList: List<House>,
+        maxOpenHouses: Int,
+        isDayClosed: Boolean,
+        triggerDelayedValidation: () -> Unit,
+        update: (House) -> House
+    ) {
+        val currentLatest = latestHousesList.find { it.id == houseId } ?: return
+        val draft = state.pendingUpdateDrafts.value[houseId]
+        val latestBase = draft ?: currentLatest
+        
+        val newHouse = update(latestBase)
+        updateHouse(scope, state, newHouse, latestHousesList, maxOpenHouses, isDayClosed, triggerDelayedValidation)
     }
 
     private fun performUpdateHouseWithDebounce(
@@ -298,6 +319,7 @@ class HouseEditDelegate @Inject constructor(
         baselineHouse: House? = null
     ) {
         houseUpdateJobs[house.id]?.cancel()
+        houseWriteJobs[house.id]?.cancel()
 
         houseUpdateJobs[house.id] = scope.launch {
             try {
@@ -309,6 +331,7 @@ class HouseEditDelegate @Inject constructor(
 
                 delay(if (isHeavy) 800L else 300L)
 
+                AppLogger.d("PERSIST_DEBUG", "DEBOUNCE_FIRE: house=${house.id} n=${house.address.number} s=${house.address.sequence} c=${house.address.complement}")
                 performUpdateHouse(scope, state, house, baselineHouse)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // Normal cancellation, do nothing
@@ -345,8 +368,10 @@ class HouseEditDelegate @Inject constructor(
         baselineHouse: House? = null,
         forceMerge: Boolean = false
     ) {
-        scope.launch {
+        houseWriteJobs[house.id]?.cancel()
+        houseWriteJobs[house.id] = scope.launch {
             try {
+                AppLogger.d("PERSIST_DEBUG", "WRITE_START: house=${house.id} n=${house.address.number} s=${house.address.sequence} c=${house.address.complement} pt=${house.propertyType.code}")
                 val currentName = state.agentName.value
                 val currentUid = state.remoteAgentUid.value ?: state.currentUserUid.value
 
@@ -364,6 +389,10 @@ class HouseEditDelegate @Inject constructor(
 
                 val adminBypass = state.isAdmin.value
                 val shouldForce = adminBypass || forceMerge
+
+                // Capture timestamp BEFORE the write so it's <= DB's actual lastUpdated
+                val dbTimestamp = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
+
                 val result = saveHouseUseCase.updateHouseWithContext(houseWithIdentity, latestHouses, baselineHouse)
 
                 if (result.localizationChanged) {
@@ -388,10 +417,23 @@ class HouseEditDelegate @Inject constructor(
                     state.validationErrorHouseIds.value = state.validationErrorHouseIds.value - house.id
                 }
 
-                // Let InitializationDelegate's prune observer remove the draft re-actively 
-                // once Room emits the updated values.
+                // Align draft's lastUpdated with the captured timestamp so the prune
+                // observer waits for Room Flow to emit the new data (prevents flicker).
+                state.pendingUpdateDrafts.update { drafts ->
+                    val existing = drafts[house.id]
+                    if (existing != null) {
+                        drafts + (house.id to existing.copy(lastUpdated = dbTimestamp))
+                    } else {
+                        drafts
+                    }
+                }
+
+                AppLogger.d("PERSIST_DEBUG", "WRITE_OK: house=${house.id} n=${house.address.number} s=${house.address.sequence} c=${house.address.complement} pt=${house.propertyType.code} dbTs=${dbTimestamp}")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                AppLogger.w("PERSIST_DEBUG", "WRITE_CANCELLED: house=${house.id} n=${house.address.number} s=${house.address.sequence} c=${house.address.complement}")
+                throw e
             } catch (e: Exception) {
-                AppLogger.e("HomeViewModel", "Error updating house", e)
+                AppLogger.e("PERSIST_DEBUG", "WRITE_FAIL: house=${house.id} n=${house.address.number} s=${house.address.sequence} c=${house.address.complement} error=${e.message}")
                 state.uiEvent.value = "Falha ao atualizar imóvel: ${e.message}"
                 soundManager.playWarning()
             }

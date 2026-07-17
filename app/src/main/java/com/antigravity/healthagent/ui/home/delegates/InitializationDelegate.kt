@@ -32,6 +32,13 @@ class InitializationDelegate @Inject constructor(
     private val settingsManager: SettingsManager,
     private val houseValidationUseCase: HouseValidationUseCase
 ) {
+    private data class HouseUpdate(
+        val houses: List<com.antigravity.healthagent.ui.home.HouseUiState>,
+        val totals: DashboardTotals,
+        val errorIds: Set<Int>,
+        val duplicateIds: Set<Int>,
+        val dayErrorCount: Int
+    )
 
     fun initialize(
         scope: CoroutineScope,
@@ -70,25 +77,32 @@ class InitializationDelegate @Inject constructor(
             }
         }
 
-        // CRITICAL: Auto-load header context ONLY when active date changes
+        // CRITICAL: Auto-load header context ONLY when active date changes OR database finishes initial load
         scope.launch {
-            viewModel.data.collect { date ->
-                val dayHouses = latestHousesFlow.value.filter { it.data == date }
-                if (dayHouses.isNotEmpty()) {
-                    val ref = dayHouses.first()
-                    viewModel.municipio.value = ref.context.municipio.uppercase()
-                    viewModel.bairro.value = ref.address.bairro.uppercase()
-                    viewModel.categoria.value = ref.context.categoria.uppercase()
-                    viewModel.zona.value = ref.context.zona.uppercase()
-                    viewModel.tipo.value = ref.context.tipo
-                    viewModel.ciclo.value = ref.context.ciclo.uppercase()
-                    viewModel.atividade.value = ref.context.atividade
+            var lastInitializedDate: String? = null
+            combine(viewModel.data, latestHousesFlow) { date, houses ->
+                date to houses
+            }.collect { (date, houses) ->
+                if (lastInitializedDate != date) {
+                    val dayHouses = houses.filter { it.data == date }
+                    if (dayHouses.isNotEmpty()) {
+                        val ref = dayHouses.first()
+                        viewModel.municipio.value = ref.context.municipio.uppercase()
+                        viewModel.bairro.value = ref.address.bairro.uppercase()
+                        viewModel.categoria.value = ref.context.categoria.uppercase()
+                        viewModel.zona.value = ref.context.zona.uppercase()
+                        viewModel.tipo.value = ref.context.tipo
+                        viewModel.ciclo.value = ref.context.ciclo.uppercase()
+                        viewModel.atividade.value = ref.context.atividade
 
-                    // SURGICAL: Auto-load block and street from the last house of the day to ensure property prediction continuity
-                    val lastRef = dayHouses.last()
-                    viewModel.currentBlock.value = lastRef.address.blockNumber.uppercase()
-                    viewModel.currentBlockSequence.value = lastRef.address.blockSequence.uppercase()
-                    viewModel.currentStreet.value = lastRef.address.streetName
+                        // SURGICAL: Auto-load block and street from the last house of the day to ensure property prediction continuity
+                        val lastRef = dayHouses.last()
+                        viewModel.currentBlock.value = lastRef.address.blockNumber.uppercase()
+                        viewModel.currentBlockSequence.value = lastRef.address.blockSequence.uppercase()
+                        viewModel.currentStreet.value = lastRef.address.streetName
+
+                        lastInitializedDate = date
+                    }
                 }
             }
         }
@@ -123,23 +137,46 @@ class InitializationDelegate @Inject constructor(
             }
         }
 
-        // CRITICAL: House List and Dashboard Totals Observer
+        // CRITICAL: House List + Dashboard Totals + Validation (merged to reduce uiState.update calls)
+        //
+        // pendingUpdateDrafts is included as an input so that when the merged collector
+        // is triggered by recentlyEditedHouseIds (which fires before latestHousesFlow
+        // re-emits on Dispatchers.Default), the mapping always applies the latest draft
+        // values. This eliminates the flicker where the collector would momentarily
+        // overwrite the UI with stale (pre-draft) data from latestHousesFlow.
         scope.launch {
+            @Suppress("UNCHECKED_CAST")
             combine(
                 latestHousesFlow, viewModel.data, viewModel.recentlyEditedHouseIds,
-                viewModel.highlightedHouseId, viewModel.currentUserUid
-            ) { h, d, recentlyEdited, highlightedId, myUid ->
-                val dayHouses = h.filter { it.data == d }
-                val totals = calculateDashboardTotals(dayHouses)
+                viewModel.highlightedHouseId, viewModel.currentUserUid,
+                viewModel.validationErrorHouseIds, viewModel.isDuplicateIds,
+                viewModel.pendingUpdateDrafts
+            ) { args ->
+                val h = args[0] as List<House>
+                val d = args[1] as String
+                val recentlyEdited = args[2] as Map<Int, Long>
+                val highlightedId = args[3] as Int?
+                val myUid = args[4] as String
+                val errorIds = args[5] as Set<Int>
+                val duplicateIds = args[6] as Set<Int>
+                val drafts = args[7] as Map<Int, House>
 
+                val dayHouses = h.filter { it.data == d }
+
+                val dayHousesWithDrafts = dayHouses.map { house ->
+                    drafts[house.id] ?: house
+                }
+
+                val totals = calculateDashboardTotals(dayHousesWithDrafts)
+
+                val houseKeys = dayHousesWithDrafts.associateWith { generateHouseKey(it) }
                 val identityCounts = mutableMapOf<String, Int>()
-                dayHouses.forEach { hh ->
-                    val key = generateHouseKey(hh)
+                houseKeys.values.forEach { key ->
                     identityCounts[key] = (identityCounts[key] ?: 0) + 1
                 }
 
-                val mapped = dayHouses.map { hh ->
-                    val key = generateHouseKey(hh)
+                val mapped = dayHousesWithDrafts.map { hh ->
+                    val key = houseKeys[hh]!!
                     HouseUiStateMapper.map(
                         house = hh,
                         houseValidationUseCase = houseValidationUseCase,
@@ -149,35 +186,18 @@ class InitializationDelegate @Inject constructor(
                         isMine = hh.agentUid == myUid
                     )
                 }
-                mapped to totals
-            }.flowOn(Dispatchers.Default).collect { (mapped, totals) ->
-                viewModel.uiState.update { it.copy(
-                    houses = mapped,
-                    dashboardTotals = totals,
-                    pendingCount = totals.worked
-                ) }
-            }
-        }
 
-        // CRITICAL: Validation Errors and Duplicates Observer
-        scope.launch {
-            combine(
-                viewModel.validationErrorHouseIds,
-                viewModel.isDuplicateIds,
-                latestHousesFlow,
-                viewModel.data
-            ) { errorIds, duplicateIds, houses, d ->
-                val dayHouses = houses.filter { it.data == d }
-                val dayErrorCount = dayHouses.count { it.id in errorIds }
-                Triple(errorIds, duplicateIds, dayErrorCount)
-            }.flowOn(Dispatchers.Default).collect { (errorIds, duplicateIds, dayErrorCount) ->
-                viewModel.uiState.update { current ->
-                    current.copy(
-                        validationErrorHouseIds = errorIds,
-                        isDuplicateIds = duplicateIds,
-                        strictPendingCount = dayErrorCount
-                    )
-                }
+                val dayErrorCount = dayHousesWithDrafts.count { it.id in errorIds }
+                HouseUpdate(mapped, totals, errorIds, duplicateIds, dayErrorCount)
+            }.flowOn(Dispatchers.Default).collect { update ->
+                viewModel.uiState.update { it.copy(
+                    houses = update.houses,
+                    dashboardTotals = update.totals,
+                    pendingCount = update.totals.worked,
+                    validationErrorHouseIds = update.errorIds,
+                    isDuplicateIds = update.duplicateIds,
+                    strictPendingCount = update.dayErrorCount
+                ) }
             }
         }
 
@@ -282,7 +302,6 @@ class InitializationDelegate @Inject constructor(
 
                         val dbMatch = dbHouses.find { it.id == id }
                         val isDraftSynced = dbMatch != null &&
-                            dbMatch.lastUpdated >= draft.lastUpdated &&
                             dbMatch.address.number == draft.address.number &&
                             dbMatch.address.sequence == draft.address.sequence &&
                             dbMatch.address.complement == draft.address.complement &&
@@ -302,9 +321,17 @@ class InitializationDelegate @Inject constructor(
                             dbMatch.localidadeConcluida == draft.localidadeConcluida
 
                         if (isDraftSynced) {
+                            AppLogger.d("PERSIST_DEBUG", "PRUNE_SYNCED: draft id=$id n='${draft.address.number}' s=${draft.address.sequence} c=${draft.address.complement} pt=${draft.propertyType.code}")
                             resolvedIds.add(id)
                         } else if (!stillClashes && dbMatch != null && dbMatch.lastUpdated == draft.lastUpdated) {
+                            AppLogger.d("PERSIST_DEBUG", "PRUNE_EXACT: draft id=$id n='${draft.address.number}' s=${draft.address.sequence} c=${draft.address.complement} pt=${draft.propertyType.code}")
                             resolvedIds.add(id)
+                        } else {
+                            if (dbMatch != null) {
+                                AppLogger.d("PERSIST_DEBUG", "PRUNE_KEEP: draft id=$id n='${draft.address.number}' s=${draft.address.sequence} c=${draft.address.complement} pt=${draft.propertyType.code} db_n='${dbMatch.address.number}' db_s=${dbMatch.address.sequence} db_c=${dbMatch.address.complement} db_pt=${dbMatch.propertyType.code} db_lu=${dbMatch.lastUpdated} draft_lu=${draft.lastUpdated}")
+                            } else {
+                                AppLogger.d("PERSIST_DEBUG", "PRUNE_KEEP_NODB: draft id=$id (no dbMatch)")
+                            }
                         }
                     }
 
@@ -341,13 +368,5 @@ class InitializationDelegate @Inject constructor(
             }
         }
 
-        // Load initial sync timestamp
-        scope.launch {
-            settingsManager.lastSyncTimestamp.collect { ts ->
-                viewModel.syncStatus.update { state ->
-                    SyncUiState.Idle(lastSyncTime = ts)
-                }
-            }
-        }
     }
 }

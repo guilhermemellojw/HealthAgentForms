@@ -301,6 +301,9 @@ fun CompactDropdown(
     val focusManager = LocalFocusManager.current
     var expanded by remember { mutableStateOf(false) }
 
+    var displayValue by remember(currentValue) { mutableStateOf(currentValue) }
+    LaunchedEffect(currentValue) { displayValue = currentValue }
+
     val targetBorderColor = when {
         isError -> MaterialTheme.colorScheme.error
         expanded -> MaterialTheme.colorScheme.primary
@@ -391,9 +394,9 @@ fun CompactDropdown(
                            verticalAlignment = Alignment.CenterVertically
                         ) {
                            Text(
-                               text = currentValue,
-                               color = (if (isEasyMode && currentValue != "-") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface).copy(alpha = contentAlpha),
-                               fontSize = 22.sp,
+                                text = displayValue,
+                                color = (if (isEasyMode && displayValue != "-") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface).copy(alpha = contentAlpha),
+                                fontSize = 22.sp,
                                fontWeight = FontWeight.ExtraBold,
                                modifier = Modifier.weight(1f),
                                textAlign = TextAlign.Center,
@@ -415,9 +418,9 @@ fun CompactDropdown(
                        verticalAlignment = Alignment.CenterVertically
                     ) {
                        Text(
-                           text = currentValue,
-                           color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
-                           fontSize = 15.sp,
+                            text = displayValue,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
+                            fontSize = 15.sp,
                            fontWeight = FontWeight.Bold,
                            modifier = Modifier.weight(1f),
                            textAlign = TextAlign.Center,
@@ -450,6 +453,7 @@ fun CompactDropdown(
                     },
                     onClick = {
                         focusManager.clearFocus()
+                        displayValue = option
                         onOptionSelected(option)
                         expanded = false
                     }
@@ -532,25 +536,40 @@ fun DebouncedCompactInputBox(
 ) {
     var text by remember(key) { mutableStateOf(initialValue) }
     var isFocused by remember(key) { mutableStateOf(false) }
+    var hasInteracted by remember(key) { mutableStateOf(false) }
+    
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
     
     LaunchedEffect(initialValue, key) {
-        if (text != initialValue && !isFocused) {
-             text = initialValue
+        if (text != initialValue && !isFocused && !hasInteracted) {
+            text = initialValue
         }
     }
 
     LaunchedEffect(text, key) {
         if (text != initialValue && isFocused) {
             delay(debounceTime)
-            onValueChange(text)
+            if (isFocused) {
+                currentOnValueChange(text)
+            }
         }
     }
 
-    val onFocusChangedInternal = remember(onValueChange, text) {
+    LaunchedEffect(initialValue) {
+        if (hasInteracted && text == initialValue) {
+            hasInteracted = false
+        }
+    }
+
+    val onFocusChangedInternal = remember(initialValue) {
         { focused: Boolean ->
             isFocused = focused
-            if (!focused && text != initialValue) {
-                onValueChange(text)
+            if (!focused) {
+                if (text != initialValue) {
+                    hasInteracted = true
+                    currentOnValueChange(text)
+                }
+                hasInteracted = false
             }
         }
     }
@@ -559,6 +578,7 @@ fun DebouncedCompactInputBox(
         label = label,
         value = text,
         onValueChange = { newText ->
+            hasInteracted = true
             text = newText
         },
         modifier = modifier,

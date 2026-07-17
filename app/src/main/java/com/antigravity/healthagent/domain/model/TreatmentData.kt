@@ -1,5 +1,8 @@
 package com.antigravity.healthagent.domain.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class TreatmentData(
     val a1: Int = 0,
     val a2: Int = 0,

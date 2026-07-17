@@ -89,7 +89,18 @@ class HouseRepositoryImpl @Inject constructor(
         val id = runInTransactionWithRetry {
             // CRITICAL: Cleanup any stale local tombstone for this same house key
             tombstoneDao.deleteByNaturalKey(house.generateNaturalKey(), house.agentUid)
-            
+
+            // DUPLICATE GUARD: Prevent DB-level duplicates from stale in-memory state
+            // (e.g. rapid adds where Room Flow hasn't emitted yet)
+            val existingHouses = houseDao.getHousesByDateAndAgent(house.data, house.agentUid)
+            val existingDuplicate = existingHouses.find {
+                it.id != house.id && it.generateIdentityKey() == house.generateIdentityKey()
+            }
+            if (existingDuplicate != null) {
+                AppLogger.w("HouseRepository", "DUPLICATE_GUARD: Skipped insert of house id=${house.id}. Existing id=${existingDuplicate.id} key=${house.generateIdentityKey()}")
+                return@runInTransactionWithRetry existingDuplicate.id.toLong()
+            }
+
             // ADMIN AUTHORITY: Mark as edited by admin if forced
             val houseToInsert = house.copy(
                 isSynced = false, 
@@ -175,6 +186,7 @@ class HouseRepositoryImpl @Inject constructor(
             }
 
             if (changedHouses.isEmpty()) {
+                AppLogger.w("PERSIST_DEBUG", "REPO_NOCHANGE: ${houses.size} houses passed, 0 changed (all matched existing DB)")
                 return@runInTransactionWithRetry
             }
 
@@ -215,6 +227,9 @@ class HouseRepositoryImpl @Inject constructor(
                     editedByAdmin = force,
                     lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
                 )
+            }
+            preparedHouses.forEach { h ->
+                AppLogger.d("PERSIST_DEBUG", "REPO_UPSERT: id=${h.id} n='${h.address.number}' s=${h.address.sequence} c=${h.address.complement} pt=${h.propertyType.code} lastUpdated=${h.lastUpdated}")
             }
             houseDao.upsertHouses(preparedHouses)
         }

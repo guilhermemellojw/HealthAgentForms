@@ -13,7 +13,8 @@ interface SyncRepository {
         houses: List<House>, 
         activities: List<DayActivity>, 
         targetUid: String? = null,
-        shouldReplace: Boolean = false
+        shouldReplace: Boolean = false,
+        isFullWipe: Boolean = false
     ): Result<Unit>
     
 
