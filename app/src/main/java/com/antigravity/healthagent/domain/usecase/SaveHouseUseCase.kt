@@ -85,8 +85,31 @@ class SaveHouseUseCase @Inject constructor(
     }
 
     suspend fun updateHouses(houses: List<House>, force: Boolean = false) = withContext(Dispatchers.IO) {
-        // Assume these are already recalculated if coming from a flow that does it
-        repository.updateHouses(houses, force)
+        // Re-query current DB state INSIDE the transaction to prevent
+        // concurrent writes from overwriting each other's changes.
+        // This mirrors the pattern in updateHouse().
+        repository.runInTransaction {
+            val affectedDates = houses.map { it.data.toDashDate() }.distinct()
+            val affectedUids = houses.map { it.agentUid }.distinct()
+            
+            // Get all houses for affected dates/uids
+            val dbHouses = affectedDates.flatMap { date ->
+                affectedUids.flatMap { uid ->
+                    repository.getHousesByDateAndAgent(date, uid)
+                }
+            }
+            
+            // Merge incoming houses with fresh DB state
+            val merged = dbHouses.map { dbHouse ->
+                houses.find { it.id == dbHouse.id } ?: dbHouse
+            }
+            
+            // Also include any new houses (id=0) that aren't in DB yet
+            val newHouses = houses.filter { it.id == 0 }
+            
+            val allToSave = (merged + newHouses).distinctBy { it.id }
+            repository.updateHouses(allToSave, force)
+        }
     }
 
     suspend fun deleteHouse(house: House, allHouses: List<House>, force: Boolean = false) = withContext(Dispatchers.IO) {
@@ -117,12 +140,17 @@ class SaveHouseUseCase @Inject constructor(
         allHouses: List<House>,
         baselineHouse: House? = null
     ): HouseUpdateResult = withContext(Dispatchers.IO) {
-        val originalHouse = baselineHouse ?: allHouses.find { it.id == house.id }
-        
         // 1. Sanitize Data
         val sanitized = sanitizeHouse(house)
         
-        // 2. Check for localization changes
+        // 2. Re-read fresh DB state for the affected day to avoid propagating stale draft values
+        val affectedDate = sanitized.data.toDashDate()
+        val freshDbHouses = repository.getHousesByDateAndAgent(affectedDate, sanitized.agentUid)
+        
+        // 3. Find original house from fresh DB (not draft-overlaid snapshot)
+        val originalHouse = baselineHouse ?: freshDbHouses.find { it.id == house.id }
+        
+        // 4. Check for localization changes using fresh DB baseline
         val localizationChanged = originalHouse != null && (
             originalHouse.address.bairro != sanitized.address.bairro ||
             originalHouse.address.blockNumber != sanitized.address.blockNumber ||
@@ -130,8 +158,9 @@ class SaveHouseUseCase @Inject constructor(
             originalHouse.address.streetName != sanitized.address.streetName
         )
         
+        // 5. Propagate using fresh DB houses as baseline (not draft-overlaid allHouses)
         val sequenceUpdated = if (localizationChanged) {
-            allHouses.map { h ->
+            freshDbHouses.map { h ->
                 if (h.id == house.id) {
                     sanitized
                 } else if (h.listOrder > sanitized.listOrder && originalHouse != null) {
@@ -154,7 +183,7 @@ class SaveHouseUseCase @Inject constructor(
                         )
                         
                         // DEFERRED CLASH CHECK: Only propagate if it doesn't create a duplication in the DB.
-                        val identityClash = allHouses.any { other ->
+                        val identityClash = freshDbHouses.any { other ->
                             other.id != updated.id &&
                             other.data == updated.data &&
                             other.agentUid == updated.agentUid &&
@@ -182,10 +211,10 @@ class SaveHouseUseCase @Inject constructor(
                 }
             }
         } else {
-            allHouses.map { if (it.id == house.id) sanitized else it }
+            freshDbHouses.map { if (it.id == house.id) sanitized else it }
         }
 
-        // 3. Recalculate segments ONLY if street name changed or specifically requested
+        // 6. Recalculate segments ONLY if street name changed or specifically requested
         val dayToRecalculate = sanitized.data.toDashDate()
         val affectedHouses = sequenceUpdated.filter { it.data.toDashDate() == dayToRecalculate }.sortedBy { it.listOrder }
         val recalculatedDay = if (localizationChanged) {
@@ -197,16 +226,16 @@ class SaveHouseUseCase @Inject constructor(
         // Find the specific updated house in the recalculated list
         val finalUpdatedHouse = recalculatedDay.find { it.id == house.id } ?: sanitized
         
-        // The list of "houses to update" should be those that changed
+        // The list of "houses to update" should be those that changed (compared to fresh DB)
         val housesThatChanged = recalculatedDay.filter { dayHouse ->
-            val original = allHouses.find { it.id == dayHouse.id }
+            val original = freshDbHouses.find { it.id == dayHouse.id }
             original == null || original != dayHouse
         }
         
         HouseUpdateResult(finalUpdatedHouse, housesThatChanged, localizationChanged)
     }
 
-    private fun sanitizeHouse(house: House): House {
+    fun sanitizeHouse(house: House): House {
         val totalDeposits = house.treatment.totalDeposits
         val hasTreatment = totalDeposits > 0 || house.treatment.eliminados > 0 || house.treatment.larvicida > 0.0
 

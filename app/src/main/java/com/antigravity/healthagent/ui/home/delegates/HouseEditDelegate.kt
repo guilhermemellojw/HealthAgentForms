@@ -3,13 +3,13 @@ package com.antigravity.healthagent.ui.home.delegates
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.usecase.AddNewHouseUseCase
-import com.antigravity.healthagent.domain.usecase.UpdateHouseUseCase
 import com.antigravity.healthagent.domain.usecase.SaveHouseUseCase
 import com.antigravity.healthagent.domain.usecase.RecalculateVisitSegmentsUseCase
 import com.antigravity.healthagent.domain.usecase.ClashDetector
 import com.antigravity.healthagent.domain.usecase.DayLockEnforcer
 import com.antigravity.healthagent.domain.usecase.RoleEnforcer
 import com.antigravity.healthagent.domain.usecase.CheckWorkedHouseLimitUseCase
+import com.antigravity.healthagent.domain.util.Clock
 import com.antigravity.healthagent.utils.SoundManager
 import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.utils.formatStreetName
@@ -18,6 +18,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -28,21 +30,35 @@ class HouseEditDelegate @Inject constructor(
     private val repository: HouseRepository,
     private val saveHouseUseCase: SaveHouseUseCase,
     private val addNewHouseUseCase: AddNewHouseUseCase,
-    private val updateHouseUseCase: UpdateHouseUseCase,
     private val recalculateVisitSegmentsUseCase: RecalculateVisitSegmentsUseCase,
     private val clashDetector: ClashDetector,
     private val dayLockEnforcer: DayLockEnforcer,
     private val roleEnforcer: RoleEnforcer,
     private val checkWorkedHouseLimitUseCase: CheckWorkedHouseLimitUseCase,
-    private val soundManager: SoundManager
+    private val soundManager: SoundManager,
+    private val clock: Clock
 ) {
     private var isAddingHouse = false
     private var lastAddClickTime = 0L
+
+    private val writeMutex = Mutex()
+    private val addHouseMutex = Mutex()
 
     private val clashDialogJobs = ConcurrentHashMap<Int, Job>()
     private val houseUpdateJobs = ConcurrentHashMap<Int, Job>()
     private val houseWriteJobs = ConcurrentHashMap<Int, Job>()
     private var recentlyDeletedHouse: House? = null
+
+    fun cancelAll() {
+        clashDialogJobs.forEach { (_, job) -> job.cancel() }
+        houseUpdateJobs.forEach { (_, job) -> job.cancel() }
+        houseWriteJobs.forEach { (_, job) -> job.cancel() }
+        clashDialogJobs.clear()
+        houseUpdateJobs.clear()
+        houseWriteJobs.clear()
+        recentlyDeletedHouse = null
+        isAddingHouse = false
+    }
 
     // ──────────────────────────────────────────────────────────────
     // ADD HOUSE AT SPECIFIC POSITION (Insert between existing rows)
@@ -51,10 +67,9 @@ class HouseEditDelegate @Inject constructor(
         scope: CoroutineScope,
         state: HomeState,
         afterId: Int,
-        latestHousesList: List<House>,
-        isDayClosed: Boolean
+        latestHousesList: List<House>
     ) {
-        val currentTime = System.currentTimeMillis()
+        val currentTime = clock.currentTimeMillis()
         if (isAddingHouse || currentTime - lastAddClickTime < 100) return
         isAddingHouse = true
         lastAddClickTime = currentTime
@@ -67,8 +82,10 @@ class HouseEditDelegate @Inject constructor(
 
         scope.launch {
             try {
-                val params = buildAddParams(state, latestHousesList, isDayClosed, afterId = afterId)
-                val result = addNewHouseUseCase.execute(params)
+                val params = buildAddParams(state, latestHousesList, afterId = afterId)
+                val result = addHouseMutex.withLock {
+                    addNewHouseUseCase.execute(params)
+                }
                 handleAddResult(result, scope, state)
             } catch (e: Exception) {
                 AppLogger.e("HomeViewModel", "Error adding house at position", e)
@@ -87,13 +104,11 @@ class HouseEditDelegate @Inject constructor(
         scope: CoroutineScope,
         state: HomeState,
         latestHousesList: List<House>,
-        maxOpenHouses: Int,
-        isDayClosed: Boolean,
         validateCurrentDay: (Boolean) -> Boolean,
         triggerDelayedValidation: () -> Unit,
         onHouseClick: (Int) -> Unit
     ) {
-        val currentTime = System.currentTimeMillis()
+        val currentTime = clock.currentTimeMillis()
         if (isAddingHouse || currentTime - lastAddClickTime < 300) return
         isAddingHouse = true
         lastAddClickTime = currentTime
@@ -146,7 +161,7 @@ class HouseEditDelegate @Inject constructor(
             }
         }
 
-        val params = buildAddParams(state, fullyUpToDateHouses, isDayClosed, afterId = -2, maxOpenHouses = maxOpenHouses)
+        val params = buildAddParams(state, fullyUpToDateHouses, afterId = -2)
 
         // Generate the house optimistically (for in-flight display)
         val houseToInsert = addNewHouseUseCase.generateHouseToInsert(params)
@@ -156,14 +171,17 @@ class HouseEditDelegate @Inject constructor(
 
         scope.launch {
             try {
-                val result = addNewHouseUseCase.execute(params, preparedHouse = houseToInsert)
+                val result = addHouseMutex.withLock {
+                    addNewHouseUseCase.execute(params, preparedHouse = houseToInsert)
+                }
 
                 when (result) {
                     is AddNewHouseUseCase.Result.Success -> {
                         val newId = result.newId
 
-                        // Reconcile in-flight state with actual DB state
-                        val dbHousesAfter = repository.getHousesByDateAndAgent(state.data.value, currentAgentUid)
+                        val dbHousesAfter = writeMutex.withLock {
+                            repository.getHousesByDateAndAgent(state.data.value, currentAgentUid)
+                        }
                         val currentDrafts = state.pendingUpdateDrafts.value
                         val currentInFlightsNow = state.housesInFlight.value
                         val refreshedLatestHouses = (dbHousesAfter.map { currentDrafts[it.id] ?: it } + currentInFlightsNow)
@@ -225,8 +243,6 @@ class HouseEditDelegate @Inject constructor(
         state: HomeState,
         house: House,
         latestHousesList: List<House>,
-        maxOpenHouses: Int,
-        isDayClosed: Boolean,
         triggerDelayedValidation: () -> Unit
     ) {
         if (roleEnforcer.enforce(state.isSupervisor.value, state.isAdmin.value) is RoleEnforcer.RoleResult.Blocked) {
@@ -234,7 +250,7 @@ class HouseEditDelegate @Inject constructor(
         }
 
         val lockResult = dayLockEnforcer.enforce(
-            isDayClosed = isDayClosed,
+            isDayClosed = state.uiState.value.isDayClosed,
             isManualUnlock = state.uiState.value.isManualUnlock,
             isAdmin = state.isAdmin.value
         )
@@ -254,7 +270,7 @@ class HouseEditDelegate @Inject constructor(
             original = original,
             dayHouses = latestHousesList,
             currentDate = state.data.value,
-            maxOpenHouses = maxOpenHouses,
+            maxOpenHouses = state.uiState.value.maxOpenHouses,
             isAdmin = state.isAdmin.value,
             isManualUnlock = state.uiState.value.isManualUnlock
         )
@@ -275,7 +291,8 @@ class HouseEditDelegate @Inject constructor(
 
         val clashingHouse = clashDetector.findClash(house, latestHousesList)
 
-        val updatedHouse = house.copy(lastUpdated = System.currentTimeMillis())
+        val sanitizedHouse = saveHouseUseCase.sanitizeHouse(house)
+        val updatedHouse = sanitizedHouse.copy(lastUpdated = System.currentTimeMillis())
         state.pendingUpdateDrafts.update { it + (updatedHouse.id to updatedHouse) }
 
         AppLogger.d("PERSIST_DEBUG", "DRAFT_SET: house=${updatedHouse.id} pt=${updatedHouse.propertyType.code} lastUpdated=${updatedHouse.lastUpdated}")
@@ -299,8 +316,6 @@ class HouseEditDelegate @Inject constructor(
         state: HomeState,
         houseId: Int,
         latestHousesList: List<House>,
-        maxOpenHouses: Int,
-        isDayClosed: Boolean,
         triggerDelayedValidation: () -> Unit,
         update: (House) -> House
     ) {
@@ -309,7 +324,7 @@ class HouseEditDelegate @Inject constructor(
         val latestBase = draft ?: currentLatest
         
         val newHouse = update(latestBase)
-        updateHouse(scope, state, newHouse, latestHousesList, maxOpenHouses, isDayClosed, triggerDelayedValidation)
+        updateHouse(scope, state, newHouse, latestHousesList, triggerDelayedValidation)
     }
 
     private fun performUpdateHouseWithDebounce(
@@ -371,70 +386,69 @@ class HouseEditDelegate @Inject constructor(
         houseWriteJobs[house.id]?.cancel()
         houseWriteJobs[house.id] = scope.launch {
             try {
-                AppLogger.d("PERSIST_DEBUG", "WRITE_START: house=${house.id} n=${house.address.number} s=${house.address.sequence} c=${house.address.complement} pt=${house.propertyType.code}")
-                val currentName = state.agentName.value
-                val currentUid = state.remoteAgentUid.value ?: state.currentUserUid.value
+                writeMutex.withLock {
+                    AppLogger.d("PERSIST_DEBUG", "WRITE_START: house=${house.id} n=${house.address.number} s=${house.address.sequence} c=${house.address.complement} pt=${house.propertyType.code}")
+                    val currentName = state.agentName.value
+                    val currentUid = state.remoteAgentUid.value ?: state.currentUserUid.value
 
-                // Guard: Do not overwrite coworker/teammate identities during updates
-                val houseWithIdentity = if (house.agentUid.isBlank() || house.agentUid == currentUid) {
-                    house.copy(agentName = currentName, agentUid = currentUid ?: "")
-                } else {
-                    house
-                }
+                    val houseWithIdentity = if (house.agentUid.isBlank() || house.agentUid == currentUid) {
+                        house.copy(agentName = currentName, agentUid = currentUid ?: "")
+                    } else {
+                        house
+                    }
 
-                val dbHouses = repository.getHousesByDateAndAgent(state.data.value, currentUid ?: "")
-                val drafts = state.pendingUpdateDrafts.value
-                val inFlights = state.housesInFlight.value
-                val latestHouses = (dbHouses.map { drafts[it.id] ?: it } + inFlights)
+                    val dbHouses = repository.getHousesByDateAndAgent(state.data.value, currentUid ?: "")
+                    val drafts = state.pendingUpdateDrafts.value
+                    val inFlights = state.housesInFlight.value
+                    val latestHouses = (dbHouses.map { drafts[it.id] ?: it } + inFlights)
 
-                val adminBypass = state.isAdmin.value
-                val shouldForce = adminBypass || forceMerge
+                    val adminBypass = state.isAdmin.value
+                    val shouldForce = adminBypass || forceMerge
 
-                // Capture timestamp BEFORE the write so it's <= DB's actual lastUpdated
-                val dbTimestamp = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
+                    val dbTimestamp = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
 
-                val result = saveHouseUseCase.updateHouseWithContext(houseWithIdentity, latestHouses, baselineHouse)
+                    val result = saveHouseUseCase.updateHouseWithContext(houseWithIdentity, latestHouses, baselineHouse)
 
-                if (result.localizationChanged) {
-                    state.bairro.value = result.updatedHouse.address.bairro
-                    state.currentBlock.value = result.updatedHouse.address.blockNumber
-                    state.currentBlockSequence.value = result.updatedHouse.address.blockSequence
-                    state.currentStreet.value = result.updatedHouse.address.streetName
+                    if (result.localizationChanged) {
+                        state.bairro.value = result.updatedHouse.address.bairro
+                        state.currentBlock.value = result.updatedHouse.address.blockNumber
+                        state.currentBlockSequence.value = result.updatedHouse.address.blockSequence
+                        state.currentStreet.value = result.updatedHouse.address.streetName
 
-                    val subsequentWithIdentity = result.subsequentHouses.map {
-                        if (it.agentUid.isBlank() || it.agentUid == currentUid) {
-                            it.copy(agentName = currentName, agentUid = currentUid ?: "")
+                        val subsequentWithIdentity = result.subsequentHouses.map {
+                            if (it.agentUid.isBlank() || it.agentUid == currentUid) {
+                                it.copy(agentName = currentName, agentUid = currentUid ?: "")
+                            } else {
+                                it
+                            }
+                        }
+                        saveHouseUseCase.updateHouses(subsequentWithIdentity + result.updatedHouse, shouldForce)
+                    } else {
+                        saveHouseUseCase.updateHouse(result.updatedHouse, latestHouses, shouldForce)
+                    }
+
+                    if (state.validationErrorHouseIds.value.contains(house.id)) {
+                        state.validationErrorHouseIds.value = state.validationErrorHouseIds.value - house.id
+                    }
+
+                    state.pendingUpdateDrafts.update { drafts ->
+                        val existing = drafts[house.id]
+                        if (existing != null) {
+                            drafts + (house.id to existing.copy(lastUpdated = dbTimestamp))
                         } else {
-                            it
+                            drafts
                         }
                     }
-                    saveHouseUseCase.updateHouses(subsequentWithIdentity + result.updatedHouse, shouldForce)
-                } else {
-                    saveHouseUseCase.updateHouse(result.updatedHouse, latestHouses, shouldForce)
-                }
 
-                if (state.validationErrorHouseIds.value.contains(house.id)) {
-                    state.validationErrorHouseIds.value = state.validationErrorHouseIds.value - house.id
-                }
-
-                // Align draft's lastUpdated with the captured timestamp so the prune
-                // observer waits for Room Flow to emit the new data (prevents flicker).
-                state.pendingUpdateDrafts.update { drafts ->
-                    val existing = drafts[house.id]
-                    if (existing != null) {
-                        drafts + (house.id to existing.copy(lastUpdated = dbTimestamp))
-                    } else {
-                        drafts
-                    }
-                }
-
-                AppLogger.d("PERSIST_DEBUG", "WRITE_OK: house=${house.id} n=${house.address.number} s=${house.address.sequence} c=${house.address.complement} pt=${house.propertyType.code} dbTs=${dbTimestamp}")
+                    AppLogger.d("PERSIST_DEBUG", "WRITE_OK: house=${house.id} n=${house.address.number} s=${house.address.sequence} c=${house.address.complement} pt=${house.propertyType.code} dbTs=${dbTimestamp}")
+                } // writeMutex.withLock end
             } catch (e: kotlinx.coroutines.CancellationException) {
                 AppLogger.w("PERSIST_DEBUG", "WRITE_CANCELLED: house=${house.id} n=${house.address.number} s=${house.address.sequence} c=${house.address.complement}")
                 throw e
             } catch (e: Exception) {
                 AppLogger.e("PERSIST_DEBUG", "WRITE_FAIL: house=${house.id} n=${house.address.number} s=${house.address.sequence} c=${house.address.complement} error=${e.message}")
                 state.uiEvent.value = "Falha ao atualizar imóvel: ${e.message}"
+                state.pendingUpdateDrafts.update { it - house.id }
                 soundManager.playWarning()
             }
         }
@@ -443,7 +457,7 @@ class HouseEditDelegate @Inject constructor(
     // ──────────────────────────────────────────────────────────────
     // DELETE HOUSE
     // ──────────────────────────────────────────────────────────────
-    fun deleteHouse(scope: CoroutineScope, state: HomeState, house: House, latestHousesList: List<House>, isDayClosed: Boolean) {
+    fun deleteHouse(scope: CoroutineScope, state: HomeState, house: House, latestHousesList: List<House>) {
         val roleResult = roleEnforcer.enforce(state.isSupervisor.value, state.isAdmin.value, "excluir dados remotamente")
         if (roleResult is RoleEnforcer.RoleResult.Blocked) {
             state.uiEvent.value = roleResult.message
@@ -459,7 +473,7 @@ class HouseEditDelegate @Inject constructor(
         }
 
         val lockResult = dayLockEnforcer.enforce(
-            isDayClosed = isDayClosed,
+            isDayClosed = state.uiState.value.isDayClosed,
             isManualUnlock = state.uiState.value.isManualUnlock,
             isAdmin = isAdmin,
             actionDescription = "deletar"
@@ -480,7 +494,9 @@ class HouseEditDelegate @Inject constructor(
 
                 if (house.id == 0) return@launch
 
-                saveHouseUseCase.deleteHouse(house, latestHousesList, isAdmin)
+                writeMutex.withLock {
+                    saveHouseUseCase.deleteHouse(house, latestHousesList, isAdmin)
+                }
                 soundManager.playPop()
             } catch (e: Exception) {
                 AppLogger.e("HomeViewModel", "Error deleting house", e)
@@ -493,9 +509,9 @@ class HouseEditDelegate @Inject constructor(
     // ──────────────────────────────────────────────────────────────
     // RESTORE DELETED HOUSE
     // ──────────────────────────────────────────────────────────────
-    fun restoreDeletedHouse(scope: CoroutineScope, state: HomeState, latestHousesList: List<House>, isDayClosed: Boolean) {
+    fun restoreDeletedHouse(scope: CoroutineScope, state: HomeState, latestHousesList: List<House>) {
         val lockResult = dayLockEnforcer.enforce(
-            isDayClosed = isDayClosed,
+            isDayClosed = state.uiState.value.isDayClosed,
             isManualUnlock = state.uiState.value.isManualUnlock,
             isAdmin = state.isAdmin.value,
             actionDescription = "restaurar"
@@ -532,7 +548,28 @@ class HouseEditDelegate @Inject constructor(
             val adminBypass = state.isAdmin.value
             val updatedList = reorderedList.mapIndexed { index, h -> h.copy(listOrder = index.toLong()) }
             val recalculated = recalculateVisitSegmentsUseCase.recalculateVisitSegments(updatedList)
-            saveHouseUseCase.updateHouses(recalculated, adminBypass)
+            
+            // Re-read DB for the affected day before writing to avoid
+            // overwriting concurrent edits to other fields (e.g., propertyType).
+            val currentDate = state.data.value
+            val currentUid = state.remoteAgentUid.value ?: state.currentUserUid.value ?: ""
+            val dbHousesForDay = if (currentUid.isNotBlank()) {
+                repository.getHousesByDateAndAgent(currentDate, currentUid)
+                    .filter { it.data == currentDate }
+                    .associateBy { it.id }
+            } else emptyMap<Int, House>()
+            
+            // Merge reordered houses with fresh DB state
+            val merged = recalculated.map { h ->
+                dbHousesForDay[h.id]?.copy(
+                    listOrder = h.listOrder,
+                    visitSegment = h.visitSegment,
+                    isSynced = false,
+                    lastUpdated = System.currentTimeMillis()
+                ) ?: h.copy(isSynced = false, lastUpdated = System.currentTimeMillis())
+            }
+            
+            saveHouseUseCase.updateHouses(merged, adminBypass)
             triggerDelayedValidation(500)
         }
     }
@@ -573,9 +610,7 @@ class HouseEditDelegate @Inject constructor(
     private fun buildAddParams(
         state: HomeState,
         latestHousesList: List<House>,
-        isDayClosed: Boolean,
-        afterId: Int,
-        maxOpenHouses: Int = 0
+        afterId: Int
     ): AddNewHouseUseCase.Params {
         val currentAgentUid = state.remoteAgentUid.value ?: state.currentUserUid.value ?: ""
         return AddNewHouseUseCase.Params(
@@ -594,11 +629,11 @@ class HouseEditDelegate @Inject constructor(
             atividade = state.atividade.value,
             afterId = afterId,
             latestHousesList = latestHousesList,
-            isDayClosed = isDayClosed,
+            isDayClosed = state.uiState.value.isDayClosed,
             isManualUnlock = state.uiState.value.isManualUnlock,
             isAdmin = state.isAdmin.value,
             isSupervisor = state.isSupervisor.value,
-            maxOpenHouses = maxOpenHouses
+            maxOpenHouses = state.uiState.value.maxOpenHouses
         )
     }
 
@@ -638,7 +673,7 @@ class HouseEditDelegate @Inject constructor(
 
     private fun markAsRecentlyEdited(scope: CoroutineScope, state: HomeState, houseId: Int) {
         scope.launch {
-            val now = System.currentTimeMillis()
+            val now = clock.currentTimeMillis()
             state.recentlyEditedHouseIds.update { it + (houseId to now) }
             delay(4000)
             state.recentlyEditedHouseIds.update { current ->

@@ -15,9 +15,9 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33], manifest = Config.NONE)
-class Migration37To38Test {
+class Migration38To39Test {
 
-    private val TEST_DB = "migration-37-38-test.db"
+    private val TEST_DB = "migration-38-39-test.db"
     private val context = ApplicationProvider.getApplicationContext<Context>()
 
     @After
@@ -26,8 +26,8 @@ class Migration37To38Test {
     }
 
     @Test
-    fun migration37To38_preservesHouseData() {
-        createV37WithData {
+    fun migration38To39_preservesHouseData() {
+        createV38WithData {
             execSQL("""
                 INSERT INTO houses (
                     propertyType, situation, data, agentName, agentUid, observation,
@@ -69,8 +69,62 @@ class Migration37To38Test {
     }
 
     @Test
-    fun migration37To38_preservesDayActivities() {
-        createV37WithData {
+    fun migration38To39_allowsDuplicateAfterMigration() {
+        // Insert one house under v38 (UNIQUE index enforced at SQLite level)
+        createV38WithData {
+            execSQL("""
+                INSERT INTO houses (
+                    propertyType, situation, data, agentName, agentUid, observation,
+                    listOrder, visitSegment, blockNumber, blockSequence, streetName,
+                    number, sequence, complement, bairro, a1, a2, b, c, d1, d2, e,
+                    eliminados, larvicida, comFoco, municipio, categoria, zona, tipo,
+                    ciclo, atividade
+                ) VALUES (
+                    'R', 'NONE', '01-01-2026', 'Agent', 'uid_1', '',
+                    0, 1, '001', 'A', 'RUA A',
+                    '10', 1, 0, 'CENTRO', 0, 0, 0, 0, 0, 0, 0,
+                    0, 0.0, 0, 'MUNICIPIO', 'CATEGORIA', 'ZONA', 1,
+                    'CICLO', 0
+                )
+            """)
+        }
+
+        // After migration to v39, inserting a duplicate should succeed
+        migrateAndVerify { db ->
+            var duplicateCount = 0
+            try {
+                db.execSQL("""
+                    INSERT INTO houses (
+                        propertyType, situation, data, agentName, agentUid, observation,
+                        listOrder, visitSegment, blockNumber, blockSequence, streetName,
+                        number, sequence, complement, bairro, a1, a2, b, c, d1, d2, e,
+                        eliminados, larvicida, comFoco, municipio, categoria, zona, tipo,
+                        ciclo, atividade
+                    ) VALUES (
+                        'R', 'NONE', '01-01-2026', 'Agent', 'uid_1', '',
+                        0, 1, '001', 'A', 'RUA A',
+                        '10', 1, 0, 'CENTRO', 0, 0, 0, 0, 0, 0, 0,
+                        0, 0.0, 0, 'MUNICIPIO', 'CATEGORIA', 'ZONA', 1,
+                        'CICLO', 0
+                    )
+                """)
+                duplicateCount = 1
+            } catch (_: Exception) {
+                // Duplicate insert failed — index still has UNIQUE constraint
+            }
+
+            val cursor = db.rawQuery("SELECT COUNT(*) FROM houses", null)
+            cursor.moveToFirst()
+            val totalAfter = cursor.getInt(0)
+            cursor.close()
+
+            assertEquals("After migration, inserting a duplicate should succeed (UNIQUE removed)", 2, totalAfter)
+        }
+    }
+
+    @Test
+    fun migration38To39_preservesDayActivities() {
+        createV38WithData {
             execSQL("""
                 INSERT INTO day_activities (date, status, isClosed, agentName, agentUid)
                 VALUES ('01-01-2026', 'OPEN', 0, 'Agent A', 'uid_1')
@@ -87,8 +141,8 @@ class Migration37To38Test {
     }
 
     @Test
-    fun migration37To38_preservesTombstones() {
-        createV37WithData {
+    fun migration38To39_preservesTombstones() {
+        createV38WithData {
             execSQL("""
                 INSERT INTO tombstones (type, naturalKey, agentName, agentUid, dataDate, deletedAt)
                 VALUES ('HOUSE', 'key_1', 'Agent A', 'uid_1', '01-01-2026', 1234567890)
@@ -106,8 +160,8 @@ class Migration37To38Test {
     }
 
     @Test
-    fun migration37To38_preservesCustomStreets() {
-        createV37WithData {
+    fun migration38To39_preservesCustomStreets() {
+        createV38WithData {
             execSQL("INSERT INTO custom_streets (name, bairro) VALUES ('RUA TESTE', 'CENTRO')")
         }
 
@@ -120,8 +174,8 @@ class Migration37To38Test {
     }
 
     @Test
-    fun migration37To38_opensSuccessfullyWithRoomDao() = runBlocking {
-        createV37WithData {
+    fun migration38To39_opensSuccessfullyWithRoomDao() = runBlocking {
+        createV38WithData {
             execSQL("""
                 INSERT INTO houses (
                     propertyType, situation, data, agentName, agentUid, observation,
@@ -143,7 +197,7 @@ class Migration37To38Test {
             context,
             AppDatabase::class.java,
             TEST_DB
-        ).addMigrations(AppDatabase.MIGRATION_37_38, AppDatabase.MIGRATION_38_39)
+        ).addMigrations(AppDatabase.MIGRATION_38_39)
             .build()
 
         val house = database.houseDao().getHouseById(1)
@@ -156,10 +210,10 @@ class Migration37To38Test {
         database.close()
     }
 
-    private fun createV37WithData(block: SQLiteDatabase.() -> Unit) {
+    private fun createV38WithData(block: SQLiteDatabase.() -> Unit) {
         context.deleteDatabase(TEST_DB)
         val db = context.openOrCreateDatabase(TEST_DB, Context.MODE_PRIVATE, null)
-        db.version = 37
+        db.version = 38
         db.execSQL("CREATE TABLE IF NOT EXISTS `houses` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `propertyType` TEXT NOT NULL DEFAULT 'EMPTY', `situation` TEXT NOT NULL DEFAULT 'EMPTY', `data` TEXT NOT NULL, `agentName` TEXT NOT NULL, `localidadeConcluida` INTEGER NOT NULL DEFAULT 0, `quarteiraoConcluido` INTEGER NOT NULL DEFAULT 0, `listOrder` INTEGER NOT NULL DEFAULT 0, `visitSegment` INTEGER NOT NULL DEFAULT 0, `agentUid` TEXT NOT NULL DEFAULT '', `observation` TEXT NOT NULL DEFAULT '', `createdAt` INTEGER NOT NULL DEFAULT 0, `isSynced` INTEGER NOT NULL DEFAULT 0, `editedByAdmin` INTEGER NOT NULL DEFAULT 0, `lastUpdated` INTEGER NOT NULL DEFAULT 0, `blockNumber` TEXT NOT NULL, `blockSequence` TEXT NOT NULL, `streetName` TEXT NOT NULL, `number` TEXT NOT NULL, `sequence` INTEGER NOT NULL, `complement` INTEGER NOT NULL, `bairro` TEXT NOT NULL, `a1` INTEGER NOT NULL, `a2` INTEGER NOT NULL, `b` INTEGER NOT NULL, `c` INTEGER NOT NULL, `d1` INTEGER NOT NULL, `d2` INTEGER NOT NULL, `e` INTEGER NOT NULL, `eliminados` INTEGER NOT NULL, `larvicida` REAL NOT NULL, `comFoco` INTEGER NOT NULL, `municipio` TEXT NOT NULL, `categoria` TEXT NOT NULL, `zona` TEXT NOT NULL, `tipo` INTEGER NOT NULL, `ciclo` TEXT NOT NULL, `atividade` INTEGER NOT NULL, `latitude` REAL, `longitude` REAL, `focusCaptureTime` INTEGER)")
         db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_houses_agentUid_agentName_data_blockNumber_blockSequence_streetName_number_sequence_complement_bairro_visitSegment` ON `houses` (`agentUid`, `agentName`, `data`, `blockNumber`, `blockSequence`, `streetName`, `number`, `sequence`, `complement`, `bairro`, `visitSegment`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_houses_data_agentUid` ON `houses` (`data`, `agentUid`)")
@@ -179,7 +233,7 @@ class Migration37To38Test {
             context,
             AppDatabase::class.java,
             TEST_DB
-        ).addMigrations(AppDatabase.MIGRATION_37_38, AppDatabase.MIGRATION_38_39)
+        ).addMigrations(AppDatabase.MIGRATION_38_39)
             .build()
         roomDb.openHelper.writableDatabase
         roomDb.close()

@@ -31,8 +31,7 @@ object HouseQueryHelper {
         val sn = hh.address.streetName.formatStreetName()
         val n = hh.address.number.stringNormalize()
         val c = hh.address.complement.toString().stringNormalize()
-        val vs = hh.visitSegment.toString()
-        return "$b|$bn|$bs|$sn|$n|${hh.address.sequence}|$c|$vs".uppercase()
+        return "$b|$bn|$bs|$sn|$n|${hh.address.sequence}|$c".uppercase()
     }
 
     fun calculateCicloFromDate(dateStr: String): String {

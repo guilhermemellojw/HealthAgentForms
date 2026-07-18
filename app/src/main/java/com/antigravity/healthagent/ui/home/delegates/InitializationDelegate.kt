@@ -6,15 +6,17 @@ import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
 import com.antigravity.healthagent.domain.usecase.PerformLocalDatabaseMigrationUseCase
-import com.antigravity.healthagent.domain.usecase.NormalizeLocalDatesUseCase
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.ui.home.DashboardTotals
 import com.antigravity.healthagent.ui.home.HomeViewModel
 import com.antigravity.healthagent.ui.home.HouseUiStateMapper
 import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.domain.logger.AppLogger
+import com.antigravity.healthagent.utils.formatStreetName
+import com.antigravity.healthagent.utils.normalize
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -27,11 +29,11 @@ import javax.inject.Singleton
 @Singleton
 class InitializationDelegate @Inject constructor(
     private val performLocalDatabaseMigrationUseCase: PerformLocalDatabaseMigrationUseCase,
-    private val normalizeLocalDatesUseCase: NormalizeLocalDatesUseCase,
     private val repository: HouseRepository,
     private val settingsManager: SettingsManager,
     private val houseValidationUseCase: HouseValidationUseCase
 ) {
+    private var initJob: Job? = null
     private data class HouseUpdate(
         val houses: List<com.antigravity.healthagent.ui.home.HouseUiState>,
         val totals: DashboardTotals,
@@ -52,8 +54,11 @@ class InitializationDelegate @Inject constructor(
         generateHouseKey: (House) -> String,
         calculateDashboardTotals: (List<House>) -> DashboardTotals
     ) {
+        initJob?.cancel()
+        val trackedJob = Job(scope.coroutineContext[Job])
+        initJob = trackedJob
         // Load initial state from SettingsManager
-        scope.launch {
+        scope.launch(trackedJob) {
             settingsManager.cachedUser.collect { user ->
                 user?.let {
                     val name = it.agentName?.uppercase()?.ifBlank { null }
@@ -68,7 +73,7 @@ class InitializationDelegate @Inject constructor(
         }
 
         // Validation observer: Clear errors immediately on date change
-        scope.launch {
+        scope.launch(trackedJob) {
             viewModel.data.collect {
                 viewModel.validationErrorHouseIds.value = emptySet()
                 viewModel.validationErrorDetails.value = emptyList()
@@ -78,7 +83,7 @@ class InitializationDelegate @Inject constructor(
         }
 
         // CRITICAL: Auto-load header context ONLY when active date changes OR database finishes initial load
-        scope.launch {
+        scope.launch(trackedJob) {
             var lastInitializedDate: String? = null
             combine(viewModel.data, latestHousesFlow) { date, houses ->
                 date to houses
@@ -108,7 +113,7 @@ class InitializationDelegate @Inject constructor(
         }
 
         // CRITICAL: Basic Header Info Observer
-        scope.launch {
+        scope.launch(trackedJob) {
             combine(
                 viewModel.data, viewModel.agentName, viewModel.municipio, viewModel.bairro,
                 viewModel.zona, viewModel.ciclo, viewModel.tipo, viewModel.atividade,
@@ -144,7 +149,7 @@ class InitializationDelegate @Inject constructor(
         // re-emits on Dispatchers.Default), the mapping always applies the latest draft
         // values. This eliminates the flicker where the collector would momentarily
         // overwrite the UI with stale (pre-draft) data from latestHousesFlow.
-        scope.launch {
+        scope.launch(trackedJob) {
             @Suppress("UNCHECKED_CAST")
             combine(
                 latestHousesFlow, viewModel.data, viewModel.recentlyEditedHouseIds,
@@ -202,7 +207,7 @@ class InitializationDelegate @Inject constructor(
         }
 
         // CRITICAL: Day Lock Status Observer
-        scope.launch {
+        scope.launch(trackedJob) {
             combine(
                 viewModel.isDayClosed,
                 viewModel.isWorkdayManualUnlock
@@ -219,7 +224,7 @@ class InitializationDelegate @Inject constructor(
         }
 
         // CRITICAL: Settings Observer (Easy Mode, Solar Mode, etc.)
-        scope.launch {
+        scope.launch(trackedJob) {
             combine(easyMode, solarMode, editingToolsMode, maxOpenHouses) { e, s, t, m ->
                 listOf(e, s, t, m)
             }.collect { args ->
@@ -230,10 +235,10 @@ class InitializationDelegate @Inject constructor(
                     maxOpenHouses = args[3] as Int
                 )}
             }
-        }
-
+}
+ 
         // SURGICAL PROTECTION: Detect misattributed data
-        scope.launch {
+        scope.launch(trackedJob) {
             allHousesFlow.collect { houses ->
                 val myName = viewModel.agentName.value.uppercase()
                 val myUid = viewModel.currentUserUid.value
@@ -254,7 +259,7 @@ class InitializationDelegate @Inject constructor(
         }
 
         // Observer for Sync Info (Metadata)
-        scope.launch {
+        scope.launch(trackedJob) {
             combine(
                 settingsManager.lastSyncTimestamp,
                 settingsManager.clockSkewMs
@@ -269,7 +274,7 @@ class InitializationDelegate @Inject constructor(
         }
 
         // Propagate syncStatus to uiState in real time so the float balloon displays it reactively
-        scope.launch {
+        scope.launch(trackedJob) {
             viewModel.syncStatus.collect { status ->
                 viewModel.uiState.update { current ->
                     current.copy(syncStatus = status)
@@ -278,7 +283,7 @@ class InitializationDelegate @Inject constructor(
         }
 
         // PRUNE OBSERVER
-        scope.launch {
+        scope.launch(trackedJob) {
             allHousesFlow.collect { dbHouses ->
                 viewModel.pendingUpdateDrafts.update { currentDrafts ->
                     if (currentDrafts.isEmpty()) return@update currentDrafts
@@ -302,16 +307,16 @@ class InitializationDelegate @Inject constructor(
 
                         val dbMatch = dbHouses.find { it.id == id }
                         val isDraftSynced = dbMatch != null &&
-                            dbMatch.address.number == draft.address.number &&
+                            dbMatch.address.number.normalize() == draft.address.number.normalize() &&
                             dbMatch.address.sequence == draft.address.sequence &&
                             dbMatch.address.complement == draft.address.complement &&
                             dbMatch.propertyType == draft.propertyType &&
                             dbMatch.situation == draft.situation &&
-                            dbMatch.address.streetName == draft.address.streetName &&
-                            dbMatch.address.blockNumber == draft.address.blockNumber &&
-                            dbMatch.address.blockSequence == draft.address.blockSequence &&
-                            dbMatch.address.bairro == draft.address.bairro &&
-                            dbMatch.observation == draft.observation &&
+                            dbMatch.address.streetName.formatStreetName() == draft.address.streetName.formatStreetName() &&
+                            dbMatch.address.blockNumber.normalize() == draft.address.blockNumber.normalize() &&
+                            dbMatch.address.blockSequence.normalize() == draft.address.blockSequence.normalize() &&
+                            dbMatch.address.bairro.normalize() == draft.address.bairro.normalize() &&
+                            dbMatch.observation.normalize() == draft.observation.normalize() &&
                             dbMatch.treatment.a1 == draft.treatment.a1 && dbMatch.treatment.a2 == draft.treatment.a2 &&
                             dbMatch.treatment.b == draft.treatment.b && dbMatch.treatment.c == draft.treatment.c &&
                             dbMatch.treatment.d1 == draft.treatment.d1 && dbMatch.treatment.d2 == draft.treatment.d2 &&
@@ -356,17 +361,19 @@ class InitializationDelegate @Inject constructor(
         }
 
         // Defer non-critical background work
-        scope.launch(Dispatchers.IO) {
+        scope.launch(trackedJob + Dispatchers.IO) {
             delay(1000)
             try {
-                performLocalDatabaseMigrationUseCase.migrateStreetNamesToFormat()
-                performLocalDatabaseMigrationUseCase.migrateBairrosToUppercase()
-                performLocalDatabaseMigrationUseCase.migrateDateFormats()
-                normalizeLocalDatesUseCase()
+                performLocalDatabaseMigrationUseCase.runMigrationsIfNeeded()
             } catch (e: Exception) {
                 AppLogger.e("HomeViewModel", "Error running migrations", e)
             }
         }
 
+    }
+
+    fun cancel() {
+        initJob?.cancel()
+        initJob = null
     }
 }

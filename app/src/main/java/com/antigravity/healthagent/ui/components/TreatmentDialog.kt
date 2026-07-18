@@ -14,47 +14,53 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
-import com.antigravity.healthagent.data.local.model.House
+import com.antigravity.healthagent.domain.model.TreatmentData
+import com.antigravity.healthagent.domain.model.GeoCapture
 import com.google.android.gms.maps.model.LatLng
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.CheckCircle
+import com.antigravity.healthagent.data.local.model.House
+
+enum class TreatmentField { A1, A2, B, C, D1, D2, E, ELIMINADOS, LARVICIDA, COM_FOCO }
 
 @Composable
 fun TreatmentDialog(
     house: House,
     onDismiss: () -> Unit,
-    onConfirm: (House) -> Unit,
+    onConfirm: (TreatmentData, GeoCapture) -> Unit,
+    onFieldChange: (TreatmentField, Any) -> Unit = { _, _ -> },
+    onComFocoChange: (Boolean) -> Unit = {},
+    onGeoChange: (GeoCapture) -> Unit = {},
     onGetLocation: (callback: (LatLng) -> Unit) -> Unit = {},
     isEasyMode: Boolean = false
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    // Local state for the form
-    var a1 by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.a1) }
-    var a2 by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.a2) }
-    var b by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.b) }
-    var c by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.c) }
-    var d1 by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.d1) }
-    var d2 by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.d2) }
-    var e by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.e) }
-    var eliminados by remember { androidx.compose.runtime.mutableIntStateOf(house.treatment.eliminados) }
-    var larvicida by remember { androidx.compose.runtime.mutableDoubleStateOf(house.treatment.larvicida) }
-    var comFoco by remember { mutableStateOf(house.treatment.comFoco) }
-    
-    var latitude by remember { mutableStateOf(house.geo.latitude) }
-    var longitude by remember { mutableStateOf(house.geo.longitude) }
-    var focusCaptureTime by remember { mutableStateOf(house.geo.focusCaptureTime) }
+    var a1 by remember(house.id) { mutableIntStateOf(house.treatment.a1) }
+    var a2 by remember(house.id) { mutableIntStateOf(house.treatment.a2) }
+    var b by remember(house.id) { mutableIntStateOf(house.treatment.b) }
+    var c by remember(house.id) { mutableIntStateOf(house.treatment.c) }
+    var d1 by remember(house.id) { mutableIntStateOf(house.treatment.d1) }
+    var d2 by remember(house.id) { mutableIntStateOf(house.treatment.d2) }
+    var e by remember(house.id) { mutableIntStateOf(house.treatment.e) }
+    var eliminados by remember(house.id) { mutableIntStateOf(house.treatment.eliminados) }
+    var larvicida by remember(house.id) { mutableDoubleStateOf(house.treatment.larvicida) }
+    var comFoco by remember(house.id) { mutableStateOf(house.treatment.comFoco) }
+
+    var latitude by remember(house.id) { mutableStateOf(house.geo.latitude) }
+    var longitude by remember(house.id) { mutableStateOf(house.geo.longitude) }
+    var focusCaptureTime by remember(house.id) { mutableStateOf(house.geo.focusCaptureTime) }
 
     var showMapPicker by remember { mutableStateOf(false) }
 
-    // Auto-capture GPS if "Com Foco" is checked and we don't have location yet
-    androidx.compose.runtime.LaunchedEffect(comFoco) {
+    LaunchedEffect(comFoco) {
         if (comFoco && latitude == null && longitude == null) {
             onGetLocation { latLng ->
                 latitude = latLng.latitude
                 longitude = latLng.longitude
                 focusCaptureTime = System.currentTimeMillis()
+                onGeoChange(GeoCapture(latitude, longitude, focusCaptureTime))
             }
         }
     }
@@ -67,20 +73,25 @@ fun TreatmentDialog(
                 latitude = latLng.latitude
                 longitude = latLng.longitude
                 focusCaptureTime = System.currentTimeMillis()
+                onGeoChange(GeoCapture(latitude, longitude, focusCaptureTime))
                 showMapPicker = false
             },
             isEasyMode = isEasyMode
         )
     }
 
+    fun emitFieldChange(field: TreatmentField, value: Any) {
+        onFieldChange(field, value)
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { 
+        title = {
             Text(
-                "Tratamento", 
+                "Tratamento",
                 fontWeight = FontWeight.ExtraBold,
                 style = MaterialTheme.typography.headlineSmall
-            ) 
+            )
         },
         text = {
             LazyColumn(
@@ -89,7 +100,7 @@ fun TreatmentDialog(
             ) {
                 item {
                     Text(
-                        "Depósitos Inspecionados", 
+                        "Depósitos Inspecionados",
                         fontWeight = FontWeight.Bold,
                         style = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium
                     )
@@ -97,31 +108,31 @@ fun TreatmentDialog(
                 }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(if (isEasyMode) 12.dp else 8.dp)) {
-                        CounterInput("A1", a1, { a1 = it }, Modifier.weight(1f), isEasyMode)
-                        CounterInput("A2", a2, { a2 = it }, Modifier.weight(1f), isEasyMode)
+                        CounterInput("A1", a1, { a1 = it; emitFieldChange(TreatmentField.A1, it) }, Modifier.weight(1f), isEasyMode)
+                        CounterInput("A2", a2, { a2 = it; emitFieldChange(TreatmentField.A2, it) }, Modifier.weight(1f), isEasyMode)
                     }
                 }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(if (isEasyMode) 12.dp else 8.dp)) {
-                        CounterInput("B", b, { b = it }, Modifier.weight(1f), isEasyMode)
-                        CounterInput("C", c, { c = it }, Modifier.weight(1f), isEasyMode)
+                        CounterInput("B", b, { b = it; emitFieldChange(TreatmentField.B, it) }, Modifier.weight(1f), isEasyMode)
+                        CounterInput("C", c, { c = it; emitFieldChange(TreatmentField.C, it) }, Modifier.weight(1f), isEasyMode)
                     }
                 }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(if (isEasyMode) 12.dp else 8.dp)) {
-                        CounterInput("D1", d1, { d1 = it }, Modifier.weight(1f), isEasyMode)
-                        CounterInput("D2", d2, { d2 = it }, Modifier.weight(1f), isEasyMode)
+                        CounterInput("D1", d1, { d1 = it; emitFieldChange(TreatmentField.D1, it) }, Modifier.weight(1f), isEasyMode)
+                        CounterInput("D2", d2, { d2 = it; emitFieldChange(TreatmentField.D2, it) }, Modifier.weight(1f), isEasyMode)
                     }
                 }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(if (isEasyMode) 12.dp else 8.dp)) {
-                        CounterInput("E", e, { e = it }, Modifier.weight(1f), isEasyMode)
-                        CounterInput("Eliminados", eliminados, { eliminados = it }, Modifier.weight(1f), isEasyMode)
+                        CounterInput("E", e, { e = it; emitFieldChange(TreatmentField.E, it) }, Modifier.weight(1f), isEasyMode)
+                        CounterInput("Eliminados", eliminados, { eliminados = it; emitFieldChange(TreatmentField.ELIMINADOS, it) }, Modifier.weight(1f), isEasyMode)
                     }
                 }
                 item {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), thickness = 0.5.dp)
-                    
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -129,13 +140,12 @@ fun TreatmentDialog(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Left: Larvicida Logic
                         Column(
                             verticalArrangement = Arrangement.Center,
                             horizontalAlignment = Alignment.Start
                         ) {
                             Text(
-                                "Larvicida (g)", 
+                                "Larvicida (g)",
                                 fontWeight = FontWeight.Bold,
                                 style = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium
                             )
@@ -145,13 +155,13 @@ fun TreatmentDialog(
                                 modifier = Modifier.padding(top = 4.dp)
                             ) {
                                 IconButton(
-                                    onClick = { if (larvicida >= 0.5) larvicida -= 0.5 },
+                                    onClick = { if (larvicida >= 0.5) { larvicida -= 0.5; emitFieldChange(TreatmentField.LARVICIDA, larvicida) } },
                                     modifier = Modifier.size(if (isEasyMode) 48.dp else 40.dp)
                                 ) {
                                     Text("-", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary, fontSize = if (isEasyMode) 24.sp else 22.sp)
                                 }
                                 Text(
-                                    String.format(java.util.Locale("pt", "BR"), "%.1f", larvicida), 
+                                    String.format(java.util.Locale("pt", "BR"), "%.1f", larvicida),
                                     color = MaterialTheme.colorScheme.onSurface,
                                     style = TextStyle(
                                         fontSize = if (isEasyMode) 20.sp else 18.sp,
@@ -159,7 +169,7 @@ fun TreatmentDialog(
                                     )
                                 )
                                 IconButton(
-                                    onClick = { larvicida += 0.5 },
+                                    onClick = { larvicida += 0.5; emitFieldChange(TreatmentField.LARVICIDA, larvicida) },
                                     modifier = Modifier.size(if (isEasyMode) 48.dp else 40.dp)
                                 ) {
                                     Text("+", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary, fontSize = if (isEasyMode) 24.sp else 22.sp)
@@ -167,7 +177,6 @@ fun TreatmentDialog(
                             }
                         }
 
-                        // Right: Com Foco Logic - Styled
                         Surface(
                             shape = RoundedCornerShape(16.dp),
                             border = androidx.compose.foundation.BorderStroke(
@@ -179,7 +188,7 @@ fun TreatmentDialog(
                                 .padding(start = 12.dp)
                                 .toggleable(
                                     value = comFoco,
-                                    onValueChange = { comFoco = it },
+                                    onValueChange = { comFoco = it; onComFocoChange(it); emitFieldChange(TreatmentField.COM_FOCO, it) },
                                     role = androidx.compose.ui.semantics.Role.Checkbox
                                 )
                         ) {
@@ -207,8 +216,7 @@ fun TreatmentDialog(
                         }
                     }
                 }
-                
-                // Location Capture Section (Only if Com Foco)
+
                 if (comFoco) {
                     item {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), thickness = 0.5.dp)
@@ -218,12 +226,11 @@ fun TreatmentDialog(
                             style = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
-                        
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            // Status Indicator
                             if (latitude != null && longitude != null) {
                                 Surface(
                                     color = MaterialTheme.colorScheme.primaryContainer,
@@ -236,21 +243,20 @@ fun TreatmentDialog(
                                         modifier = Modifier.padding(horizontal = 8.dp)
                                     ) {
                                         Icon(
-                                            Icons.Default.CheckCircle, 
-                                            contentDescription = null, 
+                                            Icons.Default.CheckCircle,
+                                            contentDescription = null,
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(18.dp)
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
-                                            "Capturado", 
+                                            "Capturado",
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
                             } else if (comFoco) {
-                                // Warning for focus without coordinates
                                 Surface(
                                     color = MaterialTheme.colorScheme.errorContainer,
                                     shape = RoundedCornerShape(12.dp),
@@ -262,14 +268,14 @@ fun TreatmentDialog(
                                         modifier = Modifier.padding(horizontal = 8.dp)
                                     ) {
                                         Icon(
-                                            Icons.Default.Warning, 
-                                            contentDescription = null, 
+                                            Icons.Default.Warning,
+                                            contentDescription = null,
                                             tint = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.size(18.dp)
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
-                                            "Sem GPS", 
+                                            "Sem GPS",
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.error
@@ -278,13 +284,13 @@ fun TreatmentDialog(
                                 }
                             }
 
-                            // GPS Button
                             OutlinedButton(
                                 onClick = {
                                     onGetLocation { latLng ->
                                         latitude = latLng.latitude
                                         longitude = latLng.longitude
                                         focusCaptureTime = System.currentTimeMillis()
+                                        onGeoChange(GeoCapture(latitude, longitude, focusCaptureTime))
                                     }
                                 },
                                 modifier = Modifier.weight(1f).height(if (isEasyMode) 52.dp else 44.dp),
@@ -295,8 +301,7 @@ fun TreatmentDialog(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("GPS", fontSize = 12.sp)
                             }
-                            
-                            // Map Button
+
                             OutlinedButton(
                                 onClick = { showMapPicker = true },
                                 modifier = Modifier.weight(1f).height(if (isEasyMode) 52.dp else 44.dp),
@@ -327,15 +332,15 @@ fun TreatmentDialog(
                 Button(
                     onClick = {
                         haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                        onConfirm(house.copy(
-                            treatment = com.antigravity.healthagent.domain.model.TreatmentData(
+                        onConfirm(
+                            TreatmentData(
                                 a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e,
                                 eliminados = eliminados, larvicida = larvicida, comFoco = comFoco
                             ),
-                            geo = com.antigravity.healthagent.domain.model.GeoCapture(
+                            GeoCapture(
                                 latitude = latitude, longitude = longitude, focusCaptureTime = focusCaptureTime
                             )
-                        ))
+                        )
                     },
                     modifier = Modifier.weight(1.3f).height(if (isEasyMode) 52.dp else 48.dp),
                     shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp)

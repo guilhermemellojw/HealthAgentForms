@@ -6,24 +6,14 @@ import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.domain.repository.HouseRepository
-import com.antigravity.healthagent.domain.repository.SyncRepository
-import com.antigravity.healthagent.domain.repository.AgentRepository
-import com.antigravity.healthagent.domain.repository.LocalizationRepository
 import com.antigravity.healthagent.domain.repository.StreetRepository
 import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.usecase.SaveHouseUseCase
-import com.antigravity.healthagent.domain.usecase.PredictHouseValuesUseCase
 import com.antigravity.healthagent.domain.usecase.RecalculateVisitSegmentsUseCase
-import com.antigravity.healthagent.domain.usecase.PerformLocalDatabaseMigrationUseCase
 import com.antigravity.healthagent.domain.usecase.DayManagementUseCase
 import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
-import com.antigravity.healthagent.domain.usecase.GenerateTestDataUseCase
-import com.antigravity.healthagent.domain.usecase.CleanupBrokenHousesUseCase
-import com.antigravity.healthagent.domain.usecase.ClashDetector
-import com.antigravity.healthagent.domain.usecase.DayLockEnforcer
-import com.antigravity.healthagent.domain.usecase.RoleEnforcer
 import com.antigravity.healthagent.domain.usecase.LoadDynamicConfigUseCase
 import com.antigravity.healthagent.domain.usecase.TriggerImmediateSyncUseCase
 import com.antigravity.healthagent.domain.usecase.SelectDayActivityUseCase
@@ -61,28 +51,21 @@ class HomeViewModelTest {
     private val repository = mockk<HouseRepository>(relaxed = true)
     private val settingsManager = mockk<SettingsManager>(relaxed = true)
     private val soundManager = mockk<SoundManager>(relaxed = true)
-    private val syncRepository = mockk<SyncRepository>(relaxed = true)
     private val saveHouseUseCase = mockk<SaveHouseUseCase>(relaxed = true)
-    private val predictHouseValuesUseCase = mockk<PredictHouseValuesUseCase>(relaxed = true)
     private val recalculateVisitSegmentsUseCase = mockk<RecalculateVisitSegmentsUseCase>(relaxed = true)
-    private val performLocalDatabaseMigrationUseCase = mockk<PerformLocalDatabaseMigrationUseCase>(relaxed = true)
     private val dayManagementUseCase = mockk<DayManagementUseCase>(relaxed = true)
     private val houseValidationUseCase = mockk<HouseValidationUseCase>(relaxed = true)
     private val streetRepository = mockk<StreetRepository>(relaxed = true)
     private val backupManager = mockk<BackupManager>(relaxed = true)
-    private val generateTestDataUseCase = mockk<GenerateTestDataUseCase>(relaxed = true)
-    private val cleanupBrokenHousesUseCase = mockk<CleanupBrokenHousesUseCase>(relaxed = true)
-    private val agentRepository = mockk<AgentRepository>(relaxed = true)
-    private val localizationRepository = mockk<LocalizationRepository>(relaxed = true)
     private val loadDynamicConfigUseCase = mockk<LoadDynamicConfigUseCase>(relaxed = true)
     private val triggerImmediateSyncUseCase = mockk<TriggerImmediateSyncUseCase>(relaxed = true)
     private val selectDayActivityUseCase = mockk<SelectDayActivityUseCase>(relaxed = true)
     private val updateDayHeaderUseCase = mockk<UpdateDayHeaderUseCase>(relaxed = true)
 
-    private val syncDelegate = mockk<SyncDelegate>(relaxed = true)
-    private val dayNavigationDelegate = mockk<DayNavigationDelegate>(relaxed = true)
+    private val syncViewModel = mockk<SyncViewModel>(relaxed = true)
+    private val dayManagementViewModel = mockk<DayManagementViewModel>(relaxed = true)
     private val dayClosingDelegate = mockk<DayClosingDelegate>(relaxed = true)
-    private val validationDelegate = mockk<ValidationDelegate>(relaxed = true)
+    private val validationViewModel = mockk<ValidationViewModel>(relaxed = true)
     private val remoteAgentDelegate = mockk<RemoteAgentDelegate>(relaxed = true)
     private val boletimDataDelegate = mockk<BoletimDataDelegate>(relaxed = true)
     private val initializationDelegate = mockk<InitializationDelegate>(relaxed = true)
@@ -121,42 +104,29 @@ class HomeViewModelTest {
     }
 
     private fun createViewModel(): HomeViewModel {
-        val provider = HomeDelegatesProvider(
-            syncDelegate = syncDelegate,
-            dayNavigationDelegate = dayNavigationDelegate,
-            dayClosingDelegate = dayClosingDelegate,
-            validationDelegate = validationDelegate,
-            remoteAgentDelegate = remoteAgentDelegate,
-            boletimDataDelegate = boletimDataDelegate,
-            initializationDelegate = initializationDelegate,
-            houseEditDelegate = houseEditDelegate,
-            stateDelegate = HomeStateDelegate()
-        )
         return HomeViewModel(
             repository = repository,
             settingsManager = settingsManager,
             soundManager = soundManager,
-            syncRepository = syncRepository,
             saveHouseUseCase = saveHouseUseCase,
-            predictHouseValuesUseCase = predictHouseValuesUseCase,
             recalculateVisitSegmentsUseCase = recalculateVisitSegmentsUseCase,
-            performLocalDatabaseMigrationUseCase = performLocalDatabaseMigrationUseCase,
             dayManagementUseCase = dayManagementUseCase,
             houseValidationUseCase = houseValidationUseCase,
             streetRepository = streetRepository,
             backupManager = backupManager,
-            generateTestDataUseCase = generateTestDataUseCase,
-            cleanupBrokenHousesUseCase = cleanupBrokenHousesUseCase,
-            agentRepository = agentRepository,
-            localizationRepository = localizationRepository,
-            clashDetector = ClashDetector(),
-            dayLockEnforcer = DayLockEnforcer(),
-            roleEnforcer = RoleEnforcer(),
             loadDynamicConfigUseCase = loadDynamicConfigUseCase,
             triggerImmediateSyncUseCase = triggerImmediateSyncUseCase,
             selectDayActivityUseCase = selectDayActivityUseCase,
             updateDayHeaderUseCase = updateDayHeaderUseCase,
-            delegatesProvider = provider
+            homeStateDelegate = HomeStateDelegate(),
+            syncViewModel = syncViewModel,
+            dayManagementViewModel = dayManagementViewModel,
+            dayClosingDelegate = dayClosingDelegate,
+            validationViewModel = validationViewModel,
+            remoteAgentDelegate = remoteAgentDelegate,
+            boletimDataDelegate = boletimDataDelegate,
+            initializationDelegate = initializationDelegate,
+            houseEditDelegate = houseEditDelegate
         )
     }
 
@@ -179,25 +149,28 @@ class HomeViewModelTest {
         assertEquals(0, vm.navigationTab.value)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `moveDate delegates to dayNavigationDelegate`() {
+    fun `moveDate delegates to dayManagementViewModel`() {
         val vm = createViewModel()
         vm.moveDate(forward = true)
-        verify { dayNavigationDelegate.moveDateForward(any(), any()) }
+        verify { dayManagementViewModel.moveDateForward(any(), any()) }
 
         vm.moveDate(forward = false)
-        verify { dayNavigationDelegate.moveDateBackward(any(), any()) }
+        verify { dayManagementViewModel.moveDateBackward(any(), any()) }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `selectToday delegates to dayNavigationDelegate`() {
+    fun `selectToday delegates to dayManagementViewModel`() {
         val vm = createViewModel()
         vm.selectToday()
-        verify { dayNavigationDelegate.goToToday(any()) }
+        verify { dayManagementViewModel.goToToday(any()) }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `moveHouseToDate delegates to dayNavigationDelegate`() {
+    fun `moveHouseToDate delegates to dayManagementViewModel`() {
         val vm = createViewModel()
         val house = House(
             id = 1, data = "15-06-2026", agentName = "AGENTE", agentUid = "user_1",
@@ -205,36 +178,36 @@ class HomeViewModelTest {
             propertyType = PropertyType.R, situation = Situation.NONE
         )
         vm.moveHouseToDate(house, "16-06-2026")
-        verify { dayNavigationDelegate.moveHouseToDate(any(), any(), house, "16-06-2026", any(), any()) }
+        verify { dayManagementViewModel.moveHouseToDate(any(), any(), any(), any(), any(), any(), any(), any(), any(), house, "16-06-2026", any(), any()) }
     }
 
     @Test
-    fun `syncDataToCloud delegates to syncDelegate`() {
+    fun `syncDataToCloud delegates to syncViewModel`() {
         val vm = createViewModel()
         vm.syncDataToCloud()
-        verify { syncDelegate.syncDataToCloud(any(), any(), any()) }
+        verify { syncViewModel.syncDataToCloud(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
-    fun `pullDataFromCloud delegates to syncDelegate`() {
+    fun `pullDataFromCloud delegates to syncViewModel`() {
         val vm = createViewModel()
         vm.pullDataFromCloud("target_uid")
-        verify { syncDelegate.pullDataFromCloud(any(), any(), "target_uid") }
+        verify { syncViewModel.pullDataFromCloud(any(), any(), eq("target_uid"), any()) }
     }
 
     @Test
-    fun `generateMockData delegates to syncDelegate`() {
+    fun `generateMockData delegates to syncViewModel`() {
         val vm = createViewModel()
         vm.generateMockData()
-        verify { syncDelegate.generateMockData(any(), any()) }
+        verify { syncViewModel.generateMockData(any(), any(), any(), any()) }
     }
 
     @Test
-    fun `finishEditSession delegates to syncDelegate with callback`() {
+    fun `finishEditSession delegates to syncViewModel with callback`() {
         val vm = createViewModel()
         var called = false
         vm.finishEditSession { called = true }
-        verify { syncDelegate.finishEditSession(any(), any(), any()) }
+        verify { syncViewModel.finishEditSession(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -294,15 +267,16 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun `updateHouse emits to debounced queue`() {
+    fun `updateHouse delegates to houseEditDelegate`() {
+
         val vm = createViewModel()
-        val house = House(
-            id = 1, data = "15-06-2026", agentName = "AGENTE", agentUid = "user_1",
-            address = VisitAddress("100", "RUA A", "001", "", 0, 0, ""),
-            propertyType = PropertyType.R, situation = Situation.NONE
-        )
+        val house = House(id = 1, data = "15-06-2026", agentName = "AGENTE", agentUid = "user_1",
+            address = VisitAddress("100", "RUA A", "020", "", 0, 0, ""),
+            propertyType = PropertyType.R, situation = Situation.F)
+
         vm.updateHouse(house)
-        verify { houseEditDelegate wasNot Called }
+
+        verify(exactly = 1) { houseEditDelegate.updateHouse(any(), any(), house, any(), any()) }
     }
 
     @Test
@@ -314,7 +288,7 @@ class HomeViewModelTest {
             propertyType = PropertyType.R, situation = Situation.NONE
         )
         vm.deleteHouse(house)
-        verify { houseEditDelegate.deleteHouse(any(), any(), house, any(), any()) }
+        verify { houseEditDelegate.deleteHouse(any(), any(), house, any()) }
     }
 
     @Test
@@ -416,23 +390,22 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun `validateCurrentDay delegates to validationDelegate`() {
-        every { validationDelegate.validateCurrentDay(any(), any(), any(), any()) } returns true
+    fun `validateCurrentDay delegates to validationViewModel`() {
         val vm = createViewModel()
+        every { validationViewModel.validateCurrentDay(any(), any(), any(), any()) } returns true
+        testDispatcher.scheduler.advanceUntilIdle()
         val result = vm.validateCurrentDay(showDialog = true, strict = true)
         assertTrue(result)
-        verify { validationDelegate.validateCurrentDay(vm, any(), true, true) }
+        verify { validationViewModel.validateCurrentDay(vm, any(), true, true) }
     }
 
     @Test
-    fun `forceFullSync calls syncRepository pullCloudDataToLocal with force=true`() = runBlocking {
-        coEvery { syncRepository.pullCloudDataToLocal(force = true) } returns Result.success(Unit)
-
+    fun `forceFullSync delegates to syncViewModel forcePull`() {
         val vm = createViewModel()
+        vm.currentUserUid.value = "user_1"
         vm.forceFullSync()
         testDispatcher.scheduler.advanceUntilIdle()
-
-        coVerify { syncRepository.pullCloudDataToLocal(force = true) }
+        verify { syncViewModel.forcePull(any()) }
     }
 
     @Test
@@ -576,14 +549,14 @@ class HomeViewModelTest {
     fun `addNewHouse delegates to houseEditDelegate`() {
         val vm = createViewModel()
         vm.addNewHouse()
-        verify { houseEditDelegate.addNewHouse(any(), any(), any(), any(), any(), any(), any(), any()) }
+        verify { houseEditDelegate.addNewHouse(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `addNewHouseAt delegates to houseEditDelegate`() {
         val vm = createViewModel()
-        vm.addNewHouseAt(afterId = 5)
-        verify { houseEditDelegate.addNewHouseAt(any(), any(), 5, any(), any()) }
+        vm.addNewHouseAt(5)
+        verify { houseEditDelegate.addNewHouseAt(any(), any(), 5, any()) }
     }
 
     @Test
@@ -632,7 +605,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun `persistListOrder recalculates segments and saves`() = runBlocking {
+    fun `persistListOrder delegates to houseEditDelegate`() {
         val house1 = House(
             id = 1, data = "15-06-2026", agentName = "AGENTE", agentUid = "user_1",
             address = VisitAddress("100", "RUA A", "001", "", 0, 0, ""),
@@ -641,14 +614,11 @@ class HomeViewModelTest {
         val house2 = house1.copy(id = 2, listOrder = 1)
         val reordered = listOf(house2, house1)
 
-        every { recalculateVisitSegmentsUseCase.recalculateVisitSegments(any()) } returns reordered
-
         val vm = createViewModel()
         vm.persistListOrder(reordered)
-        testDispatcher.scheduler.advanceTimeBy(1000)
-        testDispatcher.scheduler.runCurrent()
+        testDispatcher.scheduler.advanceUntilIdle()
 
-        coVerify { saveHouseUseCase.updateHouses(any(), any()) }
+        verify { houseEditDelegate.persistListOrder(any(), any(), reordered, any()) }
     }
 
     @Test
@@ -699,14 +669,14 @@ class HomeViewModelTest {
     fun `restoreDeletedHouse delegates to houseEditDelegate`() {
         val vm = createViewModel()
         vm.restoreDeletedHouse()
-        verify { houseEditDelegate.restoreDeletedHouse(any(), any(), any(), any()) }
+        verify { houseEditDelegate.restoreDeletedHouse(any(), any(), any()) }
     }
 
     @Test
-    fun `moveHousesToDate delegates to dayNavigationDelegate`() {
+    fun `moveHousesToDate delegates to dayManagementViewModel`() {
         val vm = createViewModel()
         vm.moveHousesToDate("15-06-2026", "16-06-2026")
-        verify { dayNavigationDelegate.moveHousesToDate(any(), any(), "15-06-2026", "16-06-2026") }
+        verify { dayManagementViewModel.moveHousesToDate(any(), any(), any(), any(), any(), "15-06-2026", "16-06-2026") }
     }
 
     @Test
@@ -714,7 +684,7 @@ class HomeViewModelTest {
         val activity = DayActivity(date = "15-06-2026", agentName = "AGENTE", agentUid = "user_1", status = "NORMAL", isClosed = true)
         coEvery { dayManagementUseCase.getDayActivity(any(), any()) } returns activity
         coEvery { dayManagementUseCase.unlockDay(any(), any()) } returns Unit
-        every { validationDelegate.validateCurrentDay(any(), any(), any(), any()) } returns true
+        every { validationViewModel.validateCurrentDay(any(), any(), any(), any()) } returns true
 
         val vm = createViewModel()
         vm.currentUserUid.value = "user_1"

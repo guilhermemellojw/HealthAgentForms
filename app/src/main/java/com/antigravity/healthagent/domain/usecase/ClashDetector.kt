@@ -26,13 +26,14 @@ class ClashDetector @Inject constructor() {
      * @param candidate The house being inserted or updated.
      * @param existingHouses Current houses (DB + drafts merged) to check against.
      * @param includeVisitSegment Whether to include visitSegment in the comparison.
-     *        Set to `true` for full natural key match (insert/move), `false` for looser identity match.
+     *        Defaults to `false` because visitSegment is recalculated and should not
+     *        cause false non-matches for the same physical address.
      * @return The clashing house, or null if no clash exists.
      */
     fun findClash(
         candidate: House,
         existingHouses: List<House>,
-        includeVisitSegment: Boolean = true
+        includeVisitSegment: Boolean = false
     ): House? {
         return existingHouses.find { existing ->
             existing.id != candidate.id &&
@@ -61,7 +62,7 @@ class ClashDetector @Inject constructor() {
     fun autoIncrementToAvoidClash(
         house: House,
         existingHouses: List<House>,
-        includeVisitSegment: Boolean = true
+        includeVisitSegment: Boolean = false
     ): House {
         var finalSequence = house.address.sequence
         var finalComplement = house.address.complement

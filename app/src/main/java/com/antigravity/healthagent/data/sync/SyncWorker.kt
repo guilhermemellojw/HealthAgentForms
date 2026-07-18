@@ -7,7 +7,10 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -25,62 +28,63 @@ class SyncWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
-        AppLogger.d("SyncWorker", "Starting background synchronization (Attempt: $runAttemptCount)...")
+        val syncOpId = nextSyncOpId.incrementAndGet()
+        AppLogger.d("SyncWorker", "[#$syncOpId] Starting background synchronization (Attempt: $runAttemptCount)...")
         
         if (runAttemptCount > 3) {
-            AppLogger.e("SyncWorker", "Too many attempts. Giving up to save battery.")
+            AppLogger.e("SyncWorker", "[#$syncOpId] Too many attempts. Giving up to save battery.")
             return Result.failure()
         }
 
         val currentUser = auth.currentUser
         if (currentUser == null) {
-            AppLogger.w("SyncWorker", "No user logged in. Skipping background sync.")
+            AppLogger.w("SyncWorker", "[#$syncOpId] No user logged in. Skipping background sync.")
             return Result.success()
         }
 
         return try {
-            // Sincroniza a hora local com a rede antes de iniciar qualquer operação
             com.antigravity.healthagent.utils.TimeManager.synchronizeTime(applicationContext)
 
-            // Check if we are in Admin Edit mode. Skip if so to prevent data mixing.
-            val isEditing = withTimeoutOrNull(2000) {
-                settingsManager.remoteAgentUid.first()
-            } != null
+            val isEditing = try {
+                withTimeout(5000) {
+                    settingsManager.remoteAgentUid.take(1).first() != null
+                }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                AppLogger.w("SyncWorker", "[#$syncOpId] Timeout waiting for remoteAgentUid - assuming not editing")
+                false
+            }
 
             if (isEditing) {
-                AppLogger.w("SyncWorker", "Admin Edit mode active. Skipping background sync.")
+                AppLogger.w("SyncWorker", "[#$syncOpId] Admin Edit mode active. Skipping background sync.")
                 return Result.success()
             }
 
-            // Fetch current agent's name from cached user profile
-            val agentName = withTimeoutOrNull(2000) { settingsManager.cachedUser.first()?.agentName } ?: ""
+            val agentName = withTimeoutOrNull(2000) { settingsManager.cachedUser.take(1).first()?.agentName } ?: ""
             val uid = currentUser.uid
 
-            // Perform background PULL first
             val pullResult = syncRepository.pullCloudDataToLocal(uid)
             if (pullResult.isFailure) {
-                AppLogger.w("SyncWorker", "Background pull failed: ${pullResult.exceptionOrNull()?.message}")
+                AppLogger.w("SyncWorker", "[#$syncOpId] Background pull failed: ${pullResult.exceptionOrNull()?.message}")
             }
 
             val houses = houseRepository.getAllHousesOnce(uid)
             val activities = houseRepository.getAllDayActivitiesOnce(uid)
             
             if (houses.isEmpty() && activities.isEmpty()) {
-                AppLogger.d("SyncWorker", "No data to push.")
+                AppLogger.d("SyncWorker", "[#$syncOpId] No data to push.")
                 return Result.success()
             }
 
             val result = syncRepository.pushLocalDataToCloud(houses, activities, uid)
             
             if (result.isSuccess) {
-                AppLogger.d("SyncWorker", "Sync successful.")
+                AppLogger.d("SyncWorker", "[#$syncOpId] Sync successful.")
                 Result.success()
             } else {
                 val exception = result.exceptionOrNull()
                 val errorMsg = exception?.message ?: "Erro de sincronização em segundo plano"
-                AppLogger.e("SyncWorker", "Sync failed: $errorMsg")
+                AppLogger.e("SyncWorker", "[#$syncOpId] Sync failed: $errorMsg")
                 
-                // If it's a permission error, don't retry
                 if (errorMsg.contains("Acesso negado", ignoreCase = true) == true) {
                     Result.failure()
                 } else {
@@ -88,8 +92,12 @@ class SyncWorker @AssistedInject constructor(
                 }
             }
         } catch (e: Exception) {
-            AppLogger.e("SyncWorker", "Error in sync worker", e)
+            AppLogger.e("SyncWorker", "[#$syncOpId] Error in sync worker", e)
             Result.failure()
         }
+    }
+
+    companion object {
+        private val nextSyncOpId = AtomicLong(0)
     }
 }

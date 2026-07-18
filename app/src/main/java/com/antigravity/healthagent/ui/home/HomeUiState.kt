@@ -7,6 +7,17 @@ import com.antigravity.healthagent.data.local.model.House
 
 import com.antigravity.healthagent.ui.state.SyncUiState
 
+data class HomeSettingsState(
+    val easyMode: Boolean = false,
+    val solarMode: Boolean = false,
+    val editingToolsMode: Boolean = true,
+    val maxOpenHouses: Int = 5,
+    val backupFrequency: com.antigravity.healthagent.data.backup.BackupFrequency = com.antigravity.healthagent.data.backup.BackupFrequency.DAILY,
+    val themeMode: String? = null,
+    val themeColor: String? = null,
+    val customActivities: Set<String> = emptySet()
+)
+
 data class BackupConfirmation(
     val backupAgentName: String,
     val currentAgentName: String,

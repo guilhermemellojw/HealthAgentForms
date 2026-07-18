@@ -15,8 +15,6 @@ import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import com.antigravity.healthagent.data.repository.StreetRepository
-import com.antigravity.healthagent.domain.repository.AgentRepository
-import com.antigravity.healthagent.domain.repository.LocalizationRepository
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.ui.semanal.WeeklySummaryViewModel
 import com.antigravity.healthagent.utils.SoundManager
@@ -39,6 +37,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import com.antigravity.healthagent.domain.model.VisitAddress
+import com.antigravity.healthagent.domain.util.Clock
 import com.antigravity.healthagent.ui.home.delegates.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -55,29 +54,29 @@ class AdminHomologationLockTest {
     private val soundManager = mockk<SoundManager>(relaxed = true)
     private val syncRepository = mockk<SyncRepository>(relaxed = true)
     private val saveHouseUseCase = mockk<SaveHouseUseCase>(relaxed = true)
-    private val predictHouseValuesUseCase = mockk<PredictHouseValuesUseCase>(relaxed = true)
     private val recalculateVisitSegmentsUseCase = mockk<RecalculateVisitSegmentsUseCase>(relaxed = true)
-    private val performLocalDatabaseMigrationUseCase = mockk<PerformLocalDatabaseMigrationUseCase>(relaxed = true)
     private val dayManagementUseCase = mockk<DayManagementUseCase>(relaxed = true)
     private val houseValidationUseCase = mockk<HouseValidationUseCase>(relaxed = true)
     private val streetRepository = mockk<StreetRepository>(relaxed = true)
     private val backupManager = mockk<BackupManager>(relaxed = true)
-    private val generateTestDataUseCase = mockk<GenerateTestDataUseCase>(relaxed = true)
-    private val cleanupBrokenHousesUseCase = mockk<CleanupBrokenHousesUseCase>(relaxed = true)
     private val addNewHouseUseCase = mockk<AddNewHouseUseCase>(relaxed = true)
-    private val updateHouseUseCase = mockk<UpdateHouseUseCase>(relaxed = true)
-    private val agentRepository = mockk<AgentRepository>(relaxed = true)
-    private val localizationRepository = mockk<LocalizationRepository>(relaxed = true)
     private val loadDynamicConfigUseCase = mockk<LoadDynamicConfigUseCase>(relaxed = true)
     private val triggerImmediateSyncUseCase = mockk<TriggerImmediateSyncUseCase>(relaxed = true)
     private val selectDayActivityUseCase = mockk<SelectDayActivityUseCase>(relaxed = true)
     private val updateDayHeaderUseCase = mockk<UpdateDayHeaderUseCase>(relaxed = true)
     private val checkWorkedHouseLimitUseCase = mockk<CheckWorkedHouseLimitUseCase>(relaxed = true)
+    private val clock = object : Clock {
+        private var counter = 500L
+        override fun currentTimeMillis(): Long {
+            counter += 100
+            return counter
+        }
+    }
 
-    private val syncDelegate = mockk<SyncDelegate>(relaxed = true)
-    private val dayNavigationDelegate = mockk<DayNavigationDelegate>(relaxed = true)
+    private val syncViewModel = mockk<SyncViewModel>(relaxed = true)
+    private val dayManagementViewModel = mockk<DayManagementViewModel>(relaxed = true)
     private val dayClosingDelegate = mockk<DayClosingDelegate>(relaxed = true)
-    private val validationDelegate = mockk<ValidationDelegate>(relaxed = true)
+    private val validationViewModel = mockk<ValidationViewModel>(relaxed = true)
     private val remoteAgentDelegate = mockk<RemoteAgentDelegate>(relaxed = true)
     private val boletimDataDelegate = mockk<BoletimDataDelegate>(relaxed = true)
     private val initializationDelegate = mockk<InitializationDelegate>(relaxed = true)
@@ -86,16 +85,15 @@ class AdminHomologationLockTest {
             repository = repository,
             saveHouseUseCase = saveHouseUseCase,
             addNewHouseUseCase = addNewHouseUseCase,
-            updateHouseUseCase = updateHouseUseCase,
             recalculateVisitSegmentsUseCase = recalculateVisitSegmentsUseCase,
             clashDetector = ClashDetector(),
             dayLockEnforcer = DayLockEnforcer(),
             roleEnforcer = RoleEnforcer(),
             checkWorkedHouseLimitUseCase = checkWorkedHouseLimitUseCase,
-            soundManager = soundManager
+            soundManager = soundManager,
+            clock = clock
         )
     }
-
     private val testDispatcher = StandardTestDispatcher()
 
     @Before
@@ -114,6 +112,7 @@ class AdminHomologationLockTest {
         coEvery { repository.runInTransaction(any<suspend () -> Any>()) } answers {
             runBlocking { (args[0] as suspend () -> Any).invoke() }
         }
+        every { saveHouseUseCase.sanitizeHouse(any()) } answers { firstArg() }
     }
 
     @After
@@ -159,40 +158,29 @@ class AdminHomologationLockTest {
             repository = repository,
             settingsManager = settingsManager,
             soundManager = soundManager,
-            syncRepository = syncRepository,
             saveHouseUseCase = saveHouseUseCase,
-            predictHouseValuesUseCase = predictHouseValuesUseCase,
             recalculateVisitSegmentsUseCase = recalculateVisitSegmentsUseCase,
-            performLocalDatabaseMigrationUseCase = performLocalDatabaseMigrationUseCase,
             dayManagementUseCase = dayManagementUseCase,
             houseValidationUseCase = houseValidationUseCase,
             streetRepository = streetRepository,
             backupManager = backupManager,
-            generateTestDataUseCase = generateTestDataUseCase,
-            cleanupBrokenHousesUseCase = cleanupBrokenHousesUseCase,
-            agentRepository = agentRepository,
-            localizationRepository = localizationRepository,
-            clashDetector = ClashDetector(),
-            dayLockEnforcer = DayLockEnforcer(),
-            roleEnforcer = RoleEnforcer(),
             loadDynamicConfigUseCase = loadDynamicConfigUseCase,
             triggerImmediateSyncUseCase = triggerImmediateSyncUseCase,
             selectDayActivityUseCase = selectDayActivityUseCase,
             updateDayHeaderUseCase = updateDayHeaderUseCase,
-            delegatesProvider = HomeDelegatesProvider(
-                syncDelegate = syncDelegate,
-                dayNavigationDelegate = dayNavigationDelegate,
-                dayClosingDelegate = dayClosingDelegate,
-                validationDelegate = validationDelegate,
-                remoteAgentDelegate = remoteAgentDelegate,
-                boletimDataDelegate = boletimDataDelegate,
-                initializationDelegate = initializationDelegate,
-                houseEditDelegate = houseEditDelegate,
-                stateDelegate = HomeStateDelegate()
-            )
+            homeStateDelegate = HomeStateDelegate(),
+            syncViewModel = syncViewModel,
+            dayManagementViewModel = dayManagementViewModel,
+            dayClosingDelegate = dayClosingDelegate,
+            validationViewModel = validationViewModel,
+            remoteAgentDelegate = remoteAgentDelegate,
+            boletimDataDelegate = boletimDataDelegate,
+            initializationDelegate = initializationDelegate,
+            houseEditDelegate = houseEditDelegate
         )
 
         // Force viewModel state loading
+        testDispatcher.scheduler.advanceUntilIdle()
         testDispatcher.scheduler.advanceUntilIdle()
 
         // Attempt update
@@ -242,38 +230,28 @@ class AdminHomologationLockTest {
             repository = repository,
             settingsManager = settingsManager,
             soundManager = soundManager,
-            syncRepository = syncRepository,
             saveHouseUseCase = saveHouseUseCase,
-            predictHouseValuesUseCase = predictHouseValuesUseCase,
             recalculateVisitSegmentsUseCase = recalculateVisitSegmentsUseCase,
-            performLocalDatabaseMigrationUseCase = performLocalDatabaseMigrationUseCase,
             dayManagementUseCase = dayManagementUseCase,
             houseValidationUseCase = houseValidationUseCase,
             streetRepository = streetRepository,
             backupManager = backupManager,
-            generateTestDataUseCase = generateTestDataUseCase,
-            cleanupBrokenHousesUseCase = cleanupBrokenHousesUseCase,
-            agentRepository = agentRepository,
-            localizationRepository = localizationRepository,
-            clashDetector = ClashDetector(),
-            dayLockEnforcer = DayLockEnforcer(),
-            roleEnforcer = RoleEnforcer(),
             loadDynamicConfigUseCase = loadDynamicConfigUseCase,
             triggerImmediateSyncUseCase = triggerImmediateSyncUseCase,
             selectDayActivityUseCase = selectDayActivityUseCase,
             updateDayHeaderUseCase = updateDayHeaderUseCase,
-            delegatesProvider = HomeDelegatesProvider(
-                syncDelegate = syncDelegate,
-                dayNavigationDelegate = dayNavigationDelegate,
-                dayClosingDelegate = dayClosingDelegate,
-                validationDelegate = validationDelegate,
-                remoteAgentDelegate = remoteAgentDelegate,
-                boletimDataDelegate = boletimDataDelegate,
-                initializationDelegate = initializationDelegate,
-                houseEditDelegate = houseEditDelegate,
-                stateDelegate = HomeStateDelegate()
-            )
+            homeStateDelegate = HomeStateDelegate(),
+            syncViewModel = syncViewModel,
+            dayManagementViewModel = dayManagementViewModel,
+            dayClosingDelegate = dayClosingDelegate,
+            validationViewModel = validationViewModel,
+            remoteAgentDelegate = remoteAgentDelegate,
+            boletimDataDelegate = boletimDataDelegate,
+            initializationDelegate = initializationDelegate,
+            houseEditDelegate = houseEditDelegate
         )
+
+        testDispatcher.scheduler.advanceUntilIdle()
 
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -382,37 +360,25 @@ class AdminHomologationLockTest {
             repository = repository,
             settingsManager = settingsManager,
             soundManager = soundManager,
-            syncRepository = syncRepository,
             saveHouseUseCase = saveHouseUseCase,
-            predictHouseValuesUseCase = predictHouseValuesUseCase,
             recalculateVisitSegmentsUseCase = recalculateVisitSegmentsUseCase,
-            performLocalDatabaseMigrationUseCase = performLocalDatabaseMigrationUseCase,
             dayManagementUseCase = dayManagementUseCase,
             houseValidationUseCase = houseValidationUseCase,
             streetRepository = streetRepository,
             backupManager = backupManager,
-            generateTestDataUseCase = generateTestDataUseCase,
-            cleanupBrokenHousesUseCase = cleanupBrokenHousesUseCase,
-            agentRepository = agentRepository,
-            localizationRepository = localizationRepository,
-            clashDetector = ClashDetector(),
-            dayLockEnforcer = DayLockEnforcer(),
-            roleEnforcer = RoleEnforcer(),
             loadDynamicConfigUseCase = loadDynamicConfigUseCase,
             triggerImmediateSyncUseCase = triggerImmediateSyncUseCase,
             selectDayActivityUseCase = selectDayActivityUseCase,
             updateDayHeaderUseCase = updateDayHeaderUseCase,
-            delegatesProvider = HomeDelegatesProvider(
-                syncDelegate = syncDelegate,
-                dayNavigationDelegate = dayNavigationDelegate,
-                dayClosingDelegate = dayClosingDelegate,
-                validationDelegate = validationDelegate,
-                remoteAgentDelegate = remoteAgentDelegate,
-                boletimDataDelegate = boletimDataDelegate,
-                initializationDelegate = initializationDelegate,
-                houseEditDelegate = houseEditDelegate,
-                stateDelegate = HomeStateDelegate()
-            )
+            homeStateDelegate = HomeStateDelegate(),
+            syncViewModel = syncViewModel,
+            dayManagementViewModel = dayManagementViewModel,
+            dayClosingDelegate = dayClosingDelegate,
+            validationViewModel = validationViewModel,
+            remoteAgentDelegate = remoteAgentDelegate,
+            boletimDataDelegate = boletimDataDelegate,
+            initializationDelegate = initializationDelegate,
+            houseEditDelegate = houseEditDelegate
         )
 
         viewModel.navigateToDate("18-05-2026")
@@ -476,37 +442,25 @@ class AdminHomologationLockTest {
             repository = repository,
             settingsManager = settingsManager,
             soundManager = soundManager,
-            syncRepository = syncRepository,
             saveHouseUseCase = saveHouseUseCase,
-            predictHouseValuesUseCase = predictHouseValuesUseCase,
             recalculateVisitSegmentsUseCase = recalculateVisitSegmentsUseCase,
-            performLocalDatabaseMigrationUseCase = performLocalDatabaseMigrationUseCase,
             dayManagementUseCase = dayManagementUseCase,
             houseValidationUseCase = houseValidationUseCase,
             streetRepository = streetRepository,
             backupManager = backupManager,
-            generateTestDataUseCase = generateTestDataUseCase,
-            cleanupBrokenHousesUseCase = cleanupBrokenHousesUseCase,
-            agentRepository = agentRepository,
-            localizationRepository = localizationRepository,
-            clashDetector = ClashDetector(),
-            dayLockEnforcer = DayLockEnforcer(),
-            roleEnforcer = RoleEnforcer(),
             loadDynamicConfigUseCase = loadDynamicConfigUseCase,
             triggerImmediateSyncUseCase = triggerImmediateSyncUseCase,
             selectDayActivityUseCase = selectDayActivityUseCase,
             updateDayHeaderUseCase = updateDayHeaderUseCase,
-            delegatesProvider = HomeDelegatesProvider(
-                syncDelegate = syncDelegate,
-                dayNavigationDelegate = dayNavigationDelegate,
-                dayClosingDelegate = dayClosingDelegate,
-                validationDelegate = validationDelegate,
-                remoteAgentDelegate = remoteAgentDelegate,
-                boletimDataDelegate = boletimDataDelegate,
-                initializationDelegate = initializationDelegate,
-                houseEditDelegate = houseEditDelegate,
-                stateDelegate = HomeStateDelegate()
-            )
+            homeStateDelegate = HomeStateDelegate(),
+            syncViewModel = syncViewModel,
+            dayManagementViewModel = dayManagementViewModel,
+            dayClosingDelegate = dayClosingDelegate,
+            validationViewModel = validationViewModel,
+            remoteAgentDelegate = remoteAgentDelegate,
+            boletimDataDelegate = boletimDataDelegate,
+            initializationDelegate = initializationDelegate,
+            houseEditDelegate = houseEditDelegate
         )
 
         viewModel.navigateToDate("18-05-2026")
@@ -655,8 +609,7 @@ class AdminHomologationLockTest {
             scope = testScope,
             state = state,
             afterId = 1,
-            latestHousesList = latestHouses,
-            isDayClosed = false
+            latestHousesList = latestHouses
         )
 
         testDispatcher.scheduler.advanceUntilIdle()
@@ -739,8 +692,6 @@ class AdminHomologationLockTest {
             scope = testScope,
             state = state,
             latestHousesList = latestHouses,
-            maxOpenHouses = 5,
-            isDayClosed = false,
             validateCurrentDay = { true },
             triggerDelayedValidation = {},
             onHouseClick = {}
@@ -796,8 +747,7 @@ class AdminHomologationLockTest {
             scope = testScope,
             state = state,
             afterId = 1,
-            latestHousesList = latestHouses,
-            isDayClosed = false
+            latestHousesList = latestHouses
         )
 
         testDispatcher.scheduler.advanceUntilIdle()
@@ -840,8 +790,7 @@ class AdminHomologationLockTest {
             scope = testScope,
             state = state,
             afterId = 1,
-            latestHousesList = latestHouses,
-            isDayClosed = false
+            latestHousesList = latestHouses
         )
 
         testDispatcher.scheduler.advanceUntilIdle()

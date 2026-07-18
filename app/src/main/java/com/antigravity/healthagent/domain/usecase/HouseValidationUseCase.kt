@@ -113,7 +113,7 @@ class HouseValidationUseCase @Inject constructor() {
     }
 
     private fun generateIdentitySignature(house: House): String {
-        return "${house.address.generateAddressSignature()}|${house.visitSegment}".uppercase()
+        return house.address.generateAddressSignature().uppercase()
     }
 
     private fun getFullAddressDisplay(house: House): String {

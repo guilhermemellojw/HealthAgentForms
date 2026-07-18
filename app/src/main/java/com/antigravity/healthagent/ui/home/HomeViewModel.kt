@@ -6,25 +6,18 @@ import androidx.lifecycle.viewModelScope
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.StreetRepository
-import com.antigravity.healthagent.domain.repository.SyncRepository
-import com.antigravity.healthagent.domain.repository.AgentRepository
-import com.antigravity.healthagent.domain.repository.LocalizationRepository
 import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.usecase.SaveHouseUseCase
-import com.antigravity.healthagent.domain.usecase.PredictHouseValuesUseCase
 import com.antigravity.healthagent.domain.usecase.RecalculateVisitSegmentsUseCase
-import com.antigravity.healthagent.domain.usecase.PerformLocalDatabaseMigrationUseCase
 import com.antigravity.healthagent.domain.usecase.DayManagementUseCase
 import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
-import com.antigravity.healthagent.domain.usecase.GenerateTestDataUseCase
-import com.antigravity.healthagent.domain.usecase.CleanupBrokenHousesUseCase
-import com.antigravity.healthagent.domain.usecase.ClashDetector
-import com.antigravity.healthagent.domain.usecase.DayLockEnforcer
-import com.antigravity.healthagent.domain.usecase.RoleEnforcer
 import com.antigravity.healthagent.domain.usecase.LoadDynamicConfigUseCase
 import com.antigravity.healthagent.domain.usecase.TriggerImmediateSyncUseCase
 import com.antigravity.healthagent.domain.usecase.SelectDayActivityUseCase
 import com.antigravity.healthagent.domain.usecase.UpdateDayHeaderUseCase
+import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.domain.model.TreatmentData
+import com.antigravity.healthagent.domain.model.GeoCapture
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.data.backup.BackupManager
 import com.antigravity.healthagent.data.backup.BackupData
@@ -40,7 +33,6 @@ import kotlinx.coroutines.delay
 import com.antigravity.healthagent.utils.DateUtils
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Calendar
@@ -51,39 +43,28 @@ class HomeViewModel @Inject constructor(
     private val repository: HouseRepository,
     private val settingsManager: SettingsManager,
     private val soundManager: SoundManager,
-    private val syncRepository: SyncRepository,
     private val saveHouseUseCase: SaveHouseUseCase,
-    private val predictHouseValuesUseCase: PredictHouseValuesUseCase,
     private val recalculateVisitSegmentsUseCase: RecalculateVisitSegmentsUseCase,
-    private val performLocalDatabaseMigrationUseCase: PerformLocalDatabaseMigrationUseCase,
     val dayManagementUseCase: DayManagementUseCase,
     private val houseValidationUseCase: HouseValidationUseCase,
     private val streetRepository: StreetRepository,
     private val backupManager: BackupManager,
-    private val generateTestDataUseCase: GenerateTestDataUseCase,
-    private val cleanupBrokenHousesUseCase: CleanupBrokenHousesUseCase,
-    private val agentRepository: AgentRepository,
-    private val localizationRepository: LocalizationRepository,
-    private val clashDetector: ClashDetector,
-    private val dayLockEnforcer: DayLockEnforcer,
-    private val roleEnforcer: RoleEnforcer,
     private val loadDynamicConfigUseCase: LoadDynamicConfigUseCase,
     private val triggerImmediateSyncUseCase: TriggerImmediateSyncUseCase,
     private val selectDayActivityUseCase: SelectDayActivityUseCase,
     private val updateDayHeaderUseCase: UpdateDayHeaderUseCase,
 
-    // DELEGATES PROVIDER
-    private val delegatesProvider: HomeDelegatesProvider
-) : ViewModel(), HomeState by delegatesProvider.stateDelegate {
-
-    private val syncDelegate get() = delegatesProvider.syncDelegate
-    private val dayNavigationDelegate get() = delegatesProvider.dayNavigationDelegate
-    private val dayClosingDelegate get() = delegatesProvider.dayClosingDelegate
-    private val validationDelegate get() = delegatesProvider.validationDelegate
-    private val remoteAgentDelegate get() = delegatesProvider.remoteAgentDelegate
-    private val boletimDataDelegate get() = delegatesProvider.boletimDataDelegate
-    private val initializationDelegate get() = delegatesProvider.initializationDelegate
-    private val houseEditDelegate get() = delegatesProvider.houseEditDelegate
+    // Direct delegate/viewmodel injection
+    private val homeStateDelegate: HomeStateDelegate,
+    private val syncViewModel: SyncViewModel,
+    private val dayManagementViewModel: DayManagementViewModel,
+    private val houseEditDelegate: HouseEditDelegate,
+    private val validationViewModel: ValidationViewModel,
+    private val dayClosingDelegate: DayClosingDelegate,
+    private val remoteAgentDelegate: RemoteAgentDelegate,
+    private val boletimDataDelegate: BoletimDataDelegate,
+    private val initializationDelegate: InitializationDelegate
+) : ViewModel(), HomeState by homeStateDelegate {
 
     private val dateFormatter get() = DateUtils.DASH_DATE.get()
     private val displayDateFormatter get() = DateUtils.SLASH_DATE.get()
@@ -120,25 +101,25 @@ class HomeViewModel @Inject constructor(
     // --- State Injections ---
     val easyMode: StateFlow<Boolean> = settingsManager.easyMode
         .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val solarMode: StateFlow<Boolean> = settingsManager.solarMode
         .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val editingToolsMode: StateFlow<Boolean> = settingsManager.editingToolsMode
         .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val maxOpenHouses: StateFlow<Int> = settingsManager.maxOpenHouses
         .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 5)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 5)
     val backupFrequency: StateFlow<com.antigravity.healthagent.data.backup.BackupFrequency> = settingsManager.backupFrequency
         .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, com.antigravity.healthagent.data.backup.BackupFrequency.DAILY)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.antigravity.healthagent.data.backup.BackupFrequency.DAILY)
     val themeMode: StateFlow<String?> = settingsManager.themeMode
         .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
     val themeColor: StateFlow<String?> = settingsManager.themeColor
         .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     // --- DB Flows ---
     private val allHousesFlow: StateFlow<List<House>> = combine(
@@ -171,7 +152,7 @@ class HomeViewModel @Inject constructor(
     }.flatMapLatest { (date, name, uid) ->
         repository.getDayActivityFlow(date, uid).map { it?.isClosed == true && it?.isManualUnlock != true }
     }.distinctUntilChanged()
-    .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val isWorkdayManualUnlock: StateFlow<Boolean> = combine(data, agentName, remoteAgentUid, currentUserUid) { date, name, remoteUid, currentUid ->
         val effectiveUid = remoteUid ?: currentUid
@@ -179,7 +160,7 @@ class HomeViewModel @Inject constructor(
     }.flatMapLatest { (date, name, uid) ->
         repository.getDayActivityFlow(date, uid).map { it?.isManualUnlock == true }
     }.distinctUntilChanged()
-    .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
         val latestHouses: StateFlow<List<House>> = combine(
             allHousesFlow,
@@ -269,12 +250,28 @@ class HomeViewModel @Inject constructor(
 
     val activityOptions: StateFlow<List<String>> = settingsManager.customActivities.map { custom ->
         (listOf("NORMAL", "FERIADO", "PONTO FACULTATIVO", "REUNIÃO", "TREINAMENTO") + custom.toList()).distinct()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("NORMAL", "FERIADO", "PONTO FACULTATIVO", "REUNIÃO", "TREINAMENTO"))
+    }.distinctUntilChanged()
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("NORMAL", "FERIADO", "PONTO FACULTATIVO", "REUNIÃO", "TREINAMENTO"))
 
     val customActivities: StateFlow<Set<String>> = settingsManager.customActivities
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
-
+    val settingsState: StateFlow<HomeSettingsState> = combine(
+        easyMode, solarMode, editingToolsMode, maxOpenHouses,
+        backupFrequency, themeMode, themeColor, customActivities
+    ) { args: Array<*> ->
+        HomeSettingsState(
+            easyMode = args[0] as Boolean,
+            solarMode = args[1] as Boolean,
+            editingToolsMode = args[2] as Boolean,
+            maxOpenHouses = args[3] as Int,
+            backupFrequency = args[4] as com.antigravity.healthagent.data.backup.BackupFrequency,
+            themeMode = args[5] as String?,
+            themeColor = args[6] as String?,
+            customActivities = args[7] as Set<String>
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), HomeSettingsState())
 
     init {
         initializationDelegate.initialize(
@@ -302,23 +299,288 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    // --- Action Routing ---
-    fun syncDataToCloud() = syncDelegate.syncDataToCloud(viewModelScope, this, maxOpenHouses.value)
-    fun pullDataFromCloud(targetUid: String? = null) = syncDelegate.pullDataFromCloud(viewModelScope, this, targetUid)
-    fun generateMockData() = syncDelegate.generateMockData(viewModelScope, this)
-    fun finishEditSession(onComplete: () -> Unit = {}) = syncDelegate.finishEditSession(viewModelScope, this, onComplete)
+    override fun onCleared() {
+        super.onCleared()
+        initializationDelegate.cancel()
+        validationViewModel.cancel()
+        dayManagementViewModel.cancelScope()
+        syncViewModel.cancelScope()
+        houseEditDelegate.cancelAll()
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // HOISTED DIALOG STATES
+    // ──────────────────────────────────────────────────────────
+
+    data class TreatmentDialogState(
+        val houseId: Int,
+        val treatment: TreatmentData,
+        val geo: GeoCapture,
+        val comFoco: Boolean
+    )
+
+    data class ContextDialogState(
+        val houseId: Int,
+        val block: String,
+        val blockSequence: String,
+        val street: String,
+        val bairro: String,
+        val quarteiraoConcluido: Boolean,
+        val localidadeConcluida: Boolean
+    )
+
+    private val _treatmentDialogState = MutableStateFlow<TreatmentDialogState?>(null)
+    val treatmentDialogState: StateFlow<TreatmentDialogState?> = _treatmentDialogState
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private val _contextDialogState = MutableStateFlow<ContextDialogState?>(null)
+    val contextDialogState: StateFlow<ContextDialogState?> = _contextDialogState
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun openTreatmentDialog(house: House) {
+        _treatmentDialogState.value = TreatmentDialogState(
+            houseId = house.id,
+            treatment = house.treatment,
+            geo = house.geo,
+            comFoco = house.treatment.comFoco
+        )
+    }
+
+    fun closeTreatmentDialog() {
+        _treatmentDialogState.value = null
+    }
+
+    fun updateTreatmentField(houseId: Int, field: com.antigravity.healthagent.ui.components.TreatmentField, value: Any) {
+        _treatmentDialogState.value?.let { state ->
+            if (state.houseId == houseId) {
+                val newTreatment = when (field) {
+                    com.antigravity.healthagent.ui.components.TreatmentField.A1 -> state.treatment.copy(a1 = value as Int)
+                    com.antigravity.healthagent.ui.components.TreatmentField.A2 -> state.treatment.copy(a2 = value as Int)
+                    com.antigravity.healthagent.ui.components.TreatmentField.B -> state.treatment.copy(b = value as Int)
+                    com.antigravity.healthagent.ui.components.TreatmentField.C -> state.treatment.copy(c = value as Int)
+                    com.antigravity.healthagent.ui.components.TreatmentField.D1 -> state.treatment.copy(d1 = value as Int)
+                    com.antigravity.healthagent.ui.components.TreatmentField.D2 -> state.treatment.copy(d2 = value as Int)
+                    com.antigravity.healthagent.ui.components.TreatmentField.E -> state.treatment.copy(e = value as Int)
+                    com.antigravity.healthagent.ui.components.TreatmentField.ELIMINADOS -> state.treatment.copy(eliminados = value as Int)
+                    com.antigravity.healthagent.ui.components.TreatmentField.LARVICIDA -> state.treatment.copy(larvicida = value as Double)
+                    com.antigravity.healthagent.ui.components.TreatmentField.COM_FOCO -> state.treatment.copy(comFoco = value as Boolean)
+                }
+                _treatmentDialogState.value = state.copy(treatment = newTreatment)
+            }
+        }
+    }
+
+    fun updateTreatmentComFoco(houseId: Int, comFoco: Boolean) {
+        _treatmentDialogState.value?.let { state ->
+            if (state.houseId == houseId) {
+                _treatmentDialogState.value = state.copy(comFoco = comFoco)
+            }
+        }
+    }
+
+    fun updateTreatmentGeo(houseId: Int, geo: GeoCapture) {
+        _treatmentDialogState.value?.let { state ->
+            if (state.houseId == houseId) {
+                _treatmentDialogState.value = state.copy(geo = geo)
+            }
+        }
+    }
+
+    fun confirmTreatmentDialog() {
+        _treatmentDialogState.value?.let { state ->
+            updateHouseField(state.houseId) { house ->
+                house.copy(
+                    treatment = state.treatment.copy(comFoco = state.comFoco),
+                    geo = state.geo
+                )
+            }
+            closeTreatmentDialog()
+        }
+    }
+
+    fun openContextDialog(house: House) {
+        _contextDialogState.value = ContextDialogState(
+            houseId = house.id,
+            block = house.address.blockNumber,
+            blockSequence = house.address.blockSequence,
+            street = house.address.streetName,
+            bairro = house.address.bairro,
+            quarteiraoConcluido = house.quarteiraoConcluido,
+            localidadeConcluida = house.localidadeConcluida
+        )
+    }
+
+    fun closeContextDialog() {
+        _contextDialogState.value = null
+    }
+
+    fun confirmContextDialog(
+        houseId: Int,
+        block: String,
+        blockSeq: String,
+        street: String,
+        bairro: String,
+        qConcluido: Boolean,
+        lConcluida: Boolean
+    ) {
+        updateHouseField(houseId) { house ->
+            house.copy(
+                address = house.address.copy(
+                    blockNumber = block,
+                    blockSequence = blockSeq,
+                    streetName = street,
+                    bairro = bairro
+                ),
+                quarteiraoConcluido = qConcluido,
+                localidadeConcluida = lConcluida
+            )
+        }
+        closeContextDialog()
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // REORDER STATE (hoisted from ReorderableHouseList)
+    // ──────────────────────────────────────────────────────────
+
+    private val _reorderHouses = MutableStateFlow<List<HouseUiState>>(emptyList())
+    val reorderHouses: StateFlow<List<HouseUiState>> = _reorderHouses
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private var _reorderMode = false
+
+    fun startReorderMode(currentHouses: List<HouseUiState>) {
+        _reorderMode = true
+        _reorderHouses.value = currentHouses
+    }
+
+    fun cancelReorderMode() {
+        _reorderMode = false
+        _reorderHouses.value = emptyList()
+    }
+
+    fun updateReorderList(newOrder: List<HouseUiState>) {
+        _reorderHouses.value = newOrder
+    }
+
+    fun persistReorderList() {
+        if (!_reorderMode) return
+        val housesToList = _reorderHouses.value.map { it.house }
+        houseEditDelegate.persistListOrder(viewModelScope, this, housesToList, ::triggerDelayedValidation)
+        _reorderMode = false
+        _reorderHouses.value = emptyList()
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // REACTIVE GOAL REACHED FLOW
+    // ──────────────────────────────────────────────────────────
+
+    val goalReachedFlow: StateFlow<Boolean> = houses
+        .map { dayHouses ->
+            val workedCount = dayHouses.filter { it.data == data.value }.count {
+                it.situation == Situation.NONE || it.situation == Situation.EMPTY
+            }
+            workedCount >= maxOpenHouses.value && maxOpenHouses.value > 0
+        }
+        .distinctUntilChanged()
+.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    // Derive showGoalReached from goalReachedFlow (overrides delegate's MutableStateFlow)
+    override val showGoalReached: MutableStateFlow<Boolean> = MutableStateFlow(false).also {
+        viewModelScope.launch {
+            goalReachedFlow.collect { reached ->
+                if (reached && !it.value) it.value = true
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Action Routing
+    // ──────────────────────────────────────────────────────────
+    fun syncDataToCloud() = syncViewModel.syncDataToCloud(
+        syncStatus = syncStatus,
+        remoteAgentUid = remoteAgentUid.value,
+        currentUserUid = currentUserUid.value,
+        maxOpenHouses = maxOpenHouses.value,
+        pendingUpdateDrafts = pendingUpdateDrafts.value,
+        uiEvent = uiEvent,
+        data = data
+    )
+
+    fun pullDataFromCloud(targetUid: String? = null) = syncViewModel.pullDataFromCloud(
+        syncStatus = syncStatus,
+        currentUserUid = currentUserUid.value,
+        targetUid = targetUid,
+        uiEvent = uiEvent
+    )
+
+    fun generateMockData() = syncViewModel.generateMockData(
+        syncStatus = syncStatus,
+        agentName = agentName.value,
+        currentUserUid = currentUserUid.value,
+        currentDate = data.value
+    )
+
+    fun finishEditSession(onComplete: () -> Unit = {}) = syncViewModel.finishEditSession(
+        syncStatus = syncStatus,
+        remoteAgent = remoteAgent.value,
+        remoteAgentUid = remoteAgentUid.value,
+        currentUserUid = currentUserUid.value,
+        uiEvent = uiEvent,
+        onComplete = onComplete,
+        remoteAgentFlow = remoteAgent,
+        remoteAgentUidFlow = remoteAgentUid,
+        pendingUpdateDraftsFlow = pendingUpdateDrafts,
+        housesInFlightFlow = housesInFlight
+    )
 
     fun moveDate(forward: Boolean) {
-        if (forward) dayNavigationDelegate.moveDateForward(viewModelScope, this)
-        else dayNavigationDelegate.moveDateBackward(viewModelScope, this)
+        if (forward) dayManagementViewModel.moveDateForward(data, uiEvent)
+        else dayManagementViewModel.moveDateBackward(data, uiEvent)
     }
-    fun selectToday() = dayNavigationDelegate.goToToday(this)
+
+    fun selectToday() = dayManagementViewModel.goToToday(data)
+
     fun moveHouseToDate(house: House, destinationDate: String) {
-        dayNavigationDelegate.moveHouseToDate(viewModelScope, this, house, destinationDate, maxOpenHouses.value, isDayClosed.value)
+        dayManagementViewModel.moveHouseToDate(
+            data = data,
+            uiEvent = uiEvent,
+            uiState = uiState,
+            isAdmin = isAdmin,
+            agentName = agentName,
+            remoteAgentUid = remoteAgentUid,
+            currentUserUid = currentUserUid,
+            housesInFlight = housesInFlight,
+            pendingUpdateDrafts = pendingUpdateDrafts,
+            house = house,
+            newDate = destinationDate,
+            maxOpenHouses = maxOpenHouses.value,
+            isDayClosed = isDayClosed.value
+        )
     }
-    fun confirmMoveHouse() = dayNavigationDelegate.confirmMoveHouse(viewModelScope, this)
-    fun dismissMoveConfirmation() = dayNavigationDelegate.dismissMoveConfirmation(this)
-    fun moveHousesToDate(oldDate: String, newDate: String) = dayNavigationDelegate.moveHousesToDate(viewModelScope, this, oldDate, newDate)
+
+    fun confirmMoveHouse() = dayManagementViewModel.confirmMoveHouse(
+        moveConfirmationData = moveConfirmationData,
+        data = data,
+        uiEvent = uiEvent,
+        isAdmin = isAdmin,
+        agentName = agentName,
+        remoteAgentUid = remoteAgentUid,
+        currentUserUid = currentUserUid,
+        housesInFlight = housesInFlight,
+        pendingUpdateDrafts = pendingUpdateDrafts
+    )
+
+    fun dismissMoveConfirmation() = dayManagementViewModel.dismissMoveConfirmation(moveConfirmationData)
+
+    fun moveHousesToDate(oldDate: String, newDate: String) = dayManagementViewModel.moveHousesToDate(
+        data = data,
+        uiEvent = uiEvent,
+        remoteAgentUid = remoteAgentUid,
+        currentUserUid = currentUserUid,
+        housesInFlight = housesInFlight,
+        oldDate = oldDate,
+        newDate = newDate
+    )
 
     fun clearNavigationTab() {
         _navigationTab.value = null
@@ -349,9 +611,8 @@ class HomeViewModel @Inject constructor(
             }
             data.value = d
             showMultiDayErrorDialog.value = false
-            // Allow UI to update to the new date before validating
             delay(300)
-            validateCurrentDay(showDialog = false) // Silence navigation dialog per user request
+            validateCurrentDay(showDialog = false)
         }
     }
 
@@ -392,11 +653,9 @@ class HomeViewModel @Inject constructor(
                 val dayActivities = repository.getAllDayActivitiesOnce(currentUid ?: "").filter { it.date == date && it.agentName == currentAgent }
                 val backupData = BackupData(dayHouses, dayActivities)
 
-                // Generate Filename
                 val safeAgentName = currentAgent.trim().replace(" ", "_").ifBlank { "Agente" }
                 val fileName = "Producao_${safeAgentName}_${date.replace("/", "-")}.json"
 
-                // Save to Cache Dir
                 val backupDir = File(context.cacheDir, "exports")
                 if (backupDir.exists()) backupDir.deleteRecursively()
                 backupDir.mkdirs()
@@ -404,7 +663,6 @@ class HomeViewModel @Inject constructor(
                 val file = File(backupDir, fileName)
                 backupManager.exportToFile(context, file, backupData)
 
-                // Create Share Intent
                 val authority = "${context.packageName}.fileprovider"
                 val uri = androidx.core.content.FileProvider.getUriForFile(context, authority, file)
 
@@ -431,11 +689,12 @@ class HomeViewModel @Inject constructor(
             }
         }
     }
-    fun moveDateBackward() = dayNavigationDelegate.moveDateBackward(viewModelScope, this)
-    fun moveDateForward() = dayNavigationDelegate.moveDateForward(viewModelScope, this)
+    fun moveDateBackward() = dayManagementViewModel.moveDateBackward(data, uiEvent)
+    fun moveDateForward() = dayManagementViewModel.moveDateForward(data, uiEvent)
 
     fun onDateSelected(date: String) {
-        dayNavigationDelegate.onDateSelected(this, date)
+        data.value = date
+        dayManagementViewModel.onDateSelected(data)
     }
 
     fun dismissIntegrityDialog() { integrityDialogMessage.value = null }
@@ -503,13 +762,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun persistListOrder(reorderedList: List<House>) {
-        viewModelScope.launch {
-            val adminBypass = isAdmin.value
-            val updatedList = reorderedList.mapIndexed { index, h -> h.copy(listOrder = index.toLong()) }
-            val recalculated = recalculateVisitSegmentsUseCase.recalculateVisitSegments(updatedList)
-            saveHouseUseCase.updateHouses(recalculated, adminBypass)
-            triggerDelayedValidation(500) // Trigger rapid validation after move
-        }
+        houseEditDelegate.persistListOrder(viewModelScope, this, reorderedList, ::triggerDelayedValidation)
     }
 
     fun startDayClosingFlow() = dayClosingDelegate.startDayClosingFlow(
@@ -532,14 +785,14 @@ class HomeViewModel @Inject constructor(
     fun confirmUnlockHistory() = dayClosingDelegate.confirmUnlockHistory(viewModelScope, this)
 
     fun validateCurrentDay(showDialog: Boolean, strict: Boolean = true): Boolean {
-        return validationDelegate.validateCurrentDay(this, houses.value, showDialog, strict)
+        return validationViewModel.validateCurrentDay(this, houses.value, showDialog, strict)
     }
 
     fun triggerDelayedValidation(delayMs: Long = 3000) {
-        validationDelegate.triggerDelayedValidation(viewModelScope, this, { houses.value }, delayMs)
+        validationViewModel.triggerDelayedValidation(this, { houses.value }, delayMs)
     }
 
-    fun onHouseClick(houseId: Int) = validationDelegate.onHouseClick(viewModelScope, this, houseId)
+    fun onHouseClick(houseId: Int) = validationViewModel.onHouseClick(this, houseId)
 
     fun setRemoteAgent(agent: AgentData?) = remoteAgentDelegate.setRemoteAgent(
         scope = viewModelScope,
@@ -551,14 +804,12 @@ class HomeViewModel @Inject constructor(
 
     fun deduplicateCurrentDay() = remoteAgentDelegate.deduplicateCurrentDay(viewModelScope, this)
 
-    fun addNewHouseAt(afterId: Int) = houseEditDelegate.addNewHouseAt(viewModelScope, this, afterId, houses.value, isDayClosed.value)
+    fun addNewHouseAt(afterId: Int) = houseEditDelegate.addNewHouseAt(viewModelScope, this, afterId, houses.value)
 
     fun addNewHouse() = houseEditDelegate.addNewHouse(
         scope = viewModelScope,
         state = this,
         latestHousesList = houses.value,
-        maxOpenHouses = maxOpenHouses.value,
-        isDayClosed = isDayClosed.value,
         validateCurrentDay = { validateCurrentDay(it) },
         triggerDelayedValidation = { triggerDelayedValidation() },
         onHouseClick = { onHouseClick(it) }
@@ -570,8 +821,6 @@ class HomeViewModel @Inject constructor(
             state = this,
             house = house,
             latestHousesList = houses.value,
-            maxOpenHouses = maxOpenHouses.value,
-            isDayClosed = isDayClosed.value,
             triggerDelayedValidation = { triggerDelayedValidation() }
         )
     }
@@ -582,8 +831,6 @@ class HomeViewModel @Inject constructor(
             state = this,
             houseId = houseId,
             latestHousesList = houses.value,
-            maxOpenHouses = maxOpenHouses.value,
-            isDayClosed = isDayClosed.value,
             triggerDelayedValidation = { triggerDelayedValidation() },
             update = update
         )
@@ -591,8 +838,8 @@ class HomeViewModel @Inject constructor(
 
     fun confirmDuplicateMerge() = houseEditDelegate.confirmDuplicateMerge(viewModelScope, this)
     fun dismissDuplicateConfirmation() = houseEditDelegate.dismissDuplicateConfirmation(this, { validateCurrentDay(it) })
-    fun deleteHouse(house: House) = houseEditDelegate.deleteHouse(viewModelScope, this, house, houses.value, isDayClosed.value)
-    fun restoreDeletedHouse() = houseEditDelegate.restoreDeletedHouse(viewModelScope, this, houses.value, isDayClosed.value)
+    fun deleteHouse(house: House) = houseEditDelegate.deleteHouse(viewModelScope, this, house, houses.value)
+    fun restoreDeletedHouse() = houseEditDelegate.restoreDeletedHouse(viewModelScope, this, houses.value)
     fun moveHouse(house: House, moveUp: Boolean) = houseEditDelegate.moveHouse(viewModelScope, this, house, moveUp, houses.value, { triggerDelayedValidation(it) })
 
     // --- ViewModel Specific Implementations ---
@@ -688,7 +935,10 @@ class HomeViewModel @Inject constructor(
 
     fun forceFullSync() {
         viewModelScope.launch {
-            syncRepository.pullCloudDataToLocal(force = true)
+            val uid = remoteAgentUid.value ?: currentUserUid.value
+            if (uid != null) {
+                syncViewModel.forcePull(uid)
+            }
         }
     }
 

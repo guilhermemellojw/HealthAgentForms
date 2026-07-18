@@ -30,19 +30,18 @@ import com.antigravity.healthagent.ui.components.ProductionStatsBar
 import com.antigravity.healthagent.ui.home.AddBetweenButton
 import com.antigravity.healthagent.ui.home.HomeUiState
 import com.antigravity.healthagent.ui.home.HouseUiState
-import com.google.android.gms.maps.model.LatLng
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ReorderableHouseList(
     uiState: HomeUiState,
+    reorderHouses: List<HouseUiState>,
     listState: LazyListState,
     isSearchActive: Boolean,
     isReorderMode: Boolean,
     onReorderModeChange: (Boolean) -> Unit,
     streetSuggestions: List<String>,
-    onGetLocation: (callback: (LatLng) -> Unit) -> Unit,
     snackbarHostState: SnackbarHostState,
     onUpdateHeader: (municipio: String, bairro: String, categoria: String, zona: String, tipo: Int, data: String, ciclo: String, atividade: Int) -> Unit,
     onUpdateBairro: (String) -> Unit,
@@ -59,25 +58,27 @@ fun ReorderableHouseList(
     onMoveHouseDate: (House) -> Unit,
     onAddNewHouseAt: (Int) -> Unit,
     onPersistListOrder: (List<House>) -> Unit,
+    onStartReorder: (List<HouseUiState>) -> Unit,
+    onUpdateReorder: (List<HouseUiState>) -> Unit,
+    onCancelReorder: () -> Unit,
+    onShowTreatment: (House) -> Unit,
+    onShowContext: (House) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
 
-    // Drag State (Overlay Strategy)
-    val uiHouses = remember { mutableStateListOf<HouseUiState>() }
-    val displayHouses = if (isReorderMode) uiHouses else uiState.houses
+    // Local drag working copy (only non-null during active drag)
+    var dragWorkingCopy by remember { mutableStateOf<List<HouseUiState>?>(null) }
+    val displayHouses = if (isReorderMode) reorderHouses else uiState.houses
     var draggingHouse by remember { mutableStateOf<HouseUiState?>(null) }
     var ghostY by remember { mutableFloatStateOf(0f) }
     var initialTouchY by remember { mutableFloatStateOf(0f) }
 
-    // Focus Management for new houses
     val focusRequesters = remember { mutableMapOf<Int, androidx.compose.ui.focus.FocusRequester>() }
 
     var overscrollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
-    // Extract stable primitives from uiState so lambdas capture only stable types,
-    // avoiding recomposition when only unstable nested objects change.
     val isAdmin = uiState.isAdmin
     val isEasyMode = uiState.isEasyMode
     val isSolarMode = uiState.isSolarMode
@@ -97,38 +98,11 @@ fun ReorderableHouseList(
         )
     }
 
-    LaunchedEffect(uiState.houses, isReorderMode) {
-        if (isReorderMode && draggingHouse == null) {
-            val target = uiState.houses
-            while (uiHouses.size > target.size) {
-                uiHouses.removeAt(uiHouses.size - 1)
-            }
-            target.forEachIndexed { index, targetHouse ->
-                if (index < uiHouses.size) {
-                    if (uiHouses[index] != targetHouse) {
-                        uiHouses[index] = targetHouse
-                    }
-                } else {
-                    uiHouses.add(targetHouse)
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(isReorderMode) {
-        if (isReorderMode) {
-            uiHouses.clear()
-            uiHouses.addAll(uiState.houses)
-        } else {
-            uiHouses.clear()
-        }
-    }
-
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 80.dp), // Space for FAB
+            contentPadding = PaddingValues(bottom = 80.dp),
             verticalArrangement = Arrangement.Top
         ) {
             item(key = "header") {
@@ -156,7 +130,7 @@ fun ReorderableHouseList(
                         isDayClosed = uiState.isDayClosed,
                         onUpdateHeader = onUpdateHeader,
                         onUpdateBairro = onUpdateBairro,
-                        onUpdateAgentName = { /* No longer needed from dropdown */ },
+                        onUpdateAgentName = { },
                         onUpdateMunicipio = onUpdateMunicipio,
                         onUpdateZona = onUpdateZona,
                         onUpdateCategoria = onUpdateCategoria,
@@ -170,7 +144,6 @@ fun ReorderableHouseList(
                 }
             }
 
-            // Empty State
             if (displayHouses.isEmpty()) {
                 item {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
@@ -188,7 +161,6 @@ fun ReorderableHouseList(
                 }
             }
 
-            // Houses Items
             itemsIndexed(
                 items = displayHouses,
                 key = { _, state ->
@@ -230,12 +202,14 @@ fun ReorderableHouseList(
                                     it.pointerInput(house.id) {
                                         detectDragGesturesAfterLongPress(
                                             onDragStart = { offset ->
-                                                if (uiHouses.isEmpty()) {
-                                                    uiHouses.addAll(uiHousesSnapshot)
-                                                }
+                                                val currentList = if (isReorderMode) reorderHouses else uiHousesSnapshot
+                                                val workingCopy = currentList.toMutableList()
+                                                dragWorkingCopy = workingCopy
+                                                onStartReorder(workingCopy)
+
                                                 val visibleItems = listState.layoutInfo.visibleItemsInfo
-                                                val currentHouse = uiHouses.find { it.house.id == house.id }
-                                                val itemIndex = if (currentHouse != null) uiHouses.indexOf(currentHouse) + 1 else -1
+                                                val currentHouse = workingCopy.find { it.house.id == house.id }
+                                                val itemIndex = if (currentHouse != null) workingCopy.indexOf(currentHouse) + 1 else -1
                                                 val itemInfo = visibleItems.find { it.index == itemIndex }
 
                                                 if (itemInfo != null && currentHouse != null) {
@@ -250,6 +224,7 @@ fun ReorderableHouseList(
                                                 ghostY += dragAmount.y
                                                 checkForOverScroll(ghostY)
                                                 val visibleItems = listState.layoutInfo.visibleItemsInfo
+                                                val workCopy = dragWorkingCopy ?: return@detectDragGesturesAfterLongPress
                                                 visibleItems.forEach { candidate ->
                                                     if (candidate.index == 0) return@forEach
                                                     val fingerY = ghostY + initialTouchY
@@ -257,12 +232,15 @@ fun ReorderableHouseList(
                                                     val triggerZoneBottom = candidate.offset + candidate.size
                                                     if (fingerY > triggerZoneTop && fingerY < triggerZoneBottom) {
                                                         val candidateIndexInList = candidate.index - 1
-                                                        val currentHouse = uiHouses.find { it.house.id == house.id }
+                                                        val currentHouse = workCopy.find { it.house.id == house.id }
                                                         if (currentHouse != null) {
-                                                            val currentIndex = uiHouses.indexOf(currentHouse)
-                                                            if (currentIndex != -1 && candidateIndexInList != currentIndex && candidateIndexInList in uiHouses.indices) {
-                                                                uiHouses.removeAt(currentIndex)
-                                                                uiHouses.add(candidateIndexInList, currentHouse)
+                                                            val currentIndex = workCopy.indexOf(currentHouse)
+                                                            if (currentIndex != -1 && candidateIndexInList != currentIndex && candidateIndexInList in workCopy.indices) {
+                                                                val mutableWork = workCopy.toMutableList()
+                                                                mutableWork.removeAt(currentIndex)
+                                                                mutableWork.add(candidateIndexInList, currentHouse)
+                                                                dragWorkingCopy = mutableWork
+                                                                onUpdateReorder(mutableWork)
                                                             }
                                                         }
                                                     }
@@ -272,14 +250,19 @@ fun ReorderableHouseList(
                                                 draggingHouse = null
                                                 ghostY = 0f
                                                 overscrollJob?.cancel()
-                                                onPersistListOrder(uiHouses.map { it.house }.toList())
+                                                val finalList = dragWorkingCopy ?: uiHousesSnapshot
+                                                onPersistListOrder(finalList.map { it.house }.toList())
+                                                dragWorkingCopy = null
+                                                onCancelReorder()
+                                                onReorderModeChange(false)
                                             },
                                             onDragCancel = {
                                                 draggingHouse = null
                                                 ghostY = 0f
                                                 overscrollJob?.cancel()
-                                                uiHouses.clear()
-                                                uiHouses.addAll(uiHousesSnapshot)
+                                                dragWorkingCopy = null
+                                                onCancelReorder()
+                                                onReorderModeChange(false)
                                             }
                                         )
                                     }
@@ -338,9 +321,10 @@ fun ReorderableHouseList(
                             isEasyMode = isEasyMode,
                             isSolarMode = isSolarMode,
                             focusRequester = focusRequester,
-                            onGetLocation = onGetLocation,
                             enabled = isBaseEnabled && (houseState.isMine || isAdmin) && !isLockedByAdmin,
-                            isAdmin = isAdmin
+                            isAdmin = isAdmin,
+                            onShowTreatment = { onShowTreatment(house) },
+                            onShowContext = { onShowContext(house) }
                         )
                     }
 
@@ -359,7 +343,6 @@ fun ReorderableHouseList(
             }
         }
 
-        // Ghost Overlay
         draggingHouse?.let { ghostHouse ->
             Box(
                 modifier = Modifier
@@ -384,7 +367,9 @@ fun ReorderableHouseList(
                     enabled = !isDayClosed,
                     isEasyMode = isEasyMode,
                     focusRequester = null,
-                    isAdmin = isAdmin
+                    isAdmin = isAdmin,
+                    onShowTreatment = {},
+                    onShowContext = {}
                 )
             }
         }

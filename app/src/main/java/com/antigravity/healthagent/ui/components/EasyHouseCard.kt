@@ -52,7 +52,6 @@ fun EasyHouseCard(
     animatedBgColor: Color,
     isSolarMode: Boolean = false,
     focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
-    onGetLocation: (callback: (com.google.android.gms.maps.model.LatLng) -> Unit) -> Unit = {},
     isHighlighted: Boolean = false
 ) {
     val haptic = LocalHapticFeedback.current

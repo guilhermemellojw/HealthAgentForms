@@ -37,13 +37,13 @@ class DayClosingDelegate @Inject constructor(
                 return@launch
             }
 
-            // count day houses in active memory (overlays + DB values)
-            // Wait, we can fetch all houses for this date or use state.houses list
-            // In the UI state or mapper, allHouses are mapped. Let's check state's houses or database.
-            // Since we want to be highly accurate, let's fetch from the repository for the selected date
             val uid = state.remoteAgentUid.value ?: state.currentUserUid.value ?: ""
             val dbHouses = repository.getHousesByDateAndAgent(state.data.value, uid)
-            val workedCount = dbHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
+            val drafts = state.pendingUpdateDrafts.value
+            val inFlights = state.housesInFlight.value
+            val allHouses = (dbHouses.map { drafts[it.id] ?: it } + inFlights)
+                .filter { it.data == state.data.value }
+            val workedCount = allHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
 
             val todayStr = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get().format(java.util.Date())
             val isToday = state.data.value == todayStr
@@ -54,7 +54,7 @@ class DayClosingDelegate @Inject constructor(
             }
 
             if (validateCurrentDay(true)) {
-                val summary = calculateAuditSummary(state.data.value, dbHouses)
+                val summary = calculateAuditSummary(state.data.value, allHouses)
                 state.showClosingAudit.value = summary
             }
         }
@@ -73,9 +73,6 @@ class DayClosingDelegate @Inject constructor(
                 val effectiveUid = state.remoteAgentUid.value ?: state.currentUserUid.value
                 dayManagementUseCase.closeDay(audit.date, effectiveUid, isAdmin)
                 state.showClosingAudit.value = null
-                if (audit.totalWorked >= maxOpenHouses && maxOpenHouses > 0) {
-                    state.showGoalReached.value = true
-                }
 
                 triggerImmediateSync()
             } catch (e: Exception) {

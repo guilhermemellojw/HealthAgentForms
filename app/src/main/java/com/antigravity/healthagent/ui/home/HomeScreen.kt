@@ -115,8 +115,11 @@ fun HomeScreen(
     val integrityDialogMessage by viewModel.integrityDialogMessage.collectAsState()
     val validationErrors by viewModel.validationErrorDetails.collectAsState()
     val scrollToHouseId by viewModel.scrollToHouseId.collectAsState()
+    val reorderHouses by viewModel.reorderHouses.collectAsState()
+    val treatmentDialogState by viewModel.treatmentDialogState.collectAsState()
+    val contextDialogState by viewModel.contextDialogState.collectAsState()
     
- 
+  
     if (integrityDialogMessage != null) {
         ValidationErrorsDialog(
             errors = validationErrors,
@@ -212,9 +215,41 @@ fun HomeScreen(
         )
     }
 
+    treatmentDialogState?.let { state ->
+        val house = uiState.houses.find { it.house.id == state.houseId }?.house
+        if (house != null) {
+            TreatmentDialog(
+                house = house,
+                onDismiss = { viewModel.closeTreatmentDialog() },
+                onConfirm = { treatment, geo ->
+                    viewModel.updateHouseField(state.houseId) { h ->
+                        h.copy(treatment = treatment, geo = geo)
+                    }
+                    viewModel.closeTreatmentDialog()
+                },
+                isEasyMode = uiState.isEasyMode,
+                onGetLocation = onGetLocation
+            )
+        }
+    }
 
+    contextDialogState?.let { state ->
+        ContextDialog(
+            currentBlock = state.block,
+            currentBlockSequence = state.blockSequence,
+            currentStreet = state.street,
+            currentBairro = state.bairro,
+            currentQuarteiraoConcluido = state.quarteiraoConcluido,
+            currentLocalidadeConcluida = state.localidadeConcluida,
+            onDismiss = { viewModel.closeContextDialog() },
+            onConfirm = { block, blockSeq, street, bairro, qConcluido, lConcluido ->
+                viewModel.confirmContextDialog(state.houseId, block, blockSeq, street, bairro, qConcluido, lConcluido)
+            },
+            isEasyMode = uiState.isEasyMode
+        )
+    }
 
-
+    
     
     
 
@@ -483,12 +518,12 @@ fun HomeScreen(
 
                 ReorderableHouseList(
                     uiState = uiState,
+                    reorderHouses = reorderHouses,
                     listState = listState,
                     isSearchActive = isSearchActive,
                     isReorderMode = isReorderMode,
                     onReorderModeChange = { isReorderMode = it },
                     streetSuggestions = streetSuggestions,
-                    onGetLocation = onGetLocation,
                     snackbarHostState = snackbarHostState,
                     onUpdateHeader = { m, b, c, z, t, d, ci, a ->
                         viewModel.updateHeader(m, b, c, z, t, d, ci, a)
@@ -510,6 +545,11 @@ fun HomeScreen(
                     },
                     onAddNewHouseAt = { viewModel.addNewHouseAt(it) },
                     onPersistListOrder = { viewModel.persistListOrder(it) },
+                    onStartReorder = { viewModel.startReorderMode(it) },
+                    onUpdateReorder = { viewModel.updateReorderList(it) },
+                    onCancelReorder = { viewModel.cancelReorderMode() },
+                    onShowTreatment = { viewModel.openTreatmentDialog(it) },
+                    onShowContext = { viewModel.openContextDialog(it) },
                     modifier = Modifier.weight(1f)
                 )
             }

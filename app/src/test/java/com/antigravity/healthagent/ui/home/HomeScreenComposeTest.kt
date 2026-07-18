@@ -50,6 +50,9 @@ class HomeScreenComposeTest {
         every { viewModel.solarMode } returns MutableStateFlow(false)
         every { viewModel.editingToolsMode } returns MutableStateFlow(false)
         every { viewModel.maxOpenHouses } returns MutableStateFlow(5)
+        every { viewModel.reorderHouses } returns MutableStateFlow(emptyList())
+        every { viewModel.treatmentDialogState } returns MutableStateFlow(null)
+        every { viewModel.contextDialogState } returns MutableStateFlow(null)
 
         composeTestRule.setContent {
             HomeScreen(

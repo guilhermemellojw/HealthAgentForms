@@ -364,6 +364,10 @@ class SyncPushHandler @Inject constructor(
 
                         for (monthYear in monthsToUpdate) {
                             val isProxyPush = targetUid != null && targetUid != auth.currentUser?.uid
+                            if (isProxyPush && !shouldReplace) {
+                                AppLogger.i("SyncPushHandler", "Skipping monthly_summaries update for $monthYear (proxy push). Agent will recalculate on next sync.")
+                                continue
+                            }
                             val todayInt = com.antigravity.healthagent.utils.DateUtils.COMPACT_DATE.get().format(java.util.Date()).toInt()
                             
                             val housesInMonthRaw = if (isProxyPush && !shouldReplace) {

@@ -42,8 +42,9 @@ fun HouseRowItem(
     isEasyMode: Boolean = false,
     isSolarMode: Boolean = false,
     focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
-    onGetLocation: (callback: (com.google.android.gms.maps.model.LatLng) -> Unit) -> Unit = {},
-    isAdmin: Boolean = false
+    isAdmin: Boolean = false,
+    onShowTreatment: (House) -> Unit = {},
+    onShowContext: (House) -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
     val house = houseState.house
@@ -59,8 +60,6 @@ fun HouseRowItem(
     val isMissingBlock = remember(invalidFields) { invalidFields.contains("blockNumber") }
     val isMissingStreet = remember(invalidFields) { invalidFields.contains("streetName") }
 
-    var showContextDialog by remember { mutableStateOf(false) }
-    var showTreatmentDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showObservationDialog by remember { mutableStateOf(false) }
     
@@ -72,46 +71,6 @@ fun HouseRowItem(
         animationSpec = tween(durationMillis = 150),
         label = "animatedBgColor"
     )
-
-    if (showContextDialog) {
-        ContextDialog(
-            currentBlock = house.address.blockNumber,
-            currentBlockSequence = house.address.blockSequence,
-            currentStreet = house.address.streetName,
-            currentBairro = house.address.bairro,
-            currentQuarteiraoConcluido = house.quarteiraoConcluido,
-            currentLocalidadeConcluida = house.localidadeConcluida,
-            invalidFields = invalidFields,
-            streetSuggestions = getStreetSuggestions(),
-            onDismiss = { showContextDialog = false },
-            onConfirm = { block, blockSeq, street, bairro, qConcluido, lConcluido ->
-                onUpdate { h -> h.copy(address = h.address.copy(
-                    blockNumber = block, 
-                    blockSequence = blockSeq,
-                    streetName = street, 
-                    bairro = bairro
-                ),
-                quarteiraoConcluido = qConcluido,
-                localidadeConcluida = lConcluido
-                )}
-                showContextDialog = false
-            },
-            isEasyMode = isEasyMode
-        )
-    }
-
-    if (showTreatmentDialog) {
-        TreatmentDialog(
-            house = house,
-            onDismiss = { showTreatmentDialog = false },
-            onConfirm = { updatedHouse ->
-                onUpdate { updatedHouse }
-                showTreatmentDialog = false
-            },
-            isEasyMode = isEasyMode,
-            onGetLocation = onGetLocation
-        )
-    }
 
     if (showDeleteDialog) {
         DeleteConfirmationDialog(
@@ -142,8 +101,8 @@ fun HouseRowItem(
             onUpdate = onUpdate,
             onDelete = { showDeleteDialog = true },
             onMoveDate = onMoveDate,
-            onShowTreatment = { showTreatmentDialog = true },
-            onShowContext = { showContextDialog = true },
+            onShowTreatment = { onShowTreatment(house) },
+            onShowContext = { onShowContext(house) },
             onMoveUp = onMoveUp,
             onMoveDown = onMoveDown,
             onToggleReorder = onEnableReorder,
@@ -156,7 +115,6 @@ fun HouseRowItem(
             animatedBgColor = animatedBgColor,
             isSolarMode = isSolarMode,
             focusRequester = focusRequester,
-            onGetLocation = onGetLocation,
             isHighlighted = houseState.isHighlighted
         )
     } else {
@@ -208,7 +166,7 @@ fun HouseRowItem(
                     isAdmin = isAdmin,
                     onShowObservation = { showObservationDialog = true },
                     onMoveDate = onMoveDate,
-                    onShowTreatment = { showTreatmentDialog = true }
+                    onShowTreatment = { onShowTreatment(house) }
                 )
 
                 Row(
@@ -230,8 +188,8 @@ fun HouseRowItem(
                         isReorderMode = isReorderMode,
                         onMoveUp = onMoveUp,
                         onMoveDown = onMoveDown,
-                        onShowContext = { showContextDialog = true },
-                        onShowDelete = { showDeleteDialog = true }
+                    onShowContext = { onShowContext(house) },
+                    onShowDelete = { showDeleteDialog = true }
                     )
                 }
             }

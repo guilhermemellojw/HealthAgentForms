@@ -166,7 +166,7 @@ class AddNewHouseUseCase @Inject constructor(
 
     suspend fun execute(params: Params, preparedHouse: House? = null): Result = withContext(Dispatchers.IO) {
         try {
-            // 1. Role Enforcement
+            // 1. Role Enforcement (outside tx - read-only)
             val roleResult = roleEnforcer.enforce(
                 isSupervisor = params.isSupervisor,
                 isAdmin = params.isAdmin,
@@ -176,7 +176,7 @@ class AddNewHouseUseCase @Inject constructor(
                 return@withContext Result.Blocked(roleResult.message)
             }
 
-            // 2. Day Lock Enforcement
+            // 2. Day Lock Enforcement (outside tx - read-only)
             val lockResult = dayLockEnforcer.enforce(
                 isDayClosed = params.isDayClosed,
                 isManualUnlock = params.isManualUnlock,
@@ -189,47 +189,52 @@ class AddNewHouseUseCase @Inject constructor(
 
             val currentDayHouses = params.latestHousesList.filter { it.data == params.currentDate }
 
-            // 3. Safety Limit Check
-            val currentTotal = currentDayHouses.size
-            val safetyLimit = (params.maxOpenHouses * 3).coerceAtLeast(150)
-            if (currentTotal >= safetyLimit && !params.isManualUnlock && !params.isAdmin) {
-                val templateHouse = House(data = params.currentDate)
-                return@withContext Result.LimitReached(templateHouse)
-            }
-
-            // 4. Generate or use prepared house
+            // 3. Generate or use prepared house (outside tx - no side effects)
             val houseToInsert = preparedHouse ?: generateHouseToInsert(params)
 
-            // 5. Save the house
-            var newId: Long = 0
-            if (params.afterId >= -1) {
-                // Re-order and recalculate logic for addNewHouseAt
-                val targetIndex = if (params.afterId == -1) -1 else currentDayHouses.indexOfFirst { it.id == params.afterId }
-                val mutableList = currentDayHouses.filter { it.id != 0 }.sortedBy { it.listOrder }.toMutableList()
-                if (targetIndex == -1) {
-                    mutableList.add(0, houseToInsert)
+            // 4. Save the house (ATOMIC: check limit + insert + recalculate in single transaction)
+            val finalResult: Result = repository.runInTransaction {
+                // Re-read fresh DB state inside transaction
+                val dbDayHouses = repository.getHousesByDateAndAgent(params.currentDate, params.agentUid)
+                    .filter { it.data == params.currentDate }
+
+                // Safety Limit Check using fresh DB state (atomic with insert)
+                val currentTotal = dbDayHouses.size
+                val safetyLimit = (params.maxOpenHouses * 3).coerceAtLeast(150)
+                if (currentTotal >= safetyLimit && !params.isManualUnlock && !params.isAdmin) {
+                    val templateHouse = House(data = params.currentDate)
+                    return@runInTransaction Result.LimitReached(templateHouse)
+                }
+
+                val insertedId: Long = if (params.afterId >= -1) {
+                    val targetIndex = if (params.afterId == -1) -1 else dbDayHouses.indexOfFirst { it.id == params.afterId }
+                    val mutableList = dbDayHouses.filter { it.id != 0 }.sortedBy { it.listOrder }.toMutableList()
+                    if (targetIndex == -1) {
+                        mutableList.add(0, houseToInsert)
+                    } else {
+                        mutableList.add(targetIndex + 1, houseToInsert)
+                    }
+
+                    val updatedList = mutableList.mapIndexed { index, h -> h.copy(listOrder = index.toLong()) }
+                    val recalculated = recalculateVisitSegmentsUseCase.recalculateVisitSegments(updatedList)
+
+                    val newlyAdded = recalculated.find { it.id == 0 }
+                    val others = recalculated.filter { it.id != 0 }
+
+                    if (others.isNotEmpty()) {
+                        repository.updateHouses(others, params.isAdmin)
+                    }
+                    if (newlyAdded != null) {
+                        repository.insertHouse(newlyAdded, params.isAdmin)
+                    } else {
+                        0L
+                    }
                 } else {
-                    mutableList.add(targetIndex + 1, houseToInsert)
+                    saveHouseUseCase.insertHouse(houseToInsert, params.latestHousesList, params.isAdmin)
                 }
-
-                val updatedList = mutableList.mapIndexed { index, h -> h.copy(listOrder = index.toLong()) }
-                val recalculated = recalculateVisitSegmentsUseCase.recalculateVisitSegments(updatedList)
-
-                val newlyAdded = recalculated.find { it.id == 0 }
-                val others = recalculated.filter { it.id != 0 }
-
-                if (others.isNotEmpty()) {
-                    repository.updateHouses(others, params.isAdmin)
-                }
-                if (newlyAdded != null) {
-                    newId = repository.insertHouse(newlyAdded, params.isAdmin)
-                }
-            } else {
-                // Simple append logic
-                newId = saveHouseUseCase.insertHouse(houseToInsert, params.latestHousesList, params.isAdmin)
+                Result.Success(insertedId)
             }
-
-            Result.Success(newId)
+            finalResult
         } catch (e: Exception) {
             Result.Error(e)
         }
