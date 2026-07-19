@@ -1,6 +1,7 @@
 package com.antigravity.healthagent.ui.home.components
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
@@ -74,6 +75,8 @@ fun ReorderableHouseList(
     var draggingHouse by remember { mutableStateOf<HouseUiState?>(null) }
     var ghostY by remember { mutableFloatStateOf(0f) }
     var initialTouchY by remember { mutableFloatStateOf(0f) }
+    var dragTargetIndex by remember { mutableIntStateOf(-1) }
+    var dragCompleteVersion by remember { mutableIntStateOf(0) }
 
     val focusRequesters = remember { mutableMapOf<Int, androidx.compose.ui.focus.FocusRequester>() }
 
@@ -98,7 +101,91 @@ fun ReorderableHouseList(
         )
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(
+        modifier = modifier.fillMaxSize().let {
+            if (!isEasyMode && !isDayClosed) {
+                it.pointerInput(dragCompleteVersion) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { offset ->
+                            val visibleItems = listState.layoutInfo.visibleItemsInfo
+                            val touchedItem = visibleItems.find { candidate ->
+                                candidate.index != 0 && offset.y >= candidate.offset && offset.y <= candidate.offset + candidate.size
+                            }
+                            if (touchedItem != null) {
+                                val itemIndex = touchedItem.index - 1
+                                val currentList = if (isReorderMode) reorderHouses else uiHousesSnapshot
+                                if (itemIndex in currentList.indices) {
+                                    val currentHouse = currentList[itemIndex]
+                                    val workingCopy = currentList.toMutableList()
+                                    dragWorkingCopy = workingCopy
+                                    onStartReorder(workingCopy)
+                                    draggingHouse = currentHouse
+                                    dragTargetIndex = itemIndex
+                                    onReorderModeChange(true)
+                                    initialTouchY = offset.y - touchedItem.offset
+                                    ghostY = touchedItem.offset.toFloat()
+                                }
+                            }
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            ghostY += dragAmount.y
+                            checkForOverScroll(ghostY)
+                            val visibleItems = listState.layoutInfo.visibleItemsInfo
+                            visibleItems.forEach { candidate ->
+                                if (candidate.index == 0) return@forEach
+                                val fingerY = ghostY + initialTouchY
+                                val triggerZoneTop = candidate.offset
+                                val triggerZoneBottom = candidate.offset + candidate.size
+                                if (fingerY > triggerZoneTop && fingerY < triggerZoneBottom) {
+                                    dragTargetIndex = candidate.index - 1
+                                }
+                            }
+                        },
+                        onDragEnd = {
+                            val finalList = if (dragTargetIndex >= 0) {
+                                val workCopy = (dragWorkingCopy ?: uiHousesSnapshot).toMutableList()
+                                val currentHouse = workCopy.find { it.house.id == draggingHouse?.house?.id }
+                                if (currentHouse != null) {
+                                    val currentIndex = workCopy.indexOf(currentHouse)
+                                    if (currentIndex != -1 && currentIndex != dragTargetIndex && dragTargetIndex in workCopy.indices) {
+                                        workCopy.removeAt(currentIndex)
+                                        workCopy.add(dragTargetIndex, currentHouse)
+                                        workCopy.toList()
+                                    } else {
+                                        dragWorkingCopy ?: uiHousesSnapshot
+                                    }
+                                } else {
+                                    dragWorkingCopy ?: uiHousesSnapshot
+                                }
+                            } else {
+                                dragWorkingCopy ?: uiHousesSnapshot
+                            }
+                            onPersistListOrder(finalList.map { it.house }.toList())
+                            draggingHouse = null
+                            ghostY = 0f
+                            overscrollJob?.cancel()
+                            dragWorkingCopy = null
+                            dragTargetIndex = -1
+                            dragCompleteVersion++
+                            onCancelReorder()
+                            onReorderModeChange(false)
+                        },
+                        onDragCancel = {
+                            draggingHouse = null
+                            ghostY = 0f
+                            overscrollJob?.cancel()
+                            dragWorkingCopy = null
+                            dragTargetIndex = -1
+                            dragCompleteVersion++
+                            onCancelReorder()
+                            onReorderModeChange(false)
+                        }
+                    )
+                }
+            } else it
+        }
+    ) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
@@ -189,6 +276,17 @@ fun ReorderableHouseList(
 
                     val house = houseState.house
                     val isDragging = house.id == draggingHouse?.house?.id
+                    val isDropTarget = draggingHouse != null && index == dragTargetIndex && !isDragging
+
+                    if (isDropTarget) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .background(MaterialTheme.colorScheme.primary)
+                                .padding(horizontal = 12.dp)
+                        )
+                    }
 
                     Box(
                         modifier = Modifier
@@ -197,77 +295,6 @@ fun ReorderableHouseList(
                             }
                             .graphicsLayer {
                                 alpha = if (isDragging) 0f else 1f
-                            }
-                            .let {
-                                if (!isEasyMode && !isDayClosed) {
-                                    it.pointerInput(house.id) {
-                                        detectDragGesturesAfterLongPress(
-                                            onDragStart = { offset ->
-                                                val currentList = if (isReorderMode) reorderHouses else uiHousesSnapshot
-                                                val workingCopy = currentList.toMutableList()
-                                                dragWorkingCopy = workingCopy
-                                                onStartReorder(workingCopy)
-
-                                                val visibleItems = listState.layoutInfo.visibleItemsInfo
-                                                val currentHouse = workingCopy.find { it.house.id == house.id }
-                                                val itemIndex = if (currentHouse != null) workingCopy.indexOf(currentHouse) + 1 else -1
-                                                val itemInfo = visibleItems.find { it.index == itemIndex }
-
-                                                if (itemInfo != null && currentHouse != null) {
-                                                    draggingHouse = currentHouse
-                                                    onReorderModeChange(true)
-                                                    initialTouchY = offset.y
-                                                    ghostY = itemInfo.offset.toFloat()
-                                                }
-                                            },
-                                            onDrag = { change, dragAmount ->
-                                                change.consume()
-                                                ghostY += dragAmount.y
-                                                checkForOverScroll(ghostY)
-                                                val visibleItems = listState.layoutInfo.visibleItemsInfo
-                                                val workCopy = dragWorkingCopy ?: return@detectDragGesturesAfterLongPress
-                                                visibleItems.forEach { candidate ->
-                                                    if (candidate.index == 0) return@forEach
-                                                    val fingerY = ghostY + initialTouchY
-                                                    val triggerZoneTop = candidate.offset
-                                                    val triggerZoneBottom = candidate.offset + candidate.size
-                                                    if (fingerY > triggerZoneTop && fingerY < triggerZoneBottom) {
-                                                        val candidateIndexInList = candidate.index - 1
-                                                        val currentHouse = workCopy.find { it.house.id == house.id }
-                                                        if (currentHouse != null) {
-                                                            val currentIndex = workCopy.indexOf(currentHouse)
-                                                            if (currentIndex != -1 && candidateIndexInList != currentIndex && candidateIndexInList in workCopy.indices) {
-                                                                val mutableWork = workCopy.toMutableList()
-                                                                mutableWork.removeAt(currentIndex)
-                                                                mutableWork.add(candidateIndexInList, currentHouse)
-                                                                dragWorkingCopy = mutableWork
-                                                                onUpdateReorder(mutableWork)
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            onDragEnd = {
-                                                draggingHouse = null
-                                                ghostY = 0f
-                                                overscrollJob?.cancel()
-                                                val finalList = dragWorkingCopy ?: uiHousesSnapshot
-                                                onPersistListOrder(finalList.map { it.house }.toList())
-                                                dragWorkingCopy = null
-                                                onCancelReorder()
-                                                onReorderModeChange(false)
-                                            },
-                                            onDragCancel = {
-                                                draggingHouse = null
-                                                ghostY = 0f
-                                                overscrollJob?.cancel()
-                                                dragWorkingCopy = null
-                                                onCancelReorder()
-                                                onReorderModeChange(false)
-                                            }
-                                        )
-                                    }
-                                } else it
                             }
                     ) {
                         val onUpdate = remember(house.id) { { updater: (House) -> House -> onHouseUpdate(house.id, updater); Unit } }
@@ -376,3 +403,4 @@ fun ReorderableHouseList(
         }
     }
 }
+
