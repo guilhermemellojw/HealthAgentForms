@@ -102,6 +102,7 @@ fun ReorderableHouseList(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
+            userScrollEnabled = draggingHouse == null,
             contentPadding = PaddingValues(bottom = 80.dp),
             verticalArrangement = Arrangement.Top
         ) {
@@ -192,7 +193,7 @@ fun ReorderableHouseList(
                     Box(
                         modifier = Modifier
                             .let {
-                                if (isReorderMode) it.animateItem() else it
+                                if (isReorderMode && draggingHouse == null) it.animateItem() else it
                             }
                             .graphicsLayer {
                                 alpha = if (isDragging) 0f else 1f
