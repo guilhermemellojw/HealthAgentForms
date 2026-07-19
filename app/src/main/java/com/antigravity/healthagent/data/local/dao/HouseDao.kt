@@ -83,6 +83,40 @@ interface HouseDao {
         insertAll(houses)
     }
 
+    // Targeted batch updates that only touch specific columns.
+    // Unlike upsertHouses(), these do NOT replace full rows, eliminating
+    // the risk of overwriting concurrent user edits (propertyType, situation, etc.).
+    @Query("""
+        UPDATE houses SET 
+            visitSegment = :segment, 
+            isSynced = 0, 
+            lastUpdated = :now 
+        WHERE id = :id
+    """)
+    suspend fun updateBatchSegment(id: Int, segment: Int, now: Long)
+
+    @Query("""
+        UPDATE houses SET 
+            listOrder = :listOrder, 
+            visitSegment = :segment, 
+            isSynced = 0, 
+            lastUpdated = :now 
+        WHERE id = :id
+    """)
+    suspend fun updateBatchOrderAndSegment(id: Int, listOrder: Long, segment: Int, now: Long)
+
+    @Transaction
+    suspend fun updateBatchSegments(updates: List<Pair<Int, Int>>) {
+        val now = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
+        updates.forEach { (id, segment) -> updateBatchSegment(id, segment, now) }
+    }
+
+    @Transaction
+    suspend fun updateBatchOrders(updates: List<Triple<Int, Long, Int>>) {
+        val now = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
+        updates.forEach { (id, listOrder, segment) -> updateBatchOrderAndSegment(id, listOrder, segment, now) }
+    }
+
     @Transaction
     suspend fun replaceHouses(houses: List<House>) {
         deleteAll()

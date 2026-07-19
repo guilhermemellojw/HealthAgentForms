@@ -169,8 +169,7 @@ class HouseRepositoryImpl @Inject constructor(
                a.listOrder != b.listOrder ||
                a.visitSegment != b.visitSegment ||
                a.agentUid != b.agentUid ||
-               a.observation != b.observation ||
-               a.createdAt != b.createdAt
+               a.observation != b.observation
     }
 
     override suspend fun updateHouses(houses: List<House>, force: Boolean) {
@@ -693,6 +692,18 @@ class HouseRepositoryImpl @Inject constructor(
 
     override suspend fun upsertHousesRaw(houses: List<House>) = houseDao.upsertHouses(houses)
     override suspend fun upsertDayActivitiesRaw(activities: List<DayActivity>) = dayActivityDao.upsertDayActivities(activities)
+
+    override suspend fun updateBatchSegments(updates: List<Pair<Int, Int>>) {
+        runInTransactionWithRetry {
+            houseDao.updateBatchSegments(updates)
+        }
+    }
+
+    override suspend fun updateBatchOrders(updates: List<Triple<Int, Long, Int>>) {
+        runInTransactionWithRetry {
+            houseDao.updateBatchOrders(updates)
+        }
+    }
     override suspend fun deleteHousesByDateAndAgent(date: String, agentUid: String) = houseDao.deleteHousesByDateAndAgent(date, agentUid)
     override suspend fun deleteHouseById(id: Int) = houseDao.deleteHouseById(id)
     override suspend fun markHouseAsSynced(id: Int, lastUpdated: Long, agentUid: String, agentName: String) = houseDao.markAsSyncedWithTimestamp(id, lastUpdated, agentUid, agentName)

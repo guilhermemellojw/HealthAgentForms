@@ -190,10 +190,7 @@ class HouseEditDelegate @Inject constructor(
                             it.listOrder == houseToInsert.listOrder && it.data == houseToInsert.data
                         }
 
-                        if (finalInFlightState != null &&
-                            (finalInFlightState.address.number != houseToInsert.address.number ||
-                             finalInFlightState.address.sequence != houseToInsert.address.sequence ||
-                             finalInFlightState.address.complement != houseToInsert.address.complement)) {
+                        if (finalInFlightState != null && finalInFlightState != houseToInsert) {
                             saveHouseUseCase.updateHouse(
                                 finalInFlightState.copy(id = newId.toInt()),
                                 refreshedLatestHouses,

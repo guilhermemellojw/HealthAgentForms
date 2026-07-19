@@ -28,6 +28,8 @@ interface HouseWriteRepository {
     suspend fun deleteDayActivity(date: String, agentUid: String? = null)
     suspend fun <T> runInTransaction(block: suspend () -> T): T
     suspend fun replaceAllDayActivities(activities: List<DayActivity>)
+    suspend fun updateBatchSegments(updates: List<Pair<Int, Int>>)
+    suspend fun updateBatchOrders(updates: List<Triple<Int, Long, Int>>)
     suspend fun restoreAgentData(houses: List<House>, activities: List<DayActivity>, agentUid: String? = null)
     suspend fun deleteProduction(date: String, agentUid: String? = null, force: Boolean = false)
     suspend fun deleteByAgentAndDates(dates: List<String>, agentUid: String? = null, force: Boolean = false)

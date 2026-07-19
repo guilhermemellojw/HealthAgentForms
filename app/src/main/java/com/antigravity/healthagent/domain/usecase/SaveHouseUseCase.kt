@@ -85,28 +85,37 @@ class SaveHouseUseCase @Inject constructor(
     }
 
     suspend fun updateHouses(houses: List<House>, force: Boolean = false) = withContext(Dispatchers.IO) {
-        // Re-query current DB state INSIDE the transaction to prevent
-        // concurrent writes from overwriting each other's changes.
-        // This mirrors the pattern in updateHouse().
         repository.runInTransaction {
             val affectedDates = houses.map { it.data.toDashDate() }.distinct()
             val affectedUids = houses.map { it.agentUid }.distinct()
             
-            // Get all houses for affected dates/uids
             val dbHouses = affectedDates.flatMap { date ->
                 affectedUids.flatMap { uid ->
                     repository.getHousesByDateAndAgent(date, uid)
                 }
             }
             
-            // Merge incoming houses with fresh DB state
+            // CRITICAL FIX: For existing houses, preserve DB values for user-editable fields.
+            // Batch operations (reorder, recalculate, address propagation) only intend to
+            // change listOrder, visitSegment, and (occasionally) address. Using incoming
+            // values for ALL fields would overwrite concurrent user edits to propertyType,
+            // situation, treatment, etc. — confirmed race condition bug (REPO_UPSERT overwrite).
             val merged = dbHouses.map { dbHouse ->
-                houses.find { it.id == dbHouse.id } ?: dbHouse
+                val incoming = houses.find { it.id == dbHouse.id }
+                if (incoming != null) {
+                    val addressChanged = incoming.address != dbHouse.address
+                    dbHouse.copy(
+                        listOrder = incoming.listOrder,
+                        visitSegment = incoming.visitSegment,
+                        address = if (addressChanged) incoming.address else dbHouse.address,
+                        isSynced = false
+                    )
+                } else {
+                    dbHouse
+                }
             }
             
-            // Also include any new houses (id=0) that aren't in DB yet
             val newHouses = houses.filter { it.id == 0 }
-            
             val allToSave = (merged + newHouses).distinctBy { it.id }
             repository.updateHouses(allToSave, force)
         }
