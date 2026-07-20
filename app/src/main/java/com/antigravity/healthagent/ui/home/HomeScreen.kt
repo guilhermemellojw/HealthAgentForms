@@ -222,10 +222,9 @@ fun HomeScreen(
                 house = house,
                 onDismiss = { viewModel.closeTreatmentDialog() },
                 onConfirm = { treatment, geo ->
-                    viewModel.updateHouseField(state.houseId) { h ->
-                        h.copy(treatment = treatment, geo = geo)
-                    }
-                    viewModel.closeTreatmentDialog()
+                    viewModel.updateTreatmentField(state.houseId, com.antigravity.healthagent.ui.components.TreatmentField.COM_FOCO, treatment.comFoco)
+                    viewModel.updateTreatmentGeo(state.houseId, geo)
+                    viewModel.confirmTreatmentDialog()
                 },
                 isEasyMode = uiState.isEasyMode,
                 onGetLocation = onGetLocation

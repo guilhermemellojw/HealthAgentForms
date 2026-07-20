@@ -152,7 +152,7 @@ class HomeViewModel @Inject constructor(
     }.flatMapLatest { (date, name, uid) ->
         repository.getDayActivityFlow(date, uid).map { it?.isClosed == true && it?.isManualUnlock != true }
     }.distinctUntilChanged()
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val isWorkdayManualUnlock: StateFlow<Boolean> = combine(data, agentName, remoteAgentUid, currentUserUid) { date, name, remoteUid, currentUid ->
         val effectiveUid = remoteUid ?: currentUid
@@ -388,13 +388,27 @@ class HomeViewModel @Inject constructor(
 
     fun confirmTreatmentDialog() {
         _treatmentDialogState.value?.let { state ->
-            updateHouseField(state.houseId) { house ->
-                house.copy(
-                    treatment = state.treatment.copy(comFoco = state.comFoco),
-                    geo = state.geo
-                )
+            viewModelScope.launch {
+                val effectiveUid = remoteAgentUid.value ?: currentUserUid.value
+                val activity = withContext(Dispatchers.IO) {
+                    dayManagementUseCase.getDayActivity(data.value, effectiveUid)
+                }
+                val isEffectivelyClosed = activity?.isClosed == true && activity?.isManualUnlock != true
+
+                if (isEffectivelyClosed && !isAdmin.value) {
+                    uiEvent.value = "Dia fechado. Desbloqueie para editar o tratamento."
+                    soundManager.playWarning()
+                    return@launch
+                }
+
+                updateHouseField(state.houseId) { house ->
+                    house.copy(
+                        treatment = state.treatment.copy(comFoco = state.comFoco),
+                        geo = state.geo
+                    )
+                }
+                closeTreatmentDialog()
             }
-            closeTreatmentDialog()
         }
     }
 

@@ -102,6 +102,8 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun deleteTombstones(ids: List<Int>) {}
         override suspend fun deleteTombstonesByAgent(agentUid: String) {}
         override suspend fun pruneOldTombstones(threshold: Long) {}
+        override suspend fun updateBatchOrders(updates: List<Triple<Int, Long, Int>>) {}
+        override suspend fun updateBatchSegments(updates: List<Pair<Int, Int>>) {}
     }
 
     private val mockSyncRepository = object : SyncRepository {

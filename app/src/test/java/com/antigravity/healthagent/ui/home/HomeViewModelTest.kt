@@ -708,4 +708,125 @@ class HomeViewModelTest {
         vm.confirmUnlockHistory()
         verify { dayClosingDelegate.confirmUnlockHistory(any(), any()) }
     }
+
+    // ── confirmTreatmentDialog tests ──
+
+    private fun advanceViewModelCoroutines() {
+        testDispatcher.scheduler.advanceUntilIdle()
+        Thread.sleep(50)
+        testDispatcher.scheduler.advanceUntilIdle()
+    }
+
+    @Test
+    fun `confirmTreatmentDialog saves treatment when day is open`() = runBlocking {
+        coEvery { dayManagementUseCase.getDayActivity(any(), any()) } returns
+            DayActivity(date = "15-06-2026", agentName = "AGENTE", agentUid = "user_1", status = "NORMAL", isClosed = false)
+
+        val vm = createViewModel()
+        vm.currentUserUid.value = "user_1"
+        advanceViewModelCoroutines()
+
+        val house = House(
+            id = 1, data = "15-06-2026", agentName = "AGENTE", agentUid = "user_1",
+            address = VisitAddress("100", "RUA A", "001", "", 0, 0, ""),
+            propertyType = PropertyType.R, situation = Situation.NONE
+        )
+        vm.openTreatmentDialog(house)
+        advanceViewModelCoroutines()
+        assertNotNull(vm.treatmentDialogState.value)
+
+        vm.confirmTreatmentDialog()
+        advanceViewModelCoroutines()
+
+        assertNull(vm.treatmentDialogState.value)
+        verify { houseEditDelegate.updateHouseField(any(), any(), eq(1), any(), any(), any()) }
+    }
+
+    @Test
+    fun `confirmTreatmentDialog blocks save when day is locked and not admin`() = runBlocking {
+        coEvery { dayManagementUseCase.getDayActivity(any(), any()) } returns
+            DayActivity(date = "15-06-2026", agentName = "AGENTE", agentUid = "user_1", status = "NORMAL", isClosed = true)
+
+        val vm = createViewModel()
+        vm.currentUserUid.value = "user_1"
+        vm.setAdmin(false)
+        advanceViewModelCoroutines()
+
+        val house = House(
+            id = 1, data = "15-06-2026", agentName = "AGENTE", agentUid = "user_1",
+            address = VisitAddress("100", "RUA A", "001", "", 0, 0, ""),
+            propertyType = PropertyType.R, situation = Situation.NONE
+        )
+        vm.openTreatmentDialog(house)
+        advanceViewModelCoroutines()
+
+        vm.confirmTreatmentDialog()
+        advanceViewModelCoroutines()
+
+        assertNotNull(vm.treatmentDialogState.value)
+        assertEquals("Dia fechado. Desbloqueie para editar o tratamento.", vm.uiEvent.value)
+        verify { soundManager.playWarning() }
+        verify(exactly = 0) { houseEditDelegate.updateHouseField(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `confirmTreatmentDialog saves treatment when day is locked but user is admin`() = runBlocking {
+        coEvery { dayManagementUseCase.getDayActivity(any(), any()) } returns
+            DayActivity(date = "15-06-2026", agentName = "AGENTE", agentUid = "user_1", status = "NORMAL", isClosed = true)
+
+        val vm = createViewModel()
+        vm.currentUserUid.value = "user_1"
+        vm.setAdmin(true)
+        advanceViewModelCoroutines()
+
+        val house = House(
+            id = 1, data = "15-06-2026", agentName = "AGENTE", agentUid = "user_1",
+            address = VisitAddress("100", "RUA A", "001", "", 0, 0, ""),
+            propertyType = PropertyType.R, situation = Situation.NONE
+        )
+        vm.openTreatmentDialog(house)
+        advanceViewModelCoroutines()
+
+        vm.confirmTreatmentDialog()
+        advanceViewModelCoroutines()
+
+        assertNull(vm.treatmentDialogState.value)
+        verify { houseEditDelegate.updateHouseField(any(), any(), eq(1), any(), any(), any()) }
+    }
+
+    @Test
+    fun `confirmTreatmentDialog does nothing when dialog state is null`() = runBlocking {
+        val vm = createViewModel()
+        vm.currentUserUid.value = "user_1"
+        advanceViewModelCoroutines()
+
+        vm.confirmTreatmentDialog()
+        advanceViewModelCoroutines()
+
+        assertNull(vm.treatmentDialogState.value)
+        verify(exactly = 0) { houseEditDelegate.updateHouseField(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `confirmTreatmentDialog uses effectiveUid from remoteAgentUid`() = runBlocking {
+        coEvery { dayManagementUseCase.getDayActivity(any(), any()) } returns null
+
+        val vm = createViewModel()
+        vm.currentUserUid.value = "user_1"
+        vm.remoteAgentUid.value = "remote_1"
+        advanceViewModelCoroutines()
+
+        val house = House(
+            id = 1, data = "15-06-2026", agentName = "AGENTE", agentUid = "user_1",
+            address = VisitAddress("100", "RUA A", "001", "", 0, 0, ""),
+            propertyType = PropertyType.R, situation = Situation.NONE
+        )
+        vm.openTreatmentDialog(house)
+        advanceViewModelCoroutines()
+
+        vm.confirmTreatmentDialog()
+        advanceViewModelCoroutines()
+
+        coVerify { dayManagementUseCase.getDayActivity(any(), eq("remote_1")) }
+    }
 }

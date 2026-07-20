@@ -25,7 +25,7 @@ class CheckWorkedHouseLimitUseCase @Inject constructor() {
             (it.situation == Situation.NONE || it.situation == Situation.EMPTY)
         }
 
-        val limitExceeded = workedCount >= maxOpenHouses && maxOpenHouses > 0 && !isManualUnlock && !isAdmin
+        val limitExceeded = workedCount > maxOpenHouses && maxOpenHouses > 0 && !isManualUnlock && !isAdmin
 
         return if (limitExceeded) Result.LimitExceeded else Result.Allowed
     }

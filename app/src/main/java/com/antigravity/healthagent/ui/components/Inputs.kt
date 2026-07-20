@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -301,8 +302,12 @@ fun CompactDropdown(
     val focusManager = LocalFocusManager.current
     var expanded by remember { mutableStateOf(false) }
 
-    var displayValue by remember(currentValue) { mutableStateOf(currentValue) }
-    LaunchedEffect(currentValue) { displayValue = currentValue }
+    var displayValue by rememberSaveable(key = currentValue) { mutableStateOf(currentValue) }
+    LaunchedEffect(currentValue) {
+        if (displayValue != currentValue && !expanded) {
+            displayValue = currentValue
+        }
+    }
 
     val targetBorderColor = when {
         isError -> MaterialTheme.colorScheme.error

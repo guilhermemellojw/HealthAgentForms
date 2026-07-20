@@ -273,6 +273,7 @@ class HouseEditDelegate @Inject constructor(
         )
         if (limitResult is CheckWorkedHouseLimitUseCase.Result.LimitExceeded) {
             soundManager.playWarning()
+            state.uiEvent.value = "Limite de ${state.uiState.value.maxOpenHouses} imóveis abertos atingido. Feche o dia ou desbloqueie para editar."
             state.situationLimitConfirmation.value = house
             return
         }
@@ -664,7 +665,7 @@ class HouseEditDelegate @Inject constructor(
 
     private fun removeInFlight(state: HomeState, house: House) {
         state.housesInFlight.update { list ->
-            list.filter { it.listOrder != house.listOrder || it.data != house.data }
+            list.filter { it.generateIdentityKey() != house.generateIdentityKey() }
         }
     }
 
