@@ -175,14 +175,17 @@ fun AddProfileDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { 
-                onConfirm(
-                    email.takeIf { it.isNotBlank() }, 
-                    nameInput.takeIf { it.isNotBlank() }, 
-                    role, 
-                    authorized
-                ) 
-            }) { Text("Criar") }
+            Button(
+                onClick = { 
+                    onConfirm(
+                        email.takeIf { it.isNotBlank() }, 
+                        nameInput.takeIf { it.isNotBlank() }, 
+                        role, 
+                        authorized
+                    ) 
+                },
+                enabled = email.isNotBlank() || nameInput.isNotBlank()
+            ) { Text("Criar") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancelar") }

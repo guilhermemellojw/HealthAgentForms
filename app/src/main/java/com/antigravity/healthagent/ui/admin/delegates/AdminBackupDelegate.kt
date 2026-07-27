@@ -66,6 +66,10 @@ class AdminBackupDelegate @Inject constructor(
 
     fun deleteAgentHouse(scope: CoroutineScope, state: AdminState, agentUid: String, houseId: String, onLoadAgentsData: suspend () -> Unit) {
         scope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                state.uiEvent.emit("Permissão negada")
+                return@launch
+            }
             val result = agentRepository.deleteAgentHouse(agentUid, houseId)
             if (result.isSuccess) {
                 onLoadAgentsData()
@@ -76,6 +80,10 @@ class AdminBackupDelegate @Inject constructor(
 
     fun deleteAgentActivity(scope: CoroutineScope, state: AdminState, agentUid: String, activityDate: String, onLoadAgentsData: suspend () -> Unit) {
         scope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                state.uiEvent.emit("Permissão negada")
+                return@launch
+            }
             val result = agentRepository.deleteAgentActivity(agentUid, activityDate)
             if (result.isSuccess) {
                 onLoadAgentsData()
@@ -86,6 +94,10 @@ class AdminBackupDelegate @Inject constructor(
 
     fun clearSyncError(scope: CoroutineScope, state: AdminState, uid: String, onLoadAgentsData: suspend () -> Unit) {
         scope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                state.uiEvent.emit("Permissão negada")
+                return@launch
+            }
             val result = agentRepository.clearSyncError(uid)
             if (result.isSuccess) {
                 state.uiEvent.emit("Erro de sincronização limpo")

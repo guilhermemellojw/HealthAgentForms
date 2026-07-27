@@ -48,6 +48,7 @@ class LoginViewModel @Inject constructor(
                             syncRepository.pullCloudDataToLocal()
                         } catch (e: Exception) {
                             AppLogger.e("LoginViewModel", "Background sync failed", e)
+                            setError("Sincronização inicial falhou: ${e.message}")
                         }
                     }
                 }
@@ -84,6 +85,7 @@ class LoginViewModel @Inject constructor(
     }
 
     fun signOut() {
+        _requestSent.value = false
         viewModelScope.launch {
             authRepository.signOut()
         }
@@ -92,8 +94,12 @@ class LoginViewModel @Inject constructor(
     private val _requestSent = MutableStateFlow(false)
     val requestSent: StateFlow<Boolean> = _requestSent.asStateFlow()
 
+    private val _isRequesting = MutableStateFlow(false)
+    val isRequesting: StateFlow<Boolean> = _isRequesting.asStateFlow()
+
     fun requestAccess(requestedName: String? = null) {
         val user = (authState.value as? AuthState.WaitingForAuthorization)?.user ?: return
+        _isRequesting.value = true
         viewModelScope.launch {
             val result = accessControlRepository.requestAccess(user.uid, user.email ?: "", user.displayName, requestedName)
             if (result.isSuccess) {
@@ -101,6 +107,7 @@ class LoginViewModel @Inject constructor(
             } else {
                 setError("Erro ao solicitar acesso: ${result.exceptionOrNull()?.message}")
             }
+            _isRequesting.value = false
         }
     }
 }

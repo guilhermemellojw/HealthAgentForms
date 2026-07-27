@@ -207,6 +207,7 @@ class AdminViewModel @Inject constructor(
                 syncState.value = SyncUiState.Success(lastSyncTime = now)
             } catch (e: java.lang.Exception) {
                 syncState.value = SyncUiState.Error(message = e.message ?: "Erro ao atualizar dados", lastSyncTime = syncState.value.lastSyncTime)
+                stateDelegate.uiEvent.emit(e.message ?: "Erro ao atualizar dados")
             } finally {
                 isLoading.value = false
             }
@@ -225,7 +226,6 @@ class AdminViewModel @Inject constructor(
     fun changeUserRole(uid: String, role: UserRole) = usersDelegate.changeUserRole(viewModelScope, stateDelegate, uid, role)
     fun updateUserProfile(uid: String, updates: Map<String, Any?>) = usersDelegate.updateUserProfile(viewModelScope, stateDelegate, uid, updates)
     fun createUser(email: String, role: UserRole, agentName: String?, isAuthorized: Boolean) = usersDelegate.createUser(viewModelScope, stateDelegate, email, role, agentName, isAuthorized)
-    fun createAgent(email: String, agentName: String?) = usersDelegate.createAgent(viewModelScope, stateDelegate, email, agentName)
     fun deleteUser(uid: String, deleteCloudData: Boolean = false) = usersDelegate.deleteUser(viewModelScope, stateDelegate, uid, deleteCloudData)
     fun deleteAgent(uid: String) = usersDelegate.deleteAgent(viewModelScope, stateDelegate, uid)
     fun remoteWipeAgentData(uid: String) = usersDelegate.remoteWipeAgentData(viewModelScope, stateDelegate, uid)

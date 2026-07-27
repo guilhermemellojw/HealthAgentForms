@@ -188,7 +188,7 @@ fun AdminDashboardScreen(
                                             request = request,
                                             isSolarMode = isSolarMode,
                                             onApprove = { showApprovalDialog = true; pendingRequest = request },
-                                            onReject = { viewModel.rejectAccess(request.id) }
+                                            onReject = { confirmTitle = "Rejeitar Acesso"; confirmMessage = "Rejeitar a solicitação de ${request.email}?"; onConfirmAction = { viewModel.rejectAccess(request.id) }; showConfirmDialog = true }
                                         )
                                     }
                                 }

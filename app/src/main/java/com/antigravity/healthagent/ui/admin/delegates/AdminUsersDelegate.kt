@@ -122,6 +122,8 @@ class AdminUsersDelegate @Inject constructor(
             val result = accessControlRepository.authorizeUser(uid, isAuthorized)
             if (result.isSuccess) {
                 loadUsers(state)
+            } else {
+                state.uiEvent.emit("Erro ao alterar autorização")
             }
         }
     }
@@ -135,6 +137,8 @@ class AdminUsersDelegate @Inject constructor(
             val result = accessControlRepository.changeUserRole(uid, role)
             if (result.isSuccess) {
                 loadUsers(state)
+            } else {
+                state.uiEvent.emit("Erro ao alterar função")
             }
         }
     }
@@ -148,6 +152,8 @@ class AdminUsersDelegate @Inject constructor(
             val result = accessControlRepository.updateUserProfile(uid, updates)
             if (result.isSuccess) {
                 loadUsers(state)
+            } else {
+                state.uiEvent.emit("Erro ao atualizar perfil")
             }
         }
     }
@@ -163,23 +169,6 @@ class AdminUsersDelegate @Inject constructor(
                 loadUsers(state)
             } else {
                 state.uiEvent.emit("Erro ao criar usuário")
-            }
-        }
-    }
-
-    fun createAgent(scope: CoroutineScope, state: AdminState, email: String, agentName: String?) {
-        scope.launch {
-            if (!accessControlRepository.isUserAdmin()) {
-                state.uiEvent.emit("Permissão negada")
-                return@launch
-            }
-            try {
-                val result = agentRepository.createAgent(email, agentName)
-                if (result.isSuccess) {
-                    loadAgentsData(state, state.selectedYear.value, state.selectedMonth.value)
-                }
-            } catch (e: Exception) {
-                state.uiEvent.emit("Erro ao criar agente: ${e.message}")
             }
         }
     }
@@ -220,7 +209,10 @@ class AdminUsersDelegate @Inject constructor(
             }
             val result = agentRepository.deleteAgent(uid)
             if (result.isSuccess) {
+                state.uiEvent.emit("Agente excluído com sucesso")
                 loadAgentsData(state, state.selectedYear.value, state.selectedMonth.value)
+            } else {
+                state.uiEvent.emit("Erro ao excluir agente: ${result.exceptionOrNull()?.message}")
             }
         }
     }
@@ -291,6 +283,10 @@ class AdminUsersDelegate @Inject constructor(
 
     fun migrateData(scope: CoroutineScope, state: AdminState, authUser: AuthUser, onRefreshAll: () -> Unit) {
         scope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                state.uiEvent.emit("Permissão negada")
+                return@launch
+            }
             val result = authRepository.migratePreRegistration(authUser)
             if (result.isSuccess) {
                 state.uiEvent.emit("Dados migrados com sucesso")

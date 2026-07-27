@@ -100,10 +100,7 @@ class MainActivity : ComponentActivity() {
                             MainScreen(loginViewModel, viewModel)
                         }
                         else -> {
-                            LoginScreen(
-                                viewModel = loginViewModel,
-                                onLoginSuccess = { /* Automatically handled by state */ }
-                            )
+                            LoginScreen(viewModel = loginViewModel)
                         }
                     }
                 }
