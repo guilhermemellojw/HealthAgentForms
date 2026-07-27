@@ -238,6 +238,7 @@ fun HomeScreen(
             currentBairro = state.bairro,
             currentQuarteiraoConcluido = state.quarteiraoConcluido,
             currentLocalidadeConcluida = state.localidadeConcluida,
+            streetSuggestions = streetSuggestions,
             onDismiss = { viewModel.closeContextDialog() },
             onConfirm = { block, blockSeq, street, bairro, qConcluido, lConcluido ->
                 viewModel.confirmContextDialog(state.houseId, block, blockSeq, street, bairro, qConcluido, lConcluido)
