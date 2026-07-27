@@ -168,7 +168,7 @@ class AdminViewModel @Inject constructor(
         val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
         val currentMonth = java.util.Calendar.getInstance().get(java.util.Calendar.MONTH)
         
-        return if (selectedYear.value >= currentYear) {
+        return if (selectedYear.value == currentYear) {
             availableMonths.take(currentMonth + 2)
         } else {
             availableMonths
@@ -209,7 +209,6 @@ class AdminViewModel @Inject constructor(
                 syncState.value = SyncUiState.Error(message = e.message ?: "Erro ao atualizar dados", lastSyncTime = syncState.value.lastSyncTime)
             } finally {
                 isLoading.value = false
-                syncState.value = SyncUiState.Idle(lastSyncTime = syncState.value.lastSyncTime)
             }
         }
     }

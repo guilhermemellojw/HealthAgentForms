@@ -154,9 +154,15 @@ class AdminUsersDelegate @Inject constructor(
 
     fun createUser(scope: CoroutineScope, state: AdminState, email: String, role: UserRole, agentName: String?, isAuthorized: Boolean) {
         scope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                state.uiEvent.emit("Permissão negada")
+                return@launch
+            }
             val result = accessControlRepository.createUserProfile(email, role, agentName, isAuthorized)
             if (result.isSuccess) {
                 loadUsers(state)
+            } else {
+                state.uiEvent.emit("Erro ao criar usuário")
             }
         }
     }
@@ -243,6 +249,10 @@ class AdminUsersDelegate @Inject constructor(
 
     fun addBairro(scope: CoroutineScope, state: AdminState, name: String) {
         scope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                state.uiEvent.emit("Permissão negada")
+                return@launch
+            }
             val result = localizationRepository.addBairro(name)
             if (result.isSuccess) {
                 loadBairros(state)
@@ -253,6 +263,10 @@ class AdminUsersDelegate @Inject constructor(
 
     fun deleteBairro(scope: CoroutineScope, state: AdminState, name: String) {
         scope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                state.uiEvent.emit("Permissão negada")
+                return@launch
+            }
             val result = localizationRepository.deleteBairro(name)
             if (result.isSuccess) {
                 loadBairros(state)
@@ -263,6 +277,10 @@ class AdminUsersDelegate @Inject constructor(
 
     fun updateSystemSetting(scope: CoroutineScope, state: AdminState, key: String, value: Any) {
         scope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                state.uiEvent.emit("Permissão negada")
+                return@launch
+            }
             val result = localizationRepository.updateSystemSetting(key, value)
             if (result.isSuccess) {
                 loadSystemSettings(state)
