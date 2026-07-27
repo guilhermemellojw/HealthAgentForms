@@ -75,6 +75,7 @@ class DayClosingDelegate @Inject constructor(
                 state.showClosingAudit.value = null
 
                 triggerImmediateSync()
+                state.showGoalReached.value = true
             } catch (e: Exception) {
                 state.uiEvent.value = "Erro ao fechar o dia: ${e.message}"
                 soundManager.playWarning()

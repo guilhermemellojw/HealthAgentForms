@@ -19,6 +19,8 @@ import com.antigravity.healthagent.domain.usecase.TriggerImmediateSyncUseCase
 import com.antigravity.healthagent.domain.usecase.SelectDayActivityUseCase
 import com.antigravity.healthagent.domain.usecase.UpdateDayHeaderUseCase
 import com.antigravity.healthagent.domain.model.VisitAddress
+import com.antigravity.healthagent.domain.model.TreatmentData
+import com.antigravity.healthagent.domain.model.GeoCapture
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.data.backup.BackupManager
 import com.antigravity.healthagent.ui.home.delegates.*
@@ -735,7 +737,7 @@ class HomeViewModelTest {
         advanceViewModelCoroutines()
         assertNotNull(vm.treatmentDialogState.value)
 
-        vm.confirmTreatmentDialog()
+        vm.confirmTreatmentDialog(TreatmentData(), GeoCapture())
         advanceViewModelCoroutines()
 
         assertNull(vm.treatmentDialogState.value)
@@ -760,7 +762,7 @@ class HomeViewModelTest {
         vm.openTreatmentDialog(house)
         advanceViewModelCoroutines()
 
-        vm.confirmTreatmentDialog()
+        vm.confirmTreatmentDialog(TreatmentData(), GeoCapture())
         advanceViewModelCoroutines()
 
         assertNotNull(vm.treatmentDialogState.value)
@@ -787,7 +789,7 @@ class HomeViewModelTest {
         vm.openTreatmentDialog(house)
         advanceViewModelCoroutines()
 
-        vm.confirmTreatmentDialog()
+        vm.confirmTreatmentDialog(TreatmentData(), GeoCapture())
         advanceViewModelCoroutines()
 
         assertNull(vm.treatmentDialogState.value)
@@ -800,7 +802,7 @@ class HomeViewModelTest {
         vm.currentUserUid.value = "user_1"
         advanceViewModelCoroutines()
 
-        vm.confirmTreatmentDialog()
+        vm.confirmTreatmentDialog(TreatmentData(), GeoCapture())
         advanceViewModelCoroutines()
 
         assertNull(vm.treatmentDialogState.value)
@@ -824,7 +826,7 @@ class HomeViewModelTest {
         vm.openTreatmentDialog(house)
         advanceViewModelCoroutines()
 
-        vm.confirmTreatmentDialog()
+        vm.confirmTreatmentDialog(TreatmentData(), GeoCapture())
         advanceViewModelCoroutines()
 
         coVerify { dayManagementUseCase.getDayActivity(any(), eq("remote_1")) }

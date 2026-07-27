@@ -350,43 +350,7 @@ class HomeViewModel @Inject constructor(
         _treatmentDialogState.value = null
     }
 
-    fun updateTreatmentField(houseId: Int, field: com.antigravity.healthagent.ui.components.TreatmentField, value: Any) {
-        _treatmentDialogState.value?.let { state ->
-            if (state.houseId == houseId) {
-                val newTreatment = when (field) {
-                    com.antigravity.healthagent.ui.components.TreatmentField.A1 -> state.treatment.copy(a1 = value as Int)
-                    com.antigravity.healthagent.ui.components.TreatmentField.A2 -> state.treatment.copy(a2 = value as Int)
-                    com.antigravity.healthagent.ui.components.TreatmentField.B -> state.treatment.copy(b = value as Int)
-                    com.antigravity.healthagent.ui.components.TreatmentField.C -> state.treatment.copy(c = value as Int)
-                    com.antigravity.healthagent.ui.components.TreatmentField.D1 -> state.treatment.copy(d1 = value as Int)
-                    com.antigravity.healthagent.ui.components.TreatmentField.D2 -> state.treatment.copy(d2 = value as Int)
-                    com.antigravity.healthagent.ui.components.TreatmentField.E -> state.treatment.copy(e = value as Int)
-                    com.antigravity.healthagent.ui.components.TreatmentField.ELIMINADOS -> state.treatment.copy(eliminados = value as Int)
-                    com.antigravity.healthagent.ui.components.TreatmentField.LARVICIDA -> state.treatment.copy(larvicida = value as Double)
-                    com.antigravity.healthagent.ui.components.TreatmentField.COM_FOCO -> state.treatment.copy(comFoco = value as Boolean)
-                }
-                _treatmentDialogState.value = state.copy(treatment = newTreatment)
-            }
-        }
-    }
-
-    fun updateTreatmentComFoco(houseId: Int, comFoco: Boolean) {
-        _treatmentDialogState.value?.let { state ->
-            if (state.houseId == houseId) {
-                _treatmentDialogState.value = state.copy(comFoco = comFoco)
-            }
-        }
-    }
-
-    fun updateTreatmentGeo(houseId: Int, geo: GeoCapture) {
-        _treatmentDialogState.value?.let { state ->
-            if (state.houseId == houseId) {
-                _treatmentDialogState.value = state.copy(geo = geo)
-            }
-        }
-    }
-
-    fun confirmTreatmentDialog() {
+    fun confirmTreatmentDialog(treatment: TreatmentData, geo: GeoCapture) {
         _treatmentDialogState.value?.let { state ->
             viewModelScope.launch {
                 val effectiveUid = remoteAgentUid.value ?: currentUserUid.value
@@ -402,10 +366,7 @@ class HomeViewModel @Inject constructor(
                 }
 
                 updateHouseField(state.houseId) { house ->
-                    house.copy(
-                        treatment = state.treatment.copy(comFoco = state.comFoco),
-                        geo = state.geo
-                    )
+                    house.copy(treatment = treatment, geo = geo)
                 }
                 closeTreatmentDialog()
             }
@@ -482,29 +443,6 @@ class HomeViewModel @Inject constructor(
         houseEditDelegate.persistListOrder(viewModelScope, this, housesToList, ::triggerDelayedValidation)
         _reorderMode = false
         _reorderHouses.value = emptyList()
-    }
-
-    // ──────────────────────────────────────────────────────────
-    // REACTIVE GOAL REACHED FLOW
-    // ──────────────────────────────────────────────────────────
-
-    val goalReachedFlow: StateFlow<Boolean> = houses
-        .map { dayHouses ->
-            val workedCount = dayHouses.filter { it.data == data.value }.count {
-                it.situation == Situation.NONE || it.situation == Situation.EMPTY
-            }
-            workedCount >= maxOpenHouses.value && maxOpenHouses.value > 0
-        }
-        .distinctUntilChanged()
-.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-
-    // Derive showGoalReached from goalReachedFlow (overrides delegate's MutableStateFlow)
-    override val showGoalReached: MutableStateFlow<Boolean> = MutableStateFlow(false).also {
-        viewModelScope.launch {
-            goalReachedFlow.collect { reached ->
-                if (reached && !it.value) it.value = true
-            }
-        }
     }
 
     // ──────────────────────────────────────────────────────────
