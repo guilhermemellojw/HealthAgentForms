@@ -12,6 +12,8 @@ import com.antigravity.healthagent.utils.SoundManager
 import com.antigravity.healthagent.domain.logger.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,6 +23,7 @@ class DayClosingDelegate @Inject constructor(
     private val dayManagementUseCase: DayManagementUseCase,
     private val soundManager: SoundManager
 ) {
+    private val dayMutex = Mutex()
 
     fun startDayClosingFlow(
         scope: CoroutineScope,
@@ -68,6 +71,7 @@ class DayClosingDelegate @Inject constructor(
         triggerImmediateSync: () -> Unit
     ) {
         scope.launch {
+            dayMutex.withLock {
             try {
                 val isAdmin = state.isAdmin.value
                 val effectiveUid = state.remoteAgentUid.value ?: state.currentUserUid.value
@@ -80,11 +84,13 @@ class DayClosingDelegate @Inject constructor(
                 state.uiEvent.value = "Erro ao fechar o dia: ${e.message}"
                 soundManager.playWarning()
             }
+            }
         }
     }
 
-    fun toggleDayLock(scope: CoroutineScope, state: HomeState, isDayClosed: Boolean) {
+    fun toggleDayLock(scope: CoroutineScope, state: HomeState) {
         scope.launch {
+            dayMutex.withLock {
             try {
                 val isViewingRemoteAgent = state.remoteAgent.value != null
                 if (isViewingRemoteAgent && state.isSupervisor.value && !state.isAdmin.value) {
@@ -93,7 +99,7 @@ class DayClosingDelegate @Inject constructor(
                     return@launch
                 }
 
-                val closed = isDayClosed
+                val closed = state.uiState.value.isDayClosed
                 val isAdmin = state.isAdmin.value
                 val effectiveUid = state.remoteAgentUid.value ?: state.currentUserUid.value
                 if (closed) {
@@ -124,6 +130,7 @@ class DayClosingDelegate @Inject constructor(
             }
         }
     }
+    }
 
     fun advanceToNextDay(scope: CoroutineScope, state: HomeState) {
         scope.launch {
@@ -146,9 +153,11 @@ class DayClosingDelegate @Inject constructor(
 
     fun confirmUnlockHistory(scope: CoroutineScope, state: HomeState) {
         scope.launch {
+            dayMutex.withLock {
             val effectiveUid = state.remoteAgentUid.value ?: state.currentUserUid.value
             dayManagementUseCase.unlockDay(state.data.value, effectiveUid)
             state.showHistoryUnlockConfirmation.value = false
+            }
         }
     }
 

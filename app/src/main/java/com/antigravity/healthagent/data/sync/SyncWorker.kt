@@ -65,6 +65,7 @@ class SyncWorker @AssistedInject constructor(
             val pullResult = syncRepository.pullCloudDataToLocal(uid)
             if (pullResult.isFailure) {
                 AppLogger.w("SyncWorker", "[#$syncOpId] Background pull failed: ${pullResult.exceptionOrNull()?.message}")
+                return Result.retry()
             }
 
             val houses = houseRepository.getAllHousesOnce(uid)

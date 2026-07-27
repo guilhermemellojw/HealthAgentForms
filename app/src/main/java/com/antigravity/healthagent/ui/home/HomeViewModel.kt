@@ -732,7 +732,7 @@ class HomeViewModel @Inject constructor(
         triggerImmediateSync = { triggerImmediateSync() }
     )
 
-    fun toggleDayLock() = dayClosingDelegate.toggleDayLock(viewModelScope, this, isDayClosed.value)
+    fun toggleDayLock() = dayClosingDelegate.toggleDayLock(viewModelScope, this)
     fun dismissHistoryUnlockConfirmation() = dayClosingDelegate.dismissHistoryUnlockConfirmation(this)
     fun confirmUnlockHistory() = dayClosingDelegate.confirmUnlockHistory(viewModelScope, this)
 

@@ -346,7 +346,7 @@ class HomeViewModelTest {
     fun `toggleDayLock delegates to dayClosingDelegate`() {
         val vm = createViewModel()
         vm.toggleDayLock()
-        verify { dayClosingDelegate.toggleDayLock(any(), any(), any()) }
+        verify { dayClosingDelegate.toggleDayLock(any(), any()) }
     }
 
     @Test

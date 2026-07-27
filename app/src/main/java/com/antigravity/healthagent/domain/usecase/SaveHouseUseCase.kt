@@ -259,11 +259,12 @@ class SaveHouseUseCase @Inject constructor(
         var e = treatment.e
         var elims = treatment.eliminados
         var larv = treatment.larvicida
+        var comFoco = treatment.comFoco
 
         // Strict Consistency: ONLY Situation.NONE (Worked) can have treatment
         if (situation != Situation.NONE && hasTreatment) {
             // Clear treatment if situation changed from NONE to something else
-            a1 = 0; a2 = 0; b = 0; c = 0; d1 = 0; d2 = 0; e = 0; elims = 0; larv = 0.0
+            a1 = 0; a2 = 0; b = 0; c = 0; d1 = 0; d2 = 0; e = 0; elims = 0; larv = 0.0; comFoco = false
         }
 
         val normalizedNumber = house.address.number.trim().uppercase() // Don't clear "0" while editing
@@ -299,7 +300,7 @@ class SaveHouseUseCase @Inject constructor(
             data = house.data.toDashDate().trim(),
             isSynced = false, // Force re-sync on every local edit
             lastUpdated = if (house.lastUpdated > 0) house.lastUpdated else System.currentTimeMillis(),
-            treatment = TreatmentData(a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e, eliminados = elims, larvicida = larv, comFoco = house.treatment.comFoco)
+            treatment = TreatmentData(a1 = a1, a2 = a2, b = b, c = c, d1 = d1, d2 = d2, e = e, eliminados = elims, larvicida = larv, comFoco = comFoco)
         )
     }
 }

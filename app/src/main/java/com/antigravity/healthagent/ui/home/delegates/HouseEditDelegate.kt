@@ -290,7 +290,7 @@ class HouseEditDelegate @Inject constructor(
         val clashingHouse = clashDetector.findClash(house, latestHousesList)
 
         val sanitizedHouse = saveHouseUseCase.sanitizeHouse(house)
-        val updatedHouse = sanitizedHouse.copy(lastUpdated = System.currentTimeMillis())
+        val updatedHouse = sanitizedHouse.copy(lastUpdated = clock.currentTimeMillis())
         state.pendingUpdateDrafts.update { it + (updatedHouse.id to updatedHouse) }
 
         AppLogger.d("PERSIST_DEBUG", "DRAFT_SET: house=${updatedHouse.id} pt=${updatedHouse.propertyType.code} lastUpdated=${updatedHouse.lastUpdated}")
@@ -403,7 +403,7 @@ class HouseEditDelegate @Inject constructor(
                     val adminBypass = state.isAdmin.value
                     val shouldForce = adminBypass || forceMerge
 
-                    val dbTimestamp = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
+                    val dbTimestamp = clock.currentTimeMillis()
 
                     val result = saveHouseUseCase.updateHouseWithContext(houseWithIdentity, latestHouses, baselineHouse)
 
@@ -563,8 +563,8 @@ class HouseEditDelegate @Inject constructor(
                     listOrder = h.listOrder,
                     visitSegment = h.visitSegment,
                     isSynced = false,
-                    lastUpdated = System.currentTimeMillis()
-                ) ?: h.copy(isSynced = false, lastUpdated = System.currentTimeMillis())
+                    lastUpdated = clock.currentTimeMillis()
+                ) ?: h.copy(isSynced = false, lastUpdated = clock.currentTimeMillis())
             }
             
             saveHouseUseCase.updateHouses(merged, adminBypass)

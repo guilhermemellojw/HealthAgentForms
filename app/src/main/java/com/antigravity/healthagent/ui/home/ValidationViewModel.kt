@@ -19,10 +19,13 @@ class ValidationViewModel @Inject constructor(
     private val soundManager: SoundManager
 ) {
     private var validationJob: Job? = null
+    private var scrollJob: Job? = null
 
     fun cancel() {
         validationJob?.cancel()
         validationJob = null
+        scrollJob?.cancel()
+        scrollJob = null
     }
 
     fun validateCurrentDay(
@@ -72,7 +75,8 @@ class ValidationViewModel @Inject constructor(
     fun onHouseClick(state: HomeState, houseId: Int) {
         state.scrollToHouseId.value = houseId
         state.integrityDialogMessage.value = null
-        CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
+        scrollJob?.cancel()
+        scrollJob = CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
             delay(500)
             state.scrollToHouseId.value = null
         }

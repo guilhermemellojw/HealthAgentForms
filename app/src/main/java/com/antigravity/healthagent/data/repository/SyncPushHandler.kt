@@ -370,32 +370,10 @@ class SyncPushHandler @Inject constructor(
                             }
                             val todayInt = com.antigravity.healthagent.utils.DateUtils.COMPACT_DATE.get().format(java.util.Date()).toInt()
                             
-                            val housesInMonthRaw = if (isProxyPush && !shouldReplace) {
-                                val monthParts = monthYear.split("-")
-                                val month = monthParts[0].toIntOrNull() ?: 1
-                                val year = monthParts[1].toIntOrNull() ?: 2024
-                                
-                                val calendar = java.util.Calendar.getInstance()
-                                calendar.set(year, month - 1, 1)
-                                val daysInMonth = calendar.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
-                                
-                                val allDays = (1..daysInMonth).map { day -> String.format("%02d-%s", day, monthYear) }
-                                
-                                val allDocs = allDays.chunked(30).flatMap { chunk ->
-                                    if (chunk.isNotEmpty()) {
-                                        userDocRef.collection("houses")
-                                            .whereIn("data", chunk)
-                                            .get().await().documents
-                                    } else emptyList()
-                                }
-                                
-                                allDocs.mapNotNull { it.toHouseSafe(uid, officialAgentName) }
+                            val housesInMonthRaw = if (shouldReplace) {
+                                housesToPush.filter { it.data.replace("/", "-").contains(monthYear) }
                             } else {
-                                if (shouldReplace) {
-                                    housesToPush.filter { it.data.replace("/", "-").contains(monthYear) }
-                                } else {
-                                    houseRepository.getHousesByMonth(uid, monthYear)
-                                }
+                                houseRepository.getHousesByMonth(uid, monthYear)
                             }
                             
                             val housesInMonth = housesInMonthRaw.filter { house ->
@@ -407,25 +385,10 @@ class SyncPushHandler @Inject constructor(
                                 } catch(e: Exception) { true }
                             }
                             
-                            val activitiesInMonthRaw = if (isProxyPush && !shouldReplace) {
-                                val calendar = java.util.Calendar.getInstance()
-                                val monthParts = monthYear.split("-")
-                                val month = monthParts[0].toIntOrNull() ?: 1
-                                val year = monthParts[1].toIntOrNull() ?: 2024
-                                calendar.set(year, month - 1, 1)
-                                val daysInMonth = calendar.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
-
-                                val allDays = (1..daysInMonth).map { day -> String.format("%02d-%s", day, monthYear) }
-                                
-                                allDays.chunked(30).flatMap { chunk ->
-                                    userDocRef.collection("day_activities").whereIn("date", chunk).get().await().documents
-                                }.mapNotNull { it.toDayActivitySafe(uid, officialAgentName) }
+                            val activitiesInMonthRaw = if (shouldReplace) {
+                                activitiesToPush.filter { it.date.replace("/", "-").contains(monthYear) }
                             } else {
-                                if (shouldReplace) {
-                                    activitiesToPush.filter { it.date.replace("/", "-").contains(monthYear) }
-                                } else {
-                                    houseRepository.getDayActivitiesByMonth(uid, monthYear)
-                                }
+                                houseRepository.getDayActivitiesByMonth(uid, monthYear)
                             }
                             
                             val activitiesInMonth = activitiesInMonthRaw.filter { activity ->
