@@ -55,7 +55,8 @@ fun AdminDashboardScreen(
     val selectedMonth by viewModel.selectedMonth.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    var showAddProfileDialog by remember { mutableStateOf(false) }
+    var showCreateUserDialog by remember { mutableStateOf(false) }
+    var showAddNameDialog by remember { mutableStateOf(false) }
     var selectedUidForRestore by remember { mutableStateOf<String?>(null) }
     var isSmartRestore by remember { mutableStateOf(false) }
     
@@ -119,8 +120,8 @@ fun AdminDashboardScreen(
         floatingActionButton = { 
             if (selectedTab == 0) { 
                 FloatingActionButton(onClick = { 
-                    showAddProfileDialog = true
-                }) { Icon(Icons.Default.Add, null) } 
+                    showCreateUserDialog = true
+                }) { Icon(Icons.Default.PersonAdd, null) } 
             } 
         }
     ) { padding ->
@@ -298,7 +299,7 @@ fun AdminDashboardScreen(
                                                 )
                                             }
                                             AssistChip(
-                                                onClick = { showAddProfileDialog = true },
+                                                onClick = { showAddNameDialog = true },
                                                 label = { Text("Adicionar Nome") },
                                                 leadingIcon = { Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)) }
                                             )
@@ -389,17 +390,23 @@ fun AdminDashboardScreen(
         }
     }
 
-    if (showAddProfileDialog) {
-        AddProfileDialog(
+    if (showCreateUserDialog) {
+        CreateUserDialog(
             agentNamesList = agentNames,
-            onDismiss = { showAddProfileDialog = false },
-            onConfirm = { email: String?, name: String?, role: UserRole, authorized: Boolean ->
-                if (email != null) {
-                    viewModel.createUser(email, role, name, authorized)
-                } else if (name != null) {
-                    viewModel.addAgentName(name)
-                }
-                showAddProfileDialog = false
+            onDismiss = { showCreateUserDialog = false },
+            onConfirm = { email, role, name, authorized ->
+                viewModel.createUser(email, role, name, authorized)
+                showCreateUserDialog = false
+            }
+        )
+    }
+    
+    if (showAddNameDialog) {
+        AddNameDialog(
+            onDismiss = { showAddNameDialog = false },
+            onConfirm = { name ->
+                viewModel.addAgentName(name)
+                showAddNameDialog = false
             }
         )
     }

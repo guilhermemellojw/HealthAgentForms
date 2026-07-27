@@ -80,10 +80,10 @@ fun ApprovalDialog(
 }
 
 @Composable
-fun AddProfileDialog(
+fun CreateUserDialog(
     agentNamesList: List<String>,
     onDismiss: () -> Unit,
-    onConfirm: (String?, String?, UserRole, Boolean) -> Unit
+    onConfirm: (email: String, role: UserRole, agentName: String?, isAuthorized: Boolean) -> Unit
 ) {
     var email by remember { mutableStateOf("") }
     var nameInput by remember { mutableStateOf("") }
@@ -94,76 +94,79 @@ fun AddProfileDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Novo Perfil / Agente", fontWeight = FontWeight.Bold) },
+        title = {
+            Column {
+                Text("Novo Usuário", fontWeight = FontWeight.Bold)
+                Text(
+                    "Um convite será criado. O usuário poderá acessar ao fazer login com Google.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 OutlinedTextField(
                     value = email,
                     onValueChange = { email = it },
-                    label = { Text("E-mail (Para conta Google)") },
+                    label = { Text("E-mail (obrigatório)") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
                 )
 
                 Column {
                     OutlinedTextField(
                         value = nameInput,
                         onValueChange = { nameInput = it; expandedName = true },
-                        label = { Text("Nome Completo do Agente (Lista Mestra)") },
+                        label = { Text("Nome do Agente") },
+                        placeholder = { Text("Opcional — selecione da lista mestra") },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
-                        trailingIcon = { 
+                        singleLine = true,
+                        trailingIcon = {
                             IconButton(onClick = { expandedName = !expandedName }) {
                                 Icon(Icons.Default.ArrowDropDown, null)
                             }
                         }
                     )
-                    
+
                     DropdownMenu(
                         expanded = expandedName && agentNamesList.isNotEmpty(),
                         onDismissRequest = { expandedName = false },
                         properties = PopupProperties(focusable = false),
                         modifier = Modifier.fillMaxWidth(0.8f)
                     ) {
-                        val filteredNames = agentNamesList.filter { 
-                            it.contains(nameInput, ignoreCase = true) 
-                        }.take(5)
-
-                        filteredNames.forEach { name ->
+                        agentNamesList.filter {
+                            it.contains(nameInput, ignoreCase = true)
+                        }.take(5).forEach { name ->
                             DropdownMenuItem(
                                 text = { Text(name) },
-                                onClick = { 
+                                onClick = {
                                     nameInput = name
-                                    expandedName = false 
+                                    expandedName = false
                                 }
                             )
                         }
-                        
-                        if (nameInput.isNotBlank() && !agentNamesList.contains(nameInput)) {
-                            DropdownMenuItem(
-                                text = { Text("Adicionar como novo: \"$nameInput\"") },
-                                onClick = { expandedName = false }
-                            )
-                        }
                     }
-                    
-                    Text(
-                        "O nome deve preferencialmente corresponder ao da lista oficial.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
-                    )
                 }
 
                 Box {
-                    OutlinedButton(onClick = { expandedRole = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                    OutlinedButton(
+                        onClick = { expandedRole = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
                         Text("Função: ${role.name}")
                         Spacer(modifier = Modifier.weight(1f))
                         Icon(Icons.Default.ArrowDropDown, null)
                     }
                     DropdownMenu(expanded = expandedRole, onDismissRequest = { expandedRole = false }) {
                         UserRole.entries.forEach { r ->
-                            DropdownMenuItem(text = { Text(r.name) }, onClick = { role = r; expandedRole = false })
+                            DropdownMenuItem(
+                                text = { Text(r.name) },
+                                onClick = { role = r; expandedRole = false }
+                            )
                         }
                     }
                 }
@@ -176,16 +179,50 @@ fun AddProfileDialog(
         },
         confirmButton = {
             Button(
-                onClick = { 
-                    onConfirm(
-                        email.takeIf { it.isNotBlank() }, 
-                        nameInput.takeIf { it.isNotBlank() }, 
-                        role, 
-                        authorized
-                    ) 
+                onClick = {
+                    onConfirm(email, role, nameInput.takeIf { it.isNotBlank() }, authorized)
                 },
-                enabled = email.isNotBlank() || nameInput.isNotBlank()
-            ) { Text("Criar") }
+                enabled = email.isNotBlank()
+            ) { Text("Criar Usuário") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar") }
+        }
+    )
+}
+
+@Composable
+fun AddNameDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (name: String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Adicionar Nome", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Adiciona um nome à lista mestra de agentes.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Nome") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(name.trim().uppercase()) },
+                enabled = name.isNotBlank()
+            ) { Text("Adicionar") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancelar") }
