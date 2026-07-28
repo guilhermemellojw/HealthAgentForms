@@ -81,33 +81,38 @@ fun HouseRowHeader(
                         )
                     }
                     Spacer(Modifier.width(8.dp))
-                    houseState.errorLabels.forEach { label ->
-                        Surface(
-                            color = MaterialTheme.colorScheme.error,
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = " $label ",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White,
-                                fontSize = 8.sp
-                            )
+                    if (houseState.errorLabels.isEmpty()) {
+                        val displayStreet = if (houseState.isMine) houseState.formattedStreet
+                        else "${houseState.formattedStreet} • ${house.agentName}"
+                        Text(
+                            text = displayStreet,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (isMissingStreet) FontWeight.Bold else FontWeight.Black,
+                            color = if (highlightErrors && (isMissingStreet || houseState.invalidFields.isEmpty() && houseState.treatmentShortSummary.isEmpty() && houseState.errorLabels.contains("DUPLICADO"))) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.5f),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                    } else {
+                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            houseState.errorLabels.forEach { label ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.error,
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = " $label ",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.White,
+                                        fontSize = 8.sp
+                                    )
+                                }
+                                Spacer(Modifier.width(4.dp))
+                            }
                         }
-                        Spacer(Modifier.width(4.dp))
                     }
-                    val displayStreet = if (houseState.isMine) houseState.formattedStreet
-                    else "${houseState.formattedStreet} • ${house.agentName}"
-                    Text(
-                        text = displayStreet,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = if (isMissingStreet) FontWeight.Bold else FontWeight.Black,
-                        color = if (highlightErrors && (isMissingStreet || houseState.invalidFields.isEmpty() && houseState.treatmentShortSummary.isEmpty() && houseState.errorLabels.contains("DUPLICADO"))) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.5f),
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
                 }
 
                 if (enabled) {

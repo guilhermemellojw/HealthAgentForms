@@ -404,17 +404,6 @@ class WeeklySummaryViewModel @Inject constructor(
                     }
                 }
                 
-                wasWorkingChange?.let { (wasWorking, isWorking) ->
-                    // Navigation will be handled in UI via onNavigateToDate
-                    if (isWorking) {
-                        _uiEvent.value = "SUCCESS_NAVIGATE_TO:$date"
-                    } else {
-                        val next = dayManagementUseCase.getNextBusinessDay(date, currentUid)
-                        if (next.isNotBlank()) {
-                            _uiEvent.value = "SUCCESS_NAVIGATE_TO:$next"
-                        }
-                    }
-                }
                 if (rippleError != null) {
                     _uiEvent.value = rippleError
                     soundManager.playWarning()
