@@ -152,16 +152,13 @@ class AddNewHouseUseCase @Inject constructor(
             agentUid = params.agentUid,
             data = params.currentDate,
             visitSegment = predictedSegment,
-            listOrder = maxOrder + 1
+            listOrder = maxOrder + 1,
+            uuid = java.util.UUID.randomUUID().toString()
         )
 
         val healedHouse = houseToInsert.copy(situation = houseToInsert.situation.heal())
 
-        return clashDetector.autoIncrementToAvoidClash(
-            healedHouse,
-            fullyUpToDateHouses,
-            includeVisitSegment = (params.afterId < -1)
-        )
+        return healedHouse
     }
 
     suspend fun execute(params: Params, preparedHouse: House? = null): Result = withContext(Dispatchers.IO) {

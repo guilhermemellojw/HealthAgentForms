@@ -3,7 +3,6 @@ package com.antigravity.healthagent.ui.home
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.domain.repository.HouseRepository
-import com.antigravity.healthagent.domain.usecase.ClashDetector
 import com.antigravity.healthagent.domain.usecase.DayManagementUseCase
 import com.antigravity.healthagent.utils.SoundManager
 import com.antigravity.healthagent.domain.logger.AppLogger
@@ -27,7 +26,6 @@ import javax.inject.Singleton
 class DayManagementViewModel @Inject constructor(
     private val repository: HouseRepository,
     private val dayManagementUseCase: DayManagementUseCase,
-    private val clashDetector: ClashDetector,
     private val soundManager: SoundManager
 ) {
 
@@ -102,6 +100,7 @@ class DayManagementViewModel @Inject constructor(
         currentUserUid: MutableStateFlow<String?>,
         housesInFlight: MutableStateFlow<List<House>>,
         pendingUpdateDrafts: MutableStateFlow<Map<Int, House>>,
+        moveConfirmationData: MutableStateFlow<Pair<House, String>?>,
         house: House,
         newDate: String,
         maxOpenHouses: Int,
@@ -123,7 +122,7 @@ class DayManagementViewModel @Inject constructor(
 
             if (existingWorkedInDb >= maxOpenHouses && maxOpenHouses > 0 && houseIsWorked) {
                 soundManager.playWarning()
-                uiEvent.value = "Impossível mover: Meta Diária do dia de destino atingida!"
+                moveConfirmationData.value = Pair(house, newDate)
                 return@launch
             }
             performMoveHouse(
@@ -169,33 +168,19 @@ class DayManagementViewModel @Inject constructor(
                 agentUid = uid
             )
 
-            val dbHouses = repository.getHousesByDateAndAgent(newDate, uid)
-            val overlays = pendingUpdateDrafts.value.values.filter { it.data == newDate } +
-                    housesInFlight.value.filter { it.data == newDate }
-            val latestHouses = (dbHouses + overlays).distinctBy { it.id }
-
-            val clashingHouse = clashDetector.findClash(updatedHouse, latestHouses)
-
-            if (clashingHouse != null) {
-                pendingUpdateDrafts.update { it + (updatedHouse.id to updatedHouse) }
-                uiEvent.value = "Conflito detectado no destino! Resolva em vermelho."
-                soundManager.playWarning()
-                data.value = newDate
-            } else {
-                if (updatedHouse.id == 0) {
-                    housesInFlight.update { inFlights ->
-                        inFlights.map { if (it.listOrder == house.listOrder) updatedHouse else it }
-                    }
-                } else {
-                    repository.updateHouse(updatedHouse.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
+            if (updatedHouse.id == 0) {
+                housesInFlight.update { inFlights ->
+                    inFlights.map { if (it.listOrder == house.listOrder) updatedHouse else it }
                 }
-
-                pendingUpdateDrafts.update { it - updatedHouse.id }
-
-                uiEvent.value = "Imóvel movido com sucesso para $newDate"
-                soundManager.playPop()
-                data.value = newDate
+            } else {
+                repository.updateHouse(updatedHouse.copy(isSynced = false, lastUpdated = System.currentTimeMillis()))
             }
+
+            pendingUpdateDrafts.update { it - updatedHouse.id }
+
+            uiEvent.value = "Imóvel movido com sucesso para $newDate"
+            soundManager.playPop()
+            data.value = newDate
         }
     }
 

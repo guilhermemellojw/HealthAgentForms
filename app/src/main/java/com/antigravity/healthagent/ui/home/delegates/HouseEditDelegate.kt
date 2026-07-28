@@ -184,7 +184,9 @@ class HouseEditDelegate @Inject constructor(
                         }
                         val currentDrafts = state.pendingUpdateDrafts.value
                         val currentInFlightsNow = state.housesInFlight.value
-                        val refreshedLatestHouses = (dbHousesAfter.map { currentDrafts[it.id] ?: it } + currentInFlightsNow)
+                        val refreshedLatestHouses = (dbHousesAfter.map { currentDrafts[it.id] ?: it } + currentInFlightsNow.filter { inFlight ->
+                            !dbHousesAfter.any { db -> db.generateIdentityKey() == inFlight.generateIdentityKey() }
+                        })
 
                         val finalInFlightState = state.housesInFlight.value.find {
                             it.listOrder == houseToInsert.listOrder && it.data == houseToInsert.data
@@ -398,7 +400,9 @@ class HouseEditDelegate @Inject constructor(
                     val dbHouses = repository.getHousesByDateAndAgent(state.data.value, currentUid ?: "")
                     val drafts = state.pendingUpdateDrafts.value
                     val inFlights = state.housesInFlight.value
-                    val latestHouses = (dbHouses.map { drafts[it.id] ?: it } + inFlights)
+                    val latestHouses = (dbHouses.map { drafts[it.id] ?: it } + inFlights.filter { inFlight ->
+                        !dbHouses.any { db -> db.generateIdentityKey() == inFlight.generateIdentityKey() }
+                    })
 
                     val adminBypass = state.isAdmin.value
                     val shouldForce = adminBypass || forceMerge
@@ -522,15 +526,8 @@ class HouseEditDelegate @Inject constructor(
 
         recentlyDeletedHouse?.let { house ->
             scope.launch {
-                val clashing = clashDetector.findClash(house, latestHousesList)
-
-                if (clashing != null) {
-                    state.pendingUpdateDrafts.update { it + (house.id to house.copy(id = house.id)) }
-                    state.uiEvent.value = "Imóvel restaurado com conflito detectado."
-                } else {
-                    val adminBypass = state.isAdmin.value
-                    saveHouseUseCase.insertHouse(house.copy(id = 0), latestHousesList, adminBypass)
-                }
+                val adminBypass = state.isAdmin.value
+                saveHouseUseCase.insertHouse(house.copy(id = 0), latestHousesList, adminBypass)
 
                 recentlyDeletedHouse = null
                 soundManager.playPop()
@@ -567,7 +564,7 @@ class HouseEditDelegate @Inject constructor(
                 ) ?: h.copy(isSynced = false, lastUpdated = clock.currentTimeMillis())
             }
             
-            saveHouseUseCase.updateHouses(merged, adminBypass)
+            saveHouseUseCase.updateHouses(merged.filter { it.id > 0 }, adminBypass)
             triggerDelayedValidation(500)
         }
     }

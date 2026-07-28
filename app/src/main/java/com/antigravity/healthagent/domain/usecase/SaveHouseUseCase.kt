@@ -47,7 +47,7 @@ class SaveHouseUseCase @Inject constructor(
             val recalculated = recalculateVisitSegmentsUseCase.recalculateVisitSegments(
                 dbHousesToday.sortedBy { it.listOrder }
             )
-            repository.updateHouses(recalculated, force)
+            repository.updateHouses(recalculated.filter { it.id > 0 }, force)
             streetRepository.saveCustomStreet(sanitized.address.streetName, sanitized.address.bairro)
             id
         }
@@ -115,9 +115,7 @@ class SaveHouseUseCase @Inject constructor(
                 }
             }
             
-            val newHouses = houses.filter { it.id == 0 }
-            val allToSave = (merged + newHouses).distinctBy { it.id }
-            repository.updateHouses(allToSave, force)
+            repository.updateHouses(merged, force)
         }
     }
 
@@ -129,7 +127,7 @@ class SaveHouseUseCase @Inject constructor(
             repository.deleteHouse(house, force)
             val remaining = dayHouses.filter { it.id != house.id }.sortedBy { it.listOrder }
             val recalculated = recalculateVisitSegmentsUseCase.recalculateVisitSegments(remaining)
-            repository.updateHouses(recalculated, force)
+            repository.updateHouses(recalculated.filter { it.id > 0 }, force)
         }
     }
 

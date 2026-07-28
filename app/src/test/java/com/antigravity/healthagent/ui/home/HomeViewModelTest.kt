@@ -180,7 +180,7 @@ class HomeViewModelTest {
             propertyType = PropertyType.R, situation = Situation.NONE
         )
         vm.moveHouseToDate(house, "16-06-2026")
-        verify { dayManagementViewModel.moveHouseToDate(any(), any(), any(), any(), any(), any(), any(), any(), any(), house, "16-06-2026", any(), any()) }
+        verify { dayManagementViewModel.moveHouseToDate(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), house, "16-06-2026", any(), any()) }
     }
 
     @Test

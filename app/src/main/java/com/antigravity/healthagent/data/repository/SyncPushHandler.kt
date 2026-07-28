@@ -176,8 +176,7 @@ class SyncPushHandler @Inject constructor(
                                 activitiesToPush.map { it.date.toDashDate() } +
                                 tombstones.filter { it.type == TombstoneType.ACTIVITY }.map { it.naturalKey.split("|")[0].toDashDate() } +
                                 tombstones.filter { it.type == TombstoneType.HOUSE }.mapNotNull { tk -> 
-                                    val parts = tk.naturalKey.split("_")
-                                    if (parts.size >= 3) parts[2].toDashDate() else null
+                                    tk.dataDate.takeIf { it.isNotBlank() }?.toDashDate()
                                 }
                             ).toSet() 
 

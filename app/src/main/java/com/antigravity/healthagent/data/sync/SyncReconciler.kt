@@ -224,10 +224,7 @@ class SyncReconciler @Inject constructor(
                             (System.currentTimeMillis() - existing.lastUpdated > 120000L)
 
                         if (!isAdminOverride) {
-                            val threshold = AppConstants.SYNC_CONFLICT_THRESHOLD_MS
-                            if (existing.lastUpdated > (cloudHouse.lastUpdated + threshold)) {
-                                return@mapNotNull null
-                            }
+                            return@mapNotNull null
                         }
                     }
 

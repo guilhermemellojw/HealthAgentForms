@@ -40,6 +40,7 @@ data class House(
     @ColumnInfo(defaultValue = "0") val createdAt: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
     @ColumnInfo(defaultValue = "0") val isSynced: Boolean = false,
     @ColumnInfo(defaultValue = "0") val editedByAdmin: Boolean = false,
+    @ColumnInfo(defaultValue = "''") val uuid: String = "",
     /**
      * Timestamp of the last local or remote modification.
      * 
@@ -62,6 +63,8 @@ data class House(
      * will break synchronization by changing the document ID in Firestore, leading to duplicates.
      */
     fun generateNaturalKey(): String {
+        if (uuid.isNotBlank()) return uuid
+        
         val normalizedDate = data.toDashDate()
         
         // Uniqueness is guaranteed by agentUid + normalizedAgent + date + address details + visitSegment.
@@ -73,6 +76,8 @@ data class House(
      * or visit segments shift. Used for deduplication and healing during sync.
      */
     fun generateIdentityKey(): String {
+        if (uuid.isNotBlank()) return uuid
+        
         val normalizedDate = data.toDashDate()
         
         // Identity is Agent(UID) + Day + Address Signature (excluding segment)

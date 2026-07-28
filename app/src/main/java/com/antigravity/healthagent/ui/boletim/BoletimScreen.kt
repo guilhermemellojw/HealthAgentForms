@@ -81,31 +81,34 @@ fun BoletimScreen(
     
     // Logic for Manual Date Transfer
     var moveSourceDate by remember { mutableStateOf("") }
-    if (moveSourceDate.isNotBlank()) {
-        val calendar = java.util.Calendar.getInstance()
-        try {
-            val parts = moveSourceDate.split("-")
-            if (parts.size == 3) {
-                calendar.set(parts[2].toInt(), parts[1].toInt() - 1, parts[0].toInt())
-            }
-        } catch (e: Exception) { AppLogger.e("BoletimScreen", "Erro no DatePickerDialog", e) }
+    var showMoveDatePicker by remember { mutableStateOf(false) }
 
-        DatePickerDialog(
-            context,
-            { _, year, month, dayOfMonth ->
-                val newDate = String.format(java.util.Locale("pt", "BR"), "%02d-%02d-%04d", dayOfMonth, month + 1, year)
-                if (newDate != moveSourceDate) {
-                    viewModel.moveHousesToDate(moveSourceDate, newDate)
-                    // Snackbar removed here; ViewModel's uiEvent will handle success/error feedback
+    if (showMoveDatePicker && moveSourceDate.isNotBlank()) {
+        LaunchedEffect(moveSourceDate) {
+            val calendar = java.util.Calendar.getInstance()
+            try {
+                val parts = moveSourceDate.split("-")
+                if (parts.size == 3) {
+                    calendar.set(parts[2].toInt(), parts[1].toInt() - 1, parts[0].toInt())
                 }
-                moveSourceDate = ""
-            },
-            calendar.get(java.util.Calendar.YEAR),
-            calendar.get(java.util.Calendar.MONTH),
-            calendar.get(java.util.Calendar.DAY_OF_MONTH)
-        ).apply {
-            setOnDismissListener { moveSourceDate = "" }
-            show()
+            } catch (e: Exception) { AppLogger.e("BoletimScreen", "Erro no DatePickerDialog", e) }
+
+            val dialog = DatePickerDialog(
+                context,
+                { _, year, month, dayOfMonth ->
+                    val newDate = String.format(java.util.Locale("pt", "BR"), "%02d-%02d-%04d", dayOfMonth, month + 1, year)
+                    if (newDate != moveSourceDate) {
+                        viewModel.moveHousesToDate(moveSourceDate, newDate)
+                    }
+                    moveSourceDate = ""
+                },
+                calendar.get(java.util.Calendar.YEAR),
+                calendar.get(java.util.Calendar.MONTH),
+                calendar.get(java.util.Calendar.DAY_OF_MONTH)
+            )
+            dialog.setOnDismissListener { moveSourceDate = "" }
+            showMoveDatePicker = false
+            dialog.show()
         }
     }
     
@@ -528,6 +531,7 @@ fun BoletimScreen(
                                             showMenu = false
                                             checkHistoryAndProceed(summary.date) {
                                                 moveSourceDate = summary.date
+                                                showMoveDatePicker = true
                                             }
                                         }
                                     )

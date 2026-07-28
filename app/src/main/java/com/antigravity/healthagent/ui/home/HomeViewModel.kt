@@ -503,6 +503,7 @@ class HomeViewModel @Inject constructor(
             currentUserUid = currentUserUid,
             housesInFlight = housesInFlight,
             pendingUpdateDrafts = pendingUpdateDrafts,
+            moveConfirmationData = moveConfirmationData,
             house = house,
             newDate = destinationDate,
             maxOpenHouses = maxOpenHouses.value,

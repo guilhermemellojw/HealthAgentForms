@@ -32,19 +32,18 @@ class HouseValidationUseCase @Inject constructor() {
         val errorDetails = mutableListOf<ErrorDetail>()
         val errorHouseIds = mutableSetOf<Int>()
 
-        // 1. Duplicate Validation (Bairro + Address)
-        val duplicateGroups = currentHouses.groupBy { house ->
-            generateIdentitySignature(house)
-        }.filter { it.value.size > 1 }
-
-        duplicateGroups.forEach { (_, houses) ->
-            houses.forEach { house ->
-                errorHouseIds.add(house.id)
+        // 1. Proximity Duplicate Validation (Adjacent Houses)
+        for (i in 1 until currentHouses.size) {
+            val current = currentHouses[i]
+            val previous = currentHouses[i - 1]
+            
+            if (generateIdentitySignature(current) == generateIdentitySignature(previous)) {
+                errorHouseIds.add(current.id)
                 errorDetails.add(ErrorDetail(
-                    houseId = house.id,
-                    streetName = house.address.streetName,
-                    location = getFullAddressDisplay(house),
-                    description = "Endereço Duplicado no mesmo segmento (Mova este imóvel ou altere o número)",
+                    houseId = current.id,
+                    streetName = current.address.streetName,
+                    location = getFullAddressDisplay(current),
+                    description = "Endereço Duplicado (imóvel adjacente idêntico)",
                     isDuplicate = true
                 ))
             }

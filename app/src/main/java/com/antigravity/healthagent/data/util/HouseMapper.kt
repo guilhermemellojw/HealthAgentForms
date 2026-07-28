@@ -66,7 +66,7 @@ fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): Hous
                 focusCaptureTime = (this.get("focusCaptureTime") as? Number)?.toLong()
             ),
             editedByAdmin = this.getBoolean("editedByAdmin") ?: false
-        ).copy(id = 0)
+        ).copy(id = 0, uuid = this@toHouseSafe.getString("uuid") ?: "")
 
         val createdAtRaw = this.get("createdAt")
         val createdAt = when(createdAtRaw) {
@@ -175,6 +175,7 @@ fun House.toFirestoreMap(): Map<String, Any?> {
         "listOrder" to listOrder,
         "visitSegment" to visitSegment,
         "agentUid" to agentUid,
+        "uuid" to uuid,
         "lastSyncTime" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
         "createdAt" to createdAt,
         "observation" to observation,

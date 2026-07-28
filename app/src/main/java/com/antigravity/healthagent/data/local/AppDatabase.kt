@@ -20,7 +20,7 @@ import com.antigravity.healthagent.data.local.model.Tombstone
         com.antigravity.healthagent.data.local.model.CachedAgent::class,
         com.antigravity.healthagent.data.local.model.CachedAgentSummary::class
     ], 
-    version = 39, 
+    version = 40, 
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -32,6 +32,19 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun agentCacheDao(): com.antigravity.healthagent.data.local.dao.AgentCacheDao
 
     companion object {
+        val MIGRATION_39_40 = object : androidx.room.migration.Migration(39, 40) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // v39->40: Add UUID column for house identity, replacing address-based uniqueness
+                try {
+                    database.execSQL("ALTER TABLE houses ADD COLUMN `uuid` TEXT NOT NULL DEFAULT ''")
+                } catch (e: Exception) {
+                    if (e.message?.contains("duplicate column name", ignoreCase = true) != true) {
+                        android.util.Log.e("AppDatabase", "Error adding uuid to houses: ${e.message}")
+                    }
+                }
+            }
+        }
+
         val MIGRATION_37_38 = object : androidx.room.migration.Migration(37, 38) {
             override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
                 // Clean Code refactoring: @Embedded TreatmentData, DailyContext, GeoCapture.
@@ -453,6 +466,7 @@ abstract class AppDatabase : RoomDatabase() {
                     `isSynced` INTEGER NOT NULL DEFAULT 0,
                     `editedByAdmin` INTEGER NOT NULL DEFAULT 0,
                     `lastUpdated` INTEGER NOT NULL DEFAULT 0,
+                    `uuid` TEXT NOT NULL DEFAULT '',
                     `blockNumber` TEXT NOT NULL,
                     `blockSequence` TEXT NOT NULL,
                     `streetName` TEXT NOT NULL,
