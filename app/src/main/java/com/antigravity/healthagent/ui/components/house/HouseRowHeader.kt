@@ -1,7 +1,9 @@
 package com.antigravity.healthagent.ui.components.house
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
@@ -19,7 +21,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.ui.components.LockBanner
 import com.antigravity.healthagent.ui.components.LockBannerStyle
 import com.antigravity.healthagent.ui.components.action.ActionIcon
@@ -92,10 +93,15 @@ fun HouseRowHeader(
                             else MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.5f),
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
+                            modifier = Modifier.weight(1f)
                         )
                     } else {
-                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(rememberScrollState()),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             houseState.errorLabels.forEach { label ->
                                 Surface(
                                     color = MaterialTheme.colorScheme.error,
@@ -115,31 +121,30 @@ fun HouseRowHeader(
                     }
                 }
 
-                if (enabled) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        ActionIcon.Badge(
-                            icon = if (house.observation.isNotBlank()) Icons.Default.NoteAlt else Icons.Default.EditNote,
-                            onClick = onShowObservation,
-                            contentDescription = "Ver Observação",
-                            hasBadge = house.observation.isNotBlank(),
-                            badgeColor = MaterialTheme.colorScheme.tertiary,
-                            tint = if (house.observation.isNotBlank()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
-                        )
-                        ActionIcon.Standard(
-                            icon = Icons.Default.DateRange,
-                            onClick = onMoveDate,
-                            contentDescription = "Mover Data",
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        val treatmentEnabled = enabled && (house.situation == Situation.NONE || house.situation == Situation.EMPTY)
-                        ActionIcon.Standard(
-                            icon = Icons.Default.Opacity,
-                            onClick = onShowTreatment,
-                            contentDescription = "Tratamento",
-                            tint = MaterialTheme.colorScheme.primary,
-                            enabled = treatmentEnabled,
-                        )
-                    }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ActionIcon.Badge(
+                        icon = if (house.observation.isNotBlank()) Icons.Default.NoteAlt else Icons.Default.EditNote,
+                        onClick = onShowObservation,
+                        contentDescription = "Ver Observação",
+                        hasBadge = house.observation.isNotBlank(),
+                        badgeColor = MaterialTheme.colorScheme.tertiary,
+                        tint = if (house.observation.isNotBlank()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                        enabled = enabled,
+                    )
+                    ActionIcon.Standard(
+                        icon = Icons.Default.DateRange,
+                        onClick = onMoveDate,
+                        contentDescription = "Mover Data",
+                        tint = MaterialTheme.colorScheme.primary,
+                        enabled = enabled,
+                    )
+                    ActionIcon.Standard(
+                        icon = Icons.Default.Opacity,
+                        onClick = onShowTreatment,
+                        contentDescription = "Tratamento",
+                        tint = MaterialTheme.colorScheme.primary,
+                        enabled = enabled,
+                    )
                 }
             }
         }

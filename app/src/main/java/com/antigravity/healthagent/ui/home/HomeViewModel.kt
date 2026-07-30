@@ -362,6 +362,7 @@ class HomeViewModel @Inject constructor(
                 if (isEffectivelyClosed && !isAdmin.value) {
                     uiEvent.value = "Dia fechado. Desbloqueie para editar o tratamento."
                     soundManager.playWarning()
+                    closeTreatmentDialog()
                     return@launch
                 }
 
@@ -555,12 +556,17 @@ class HomeViewModel @Inject constructor(
         _navigationTab.value = 0
     }
 
-    fun navigateToErroneousDay(d: String) { 
+    fun navigateToErroneousDay(d: String) {
         viewModelScope.launch {
             val effectiveUid = remoteAgentUid.value ?: currentUserUid.value
             val activity = dayManagementUseCase.getDayActivity(d, effectiveUid)
             if (activity?.isClosed == true) {
-                dayManagementUseCase.unlockDay(d, effectiveUid)
+                if (dayManagementUseCase.canSafelyUnlock(d, effectiveUid, isAdmin.value)) {
+                    dayManagementUseCase.unlockDay(d, effectiveUid)
+                } else {
+                    uiEvent.value = "Este dia está fechado. Desbloqueie-o manualmente para editar."
+                    soundManager.playWarning()
+                }
             }
             data.value = d
             showMultiDayErrorDialog.value = false

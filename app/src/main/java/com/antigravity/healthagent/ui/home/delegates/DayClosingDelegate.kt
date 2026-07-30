@@ -116,9 +116,16 @@ class DayClosingDelegate @Inject constructor(
                     val activity = dayManagementUseCase.getDayActivity(currentData, effectiveUid)
                         ?: DayActivity(date = currentData, agentName = currentAgent, agentUid = effectiveUid ?: "")
 
-                    repository.updateDayActivity(activity.copy(isManualUnlock = !manualUnlock), isAdmin)
+                    val newManualUnlock = !manualUnlock
+                    repository.updateDayActivity(
+                        activity.copy(
+                            isManualUnlock = newManualUnlock,
+                            isClosed = if (newManualUnlock) false else true
+                        ),
+                        isAdmin
+                    )
 
-                    if (!manualUnlock) {
+                    if (newManualUnlock) {
                         state.uiEvent.value = "Edição extra habilitada para este dia."
                     } else {
                         state.uiEvent.value = "Edição extra desabilitada."
