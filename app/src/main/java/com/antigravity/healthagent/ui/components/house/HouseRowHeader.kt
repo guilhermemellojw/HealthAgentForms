@@ -61,11 +61,13 @@ fun HouseRowHeader(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(40.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 // Info de Localização (Esquerda)
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Surface(
                         color = if (highlightErrors && isMissingBlock) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
                         else Color.Transparent,
@@ -93,13 +95,10 @@ fun HouseRowHeader(
                             else MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.5f),
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
                         )
                     } else {
                         Row(
-                            modifier = Modifier
-                                .weight(1f)
-                                .horizontalScroll(rememberScrollState()),
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             houseState.errorLabels.forEach { label ->
