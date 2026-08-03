@@ -317,7 +317,7 @@ fun ReorderableHouseList(
                         }
                         val onMoveUp = remember(house.id) { { onMoveHouse(house, true); Unit } }
                         val onMoveDown = remember(house.id) { { onMoveHouse(house, false); Unit } }
-                        val onEnableReorder = remember(isEasyMode, house.id) {
+                        val onEnableReorder = remember(isEasyMode, house.id, isReorderMode) {
                             {
                                 val nextMode = !isReorderMode
                                 onReorderModeChange(nextMode)

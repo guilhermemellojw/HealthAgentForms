@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Calendar
+import java.util.Collections
 import javax.inject.Inject
 
 @HiltViewModel
@@ -444,6 +445,16 @@ class HomeViewModel @Inject constructor(
         houseEditDelegate.persistListOrder(viewModelScope, this, housesToList, ::triggerDelayedValidation)
         _reorderMode = false
         _reorderHouses.value = emptyList()
+    }
+
+    fun moveHouseEasyReorder(house: House, moveUp: Boolean) {
+        val list = _reorderHouses.value.toMutableList()
+        val index = list.indexOfFirst { it.house.id == house.id }
+        if (index == -1) return
+        if (moveUp && index > 0) Collections.swap(list, index, index - 1)
+        else if (!moveUp && index < list.size - 1) Collections.swap(list, index, index + 1)
+        else return
+        _reorderHouses.value = list
     }
 
     // ──────────────────────────────────────────────────────────

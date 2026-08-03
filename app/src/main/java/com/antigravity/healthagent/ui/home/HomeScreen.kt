@@ -165,6 +165,7 @@ fun HomeScreen(
     // Intercept system back button ONLY for Reorder Mode or Search
     androidx.activity.compose.BackHandler(enabled = isReorderMode || isSearchActive) {
         if (isReorderMode) {
+            if (uiState.isEasyMode) viewModel.cancelReorderMode()
             isReorderMode = false
         } else if (isSearchActive) {
             isSearchActive = false
@@ -393,7 +394,10 @@ fun HomeScreen(
                 isSearchActive = isSearchActive,
                 isReorderMode = isReorderMode,
                 onSearchActiveChange = { isSearchActive = it },
-                onReorderModeChange = { isReorderMode = it },
+                onReorderModeChange = { newMode ->
+                    if (!newMode && uiState.isEasyMode && isReorderMode) viewModel.cancelReorderMode()
+                    isReorderMode = newMode
+                },
                 strictPendingHousesCount = strictPendingHousesCount,
                 onSearchQueryChange = { viewModel.updateSearchQuery(it) },
                 onLockClick = {
@@ -520,7 +524,13 @@ fun HomeScreen(
                     listState = listState,
                     isSearchActive = isSearchActive,
                     isReorderMode = isReorderMode,
-                    onReorderModeChange = { isReorderMode = it },
+                    onReorderModeChange = { newMode ->
+                        if (uiState.isEasyMode) {
+                            if (newMode) viewModel.startReorderMode(uiState.houses)
+                            else viewModel.persistReorderList()
+                        }
+                        isReorderMode = newMode
+                    },
                     streetSuggestions = streetSuggestions,
                     snackbarHostState = snackbarHostState,
                     onUpdateHeader = { m, b, c, z, t, d, ci, a ->
@@ -536,7 +546,13 @@ fun HomeScreen(
                     onHouseUpdate = { id, updater -> viewModel.updateHouseField(id, updater) },
                     onHouseDelete = { viewModel.deleteHouse(it) },
                     onHouseRestore = { viewModel.restoreDeletedHouse() },
-                    onMoveHouse = { house, moveUp -> viewModel.moveHouse(house, moveUp) },
+                    onMoveHouse = { house, moveUp ->
+                        if (uiState.isEasyMode && isReorderMode) {
+                            viewModel.moveHouseEasyReorder(house, moveUp)
+                        } else {
+                            viewModel.moveHouse(house, moveUp)
+                        }
+                    },
                     onMoveHouseDate = {
                         houseToMove = it
                         showMoveDatePicker = true
