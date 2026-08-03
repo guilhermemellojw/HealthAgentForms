@@ -203,7 +203,8 @@ class SyncReconciler @Inject constructor(
                         val dayActivity = localActivities[dateKey]?.firstOrNull()
                         val cloudActivity = activitiesDelta.find { it.date.replace("/", "-") == normalizedDate }
 
-                        val isCloudUnlocked = cloudActivity?.isManualUnlock == true
+                        val isCloudUnlocked = cloudActivity?.isManualUnlock == true &&
+                            cloudActivity.lastUpdated > (dayActivity?.lastUpdated ?: 0L) + AppConstants.SYNC_CONFLICT_THRESHOLD_MS
                         val isLocallyClosed = dayActivity?.isClosed == true && dayActivity.isManualUnlock != true
 
                         if (isLocallyClosed && !isCloudUnlocked && !cloudHouse.editedByAdmin && !isTargetDifferentUser) {
@@ -248,11 +249,12 @@ class SyncReconciler @Inject constructor(
                     val existing = localActivities[key]?.firstOrNull()
 
                     if (existing != null && !existing.isSynced) {
-                        val isRemoteUnlock = activity.isManualUnlock && !existing.isManualUnlock
+                        val threshold = AppConstants.SYNC_CONFLICT_THRESHOLD_MS
+
+                        val isRemoteUnlock = activity.isManualUnlock && !existing.isManualUnlock &&
+                            activity.lastUpdated > (existing.lastUpdated + threshold)
                         val isAdminOverride = activity.editedByAdmin && !existing.editedByAdmin &&
                             (System.currentTimeMillis() - existing.lastUpdated > 120000L)
-
-                        val threshold = AppConstants.SYNC_CONFLICT_THRESHOLD_MS
 
                         if (!isRemoteUnlock && !isAdminOverride && existing.lastUpdated > (activity.lastUpdated + threshold)) {
                             return@mapNotNull null
