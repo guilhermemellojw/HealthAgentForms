@@ -76,6 +76,9 @@ interface HouseDao {
     @Query("SELECT * FROM houses WHERE REPLACE(data, '/', '-') = REPLACE(:date, '/', '-') AND agentUid = :agentUid ORDER BY listOrder ASC")
     suspend fun getHousesByDateAndAgent(date: String, agentUid: String): List<House>
 
+    @Query("SELECT * FROM houses WHERE REPLACE(data, '/', '-') = REPLACE(:date, '/', '-') AND agentUid = :agentUid ORDER BY listOrder ASC, id ASC")
+    fun getHousesByDateAndAgentFlow(date: String, agentUid: String): Flow<List<House>>
+
     @Transaction
     suspend fun upsertHouses(houses: List<House>) {
         // We use Upsert (insertAll with REPLACE) to update cloud data locally 

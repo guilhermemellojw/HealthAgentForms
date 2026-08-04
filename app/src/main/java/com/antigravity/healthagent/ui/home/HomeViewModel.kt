@@ -92,6 +92,8 @@ class HomeViewModel @Inject constructor(
     private val _isSyncPullActive = MutableStateFlow(false)
     val isSyncPullActive: StateFlow<Boolean> = _isSyncPullActive.asStateFlow()
 
+    private val dayErrorTracker = DayErrorTracker(houseValidationUseCase)
+
     fun setSyncPullActive(active: Boolean) {
         _isSyncPullActive.value = active
     }
@@ -163,7 +165,25 @@ class HomeViewModel @Inject constructor(
     }.distinctUntilChanged()
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-        val latestHouses: StateFlow<List<House>> = combine(
+    // Day-scoped DB flow: only the houses of the active date for the effective agent.
+    // Emits (date, houses) so consumers never see stale houses under a new date.
+    // Keeps the Home hot path O(day) instead of O(history) for old profiles.
+    val dayHousesFlow: StateFlow<Pair<String, List<House>>> = combine(
+        data,
+        remoteAgentUid,
+        currentUserUid
+    ) { date, remoteUid, currentUid ->
+        (remoteUid ?: currentUid) to date
+    }.flatMapLatest { (uid, date) ->
+        if (uid != null) {
+            repository.getHousesByDateAndAgentFlow(date, uid).map { date to it }
+        } else {
+            kotlinx.coroutines.flow.flowOf(date to emptyList())
+        }
+    }.distinctUntilChanged()
+    .stateIn(viewModelScope, SharingStarted.Eagerly, "" to emptyList())
+
+    val latestHouses: StateFlow<List<House>> = combine(
             allHousesFlow,
             pendingUpdateDrafts,
             housesInFlight
@@ -204,23 +224,20 @@ class HomeViewModel @Inject constructor(
 
     val houses: StateFlow<List<House>> = latestHouses
 
-    val daysWithErrors: StateFlow<List<DayErrorSummary>> = houses.map { all ->
-        try {
-            all.groupBy { it.data }
-                .mapNotNull { (date, h) -> 
-                    val validationResult = houseValidationUseCase.validateCurrentDay(date, h, strict = true)
-                    if (!validationResult.isValid) {
-                        val errorCount = h.count { !houseValidationUseCase.isHouseValid(it, strict = true) }
-                        if (errorCount > 0) DayErrorSummary(date, errorCount) else null
-                    } else null
-                }
-                .sortedByDescending { HouseQueryHelper.getTimestamp(it.date) }
-        } catch (e: Exception) {
-            emptyList()
+    // Delta-based: only re-validates days whose houses changed, debounced to coalesce
+    // consecutive save bursts (e.g. batch reorder writes).
+    @OptIn(FlowPreview::class)
+    val daysWithErrors: StateFlow<List<DayErrorSummary>> = houses
+        .debounce(400)
+        .map { all ->
+            try {
+                dayErrorTracker.compute(all)
+            } catch (e: Exception) {
+                emptyList()
+            }
         }
-    }
-    .flowOn(Dispatchers.Default)
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val currentWeekDates: StateFlow<List<String>> = _currentWeekStart.map { start ->
         val dates = mutableListOf<String>()
@@ -278,7 +295,7 @@ class HomeViewModel @Inject constructor(
         initializationDelegate.initialize(
             scope = viewModelScope,
             viewModel = this,
-            latestHousesFlow = latestHouses,
+            dayHousesFlow = dayHousesFlow,
             allHousesFlow = allHousesFlow,
             easyMode = easyMode,
             solarMode = solarMode,

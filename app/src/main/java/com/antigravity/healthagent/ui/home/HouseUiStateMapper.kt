@@ -5,6 +5,65 @@ import com.antigravity.healthagent.domain.model.heal
 import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
 import com.antigravity.healthagent.utils.formatStreetName
 
+data class CachedHouseUi(
+    val house: House,
+    val isDuplicate: Boolean,
+    val isRecentlyEdited: Boolean,
+    val isHighlighted: Boolean,
+    val isMine: Boolean,
+    val ui: HouseUiState
+)
+
+data class MappedDayResult(
+    val states: List<HouseUiState>,
+    val cache: Map<Int, CachedHouseUi>
+)
+
+/**
+ * Incremental day mapping: only re-renders cards whose inputs (house content or flags)
+ * actually changed. Previous state is reused for unchanged houses, keeping the hot
+ * path O(changed) instead of O(day) per save.
+ */
+fun mapDayIncremental(
+    houses: List<House>,
+    previous: Map<Int, CachedHouseUi>,
+    generateHouseKey: (House) -> String,
+    recentlyEditedHouseIds: Map<Int, Long>,
+    highlightedId: Int?,
+    myUid: String,
+    mapper: (House, Boolean, Boolean, Boolean, Boolean) -> HouseUiState
+): MappedDayResult {
+    val keys = houses.map { generateHouseKey(it) }
+    val counts = HashMap<String, Int>(keys.size * 2)
+    keys.forEach { key -> counts[key] = (counts[key] ?: 0) + 1 }
+
+    val states = ArrayList<HouseUiState>(houses.size)
+    val newCache = HashMap<Int, CachedHouseUi>(previous.size * 2)
+    for (i in houses.indices) {
+        val house = houses[i]
+        val isDuplicate = (counts[keys[i]] ?: 0) > 1
+        val isRecentlyEdited = recentlyEditedHouseIds.containsKey(house.id)
+        val isHighlighted = house.id == highlightedId
+        val isMine = house.agentUid == myUid
+
+        val cached = previous[house.id]
+        val ui = if (cached != null &&
+            cached.house == house &&
+            cached.isDuplicate == isDuplicate &&
+            cached.isRecentlyEdited == isRecentlyEdited &&
+            cached.isHighlighted == isHighlighted &&
+            cached.isMine == isMine
+        ) {
+            cached.ui
+        } else {
+            mapper(house, isDuplicate, isRecentlyEdited, isHighlighted, isMine)
+        }
+        newCache[house.id] = CachedHouseUi(house, isDuplicate, isRecentlyEdited, isHighlighted, isMine, ui)
+        states.add(ui)
+    }
+    return MappedDayResult(states, newCache)
+}
+
 object HouseUiStateMapper {
     fun map(
         house: House, 

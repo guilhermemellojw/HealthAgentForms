@@ -10,6 +10,7 @@ import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.domain.model.VisitAddress
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -105,6 +106,57 @@ class HouseDaoTest {
         )
         
         assertEquals("Deve detectar 1 clash (duplicidade) com a casa já existente", 1, clashCount)
+    }
+
+    @Test
+    fun getHousesByDateAndAgentFlow_returnsOnlyMatchingDateAndAgent() = runBlocking {
+        val agentUid = "flow_uid_1"
+        val otherUid = "flow_uid_2"
+        val date = "25-05-2026"
+        val otherDate = "26-05-2026"
+
+        listOf(
+            House(data = date, agentUid = agentUid, lastUpdated = 1L),
+            House(data = otherDate, agentUid = agentUid, lastUpdated = 2L),
+            House(data = date, agentUid = otherUid, lastUpdated = 3L)
+        ).forEach { houseDao.insertHouse(it) }
+
+        val result = houseDao.getHousesByDateAndAgentFlow(date, agentUid).first()
+
+        assertEquals("Must return only the houses of the given date+agent", 1, result.size)
+        assertEquals(date, result[0].data)
+        assertEquals(agentUid, result[0].agentUid)
+    }
+
+    @Test
+    fun getHousesByDateAndAgentFlow_normalizesSlashDate() = runBlocking {
+        val agentUid = "flow_uid_3"
+        val dashDate = "25-05-2026"
+        val slashDate = "25/05/2026"
+
+        houseDao.insertHouse(House(data = dashDate, agentUid = agentUid, lastUpdated = 1L))
+
+        val result = houseDao.getHousesByDateAndAgentFlow(slashDate, agentUid).first()
+
+        assertEquals(1, result.size)
+        assertEquals(dashDate, result[0].data)
+    }
+
+    @Test
+    fun getHousesByDateAndAgentFlow_orderedByListOrder() = runBlocking {
+        val agentUid = "flow_uid_4"
+        val date = "25-05-2026"
+
+        listOf(
+            House(data = date, agentUid = agentUid, listOrder = 5L, lastUpdated = 1L),
+            House(data = date, agentUid = agentUid, listOrder = 1L, lastUpdated = 2L),
+            House(data = date, agentUid = agentUid, listOrder = 3L, lastUpdated = 3L)
+        ).forEach { houseDao.insertHouse(it) }
+
+        val result = houseDao.getHousesByDateAndAgentFlow(date, agentUid).first()
+
+        assertEquals(3, result.size)
+        assertEquals(listOf(1L, 3L, 5L), result.map { it.listOrder })
     }
 
     @Test

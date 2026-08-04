@@ -266,6 +266,10 @@ class HouseRepositoryImpl @Inject constructor(
         return houseDao.getHousesByDateAndAgent(date, agentUid)
     }
 
+    override fun getHousesByDateAndAgentFlow(date: String, agentUid: String): Flow<List<House>> {
+        return houseDao.getHousesByDateAndAgentFlow(date, agentUid)
+    }
+
     override fun getDayActivities(dates: List<String>, agentUid: String?): Flow<List<DayActivity>> {
         return dayActivityDao.getDayActivities(dates, agentUid ?: "")
     }

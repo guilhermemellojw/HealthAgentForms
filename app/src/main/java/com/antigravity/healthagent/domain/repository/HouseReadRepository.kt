@@ -29,6 +29,7 @@ interface HouseReadRepository {
     fun getHousesByAgentSnapshotFlow(agentUid: String): Flow<List<House>>
     fun getParticipatoryHousesFlow(agentUid: String): Flow<List<House>>
     suspend fun getHousesByDateAndAgent(date: String, agentUid: String): List<House>
+    fun getHousesByDateAndAgentFlow(date: String, agentUid: String): Flow<List<House>>
     suspend fun getLastHouseForAgent(agentUid: String): House?
     suspend fun getLastHouseForAgentOnDate(agentUid: String, date: String): House?
     fun getDayActivities(dates: List<String>, agentUid: String? = null): Flow<List<DayActivity>>

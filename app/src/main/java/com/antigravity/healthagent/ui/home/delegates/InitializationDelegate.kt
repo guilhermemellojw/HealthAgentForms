@@ -10,6 +10,8 @@ import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.ui.home.DashboardTotals
 import com.antigravity.healthagent.ui.home.HomeViewModel
 import com.antigravity.healthagent.ui.home.HouseUiStateMapper
+import com.antigravity.healthagent.ui.home.mapDayIncremental
+import com.antigravity.healthagent.ui.home.CachedHouseUi
 import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.utils.formatStreetName
@@ -45,7 +47,7 @@ class InitializationDelegate @Inject constructor(
     fun initialize(
         scope: CoroutineScope,
         viewModel: HomeViewModel,
-        latestHousesFlow: kotlinx.coroutines.flow.StateFlow<List<House>>,
+        dayHousesFlow: kotlinx.coroutines.flow.StateFlow<Pair<String, List<House>>>,
         allHousesFlow: kotlinx.coroutines.flow.StateFlow<List<House>>,
         easyMode: kotlinx.coroutines.flow.StateFlow<Boolean>,
         solarMode: kotlinx.coroutines.flow.StateFlow<Boolean>,
@@ -85,29 +87,24 @@ class InitializationDelegate @Inject constructor(
         // CRITICAL: Auto-load header context ONLY when active date changes OR database finishes initial load
         scope.launch(trackedJob) {
             var lastInitializedDate: String? = null
-            combine(viewModel.data, latestHousesFlow) { date, houses ->
-                date to houses
-            }.collect { (date, houses) ->
-                if (lastInitializedDate != date) {
-                    val dayHouses = houses.filter { it.data == date }
-                    if (dayHouses.isNotEmpty()) {
-                        val ref = dayHouses.first()
-                        viewModel.municipio.value = ref.context.municipio.uppercase()
-                        viewModel.bairro.value = ref.address.bairro.uppercase()
-                        viewModel.categoria.value = ref.context.categoria.uppercase()
-                        viewModel.zona.value = ref.context.zona.uppercase()
-                        viewModel.tipo.value = ref.context.tipo
-                        viewModel.ciclo.value = ref.context.ciclo.uppercase()
-                        viewModel.atividade.value = ref.context.atividade
+            dayHousesFlow.collect { (date, dayHouses) ->
+                if (lastInitializedDate != date && dayHouses.isNotEmpty()) {
+                    val ref = dayHouses.first()
+                    viewModel.municipio.value = ref.context.municipio.uppercase()
+                    viewModel.bairro.value = ref.address.bairro.uppercase()
+                    viewModel.categoria.value = ref.context.categoria.uppercase()
+                    viewModel.zona.value = ref.context.zona.uppercase()
+                    viewModel.tipo.value = ref.context.tipo
+                    viewModel.ciclo.value = ref.context.ciclo.uppercase()
+                    viewModel.atividade.value = ref.context.atividade
 
-                        // SURGICAL: Auto-load block and street from the last house of the day to ensure property prediction continuity
-                        val lastRef = dayHouses.last()
-                        viewModel.currentBlock.value = lastRef.address.blockNumber.uppercase()
-                        viewModel.currentBlockSequence.value = lastRef.address.blockSequence.uppercase()
-                        viewModel.currentStreet.value = lastRef.address.streetName
+                    // SURGICAL: Auto-load block and street from the last house of the day to ensure property prediction continuity
+                    val lastRef = dayHouses.last()
+                    viewModel.currentBlock.value = lastRef.address.blockNumber.uppercase()
+                    viewModel.currentBlockSequence.value = lastRef.address.blockSequence.uppercase()
+                    viewModel.currentStreet.value = lastRef.address.streetName
 
-                        lastInitializedDate = date
-                    }
+                    lastInitializedDate = date
                 }
             }
         }
@@ -145,28 +142,39 @@ class InitializationDelegate @Inject constructor(
         // CRITICAL: House List + Dashboard Totals + Validation (merged to reduce uiState.update calls)
         //
         // pendingUpdateDrafts is included as an input so that when the merged collector
-        // is triggered by recentlyEditedHouseIds (which fires before latestHousesFlow
+        // is triggered by recentlyEditedHouseIds (which fires before dayHousesFlow
         // re-emits on Dispatchers.Default), the mapping always applies the latest draft
         // values. This eliminates the flicker where the collector would momentarily
-        // overwrite the UI with stale (pre-draft) data from latestHousesFlow.
+        // overwrite the UI with stale (pre-draft) data from the DB flow.
+        //
+        // Day-scoped: consumes dayHousesFlow (date, houses) so edits only cost O(day).
+        // Cards are mapped incrementally (mapDayIncremental) — only changed houses
+        // are re-rendered; the cache is reset on day change.
         scope.launch(trackedJob) {
+            var lastMappedDay: String? = null
+            var mappedCache: Map<Int, CachedHouseUi> = emptyMap()
             @Suppress("UNCHECKED_CAST")
             combine(
-                latestHousesFlow, viewModel.data, viewModel.recentlyEditedHouseIds,
+                dayHousesFlow, viewModel.recentlyEditedHouseIds,
                 viewModel.highlightedHouseId, viewModel.currentUserUid,
                 viewModel.validationErrorHouseIds, viewModel.isDuplicateIds,
-                viewModel.pendingUpdateDrafts
+                viewModel.pendingUpdateDrafts, viewModel.housesInFlight
             ) { args ->
-                val h = args[0] as List<House>
-                val d = args[1] as String
-                val recentlyEdited = args[2] as Map<Int, Long>
-                val highlightedId = args[3] as Int?
-                val myUid = args[4] as String
-                val errorIds = args[5] as Set<Int>
-                val duplicateIds = args[6] as Set<Int>
-                val drafts = args[7] as Map<Int, House>
+                val (day, dayDb) = args[0] as Pair<String, List<House>>
+                val recentlyEdited = args[1] as Map<Int, Long>
+                val highlightedId = args[2] as Int?
+                val myUid = args[3] as String
+                val errorIds = args[4] as Set<Int>
+                val duplicateIds = args[5] as Set<Int>
+                val drafts = args[6] as Map<Int, House>
+                val inFlights = args[7] as List<House>
 
-                val dayHouses = h.filter { it.data == d }
+                val dayNorm = day.replace("/", "-")
+                val dayInFlights = inFlights.filter { inFlight ->
+                    inFlight.data.replace("/", "-") == dayNorm &&
+                    !dayDb.any { db -> db.generateIdentityKey() == inFlight.generateIdentityKey() }
+                }
+                val dayHouses = (dayDb + dayInFlights).sortedBy { it.listOrder }
 
                 val dayHousesWithDrafts = dayHouses.map { house ->
                     drafts[house.id] ?: house
@@ -174,22 +182,30 @@ class InitializationDelegate @Inject constructor(
 
                 val totals = calculateDashboardTotals(dayHousesWithDrafts)
 
-                val houseKeys = dayHousesWithDrafts.associateWith { generateHouseKey(it) }
-                val identityCounts = mutableMapOf<String, Int>()
-                houseKeys.values.forEach { key ->
-                    identityCounts[key] = (identityCounts[key] ?: 0) + 1
-                }
-
-                val mapped = dayHousesWithDrafts.map { hh ->
-                    val key = houseKeys[hh]!!
-                    HouseUiStateMapper.map(
-                        house = hh,
-                        houseValidationUseCase = houseValidationUseCase,
-                        isDuplicate = (identityCounts[key] ?: 0) > 1,
-                        isRecentlyEdited = recentlyEdited.containsKey(hh.id),
-                        isHighlighted = hh.id == highlightedId,
-                        isMine = hh.agentUid == myUid
-                    )
+                val mapped = run {
+                    if (lastMappedDay != dayNorm) {
+                        lastMappedDay = dayNorm
+                        mappedCache = emptyMap()
+                    }
+                    val result = mapDayIncremental(
+                        houses = dayHousesWithDrafts,
+                        previous = mappedCache,
+                        generateHouseKey = generateHouseKey,
+                        recentlyEditedHouseIds = recentlyEdited,
+                        highlightedId = highlightedId,
+                        myUid = myUid
+                    ) { house, isDuplicate, isRecentlyEdited, isHighlighted, isMine ->
+                        HouseUiStateMapper.map(
+                            house = house,
+                            houseValidationUseCase = houseValidationUseCase,
+                            isDuplicate = isDuplicate,
+                            isRecentlyEdited = isRecentlyEdited,
+                            isHighlighted = isHighlighted,
+                            isMine = isMine
+                        )
+                    }
+                    mappedCache = result.cache
+                    result.states
                 }
 
                 val dayErrorCount = dayHousesWithDrafts.count { it.id in errorIds }
