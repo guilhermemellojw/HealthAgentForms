@@ -28,18 +28,30 @@ class SaveHouseUseCase @Inject constructor(
             val sanitized = sanitizeHouse(house)
 
             // DUPLICATE GUARD: Prevent DB-level duplicates from stale in-memory state
-            // (e.g. rapid adds where Room Flow hasn't emitted yet)
+            // (e.g. rapid adds where Room Flow hasn't emitted yet).
+            // Uses the PHYSICAL key (never uuid) so a freshly-random-UUID'd house that
+            // matches an existing address is detected. On a match we advance the
+            // prediction to the next free house instead of silently skipping, keeping
+            // rapid one-tap adds useful (51 -> 52 -> 53...).
             val normalizedData = sanitized.data.toDashDate()
+            val tGuard = System.currentTimeMillis()
             val existingHouses = repository.getHousesByDateAndAgent(normalizedData, sanitized.agentUid)
             val existingDuplicate = existingHouses.find {
-                it.generateIdentityKey() == sanitized.generateIdentityKey()
+                it.id != sanitized.id && it.generatePhysicalKey() == sanitized.generatePhysicalKey()
             }
+            var toInsert = sanitized
             if (existingDuplicate != null) {
-                AppLogger.w("PERSIST_DEBUG", "DUPLICATE_GUARD: Skipped insert. Existing id=${existingDuplicate.id} key=${sanitized.generateIdentityKey()}")
-                return@runInTransaction existingDuplicate.id.toLong()
+                AppLogger.w("PERSIST_DEBUG", "DUPLICATE_GUARD: found existing id=${existingDuplicate.id} key=${sanitized.generatePhysicalKey()}. Advancing to next free house.")
+                val bumped = advanceToNextFree(sanitized, existingHouses)
+                if (bumped == null) {
+                    AppLogger.w("PERSIST_DEBUG", "DUPLICATE_GUARD: bump exhausted, returning existing id=${existingDuplicate.id}")
+                    return@runInTransaction existingDuplicate.id.toLong()
+                }
+                toInsert = bumped
             }
+            val guardMs = System.currentTimeMillis() - tGuard
 
-            val id = repository.insertHouse(sanitized, force)
+            val id = repository.insertHouse(toInsert, force)
             
             // Re-query DB inside transaction to avoid in-flight houses (id=0)
             // leaking into the upsert and creating duplicates
@@ -48,8 +60,54 @@ class SaveHouseUseCase @Inject constructor(
                 dbHousesToday.sortedBy { it.listOrder }
             )
             repository.updateHouses(recalculated.filter { it.id > 0 }, force)
-            streetRepository.saveCustomStreet(sanitized.address.streetName, sanitized.address.bairro)
+            streetRepository.saveCustomStreet(toInsert.address.streetName, toInsert.address.bairro)
+            AppLogger.d("PERF", "ADD_TOTAL ms=${System.currentTimeMillis() - tGuard} guard=$guardMs day=${dbHousesToday.size}")
             id
+        }
+    }
+
+    private val bumpAttempts = 12
+
+    /**
+     * Advances a house that collides with an existing one (same physical key) to the
+     * next free number/sequence/complement, mirroring the prediction progression
+     * (number+1, else sequence+1, else complement+1). Returns null when no free
+     * candidate is found within [bumpAttempts].
+     */
+    private fun advanceToNextFree(house: House, existing: List<House>): House? {
+        val occupiedKeys = existing.mapTo(HashSet()) { it.generatePhysicalKey() }
+        var candidate = house
+        repeat(bumpAttempts) {
+            candidate = nextOf(candidate)
+            if (candidate.generatePhysicalKey() !in occupiedKeys) {
+                return sanitizeHouse(candidate)
+            }
+        }
+        return null
+    }
+
+    private fun nextOf(house: House): House {
+        val number = house.address.number
+        val digits = number.filter { it.isDigit() }
+        val numeric = digits.toLongOrNull()
+        val suffix = number.filter { !it.isDigit() }
+        return when {
+            house.address.complement > 0 -> house.copy(
+                address = house.address.copy(complement = house.address.complement + 1)
+            )
+            house.address.sequence > 0 -> house.copy(
+                address = house.address.copy(sequence = house.address.sequence + 1, complement = 0)
+            )
+            numeric != null && numeric > 0 -> house.copy(
+                address = house.address.copy(
+                    number = if (suffix.isEmpty()) (numeric + 1).toString() else "${numeric + 1}$suffix",
+                    sequence = 0,
+                    complement = 0
+                )
+            )
+            else -> house.copy(
+                address = house.address.copy(sequence = house.address.sequence + 1, complement = 0)
+            )
         }
     }
 

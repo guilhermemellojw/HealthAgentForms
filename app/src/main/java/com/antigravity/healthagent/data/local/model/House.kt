@@ -84,6 +84,18 @@ data class House(
         return "${agentUid}_${normalizedDate}_${address.generateAddressSignature()}".uppercase()
     }
 
+    /**
+     * Physical dedup key: NEVER uses uuid. Two inserts producing the same key for the
+     * same agent+day represent the same house (same number/sequence/complement on the
+     * same street/block/bairro). Used by the duplicate guards and the in-flight merge
+     * so that quickly re-added houses (which get fresh UUIDs) cannot create duplicates.
+     * Sync identity (uuid) is intentionally NOT used here.
+     */
+    fun generatePhysicalKey(): String {
+        val normalizedDate = data.toDashDate()
+        return "${agentUid}_${normalizedDate}_${address.generateAddressSignature()}".uppercase()
+    }
+
 
 
 

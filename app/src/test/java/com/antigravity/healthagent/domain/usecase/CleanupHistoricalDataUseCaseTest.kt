@@ -44,6 +44,7 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun deleteHouse(house: House, force: Boolean) { deletedHouses.add(house) }
         override suspend fun replaceAllHouses(houses: List<House>) {}
         override suspend fun getHousesByDateAndAgent(date: String, agentUid: String): List<House> = emptyList()
+        override fun getHousesByDateAndAgentFlow(date: String, agentUid: String): Flow<List<House>> = flowOf(emptyList())
 
         override fun getDayActivities(dates: List<String>, agentUid: String?): Flow<List<DayActivity>> = flowOf(emptyList())
         override fun getDayActivityFlow(date: String, agentUid: String?): Flow<DayActivity?> = flowOf(null)

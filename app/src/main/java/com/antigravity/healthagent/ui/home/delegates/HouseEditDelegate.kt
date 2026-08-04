@@ -185,7 +185,7 @@ class HouseEditDelegate @Inject constructor(
                         val currentDrafts = state.pendingUpdateDrafts.value
                         val currentInFlightsNow = state.housesInFlight.value
                         val refreshedLatestHouses = (dbHousesAfter.map { currentDrafts[it.id] ?: it } + currentInFlightsNow.filter { inFlight ->
-                            !dbHousesAfter.any { db -> db.generateIdentityKey() == inFlight.generateIdentityKey() }
+                            !dbHousesAfter.any { db -> db.generatePhysicalKey() == inFlight.generatePhysicalKey() }
                         })
 
                         val finalInFlightState = state.housesInFlight.value.find {
@@ -401,7 +401,7 @@ class HouseEditDelegate @Inject constructor(
                     val drafts = state.pendingUpdateDrafts.value
                     val inFlights = state.housesInFlight.value
                     val latestHouses = (dbHouses.map { drafts[it.id] ?: it } + inFlights.filter { inFlight ->
-                        !dbHouses.any { db -> db.generateIdentityKey() == inFlight.generateIdentityKey() }
+                        !dbHouses.any { db -> db.generatePhysicalKey() == inFlight.generatePhysicalKey() }
                     })
 
                     val adminBypass = state.isAdmin.value
@@ -662,7 +662,7 @@ class HouseEditDelegate @Inject constructor(
 
     private fun removeInFlight(state: HomeState, house: House) {
         state.housesInFlight.update { list ->
-            list.filter { it.generateIdentityKey() != house.generateIdentityKey() }
+            list.filter { it.generatePhysicalKey() != house.generatePhysicalKey() }
         }
     }
 

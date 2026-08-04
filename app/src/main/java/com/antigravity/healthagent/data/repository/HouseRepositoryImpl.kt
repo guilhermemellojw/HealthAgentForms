@@ -91,13 +91,15 @@ class HouseRepositoryImpl @Inject constructor(
             tombstoneDao.deleteByNaturalKey(house.generateNaturalKey(), house.agentUid)
 
             // DUPLICATE GUARD: Prevent DB-level duplicates from stale in-memory state
-            // (e.g. rapid adds where Room Flow hasn't emitted yet)
+            // (e.g. rapid adds where Room Flow hasn't emitted yet).
+            // PHYSICAL key (never uuid): a re-added house carries a fresh uuid, so
+            // identity-based comparison would miss literal duplicates.
             val existingHouses = houseDao.getHousesByDateAndAgent(house.data, house.agentUid)
             val existingDuplicate = existingHouses.find {
-                it.id != house.id && it.generateIdentityKey() == house.generateIdentityKey()
+                it.id != house.id && it.generatePhysicalKey() == house.generatePhysicalKey()
             }
             if (existingDuplicate != null) {
-                AppLogger.w("HouseRepository", "DUPLICATE_GUARD: Skipped insert of house id=${house.id}. Existing id=${existingDuplicate.id} key=${house.generateIdentityKey()}")
+                AppLogger.w("HouseRepository", "DUPLICATE_GUARD: Skipped insert of house id=${house.id}. Existing id=${existingDuplicate.id} key=${house.generatePhysicalKey()}")
                 return@runInTransactionWithRetry existingDuplicate.id.toLong()
             }
 

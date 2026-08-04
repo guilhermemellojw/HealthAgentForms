@@ -188,9 +188,15 @@ class HomeViewModel @Inject constructor(
             pendingUpdateDrafts,
             housesInFlight
         ) { dbHouses, drafts, inFlights ->
+            val tMerge = System.currentTimeMillis()
+            val dbKeys = dbHouses.mapTo(HashSet()) { it.generatePhysicalKey() }
             val combined = (dbHouses.map { drafts[it.id] ?: it } + inFlights.filter { inFlight ->
-                !dbHouses.any { db -> db.generateIdentityKey() == inFlight.generateIdentityKey() }
+                !dbKeys.contains(inFlight.generatePhysicalKey())
             }).sortedBy { it.listOrder }
+            val mergeMs = System.currentTimeMillis() - tMerge
+            if (mergeMs > 60) {
+                AppLogger.d("PERF", "MERGE_END ms=$mergeMs n=${dbHouses.size} inflight=${inFlights.size}")
+            }
             combined.firstOrNull()?.let { first ->
                 AppLogger.d("PERSIST_DEBUG", "COMBINE: count=${combined.size} first_id=${first.id} first_pt=${first.propertyType.code}")
             }
@@ -230,8 +236,14 @@ class HomeViewModel @Inject constructor(
     val daysWithErrors: StateFlow<List<DayErrorSummary>> = houses
         .debounce(400)
         .map { all ->
+            val t0 = System.currentTimeMillis()
             try {
-                dayErrorTracker.compute(all)
+                val computed = dayErrorTracker.compute(all)
+                val elapsed = System.currentTimeMillis() - t0
+                if (elapsed > 50) {
+                    AppLogger.d("PERF", "ERRORS_MS ms=$elapsed n=${all.size}")
+                }
+                computed
             } catch (e: Exception) {
                 emptyList()
             }

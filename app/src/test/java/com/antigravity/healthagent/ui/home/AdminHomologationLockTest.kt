@@ -179,8 +179,12 @@ class AdminHomologationLockTest {
             houseEditDelegate = houseEditDelegate
         )
 
-        // Force viewModel state loading
+        // Force viewModel state loading.
+        // latestHouses crosses flowOn(Dispatchers.Default), which advanceUntilIdle alone does
+        // not wait for; give the Default thread time to land the merged value (same pattern as
+        // HomeViewModelTest.advanceViewModelCoroutines).
         testDispatcher.scheduler.advanceUntilIdle()
+        Thread.sleep(50)
         testDispatcher.scheduler.advanceUntilIdle()
 
         // Attempt update

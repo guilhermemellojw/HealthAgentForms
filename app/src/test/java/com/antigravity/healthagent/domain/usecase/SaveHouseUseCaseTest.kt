@@ -337,4 +337,65 @@ class SaveHouseUseCaseTest {
             )
         }
     }
+
+    @Test
+    fun `rapid duplicate add advances to next free house instead of duplicating`() = runBlocking {
+        var nextId = 1L
+        val db = mutableListOf<House>()
+
+        coEvery { repository.getHousesByDateAndAgent(any(), any()) } answers {
+            val date = firstArg<String>()
+            val uid = secondArg<String>()
+            db.filter { it.data == date && it.agentUid == uid }
+        }
+        coEvery { repository.insertHouse(any(), any()) } answers {
+            val h = firstArg<House>()
+            val inserted = h.copy(id = nextId.toInt())
+            db.add(inserted)
+            nextId++
+        }
+        coEvery { repository.updateHouses(any(), any()) } answers {
+            db.clear()
+            db.addAll(firstArg<List<House>>())
+        }
+
+        // Two rapid adds of the same address (stale prediction repeats "51")
+        val firstId = useCase.insertHouse(house(number = "51"), emptyList())
+        val secondId = useCase.insertHouse(house(number = "51"), emptyList())
+
+        assertEquals(1L, firstId)
+        assertEquals(2L, secondId)
+        // Exactly one row per physical key: 51 then 52
+        assertEquals(listOf("51", "52"), db.map { it.address.number })
+        assertEquals(2, db.map { it.generatePhysicalKey() }.distinct().size)
+    }
+
+    @Test
+    fun `duplicate add with sequence bump advances sequence`() = runBlocking {
+        var nextId = 1L
+        val db = mutableListOf<House>()
+
+        coEvery { repository.getHousesByDateAndAgent(any(), any()) } answers {
+            val date = firstArg<String>()
+            val uid = secondArg<String>()
+            db.filter { it.data == date && it.agentUid == uid }
+        }
+        coEvery { repository.insertHouse(any(), any()) } answers {
+            val h = firstArg<House>()
+            val inserted = h.copy(id = nextId.toInt())
+            db.add(inserted)
+            nextId++
+        }
+        coEvery { repository.updateHouses(any(), any()) } answers {
+            db.clear()
+            db.addAll(firstArg<List<House>>())
+        }
+
+        // Number has no digits: prediction falls back to sequence bump (0 -> 1)
+        val h = house(number = "SN")
+        useCase.insertHouse(h, emptyList())
+        useCase.insertHouse(h, emptyList())
+
+        assertEquals(listOf(0, 1), db.map { it.address.sequence })
+    }
 }

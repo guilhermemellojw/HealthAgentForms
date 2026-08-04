@@ -503,6 +503,8 @@ class HomeViewModelTest {
 
         val vm = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
+        Thread.sleep(50)
+        testDispatcher.scheduler.advanceUntilIdle()
 
         val result = vm.getHousesForDate("15-06-2026", "AGENTE")
         assertEquals(1, result.size)

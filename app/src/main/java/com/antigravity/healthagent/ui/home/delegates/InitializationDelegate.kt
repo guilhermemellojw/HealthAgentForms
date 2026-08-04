@@ -172,7 +172,7 @@ class InitializationDelegate @Inject constructor(
                 val dayNorm = day.replace("/", "-")
                 val dayInFlights = inFlights.filter { inFlight ->
                     inFlight.data.replace("/", "-") == dayNorm &&
-                    !dayDb.any { db -> db.generateIdentityKey() == inFlight.generateIdentityKey() }
+                    !dayDb.any { db -> db.generatePhysicalKey() == inFlight.generatePhysicalKey() }
                 }
                 val dayHouses = (dayDb + dayInFlights).sortedBy { it.listOrder }
 
@@ -180,6 +180,7 @@ class InitializationDelegate @Inject constructor(
                     drafts[house.id] ?: house
                 }
 
+                val dayT0 = System.currentTimeMillis()
                 val totals = calculateDashboardTotals(dayHousesWithDrafts)
 
                 val mapped = run {
@@ -209,6 +210,10 @@ class InitializationDelegate @Inject constructor(
                 }
 
                 val dayErrorCount = dayHousesWithDrafts.count { it.id in errorIds }
+                val dayMs = System.currentTimeMillis() - dayT0
+                if (dayMs > 40) {
+                    AppLogger.d("PERF", "DAYMAP_MS ms=$dayMs n=${dayHousesWithDrafts.size}")
+                }
                 HouseUpdate(mapped, totals, errorIds, duplicateIds, dayErrorCount)
             }.flowOn(Dispatchers.Default).collect { update ->
                 viewModel.uiState.update { it.copy(
@@ -361,16 +366,9 @@ class InitializationDelegate @Inject constructor(
 
                 viewModel.housesInFlight.update { inFlights ->
                     if (inFlights.isEmpty()) return@update inFlights
+                    val dbKeys = dbHouses.mapTo(HashSet()) { it.generatePhysicalKey() }
                     inFlights.filter { inFlight ->
-                        !dbHouses.any { db ->
-                            (db.listOrder == inFlight.listOrder && db.data == inFlight.data &&
-                             db.address.blockNumber == inFlight.address.blockNumber &&
-                             db.address.streetName == inFlight.address.streetName &&
-                             db.address.number == inFlight.address.number &&
-                             db.address.sequence == inFlight.address.sequence &&
-                             db.address.complement == inFlight.address.complement) ||
-                            (db.generateIdentityKey() == inFlight.generateIdentityKey())
-                        }
+                        !dbKeys.contains(inFlight.generatePhysicalKey())
                     }
                 }
             }
