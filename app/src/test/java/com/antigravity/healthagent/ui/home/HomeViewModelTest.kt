@@ -687,6 +687,7 @@ class HomeViewModelTest {
     fun `navigateToErroneousDay unlocks day if needed and navigates`() = runBlocking {
         val activity = DayActivity(date = "15-06-2026", agentName = "AGENTE", agentUid = "user_1", status = "NORMAL", isClosed = true)
         coEvery { dayManagementUseCase.getDayActivity(any(), any()) } returns activity
+        coEvery { dayManagementUseCase.canSafelyUnlock(any(), any(), any()) } returns true
         coEvery { dayManagementUseCase.unlockDay(any(), any()) } returns Unit
         every { validationViewModel.validateCurrentDay(any(), any(), any(), any()) } returns true
 
@@ -763,11 +764,12 @@ class HomeViewModelTest {
         )
         vm.openTreatmentDialog(house)
         advanceViewModelCoroutines()
+        assertNotNull(vm.treatmentDialogState.value)
 
         vm.confirmTreatmentDialog(TreatmentData(), GeoCapture())
         advanceViewModelCoroutines()
 
-        assertNotNull(vm.treatmentDialogState.value)
+        assertNull(vm.treatmentDialogState.value)
         assertEquals("Dia fechado. Desbloqueie para editar o tratamento.", vm.uiEvent.value)
         verify { soundManager.playWarning() }
         verify(exactly = 0) { houseEditDelegate.updateHouseField(any(), any(), any(), any(), any(), any()) }

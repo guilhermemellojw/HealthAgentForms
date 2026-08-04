@@ -197,7 +197,7 @@ class Migration38To39Test {
             context,
             AppDatabase::class.java,
             TEST_DB
-        ).addMigrations(AppDatabase.MIGRATION_38_39)
+        ).addMigrations(AppDatabase.MIGRATION_38_39, AppDatabase.MIGRATION_39_40)
             .build()
 
         val house = database.houseDao().getHouseById(1)
@@ -233,7 +233,7 @@ class Migration38To39Test {
             context,
             AppDatabase::class.java,
             TEST_DB
-        ).addMigrations(AppDatabase.MIGRATION_38_39)
+        ).addMigrations(AppDatabase.MIGRATION_38_39, AppDatabase.MIGRATION_39_40)
             .build()
         roomDb.openHelper.writableDatabase
         roomDb.close()
