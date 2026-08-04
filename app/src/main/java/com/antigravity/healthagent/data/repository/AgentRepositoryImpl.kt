@@ -58,7 +58,11 @@ class AgentRepositoryImpl @Inject constructor(
     }
 
     override suspend fun addAgentName(name: String): Result<Unit> {
-        return agentRemoteDataSource.addAgentName(name)
+        val result = agentRemoteDataSource.addAgentName(name)
+        if (result.isSuccess) {
+            cachedNamesList = null
+        }
+        return result
     }
 
     override suspend fun deleteAgentName(name: String): Result<Unit> {

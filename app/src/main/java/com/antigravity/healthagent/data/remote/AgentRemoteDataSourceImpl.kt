@@ -148,12 +148,10 @@ class AgentRemoteDataSourceImpl @Inject constructor(
         return try {
             val normalizedName = name.trim().uppercase()
             val docRef = firestore.collection("metadata").document("agent_info")
-            val snapshot = docRef.get().await()
-            val currentNames = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
-            if (!currentNames.contains(normalizedName)) {
-                currentNames.add(normalizedName)
-                docRef.set(mapOf("names" to currentNames.sorted())).await()
-            }
+            docRef.set(
+                mapOf("names" to FieldValue.arrayUnion(normalizedName)),
+                SetOptions.merge()
+            ).await()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -162,12 +160,12 @@ class AgentRemoteDataSourceImpl @Inject constructor(
 
     override suspend fun deleteAgentName(name: String): Result<Unit> {
         return try {
+            val normalizedName = name.trim().uppercase()
             val docRef = firestore.collection("metadata").document("agent_info")
-            val snapshot = docRef.get().await()
-            val currentNames = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
-            if (currentNames.remove(name)) {
-                docRef.set(mapOf("names" to currentNames.sorted())).await()
-            }
+            docRef.set(
+                mapOf("names" to FieldValue.arrayRemove(normalizedName)),
+                SetOptions.merge()
+            ).await()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

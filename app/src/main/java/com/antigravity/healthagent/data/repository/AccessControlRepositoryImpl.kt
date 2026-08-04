@@ -138,26 +138,35 @@ class AccessControlRepositoryImpl @Inject constructor(
     override suspend fun updateUserProfile(uid: String, updates: Map<String, Any?>): Result<Unit> {
         return try {
             val finalUpdates = updates.toMutableMap()
-            val newAgentName = (updates["agentName"] as? String)?.trim()?.uppercase()
-            if (newAgentName != null && newAgentName.isNotBlank()) {
-                finalUpdates["agentName"] = newAgentName
-                agentRepository.addAgentName(newAgentName)
-                try {
-                    firestore.collection("agents").document(uid).update("agentName", newAgentName).await()
-                } catch(e: Exception) { }
+            val nameChange = resolveProfileAgentNameChange(updates)
+            when (nameChange) {
+                is AgentNameChange.Set -> {
+                    finalUpdates["agentName"] = nameChange.name
+                    agentRepository.addAgentName(nameChange.name).onFailure { error ->
+                        AppLogger.w("AccessControlRepository", "Failed to register agentName ${nameChange.name}: ${error.message}")
+                    }
+                    if (shouldRenameProduction(uid, nameChange.name)) {
+                        renameAgentProduction(uid, nameChange.name)
+                    }
+                }
+                is AgentNameChange.Clear -> {
+                    finalUpdates["agentName"] = com.google.firebase.firestore.FieldValue.delete()
+                }
+                is AgentNameChange.None -> Unit
             }
-            
+
             firestore.collection("users").document(uid).update(finalUpdates).await()
-            
+
             val agentMetadata = mutableMapOf<String, Any?>()
+            val newAgentName = (nameChange as? AgentNameChange.Set)?.name
             if (newAgentName != null) agentMetadata["agentName"] = newAgentName
             updates["email"]?.let { agentMetadata["email"] = it }
             updates["photoUrl"]?.let { agentMetadata["photoUrl"] = it }
-            
+
             if (agentMetadata.isNotEmpty()) {
                 firestore.collection("agents").document(uid).set(agentMetadata, com.google.firebase.firestore.SetOptions.merge()).await()
             }
-            
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -168,20 +177,17 @@ class AccessControlRepositoryImpl @Inject constructor(
         return try {
             val normalizedEmail = email.trim().lowercase()
             val docId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
-            val normalizedAgentName = agentName?.trim()?.uppercase()
-            
-            val userData = mutableMapOf(
-                "email" to normalizedEmail,
-                "role" to role.name,
-                "isAuthorized" to isAuthorized,
-                "agentName" to normalizedAgentName,
-                "createdAt" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
-                "isPreRegistered" to true
-            )
-            
+            val userData = buildPreRegisteredUserData(
+                email = normalizedEmail,
+                role = role,
+                agentName = agentName,
+                isAuthorized = isAuthorized,
+                createdAt = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
+            ).toMutableMap()
+
             firestore.collection("users").document(docId).set(userData).await()
-            if (agentName != null && agentName.isNotBlank()) {
-                agentRepository.addAgentName(agentName)
+            (userData["agentName"] as? String)?.takeIf { it.isNotBlank() }?.let {
+                agentRepository.addAgentName(it)
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -287,10 +293,16 @@ class AccessControlRepositoryImpl @Inject constructor(
                 val userRef = firestore.collection("users").document(uid)
                 val updates = mutableMapOf<String, Any>("isAuthorized" to true)
                 
-                val finalAgentName = agentName?.takeIf { it.isNotBlank() } 
-                    ?: doc.getString("requestedName")?.takeIf { it.isNotBlank() }
+                val finalAgentName = resolveApprovalAgentName(agentName, doc.getString("requestedName"))
                 
-                if (finalAgentName != null) updates["agentName"] = finalAgentName.trim().uppercase()
+                if (finalAgentName != null) {
+                    updates["agentName"] = finalAgentName
+                    try {
+                        agentRepository.addAgentName(finalAgentName)
+                    } catch (e: Exception) {
+                        AppLogger.w("AccessControlRepository", "Failed to register approved agentName $finalAgentName: ${e.message}")
+                    }
+                }
                 batch.update(userRef, updates)
                 
                 if (email != null) {
@@ -317,4 +329,90 @@ class AccessControlRepositoryImpl @Inject constructor(
             }
         awaitClose { listener.remove() }
     }
+
+    private suspend fun shouldRenameProduction(uid: String, newName: String): Boolean {
+        return try {
+            val existing = firestore.collection("agents").document(uid)
+                .get(Source.DEFAULT).await()
+                .getString("agentName")?.trim()?.uppercase()
+            existing != newName
+        } catch (e: Exception) {
+            AppLogger.w("AccessControlRepository", "Could not read current agentName for $uid, renaming anyway: ${e.message}")
+            true
+        }
+    }
+
+    private suspend fun renameAgentProduction(uid: String, newAgentName: String) {
+        try {
+            val agentRef = firestore.collection("agents").document(uid)
+            renameCollectionField(agentRef.collection("houses"), newAgentName)
+            renameCollectionField(agentRef.collection("day_activities"), newAgentName)
+            AppLogger.d("AccessControlRepository", "Renamed production for $uid to $newAgentName")
+        } catch (e: Exception) {
+            AppLogger.e("AccessControlRepository", "Failed to rename production for $uid", e)
+        }
+    }
+
+    private suspend fun renameCollectionField(ref: com.google.firebase.firestore.CollectionReference, value: String) {
+        var lastDoc: com.google.firebase.firestore.DocumentSnapshot? = null
+        while (true) {
+            val query = if (lastDoc == null) {
+                ref.orderBy(com.google.firebase.firestore.FieldPath.documentId()).limit(450).get(Source.SERVER).await()
+            } else {
+                ref.orderBy(com.google.firebase.firestore.FieldPath.documentId()).startAfter(lastDoc).limit(450).get(Source.SERVER).await()
+            }
+            if (query.isEmpty) return
+            var batch = firestore.batch()
+            var ops = 0
+            query.documents.forEach { doc ->
+                batch.update(doc.reference, "agentName", value)
+                ops++
+                lastDoc = doc
+                if (ops == 450) {
+                    batch.commit().await()
+                    batch = firestore.batch()
+                    ops = 0
+                }
+            }
+            if (ops > 0) batch.commit().await()
+        }
+    }
+}
+
+internal fun buildPreRegisteredUserData(
+    email: String,
+    role: UserRole,
+    agentName: String?,
+    isAuthorized: Boolean,
+    createdAt: Long
+): Map<String, Any?> {
+    val normalizedAgentName = agentName?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+    val userData = mutableMapOf<String, Any?>(
+        "email" to email,
+        "role" to role.name,
+        "isAuthorized" to isAuthorized,
+        "createdAt" to createdAt,
+        "isPreRegistered" to true
+    )
+    if (normalizedAgentName != null) {
+        userData["agentName"] = normalizedAgentName
+    }
+    return userData
+}
+
+internal sealed class AgentNameChange {
+    data class Set(val name: String) : AgentNameChange()
+    object Clear : AgentNameChange()
+    object None : AgentNameChange()
+}
+
+internal fun resolveProfileAgentNameChange(updates: Map<String, Any?>): AgentNameChange {
+    if (!updates.containsKey("agentName")) return AgentNameChange.None
+    val name = (updates["agentName"] as? String)?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+    return if (name != null) AgentNameChange.Set(name) else AgentNameChange.Clear
+}
+
+internal fun resolveApprovalAgentName(dialogAgentName: String?, requestedName: String?): String? {
+    return dialogAgentName?.takeIf { it.isNotBlank() }?.trim()?.uppercase()
+        ?: requestedName?.takeIf { it.isNotBlank() }?.trim()?.uppercase()
 }
