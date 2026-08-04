@@ -9,6 +9,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -16,11 +20,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.PopupProperties
 import com.antigravity.healthagent.domain.repository.AccessRequest
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.ui.admin.UnifiedProfile
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ApprovalDialog(
     request: AccessRequest,
@@ -37,36 +41,33 @@ fun ApprovalDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Vincular conta ${request.email} a um nome da lista mestra:")
-                Column {
+                ExposedDropdownMenuBox(
+                    expanded = expanded && agentNamesList.isNotEmpty(),
+                    onExpandedChange = { expanded = it }
+                ) {
                     OutlinedTextField(
                         value = selectedName ?: "",
                         onValueChange = { selectedName = it; expanded = true },
                         label = { Text("Nome do Agente (da Lista Mestra)") },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
                         shape = RoundedCornerShape(12.dp),
-                        trailingIcon = { 
-                            IconButton(onClick = { expanded = !expanded }) {
-                                Icon(Icons.Default.ArrowDropDown, null)
-                            }
-                        }
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
                     )
-                    
-                    DropdownMenu(
+
+                    ExposedDropdownMenu(
                         expanded = expanded && agentNamesList.isNotEmpty(),
-                        onDismissRequest = { expanded = false },
-                        properties = PopupProperties(focusable = false),
-                        modifier = Modifier.fillMaxWidth(0.8f)
+                        onDismissRequest = { expanded = false }
                     ) {
-                        val filteredNames = agentNamesList.filter { 
-                            it.contains(selectedName ?: "", ignoreCase = true) 
+                        val filteredNames = agentNamesList.filter {
+                            it.contains(selectedName ?: "", ignoreCase = true)
                         }.take(5)
 
                         filteredNames.forEach { name ->
                             DropdownMenuItem(
                                 text = { Text(name) },
-                                onClick = { 
+                                onClick = {
                                     selectedName = name
-                                    expanded = false 
+                                    expanded = false
                                 }
                             )
                         }
@@ -79,6 +80,7 @@ fun ApprovalDialog(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateUserDialog(
     agentNamesList: List<String>,
@@ -115,27 +117,26 @@ fun CreateUserDialog(
                     singleLine = true
                 )
 
-                Column {
+                ExposedDropdownMenuBox(
+                    expanded = expandedName && agentNamesList.isNotEmpty(),
+                    onExpandedChange = { expandedName = it }
+                ) {
                     OutlinedTextField(
                         value = nameInput,
                         onValueChange = { nameInput = it; expandedName = true },
                         label = { Text("Nome do Agente") },
                         placeholder = { Text("Opcional — selecione da lista mestra") },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
                         shape = RoundedCornerShape(12.dp),
                         singleLine = true,
                         trailingIcon = {
-                            IconButton(onClick = { expandedName = !expandedName }) {
-                                Icon(Icons.Default.ArrowDropDown, null)
-                            }
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedName)
                         }
                     )
 
-                    DropdownMenu(
+                    ExposedDropdownMenu(
                         expanded = expandedName && agentNamesList.isNotEmpty(),
-                        onDismissRequest = { expandedName = false },
-                        properties = PopupProperties(focusable = false),
-                        modifier = Modifier.fillMaxWidth(0.8f)
+                        onDismissRequest = { expandedName = false }
                     ) {
                         agentNamesList.filter {
                             it.contains(nameInput, ignoreCase = true)
@@ -151,17 +152,20 @@ fun CreateUserDialog(
                     }
                 }
 
-                Box {
+                ExposedDropdownMenuBox(
+                    expanded = expandedRole,
+                    onExpandedChange = { expandedRole = it }
+                ) {
                     OutlinedButton(
-                        onClick = { expandedRole = true },
-                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {},
+                        modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text("Função: ${role.name}")
                         Spacer(modifier = Modifier.weight(1f))
-                        Icon(Icons.Default.ArrowDropDown, null)
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedRole)
                     }
-                    DropdownMenu(expanded = expandedRole, onDismissRequest = { expandedRole = false }) {
+                    ExposedDropdownMenu(expanded = expandedRole, onDismissRequest = { expandedRole = false }) {
                         UserRole.entries.forEach { r ->
                             DropdownMenuItem(
                                 text = { Text(r.name) },

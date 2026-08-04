@@ -10,6 +10,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,7 +24,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.PopupProperties
 import com.antigravity.healthagent.domain.repository.AccessRequest
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.ui.admin.UnifiedProfile
@@ -59,7 +62,7 @@ fun AccessRequestCard(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun UnifiedProfileCard(
     profile: UnifiedProfile,
@@ -411,43 +414,42 @@ fun UnifiedProfileCard(
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text("Defina o nome da lista mestra para este usuário (${profile.email}):", style = MaterialTheme.typography.bodySmall)
                             
-                            Column {
-                                OutlinedTextField(
-                                    value = nameInput,
-                                    onValueChange = { nameInput = it; expandedNameMenu = true },
-                                    label = { Text("Nome do Agente") },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp),
-                                    trailingIcon = { 
-                                        IconButton(onClick = { expandedNameMenu = !expandedNameMenu }) {
-                                            Icon(Icons.Default.ArrowDropDown, null)
+                            ExposedDropdownMenuBox(
+                                    expanded = expandedNameMenu && agentNamesList.isNotEmpty(),
+                                    onExpandedChange = { expandedNameMenu = it }
+                                ) {
+                                    OutlinedTextField(
+                                        value = nameInput,
+                                        onValueChange = { nameInput = it; expandedNameMenu = true },
+                                        label = { Text("Nome do Agente") },
+                                        modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
+                                        shape = RoundedCornerShape(12.dp),
+                                        trailingIcon = {
+                                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedNameMenu)
+                                        }
+                                    )
+                                    
+                                    ExposedDropdownMenu(
+                                        expanded = expandedNameMenu && agentNamesList.isNotEmpty(),
+                                        onDismissRequest = { expandedNameMenu = false }
+                                    ) {
+                                        val filteredNames = remember(nameInput, agentNamesList) {
+                                            agentNamesList.filter { 
+                                                it.contains(nameInput, ignoreCase = true) 
+                                            }.take(5)
+                                        }
+
+                                        filteredNames.forEach { name ->
+                                            DropdownMenuItem(
+                                                text = { Text(name) },
+                                                onClick = { 
+                                                    nameInput = name
+                                                    expandedNameMenu = false 
+                                                }
+                                            )
                                         }
                                     }
-                                )
-                                
-                                DropdownMenu(
-                                    expanded = expandedNameMenu && agentNamesList.isNotEmpty(),
-                                    onDismissRequest = { expandedNameMenu = false },
-                                    properties = PopupProperties(focusable = false),
-                                    modifier = Modifier.fillMaxWidth(0.8f)
-                                ) {
-                                    val filteredNames = remember(nameInput, agentNamesList) {
-                                        agentNamesList.filter { 
-                                            it.contains(nameInput, ignoreCase = true) 
-                                        }.take(5)
-                                    }
-
-                                    filteredNames.forEach { name ->
-                                        DropdownMenuItem(
-                                            text = { Text(name) },
-                                            onClick = { 
-                                                nameInput = name
-                                                expandedNameMenu = false 
-                                            }
-                                        )
-                                    }
                                 }
-                            }
                             
                             TextButton(onClick = { nameInput = ""; onUpdateName(null); showEditNameDialog = false }) {
                                 Text("Limpar Vínculo Existente", color = MaterialTheme.colorScheme.error)
