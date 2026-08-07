@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,7 +49,9 @@ fun CompactInputBox(
     enabled: Boolean = true,
     isEasyMode: Boolean = false,
     onFocusChanged: (Boolean) -> Unit = {},
-    focusRequester: FocusRequester? = null
+    focusRequester: FocusRequester? = null,
+    placeholder: String? = null,
+    visualTransformation: VisualTransformation = VisualTransformation.None
 ) {
     var isFocusedInternal by remember { mutableStateOf(false) }
     
@@ -175,7 +178,7 @@ fun CompactInputBox(
                         Box(contentAlignment = Alignment.Center) {
                             if (value.isEmpty()) {
                                 Text(
-                                    text = "—",
+                                    text = placeholder ?: "—",
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                                     style = TextStyle(
                                         textAlign = TextAlign.Center,
@@ -189,6 +192,7 @@ fun CompactInputBox(
                     }
                 },
                 keyboardOptions = keyboardOptions,
+                visualTransformation = visualTransformation,
                 readOnly = readOnly,
                 modifier = Modifier
                     .fillMaxWidth()

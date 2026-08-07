@@ -10,7 +10,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.antigravity.healthagent.data.local.model.House
@@ -61,20 +67,14 @@ fun ContextDialog(
                     horizontalArrangement = Arrangement.spacedBy(if (isEasyMode) 12.dp else 8.dp),
                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
                 ) {
-                    OutlinedTextField(
+                    CompactInputBox(
+                        label = "Quarteirão",
                         value = block,
                         onValueChange = { block = it },
-                        label = { Text("Quarteirão") },
-                        isError = invalidFields.contains("blockNumber"),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(if (isEasyMode) 16.dp else 12.dp),
-                        textStyle = TextStyle(fontSize = if (isEasyMode) 18.sp else 16.sp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                        )
+                        isError = invalidFields.contains("blockNumber"),
+                        isEasyMode = isEasyMode,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
                     )
                     
                     Text(
@@ -84,13 +84,24 @@ fun ContextDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    CompactDropdown(
+                    CompactInputBox(
                         label = "Sequência",
-                        currentValue = blockSequence,
-                        options = listOf("1", "2", "3", "4", "5"),
-                        onOptionSelected = { blockSequence = it },
+                        value = blockSequence,
+                        onValueChange = { blockSequence = it },
                         modifier = Modifier.weight(1f),
-                        isEasyMode = isEasyMode
+                        isError = invalidFields.contains("blockSequence"),
+                        isEasyMode = isEasyMode,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = ImeAction.Next
+                        ),
+                        visualTransformation = VisualTransformation { text ->
+                            TransformedText(
+                                AnnotatedString(text.text.filter { it.isDigit() }),
+                                offsetMapping = OffsetMapping.Identity
+                            )
+                        },
+                        placeholder = "de 1 a 10"
                     )
                 }
 

@@ -184,27 +184,24 @@ object PdfComponents {
         val sep = " / "
         val sepBounds = Rect()
         textPaint.getTextBounds(sep, 0, sep.length, sepBounds)
+        val sepFullWidth = textPaint.measureText(sep)
         
         val centerX = x + w / 2
         val centerY = y + (h + sepBounds.height()) / 2 - sepBounds.bottom
         
         // Center the "/"
-        val sepX = centerX - (sepBounds.width() / 2f)
+        val sepX = centerX - (sepFullWidth / 2f)
         canvas.drawText(sep, sepX, centerY, textPaint)
         
         // Draw blockNum to the left of "/"
         if (!blockNum.isNullOrBlank()) {
-            val bBounds = Rect()
-            textPaint.getTextBounds(blockNum, 0, blockNum.length, bBounds)
-            val bx = sepX - bBounds.width() - 2f // 2f gap
+            val bx = sepX - textPaint.measureText(blockNum) - 2f // 2f gap
             canvas.drawText(blockNum, bx, centerY, textPaint)
         }
         
         // Draw blockSeq to the right of "/"
         if (!blockSeq.isNullOrBlank()) {
-            val sBounds = Rect()
-            textPaint.getTextBounds(blockSeq, 0, blockSeq.length, sBounds)
-            val sx = sepX + sepBounds.width() + 2f // 2f gap
+            val sx = sepX + sepFullWidth + 2f // 2f gap
             canvas.drawText(blockSeq, sx, centerY, textPaint)
         }
     }
