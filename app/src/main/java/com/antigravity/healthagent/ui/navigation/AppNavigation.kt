@@ -15,8 +15,7 @@ fun AppNavigation(
     weeklySummaryViewModel: WeeklySummaryViewModel,
     onLogout: () -> Unit,
     onSwitchAccount: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onSyncPullActive: (Boolean) -> Unit = {}
+    onOpenSettings: () -> Unit
 ) {
     if (isSupervisor) {
         when (selectedTab) {
@@ -40,23 +39,20 @@ fun AppNavigation(
                 user = user,
                 onLogout = onLogout,
                 onSwitchAccount = onSwitchAccount,
-                onOpenSettings = onOpenSettings,
-                onSyncPullActive = onSyncPullActive
+                onOpenSettings = onOpenSettings
             )
             1 -> com.antigravity.healthagent.ui.rg.RGScreen(
                 user = user,
                 onLogout = onLogout,
                 onSwitchAccount = onSwitchAccount,
-                onOpenSettings = onOpenSettings,
-                onSyncPullActive = onSyncPullActive
+                onOpenSettings = onOpenSettings
             )
             2 -> com.antigravity.healthagent.ui.boletim.BoletimScreen(
                 viewModel = homeViewModel,
                 onOpenSettings = onOpenSettings,
                 user = user,
                 onLogout = onLogout,
-                onSwitchAccount = onSwitchAccount,
-                onSyncPullActive = onSyncPullActive
+                onSwitchAccount = onSwitchAccount
             )
             3 -> com.antigravity.healthagent.ui.semanal.SemanalScreen(
                 viewModel = weeklySummaryViewModel,
@@ -66,16 +62,14 @@ fun AppNavigation(
                 user = user,
                 onLogout = onLogout,
                 onSwitchAccount = onSwitchAccount,
-                onOpenSettings = onOpenSettings,
-                onSyncPullActive = onSyncPullActive
+                onOpenSettings = onOpenSettings
             )
             4 -> com.antigravity.healthagent.ui.quarteiroes.QuarteiroesScreen(
                 isEasyMode = isEasyMode,
                 user = user,
                 onLogout = onLogout,
                 onSwitchAccount = onSwitchAccount,
-                onOpenSettings = onOpenSettings,
-                onSyncPullActive = onSyncPullActive
+                onOpenSettings = onOpenSettings
             )
         }
     }

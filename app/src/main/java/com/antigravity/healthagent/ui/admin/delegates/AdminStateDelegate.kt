@@ -4,7 +4,6 @@ import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.AccessRequest
 import com.antigravity.healthagent.domain.repository.BackupMetadata
-import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.ui.admin.AdminUiState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -13,7 +12,6 @@ import javax.inject.Inject
 
 class AdminStateDelegate @Inject constructor() : AdminState {
     override val uiState = MutableStateFlow<AdminUiState>(AdminUiState.Loading)
-    override val syncState = MutableStateFlow<SyncUiState>(SyncUiState.Idle())
     override val users = MutableStateFlow<List<AuthUser>>(emptyList())
     override val isLoading = MutableStateFlow(false)
     override val uiEvent = MutableSharedFlow<String>()

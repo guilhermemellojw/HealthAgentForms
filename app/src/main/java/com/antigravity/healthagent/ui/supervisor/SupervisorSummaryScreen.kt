@@ -24,11 +24,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.ui.zIndex
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.MeshGradient
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
-import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,13 +39,13 @@ fun SupervisorSummaryScreen(
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val summary by viewModel.aggregatedSummary.collectAsState()
     val weekRange by viewModel.weekRangeText.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
-    val syncState by viewModel.syncState.collectAsState()
     val isSolarMode by viewModel.solarMode.collectAsState()
     
     val selectedYear by viewModel.selectedYear.collectAsState()
@@ -87,8 +89,9 @@ fun SupervisorSummaryScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = Color.Transparent
     ) { paddingValues ->
+        val syncFeedback by feedbackManager.feedback.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
-        val isRefreshing = syncState is com.antigravity.healthagent.ui.state.SyncUiState.Syncing
+        val isRefreshing = syncFeedback is com.antigravity.healthagent.ui.state.SyncUiState.Syncing
         val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
 
         PullToRefreshBox(
@@ -101,23 +104,24 @@ fun SupervisorSummaryScreen(
                     state = pullToRefreshState,
                     isRefreshing = isRefreshing,
                     isSolarMode = isSolarMode,
-                    syncStatus = syncState,
+                    syncStatus = syncFeedback,
                     pullText = "Puxe para atualizar...",
                     releaseText = "Solte para atualizar!"
                 )
             }
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-                SyncFloatingBalloon(
-                    syncStatus = syncState,
-                    isEasyMode = false,
-                    isSolarMode = isSolarMode,
-                    isPullActive = isPullActive,
-                    topPadding = 12.dp,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .zIndex(3000f)
-                )
+                if (!isPullActive) {
+                    SyncCompactBalloon(
+                        feedbackManager = feedbackManager,
+                        isEasyMode = false,
+                        isSolarMode = isSolarMode,
+                        isPullActive = isPullActive,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(3000f)
+                    )
+                }
                 MeshGradient(modifier = Modifier.fillMaxSize())
                 
                 Column(

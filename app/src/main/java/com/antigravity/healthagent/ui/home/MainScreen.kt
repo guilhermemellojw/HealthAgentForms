@@ -16,9 +16,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.domain.repository.UserRole
+import kotlinx.coroutines.launch
 import com.antigravity.healthagent.ui.auth.AuthState
 import com.antigravity.healthagent.ui.auth.LoginViewModel
 import com.antigravity.healthagent.ui.components.*
@@ -30,7 +30,10 @@ import com.antigravity.healthagent.ui.settings.SettingsScreen
 import com.antigravity.healthagent.ui.boletim.BoletimScreen
 
 @Composable
-fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.healthagent.ui.home.HomeViewModel) {
+fun MainScreen(
+    loginViewModel: LoginViewModel, 
+    homeViewModel: com.antigravity.healthagent.ui.home.HomeViewModel
+) {
     val authState by loginViewModel.authState.collectAsState()
     val user = (authState as? AuthState.Authenticated)?.user
     val isAdmin = user?.role == com.antigravity.healthagent.domain.repository.UserRole.ADMIN
@@ -252,37 +255,8 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
                     weeklySummaryViewModel = weeklySummaryViewModel,
                     onLogout = { loginViewModel.signOut() },
                     onSwitchAccount = { loginViewModel.signOut() },
-                    onOpenSettings = { showSettings = true },
-                    onSyncPullActive = { homeViewModel.setSyncPullActive(it) }
+                    onOpenSettings = { showSettings = true }
                 )
-                
-                // Unified Sync Status Feedback for all screens (only for agents)
-                val uiState by homeViewModel.uiState.collectAsState()
-                val isSyncPullActive by homeViewModel.isSyncPullActive.collectAsState()
-                
-                if (!showSupervisorEnvironment) {
-                    if (selectedTab == 2) {
-                        SyncFloatingBalloon(
-                            syncStatus = uiState.syncStatus,
-                            isEasyMode = uiState.isEasyMode,
-                            isSolarMode = uiState.isSolarMode,
-                            isPullActive = isSyncPullActive,
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .zIndex(3000f)
-                        )
-                    }
-
-                    if (!isSyncPullActive) {
-                        SyncStatusOverlay(
-                            syncStatus = uiState.syncStatus,
-                            isEasyMode = uiState.isEasyMode,
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .zIndex(4000f)
-                        )
-                    }
-                }
             }
         }
     }

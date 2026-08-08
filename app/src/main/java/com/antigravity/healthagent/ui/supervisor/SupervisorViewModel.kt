@@ -2,10 +2,10 @@ package com.antigravity.healthagent.ui.supervisor
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
 import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.AgentRepository
 import com.antigravity.healthagent.domain.usecase.RestoreDataUseCase
-import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.ui.supervisor.delegates.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -47,7 +47,8 @@ class SupervisorViewModel @Inject constructor(
     private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager,
     private val stateDelegate: SupervisorStateDelegate,
     private val statsDelegate: SupervisorStatsDelegate,
-    private val filterDelegate: SupervisorFilterDelegate
+    private val filterDelegate: SupervisorFilterDelegate,
+    private val feedbackManager: SyncFeedbackManager
 ) : ViewModel(), SupervisorState by stateDelegate {
 
     private val tz = TimeZone.getTimeZone("America/Sao_Paulo")
@@ -104,11 +105,6 @@ class SupervisorViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AggregateSummary())
 
     init {
-        viewModelScope.launch {
-            settingsManager.lastSyncTimestamp.collect { ts ->
-                syncState.value = SyncUiState.Idle(lastSyncTime = if (ts > 0L) ts else null)
-            }
-        }
         refreshData()
     }
 
@@ -137,8 +133,8 @@ class SupervisorViewModel @Inject constructor(
         }
 
     fun refreshData() {
-        if (syncState.value is SyncUiState.Syncing) return
-        syncState.value = SyncUiState.Syncing(progress = 0.5f, message = "Atualizando dados...", lastSyncTime = syncState.value.lastSyncTime)
+        if (feedbackManager.isSyncing) return
+        feedbackManager.syncing(progress = 0.5f, message = "Atualizando dados...")
         viewModelScope.launch {
             isLoading.value = true
             errorMessage.value = null
@@ -200,21 +196,18 @@ class SupervisorViewModel @Inject constructor(
                 val result = agentRepository.fetchAllAgentsData(since, until, datePattern)
                 if (result.isSuccess) {
                     rawAgents.value = result.getOrNull() ?: emptyList()
-                    val now = System.currentTimeMillis()
-                    settingsManager.setLastSyncTimestamp(now)
-                    syncState.value = SyncUiState.Success(lastSyncTime = now)
+                    feedbackManager.success()
                 } else {
                     val errMsg = result.exceptionOrNull()?.message ?: "Erro desconhecido ao carregar dados"
                     errorMessage.value = errMsg
-                    syncState.value = SyncUiState.Error(message = errMsg, lastSyncTime = syncState.value.lastSyncTime)
+                    feedbackManager.error(message = errMsg)
                 }
             } catch (e: Exception) {
                 val errMsg = e.message ?: "Erro ao atualizar dados"
                 errorMessage.value = errMsg
-                syncState.value = SyncUiState.Error(message = errMsg, lastSyncTime = syncState.value.lastSyncTime)
+                feedbackManager.error(message = errMsg)
             } finally {
                 isLoading.value = false
-                syncState.value = SyncUiState.Idle(lastSyncTime = syncState.value.lastSyncTime)
             }
         }
     }

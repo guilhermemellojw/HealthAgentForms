@@ -28,14 +28,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.data.backup.BackupFrequency
 import com.antigravity.healthagent.ui.settings.SettingsViewModel
 import com.antigravity.healthagent.ui.theme.AppColors 
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.MeshGradient
-import com.antigravity.healthagent.ui.components.SyncStatusOverlay
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
 import com.antigravity.healthagent.ui.components.settings.*
 import kotlinx.coroutines.launch
 
@@ -49,7 +52,8 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
-    onSwitchAccount: () -> Unit = {}
+    onSwitchAccount: () -> Unit = {},
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val canAccessAdmin = isAdmin
     // Intercept system back button
@@ -277,13 +281,14 @@ fun SettingsScreen(
         containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
-        val syncState by viewModel.syncState.collectAsState()
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             MeshGradient(modifier = Modifier.fillMaxSize())
             
-            SyncStatusOverlay(
-                syncStatus = syncState,
+            SyncCompactBalloon(
+                feedbackManager = feedbackManager,
                 isEasyMode = isEasyMode,
+                isSolarMode = isSolarMode,
+                isPullActive = false,
                 modifier = Modifier.align(Alignment.TopCenter)
             )
             

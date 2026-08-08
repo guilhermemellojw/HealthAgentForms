@@ -3,7 +3,6 @@ package com.antigravity.healthagent.ui.home.delegates
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.ui.home.AuditSummary
 import com.antigravity.healthagent.ui.home.HomeUiState
-import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import com.antigravity.healthagent.utils.DateUtils
@@ -20,7 +19,6 @@ class HomeStateDelegate @Inject constructor() : HomeState {
     override val remoteAgentUid = MutableStateFlow<String?>(null)
     override val currentUserUid = MutableStateFlow<String?>(null)
     override val uiEvent = MutableStateFlow<String?>(null)
-    override val syncStatus = MutableStateFlow<SyncUiState>(SyncUiState.Idle())
     override val pendingUpdateDrafts = MutableStateFlow<Map<Int, House>>(emptyMap())
     override val housesInFlight = MutableStateFlow<List<House>>(emptyList())
     override val recentlyEditedHouseIds = MutableStateFlow<Map<Int, Long>>(emptyMap())

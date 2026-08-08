@@ -74,6 +74,7 @@ class AdminHomologationLockTest {
     }
 
     private val syncViewModel = mockk<SyncViewModel>(relaxed = true)
+    private val feedbackManager = mockk<com.antigravity.healthagent.data.sync.SyncFeedbackManager>(relaxed = true)
     private val dayManagementViewModel = mockk<DayManagementViewModel>(relaxed = true)
     private val dayClosingDelegate = mockk<DayClosingDelegate>(relaxed = true)
     private val validationViewModel = mockk<ValidationViewModel>(relaxed = true)
@@ -302,7 +303,8 @@ class AdminHomologationLockTest {
             soundManager = soundManager,
             dayManagementUseCase = dayManagementUseCase,
             syncRepository = syncRepository,
-            roleEnforcer = RoleEnforcer()
+            roleEnforcer = RoleEnforcer(),
+            feedbackManager = feedbackManager
         )
 
         testDispatcher.scheduler.advanceUntilIdle()
@@ -516,7 +518,8 @@ class AdminHomologationLockTest {
             soundManager = soundManager,
             dayManagementUseCase = dayManagementUseCase,
             syncRepository = syncRepository,
-            roleEnforcer = RoleEnforcer()
+            roleEnforcer = RoleEnforcer(),
+            feedbackManager = feedbackManager
         )
 
         testDispatcher.scheduler.advanceUntilIdle()
@@ -538,7 +541,6 @@ class AdminHomologationLockTest {
         override val remoteAgentUid = MutableStateFlow<String?>(null)
         override val currentUserUid = MutableStateFlow<String?>("user_123")
         override val uiEvent = MutableStateFlow<String?>(null)
-        override val syncStatus = MutableStateFlow<com.antigravity.healthagent.ui.state.SyncUiState>(com.antigravity.healthagent.ui.state.SyncUiState.Idle())
         override val pendingUpdateDrafts = MutableStateFlow<Map<Int, House>>(emptyMap())
         override val housesInFlight = MutableStateFlow<List<House>>(emptyList())
         override val recentlyEditedHouseIds = MutableStateFlow<Map<Int, Long>>(emptyMap())

@@ -36,13 +36,11 @@ import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.ui.semanal.WeeklySummaryViewModel
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.CompactDropdown
-import com.antigravity.healthagent.ui.components.SyncStatusOverlay
-import com.antigravity.healthagent.ui.home.DaySummary
-import com.antigravity.healthagent.utils.AppConstants
-import kotlinx.coroutines.launch
-import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
 import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
 import com.antigravity.healthagent.ui.components.PremiumCard
 
 
@@ -50,6 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.zIndex
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,7 +59,7 @@ fun SemanalScreen(
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
-    onSyncPullActive: (Boolean) -> Unit = {}
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val weeklySummary by viewModel.weeklySummary.collectAsState()
     val weeklySummaryTotals by viewModel.weeklySummaryTotals.collectAsState()
@@ -188,19 +187,11 @@ fun SemanalScreen(
             )
         }
     ) { paddingValues ->
-        val syncState by viewModel.syncState.collectAsState()
+        val syncFeedback by feedbackManager.feedback.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
 
-        val isRefreshing = syncState is SyncUiState.Syncing
+        val isRefreshing = syncFeedback is SyncUiState.Syncing
         val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
-        LaunchedEffect(isPullActive) {
-            onSyncPullActive(isPullActive)
-        }
-        DisposableEffect(Unit) {
-            onDispose {
-                onSyncPullActive(false)
-            }
-        }
 
         PullToRefreshBox(
             isRefreshing = isRefreshing,
@@ -211,12 +202,23 @@ fun SemanalScreen(
                     state = pullToRefreshState,
                     isRefreshing = isRefreshing,
                     isSolarMode = isSolarMode,
-                    syncStatus = syncState
+                    syncStatus = syncFeedback
                 )
             },
             modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
+                if (!isPullActive) {
+                    SyncCompactBalloon(
+                        feedbackManager = feedbackManager,
+                        isEasyMode = isEasyMode,
+                        isSolarMode = isSolarMode,
+                        isPullActive = isPullActive,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(3000f)
+                    )
+                }
                 com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
                 
                 Column(

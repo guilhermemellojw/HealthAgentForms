@@ -4,9 +4,6 @@ import androidx.compose.runtime.Immutable
 import com.antigravity.healthagent.data.local.model.House
 
 
-
-import com.antigravity.healthagent.ui.state.SyncUiState
-
 data class HomeSettingsState(
     val easyMode: Boolean = false,
     val solarMode: Boolean = false,
@@ -73,7 +70,6 @@ data class HomeUiState(
     val isSolarMode: Boolean = false,
     val isEditingToolsEnabled: Boolean = false,
     val maxOpenHouses: Int = 25,
-    val syncStatus: SyncUiState = SyncUiState.Idle(),
     val backupConfirmation: BackupConfirmation? = null,
     val isDuplicateIds: Set<Int> = emptySet(),
     val highlightedHouseId: Int? = null,

@@ -38,8 +38,11 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -55,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.android.gms.location.LocationServices
@@ -96,7 +100,7 @@ fun QuarteiroesScreen(
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
-    onSyncPullActive: (Boolean) -> Unit = {}
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val context = LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -197,14 +201,6 @@ fun QuarteiroesScreen(
         val pullToRefreshState = rememberPullToRefreshState()
 
         val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isLoading
-        LaunchedEffect(isPullActive) {
-            onSyncPullActive(isPullActive)
-        }
-        DisposableEffect(Unit) {
-            onDispose {
-                onSyncPullActive(false)
-            }
-        }
 
         PullToRefreshBox(
             isRefreshing = isLoading,
@@ -220,6 +216,17 @@ fun QuarteiroesScreen(
             modifier = Modifier.padding(padding).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
+                if (!isPullActive) {
+                    SyncCompactBalloon(
+                        feedbackManager = feedbackManager,
+                        isEasyMode = isEasyMode,
+                        isSolarMode = false,
+                        isPullActive = isPullActive,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(3000f)
+                    )
+                }
                 GoogleMap(
                     modifier = Modifier.fillMaxSize(),
                     cameraPositionState = cameraPositionState,

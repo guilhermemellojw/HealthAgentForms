@@ -16,7 +16,7 @@ import com.antigravity.healthagent.ui.home.WeeklySummaryTotals
 import com.antigravity.healthagent.utils.BoletimPdfGenerator
 import com.antigravity.healthagent.utils.SemanalPdfGenerator
 import com.antigravity.healthagent.domain.repository.UserRole
-import com.antigravity.healthagent.ui.state.SyncUiState
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
 import com.antigravity.healthagent.domain.usecase.RoleEnforcer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -36,14 +36,12 @@ class WeeklySummaryViewModel @Inject constructor(
     private val soundManager: SoundManager,
     private val dayManagementUseCase: DayManagementUseCase,
     private val syncRepository: SyncRepository,
-    private val roleEnforcer: RoleEnforcer
+    private val roleEnforcer: RoleEnforcer,
+    private val feedbackManager: SyncFeedbackManager
 ) : ViewModel() {
 
     private val dateFormatter get() = DateUtils.DASH_DATE.get()
     private val displayDateFormatter get() = DateUtils.SLASH_DATE.get()
-
-    private val _syncState = MutableStateFlow<SyncUiState>(SyncUiState.Idle())
-    val syncState: StateFlow<SyncUiState> = _syncState.asStateFlow()
 
     private val _agentName = MutableStateFlow("")
     val agentName: StateFlow<String> = _agentName.asStateFlow()
@@ -539,8 +537,8 @@ class WeeklySummaryViewModel @Inject constructor(
     }
 
     fun syncDataToCloud() {
-        if (_syncState.value is SyncUiState.Syncing) return
-        _syncState.value = SyncUiState.Syncing(progress = 0.5f, message = "Sincronizando...")
+        if (feedbackManager.isSyncing) return
+        feedbackManager.syncing(progress = 0.5f, message = "Sincronizando...")
         viewModelScope.launch {
             try {
                 val currentUid = _remoteAgentUid.value ?: _currentUserUid.value
@@ -552,15 +550,15 @@ class WeeklySummaryViewModel @Inject constructor(
                     if (pushResult.isSuccess) {
                         syncRepository.pruneOldTombstones()
                     }
-                    syncRepository.pullCloudDataToLocal(currentUid)
-                    _syncState.value = SyncUiState.Success(System.currentTimeMillis())
+                    val pullResult = syncRepository.pullCloudDataToLocal(currentUid)
+                    feedbackManager.success(
+                        cloudMaxTime = pullResult.getOrNull()?.cloudMaxTime,
+                        clockSkew = pullResult.getOrNull()?.clockSkewMs ?: 0L
+                    )
                 }
             } catch (e: Exception) {
                 AppLogger.e("WeeklySummaryViewModel", "Sync failed", e)
-                _syncState.value = SyncUiState.Error(e.message ?: "Erro na sincronização")
-            } finally {
-                kotlinx.coroutines.delay(2000)
-                _syncState.value = SyncUiState.Idle(_syncState.value.lastSyncTime)
+                feedbackManager.error(e.message ?: "Erro na sincronização")
             }
         }
     }

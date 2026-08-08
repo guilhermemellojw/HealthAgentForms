@@ -1,7 +1,6 @@
 package com.antigravity.healthagent.ui.supervisor.delegates
 
 import com.antigravity.healthagent.domain.repository.AgentData
-import com.antigravity.healthagent.ui.state.SyncUiState
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.util.Calendar
 import java.util.Date
@@ -18,7 +17,6 @@ class SupervisorStateDelegate @Inject constructor() : SupervisorState {
     override val searchQuery = MutableStateFlow("")
     override val expandedUids = MutableStateFlow<Set<String>>(emptySet())
     override val isLoading = MutableStateFlow(false)
-    override val syncState = MutableStateFlow<SyncUiState>(SyncUiState.Idle())
     override val errorMessage = MutableStateFlow<String?>(null)
     override val selectedYear = MutableStateFlow(Calendar.getInstance(tz).get(Calendar.YEAR))
     override val selectedMonth = MutableStateFlow(Calendar.getInstance(tz).get(Calendar.MONTH))

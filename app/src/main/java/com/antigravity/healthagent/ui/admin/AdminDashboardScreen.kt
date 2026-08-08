@@ -24,11 +24,14 @@ import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.AccessRequest
 import androidx.compose.ui.graphics.Color
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.MeshGradient
 import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
-import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -43,7 +46,8 @@ fun AdminDashboardScreen(
     user: AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val users by viewModel.users.collectAsState()
@@ -151,11 +155,12 @@ fun AdminDashboardScreen(
                     }
                 }
                 
-                val syncState by viewModel.syncState.collectAsState()
+                val syncFeedback by feedbackManager.feedback.collectAsState()
                 val isSolarMode by viewModel.solarMode.collectAsState()
                 
                 val pullToRefreshState = rememberPullToRefreshState()
-                val isRefreshing = syncState is com.antigravity.healthagent.ui.state.SyncUiState.Syncing
+                val isRefreshing = syncFeedback is com.antigravity.healthagent.ui.state.SyncUiState.Syncing
+                val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
 
                 PullToRefreshBox(
                     isRefreshing = isRefreshing,
@@ -166,7 +171,7 @@ fun AdminDashboardScreen(
                             state = pullToRefreshState,
                             isRefreshing = isRefreshing,
                             isSolarMode = isSolarMode,
-                            syncStatus = syncState,
+                            syncStatus = syncFeedback,
                             pullText = "Puxe para atualizar...",
                             releaseText = "Solte para atualizar!"
                         )
@@ -174,7 +179,18 @@ fun AdminDashboardScreen(
                     modifier = Modifier.weight(1f).fillMaxWidth()
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                    if (selectedTab == 0) {
+                        if (!isPullActive) {
+                            SyncCompactBalloon(
+                                feedbackManager = feedbackManager,
+                                isEasyMode = false,
+                                isSolarMode = isSolarMode,
+                                isPullActive = isPullActive,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .zIndex(3000f)
+                            )
+                        }
+                        if (selectedTab == 0) {
                         // Gestão Tab (Combined Profiles, Requests, and Master List)
                         Column(modifier = Modifier.fillMaxSize()) {
                             var showMasterList by remember { mutableStateOf(false) }

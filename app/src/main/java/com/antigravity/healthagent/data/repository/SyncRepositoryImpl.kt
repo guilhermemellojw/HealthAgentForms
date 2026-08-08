@@ -58,12 +58,17 @@ class SyncRepositoryImpl @Inject constructor(
         )
     }
 
-    override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> {
+    override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<SyncRepository.SyncResult> {
         return syncPullHandler.pullCloudDataToLocal(
             targetUid = targetUid,
             force = force,
             syncMutex = syncMutex
-        )
+        ).map { 
+            SyncRepository.SyncResult(
+                cloudMaxTime = it.cloudMaxTime,
+                clockSkewMs = it.clockSkewMs
+            )
+        }
     }
 
     override suspend fun clearLocalData(): Result<Unit> {

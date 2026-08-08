@@ -3,6 +3,8 @@ package com.antigravity.healthagent.ui.home
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.ui.state.SyncUiState
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +26,8 @@ class HomeScreenComposeTest {
     @Test
     fun homeScreenShowsAgentName() {
         val viewModel = mockk<HomeViewModel>(relaxed = true)
+        val feedbackManager = mockk<SyncFeedbackManager>(relaxed = true)
+        every { feedbackManager.feedback } returns MutableStateFlow(SyncUiState.Idle())
         val uiState = MutableStateFlow(
             HomeUiState(
                 agentName = "Test Agent",
@@ -61,7 +65,7 @@ class HomeScreenComposeTest {
                 onLogout = {},
                 onSwitchAccount = {},
                 onOpenSettings = {},
-                onSyncPullActive = {}
+                feedbackManager = feedbackManager
             )
         }
 

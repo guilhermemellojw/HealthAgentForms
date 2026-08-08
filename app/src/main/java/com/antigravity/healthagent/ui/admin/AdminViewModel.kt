@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.UserRole
-import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.ui.admin.delegates.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -14,6 +13,8 @@ import javax.inject.Inject
 import android.content.Context
 import android.net.Uri
 
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+
 @HiltViewModel
 class AdminViewModel @Inject constructor(
     private val authRepository: com.antigravity.healthagent.domain.repository.AuthRepository,
@@ -21,7 +22,8 @@ class AdminViewModel @Inject constructor(
     private val settingsManager: com.antigravity.healthagent.data.settings.SettingsManager,
     private val stateDelegate: AdminStateDelegate,
     private val usersDelegate: AdminUsersDelegate,
-    private val backupDelegate: AdminBackupDelegate
+    private val backupDelegate: AdminBackupDelegate,
+    private val feedbackManager: SyncFeedbackManager
 ) : ViewModel(), AdminState by stateDelegate {
 
     val solarMode: StateFlow<Boolean> = settingsManager.solarMode
@@ -154,12 +156,6 @@ class AdminViewModel @Inject constructor(
                 accessRequests.value = requests
             }
         }
-
-        viewModelScope.launch {
-            settingsManager.lastSyncTimestamp.collect { ts ->
-                syncState.value = SyncUiState.Idle(lastSyncTime = if (ts > 0L) ts else null)
-            }
-        }
     }
 
     fun updateSearchQuery(query: String) { searchQuery.value = query }
@@ -191,8 +187,8 @@ class AdminViewModel @Inject constructor(
     }
 
     fun refreshAll() {
-        if (syncState.value is SyncUiState.Syncing) return
-        syncState.value = SyncUiState.Syncing(progress = 0.5f, message = "Atualizando dados...", lastSyncTime = syncState.value.lastSyncTime)
+        if (feedbackManager.isSyncing) return
+        feedbackManager.syncing(progress = 0.5f, message = "Atualizando dados...")
         viewModelScope.launch {
             isLoading.value = true
             try {
@@ -202,11 +198,9 @@ class AdminViewModel @Inject constructor(
                 usersDelegate.loadBairros(stateDelegate)
                 usersDelegate.loadSystemSettings(stateDelegate)
                 
-                val now = System.currentTimeMillis()
-                settingsManager.setLastSyncTimestamp(now)
-                syncState.value = SyncUiState.Success(lastSyncTime = now)
+                feedbackManager.success()
             } catch (e: java.lang.Exception) {
-                syncState.value = SyncUiState.Error(message = e.message ?: "Erro ao atualizar dados", lastSyncTime = syncState.value.lastSyncTime)
+                feedbackManager.error(message = e.message ?: "Erro ao atualizar dados")
                 stateDelegate.uiEvent.emit(e.message ?: "Erro ao atualizar dados")
             } finally {
                 isLoading.value = false

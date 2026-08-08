@@ -2,7 +2,6 @@ package com.antigravity.healthagent.ui.home.delegates
 
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.ui.home.AuditSummary
-import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.domain.usecase.HouseValidationUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -17,7 +16,6 @@ interface HomeState {
     val remoteAgentUid: MutableStateFlow<String?>
     val currentUserUid: MutableStateFlow<String?>
     val uiEvent: MutableStateFlow<String?>
-    val syncStatus: MutableStateFlow<SyncUiState>
     val pendingUpdateDrafts: MutableStateFlow<Map<Int, House>>
     val housesInFlight: MutableStateFlow<List<House>>
     val recentlyEditedHouseIds: MutableStateFlow<Map<Int, Long>>

@@ -17,13 +17,16 @@ import androidx.compose.runtime.DisposableEffect
 import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.ui.state.SyncUiState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.text.font.FontWeight
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.HouseRowItem
-import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
 import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.rg.RgViewModel
@@ -47,7 +50,7 @@ fun RGScreen(
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
-    onSyncPullActive: (Boolean) -> Unit = {}
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val rgBlocks by viewModel.rgBlocks.collectAsState()
     val selectedRgBlock by viewModel.selectedRgBlock.collectAsState()
@@ -136,20 +139,12 @@ fun RGScreen(
             }
         }
     ) { paddingValues ->
-        val syncState by viewModel.syncState.collectAsState()
+        val syncFeedback by feedbackManager.feedback.collectAsState()
         val currentUserUid by viewModel.currentUserUid.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
 
-        val isRefreshing = syncState is SyncUiState.Syncing
+        val isRefreshing = syncFeedback is SyncUiState.Syncing
         val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
-        LaunchedEffect(isPullActive) {
-            onSyncPullActive(isPullActive)
-        }
-        DisposableEffect(Unit) {
-            onDispose {
-                onSyncPullActive(false)
-            }
-        }
 
         PullToRefreshBox(
             isRefreshing = isRefreshing,
@@ -160,12 +155,23 @@ fun RGScreen(
                     state = pullToRefreshState,
                     isRefreshing = isRefreshing,
                     isSolarMode = isSolarMode,
-                    syncStatus = syncState
+                    syncStatus = syncFeedback
                 )
             },
             modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
+                if (!isPullActive) {
+                    SyncCompactBalloon(
+                        feedbackManager = feedbackManager,
+                        isEasyMode = isEasyMode,
+                        isSolarMode = isSolarMode,
+                        isPullActive = isPullActive,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(3000f)
+                    )
+                }
                 com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
                 Column(
                     modifier = Modifier

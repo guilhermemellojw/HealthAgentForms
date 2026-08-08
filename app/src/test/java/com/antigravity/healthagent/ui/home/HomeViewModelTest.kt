@@ -187,21 +187,21 @@ class HomeViewModelTest {
     fun `syncDataToCloud delegates to syncViewModel`() {
         val vm = createViewModel()
         vm.syncDataToCloud()
-        verify { syncViewModel.syncDataToCloud(any(), any(), any(), any(), any(), any(), any()) }
+        verify { syncViewModel.syncDataToCloud(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `pullDataFromCloud delegates to syncViewModel`() {
         val vm = createViewModel()
         vm.pullDataFromCloud("target_uid")
-        verify { syncViewModel.pullDataFromCloud(any(), any(), eq("target_uid"), any()) }
+        verify { syncViewModel.pullDataFromCloud(any(), eq("target_uid"), any()) }
     }
 
     @Test
     fun `generateMockData delegates to syncViewModel`() {
         val vm = createViewModel()
         vm.generateMockData()
-        verify { syncViewModel.generateMockData(any(), any(), any(), any()) }
+        verify { syncViewModel.generateMockData(any(), any(), any()) }
     }
 
     @Test
@@ -209,7 +209,7 @@ class HomeViewModelTest {
         val vm = createViewModel()
         var called = false
         vm.finishEditSession { called = true }
-        verify { syncViewModel.finishEditSession(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        verify { syncViewModel.finishEditSession(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -561,16 +561,6 @@ class HomeViewModelTest {
         val vm = createViewModel()
         vm.addNewHouseAt(5)
         verify { houseEditDelegate.addNewHouseAt(any(), any(), 5, any()) }
-    }
-
-    @Test
-    fun `setSyncPullActive updates isSyncPullActive state`() {
-        val vm = createViewModel()
-        assertFalse(vm.isSyncPullActive.value)
-        vm.setSyncPullActive(true)
-        assertTrue(vm.isSyncPullActive.value)
-        vm.setSyncPullActive(false)
-        assertFalse(vm.isSyncPullActive.value)
     }
 
     @Test

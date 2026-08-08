@@ -12,7 +12,6 @@ import com.antigravity.healthagent.ui.home.HomeViewModel
 import com.antigravity.healthagent.ui.home.HouseUiStateMapper
 import com.antigravity.healthagent.ui.home.mapDayIncremental
 import com.antigravity.healthagent.ui.home.CachedHouseUi
-import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.normalize
@@ -275,30 +274,6 @@ class InitializationDelegate @Inject constructor(
                     viewModel.uiState.update { it.copy(hasMisattributedData = hasLeaks) }
                 } else {
                     viewModel.uiState.update { it.copy(hasMisattributedData = false) }
-                }
-            }
-        }
-
-        // Observer for Sync Info (Metadata)
-        scope.launch(trackedJob) {
-            combine(
-                settingsManager.lastSyncTimestamp,
-                settingsManager.clockSkewMs
-            ) { lastSync, skew ->
-                lastSync to skew
-            }.collect { (lastSync, skew) ->
-                viewModel.syncStatus.update { state ->
-                    if (state is SyncUiState.Success) state.copy(lastSyncTime = lastSync, clockSkewMs = skew)
-                    else SyncUiState.Idle(lastSyncTime = lastSync)
-                }
-            }
-        }
-
-        // Propagate syncStatus to uiState in real time so the float balloon displays it reactively
-        scope.launch(trackedJob) {
-            viewModel.syncStatus.collect { status ->
-                viewModel.uiState.update { current ->
-                    current.copy(syncStatus = status)
                 }
             }
         }

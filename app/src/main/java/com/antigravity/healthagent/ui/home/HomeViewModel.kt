@@ -22,7 +22,6 @@ import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.data.backup.BackupManager
 import com.antigravity.healthagent.data.backup.BackupData
 import com.antigravity.healthagent.ui.home.delegates.*
-import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.utils.SoundManager
 import com.antigravity.healthagent.domain.logger.AppLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -89,14 +88,7 @@ class HomeViewModel @Inject constructor(
     private val _navigationTab = MutableStateFlow<Int?>(null)
     val navigationTab: StateFlow<Int?> = _navigationTab.asStateFlow()
 
-    private val _isSyncPullActive = MutableStateFlow(false)
-    val isSyncPullActive: StateFlow<Boolean> = _isSyncPullActive.asStateFlow()
-
     private val dayErrorTracker = DayErrorTracker(houseValidationUseCase)
-
-    fun setSyncPullActive(active: Boolean) {
-        _isSyncPullActive.value = active
-    }
 
     val recentlyEditedHouseSet: StateFlow<Set<Int>> = recentlyEditedHouseIds.map { it.keys }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
@@ -490,7 +482,6 @@ class HomeViewModel @Inject constructor(
     // Action Routing
     // ──────────────────────────────────────────────────────────
     fun syncDataToCloud() = syncViewModel.syncDataToCloud(
-        syncStatus = syncStatus,
         remoteAgentUid = remoteAgentUid.value,
         currentUserUid = currentUserUid.value,
         maxOpenHouses = maxOpenHouses.value,
@@ -500,21 +491,18 @@ class HomeViewModel @Inject constructor(
     )
 
     fun pullDataFromCloud(targetUid: String? = null) = syncViewModel.pullDataFromCloud(
-        syncStatus = syncStatus,
         currentUserUid = currentUserUid.value,
         targetUid = targetUid,
         uiEvent = uiEvent
     )
 
     fun generateMockData() = syncViewModel.generateMockData(
-        syncStatus = syncStatus,
         agentName = agentName.value,
         currentUserUid = currentUserUid.value,
         currentDate = data.value
     )
 
     fun finishEditSession(onComplete: () -> Unit = {}) = syncViewModel.finishEditSession(
-        syncStatus = syncStatus,
         remoteAgent = remoteAgent.value,
         remoteAgentUid = remoteAgentUid.value,
         currentUserUid = currentUserUid.value,

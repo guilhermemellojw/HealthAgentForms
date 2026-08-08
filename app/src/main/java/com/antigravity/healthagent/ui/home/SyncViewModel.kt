@@ -6,7 +6,6 @@ import com.antigravity.healthagent.domain.usecase.CleanupBrokenHousesUseCase
 import com.antigravity.healthagent.domain.usecase.GenerateTestDataUseCase
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.utils.SoundManager
-import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.BuildConfig
 import com.antigravity.healthagent.utils.DateUtils
@@ -17,13 +16,13 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Date
 import javax.inject.Inject
 import javax.inject.Singleton
+
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
 
 @Singleton
 class SyncViewModel @Inject constructor(
@@ -32,7 +31,8 @@ class SyncViewModel @Inject constructor(
     private val repository: HouseRepository,
     private val cleanupBrokenHousesUseCase: CleanupBrokenHousesUseCase,
     private val generateTestDataUseCase: GenerateTestDataUseCase,
-    private val soundManager: SoundManager
+    private val soundManager: SoundManager,
+    private val feedbackManager: SyncFeedbackManager
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -41,7 +41,6 @@ class SyncViewModel @Inject constructor(
     fun cancelScope() { scope.cancel() }
 
     fun syncDataToCloud(
-        syncStatus: MutableStateFlow<SyncUiState>,
         remoteAgentUid: String?,
         currentUserUid: String?,
         maxOpenHouses: Int,
@@ -58,16 +57,19 @@ class SyncViewModel @Inject constructor(
         scope.launch {
             val uid = remoteAgentUid ?: currentUserUid ?: return@launch
 
-            syncStatus.update { SyncUiState.Syncing(progress = 0.1f, message = "Iniciando sincronização...", isDownloading = false) }
+            feedbackManager.syncing(progress = 0.1f, message = "Iniciando sincronização...", isDownloading = false)
 
             val targetUid = remoteAgentUid
             withContext(Dispatchers.IO) {
                 try {
                     val pullResult = syncRepository.pullCloudDataToLocal(uid)
                     if (pullResult.isSuccess) {
-                        syncStatus.update { SyncUiState.Syncing(progress = 0.3f, message = "Baixando dados atualizados...", isDownloading = true) }
+                        val cloudMaxTime = pullResult.getOrNull()?.cloudMaxTime
+                        val clockSkew = pullResult.getOrNull()?.clockSkewMs ?: 0L
 
-                        syncStatus.update { SyncUiState.Syncing(progress = 0.6f, message = "Enviando dados para a nuvem...", isDownloading = false) }
+                        feedbackManager.syncing(progress = 0.3f, message = "Baixando dados atualizados...", isDownloading = true)
+
+                        feedbackManager.syncing(progress = 0.6f, message = "Enviando dados para a nuvem...", isDownloading = false)
                         val houses = repository.getAllHousesOnce(targetUid ?: "")
                         val activities = repository.getAllDayActivitiesOnce(uid)
                         val pushResult = syncRepository.pushLocalDataToCloud(houses, activities, targetUid)
@@ -79,8 +81,7 @@ class SyncViewModel @Inject constructor(
                                 cleanupBrokenHousesUseCase(uid)
                             }
 
-                            settingsManager.setLastSyncTimestamp(System.currentTimeMillis())
-                            syncStatus.update { SyncUiState.Success(System.currentTimeMillis()) }
+                            feedbackManager.success(cloudMaxTime, clockSkew)
 
                             val housesAfterSync = repository.getAllHousesOnce(uid)
                             if (housesAfterSync.isNotEmpty()) {
@@ -94,23 +95,19 @@ class SyncViewModel @Inject constructor(
                                 }
                             }
                         } else {
-                            syncStatus.update { SyncUiState.Error("Erro ao enviar: ${pushResult.exceptionOrNull()?.message}") }
+                            feedbackManager.error("Erro ao enviar: ${pushResult.exceptionOrNull()?.message}")
                         }
                     } else {
-                        syncStatus.update { SyncUiState.Error("Falha ao baixar: ${pullResult.exceptionOrNull()?.message}") }
+                        feedbackManager.error("Falha ao baixar: ${pullResult.exceptionOrNull()?.message}")
                     }
                 } catch (e: Exception) {
-                    syncStatus.update { SyncUiState.Error("Erro: ${e.message}") }
-                } finally {
-                    delay(1500)
-                    syncStatus.update { SyncUiState.Idle(syncStatus.value.lastSyncTime) }
+                    feedbackManager.error("Erro: ${e.message}")
                 }
             }
         }
     }
 
     fun pullDataFromCloud(
-        syncStatus: MutableStateFlow<SyncUiState>,
         currentUserUid: String?,
         targetUid: String? = null,
         uiEvent: MutableStateFlow<String?>
@@ -118,13 +115,16 @@ class SyncViewModel @Inject constructor(
         scope.launch {
             val uid = targetUid ?: currentUserUid ?: return@launch
 
-            syncStatus.update { SyncUiState.Syncing(progress = 0.1f, message = "Iniciando download...", isDownloading = true) }
+            feedbackManager.syncing(progress = 0.1f, message = "Iniciando download...", isDownloading = true)
 
             withContext(Dispatchers.IO) {
                 try {
-                    syncStatus.update { SyncUiState.Syncing(progress = 0.5f, message = "Baixando dados da nuvem...", isDownloading = true) }
+                    feedbackManager.syncing(progress = 0.5f, message = "Baixando dados da nuvem...", isDownloading = true)
                     val result = syncRepository.pullCloudDataToLocal(uid)
                     if (result.isSuccess) {
+                        val cloudMaxTime = result.getOrNull()?.cloudMaxTime
+                        val clockSkew = result.getOrNull()?.clockSkewMs ?: 0L
+
                         if (uid.isNotBlank()) {
                             cleanupBrokenHousesUseCase(uid)
 
@@ -134,27 +134,22 @@ class SyncViewModel @Inject constructor(
                             repository.migrateLocalData(name, email, uid, isCurrentAgent = true)
                         }
 
-                        settingsManager.setLastSyncTimestamp(System.currentTimeMillis())
+                        feedbackManager.success(cloudMaxTime, clockSkew)
                         soundManager.vibrateSuccess()
-                        syncStatus.update { SyncUiState.Success(System.currentTimeMillis()) }
                         uiEvent.value = "Dados baixados com sucesso."
                     } else {
-                        syncStatus.update { SyncUiState.Error("Falha ao baixar: ${result.exceptionOrNull()?.message}") }
+                        feedbackManager.error("Falha ao baixar: ${result.exceptionOrNull()?.message}")
                         uiEvent.value = "Falha ao baixar dados: ${result.exceptionOrNull()?.message}"
                     }
                 } catch (e: Exception) {
-                    syncStatus.update { SyncUiState.Error("Erro: ${e.message}") }
+                    feedbackManager.error("Erro: ${e.message}")
                     uiEvent.value = "Erro ao baixar: ${e.message}"
-                } finally {
-                    delay(1500)
-                    syncStatus.update { SyncUiState.Idle(syncStatus.value.lastSyncTime) }
                 }
             }
         }
     }
 
     fun finishEditSession(
-        syncStatus: MutableStateFlow<SyncUiState>,
         remoteAgent: String?,
         remoteAgentUid: String?,
         currentUserUid: String?,
@@ -171,18 +166,17 @@ class SyncViewModel @Inject constructor(
                 return@launch
             }
 
-            syncStatus.update { SyncUiState.Syncing(progress = 0.1f, message = "Finalizando edição...", lastSyncTime = it.lastSyncTime) }
+            feedbackManager.syncing(progress = 0.1f, message = "Finalizando edição...")
 
             try {
-                syncStatus.update { SyncUiState.Syncing(progress = 0.5f, message = "Sincronizando dados remotos...", lastSyncTime = it.lastSyncTime) }
+                feedbackManager.syncing(progress = 0.5f, message = "Sincronizando dados remotos...")
                 val uid = remoteAgentUid ?: currentUserUid
                 val houses = repository.getAllHousesOnce(uid ?: "")
                 val activities = repository.getAllDayActivitiesOnce(uid ?: "")
                 val result = syncRepository.pushLocalDataToCloud(houses, activities, uid ?: "")
 
                 if (result.isSuccess) {
-                    val newTs = System.currentTimeMillis()
-                    syncStatus.update { SyncUiState.Success(lastSyncTime = newTs) }
+                    feedbackManager.success()
                     uiEvent.value = "Edição finalizada e sincronizada!"
 
                     withContext(Dispatchers.Main) {
@@ -195,16 +189,12 @@ class SyncViewModel @Inject constructor(
                     pendingUpdateDraftsFlow.value = emptyMap()
                     housesInFlightFlow.value = emptyList()
                 } else {
-                    syncStatus.update { SyncUiState.Error(message = "Falha: ${result.exceptionOrNull()?.message}", lastSyncTime = it.lastSyncTime) }
+                    feedbackManager.error("Falha: ${result.exceptionOrNull()?.message}")
                     uiEvent.value = "Falha ao finalizar: ${result.exceptionOrNull()?.message}"
-                    delay(3000)
                 }
             } catch (e: Exception) {
-                syncStatus.update { SyncUiState.Error(message = "Erro: ${e.message}", lastSyncTime = it.lastSyncTime) }
+                feedbackManager.error("Erro: ${e.message}")
                 uiEvent.value = "Erro ao finalizar: ${e.message}"
-                delay(3000)
-            } finally {
-                syncStatus.update { SyncUiState.Idle(lastSyncTime = syncStatus.value.lastSyncTime) }
             }
         }
     }
@@ -216,7 +206,6 @@ class SyncViewModel @Inject constructor(
     }
 
     fun generateMockData(
-        syncStatus: MutableStateFlow<SyncUiState>,
         agentName: String,
         currentUserUid: String?,
         currentDate: String
@@ -226,7 +215,7 @@ class SyncViewModel @Inject constructor(
 
             val uid = currentUserUid ?: return@launch
 
-            syncStatus.update { SyncUiState.Syncing(progress = 0.1f, message = "Gerando 100 casas de teste...", lastSyncTime = it.lastSyncTime) }
+            feedbackManager.syncing(progress = 0.1f, message = "Gerando 100 casas de teste...")
             val result = generateTestDataUseCase(
                 agentName = agentName,
                 agentUid = uid,
@@ -236,21 +225,18 @@ class SyncViewModel @Inject constructor(
             )
 
             if (result.isSuccess) {
-                syncStatus.update { SyncUiState.Syncing(progress = 1.0f, message = "Dados gerados! Sincronizando...", lastSyncTime = it.lastSyncTime) }
+                feedbackManager.syncing(progress = 1.0f, message = "Dados gerados! Sincronizando...")
                 delay(1000)
                 try {
                     val housesToPush = repository.getAllHousesOnce(uid)
                     val activitiesToPush = repository.getAllDayActivitiesOnce(uid)
                     syncRepository.pushLocalDataToCloud(housesToPush, activitiesToPush, uid)
                 } catch (e: Exception) {
-                    syncStatus.update { SyncUiState.Error(message = "Erro no push: ${e.message}", lastSyncTime = it.lastSyncTime) }
+                    feedbackManager.error("Erro no push: ${e.message}")
                 }
             } else {
-                syncStatus.update { SyncUiState.Error(message = "Erro: ${result.exceptionOrNull()?.message}", lastSyncTime = it.lastSyncTime) }
+                feedbackManager.error("Erro: ${result.exceptionOrNull()?.message}")
             }
-
-            delay(2000)
-            syncStatus.update { SyncUiState.Idle(lastSyncTime = syncStatus.value.lastSyncTime) }
         }
     }
 }

@@ -15,7 +15,7 @@ import com.antigravity.healthagent.domain.repository.LocalizationRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.usecase.CleanupHistoricalDataUseCase
-import com.antigravity.healthagent.ui.state.SyncUiState
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
 import com.antigravity.healthagent.domain.usecase.RestoreDataUseCase
 import com.antigravity.healthagent.utils.SoundManager
 import com.antigravity.healthagent.ui.home.BackupConfirmation
@@ -42,7 +42,8 @@ class SettingsViewModel @Inject constructor(
     private val accessControlRepository: com.antigravity.healthagent.domain.repository.AccessControlRepository,
     private val restoreDataUseCase: RestoreDataUseCase,
     private val localizationRepository: LocalizationRepository,
-    private val syncRepository: SyncRepository
+    private val syncRepository: SyncRepository,
+    private val feedbackManager: SyncFeedbackManager
 ) : ViewModel() {
 
     private val dateFormatter get() = DateUtils.DASH_DATE.get()
@@ -93,9 +94,6 @@ class SettingsViewModel @Inject constructor(
 
     private val _uiEvent = MutableStateFlow<String?>(null)
     val uiEvent: StateFlow<String?> = _uiEvent.asStateFlow()
-
-    private val _syncState = MutableStateFlow<SyncUiState>(SyncUiState.Idle())
-    val syncState: StateFlow<SyncUiState> = _syncState.asStateFlow()
 
     private val _backupConfirmation = MutableStateFlow<BackupConfirmation?>(null)
     val backupConfirmation: StateFlow<BackupConfirmation?> = _backupConfirmation.asStateFlow()
@@ -457,8 +455,8 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun cleanupHistoricalData(beforeDate: String) {
-        if (_syncState.value is SyncUiState.Syncing) return
-        _syncState.value = SyncUiState.Syncing(progress = 0.5f, message = "Limpando histórico...")
+        if (feedbackManager.isSyncing) return
+        feedbackManager.syncing(progress = 0.5f, message = "Limpando histórico...")
         _uiEvent.value = "Iniciando limpeza de histórico..."
         
         viewModelScope.launch(Dispatchers.IO) {
@@ -490,7 +488,7 @@ class SettingsViewModel @Inject constructor(
                     soundManager.playWarning()
                 }
             } finally {
-                _syncState.value = SyncUiState.Idle()
+                feedbackManager.idle()
             }
         }
     }
@@ -498,7 +496,7 @@ class SettingsViewModel @Inject constructor(
     fun clearAllData() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                _syncState.value = SyncUiState.Syncing(progress = 0.5f, message = "Limpando todos os dados...")
+                feedbackManager.syncing(progress = 0.5f, message = "Limpando todos os dados...")
                 _uiEvent.value = "Iniciando limpeza completa..."
                 
                 val user = authRepository.currentUserAsync.first()
@@ -526,7 +524,7 @@ class SettingsViewModel @Inject constructor(
                     _uiEvent.value = "Erro ao apagar dados: ${e.message}"
                 }
             } finally {
-                _syncState.value = SyncUiState.Idle()
+                feedbackManager.idle()
             }
         }
     }

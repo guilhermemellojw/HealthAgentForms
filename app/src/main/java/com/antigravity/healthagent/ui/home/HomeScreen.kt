@@ -45,6 +45,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.HouseRowItem
 import com.antigravity.healthagent.ui.components.CompactDropdown
 import com.antigravity.healthagent.ui.components.CompactInputBox
@@ -67,7 +69,7 @@ fun HomeScreen(
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
-    onSyncPullActive: (Boolean) -> Unit = {}
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
@@ -452,18 +454,11 @@ fun HomeScreen(
         containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
         val isSyncing by viewModel.isSyncing.collectAsState()
-        val isRefreshing = uiState.syncStatus is SyncUiState.Syncing || isSyncing
+        val syncFeedback by feedbackManager.feedback.collectAsState()
+        val isRefreshing = syncFeedback is SyncUiState.Syncing || isSyncing
         val pullToRefreshState = rememberPullToRefreshState()
 
         val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
-        LaunchedEffect(isPullActive) {
-            onSyncPullActive(isPullActive)
-        }
-        DisposableEffect(Unit) {
-            onDispose {
-                onSyncPullActive(false)
-            }
-        }
 
         PullToRefreshBox(
             isRefreshing = isRefreshing,
@@ -474,7 +469,7 @@ fun HomeScreen(
                     state = pullToRefreshState,
                     isRefreshing = isRefreshing,
                     isSolarMode = uiState.isSolarMode,
-                    syncStatus = uiState.syncStatus
+                    syncStatus = syncFeedback
                 )
             },
             modifier = Modifier.padding(paddingValues).fillMaxSize()
@@ -486,6 +481,18 @@ fun HomeScreen(
                 .fillMaxSize()
         ) {
             MeshGradient(modifier = Modifier.fillMaxSize())
+            
+            if (!isPullActive) {
+                SyncCompactBalloon(
+                    feedbackManager = feedbackManager,
+                    isEasyMode = uiState.isEasyMode,
+                    isSolarMode = uiState.isSolarMode,
+                    isPullActive = isPullActive,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .zIndex(3000f)
+                )
+            }
             
             // Repositioned SnackbarHost to the TOP
             SnackbarHost(
