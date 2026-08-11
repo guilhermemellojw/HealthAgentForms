@@ -137,19 +137,28 @@ class HouseRepositoryImpl @Inject constructor(
                 AppLogger.w("HouseRepository", "Manual update created an address conflict for house ${house.id}. UI will flag this.")
             }
 
-            val existing = houseDao.getHouseById(house.id.toLong())
+            val houseWithUuid = if (house.uuid.isBlank()) {
+                house.copy(uuid = java.util.UUID.randomUUID().toString())
+            } else house
+
+            val existing = houseDao.getHouseById(houseWithUuid.id.toLong())
             if (existing != null) {
                 val oldKey = existing.generateNaturalKey()
-                val newKey = house.generateNaturalKey()
+                val newKey = houseWithUuid.generateNaturalKey()
                 if (oldKey != newKey) {
-                    tombstoneDao.insertTombstone(Tombstone(type = TombstoneType.HOUSE, naturalKey = oldKey, agentUid = existing.agentUid))
+                    tombstoneDao.insertTombstone(Tombstone(
+                        type = TombstoneType.HOUSE,
+                        naturalKey = oldKey,
+                        agentUid = existing.agentUid,
+                        agentName = existing.agentName,
+                        dataDate = existing.data
+                    ))
                 }
-                // Also ensures NO tombstone exists for the NEW key (re-added or restored)
-                tombstoneDao.deleteByNaturalKey(newKey, house.agentUid)
+                tombstoneDao.deleteByNaturalKey(newKey, houseWithUuid.agentUid)
             }
 
-            houseDao.updateHouse(house.copy(
-                isSynced = false, 
+            houseDao.updateHouse(houseWithUuid.copy(
+                isSynced = false,
                 editedByAdmin = force,
                 lastUpdated = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
             ))

@@ -92,6 +92,7 @@ data class House(
      * Sync identity (uuid) is intentionally NOT used here.
      */
     fun generatePhysicalKey(): String {
+        if (uuid.isNotBlank()) return uuid
         val normalizedDate = data.toDashDate()
         return "${agentUid}_${normalizedDate}_${address.generateAddressSignature()}".uppercase()
     }

@@ -34,14 +34,19 @@ fun mapDayIncremental(
     mapper: (House, Boolean, Boolean, Boolean, Boolean) -> HouseUiState
 ): MappedDayResult {
     val keys = houses.map { generateHouseKey(it) }
-    val counts = HashMap<String, Int>(keys.size * 2)
-    keys.forEach { key -> counts[key] = (counts[key] ?: 0) + 1 }
+    val duplicateFlags = BooleanArray(houses.size)
+    for (i in 1 until houses.size) {
+        if (keys[i] == keys[i - 1]) {
+            duplicateFlags[i - 1] = true
+            duplicateFlags[i] = true
+        }
+    }
 
     val states = ArrayList<HouseUiState>(houses.size)
     val newCache = HashMap<Int, CachedHouseUi>(previous.size * 2)
     for (i in houses.indices) {
         val house = houses[i]
-        val isDuplicate = (counts[keys[i]] ?: 0) > 1
+        val isDuplicate = duplicateFlags[i]
         val isRecentlyEdited = recentlyEditedHouseIds.containsKey(house.id)
         val isHighlighted = house.id == highlightedId
         val isMine = house.agentUid == myUid
