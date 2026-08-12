@@ -75,6 +75,7 @@ fun BoletimScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val boletimList by viewModel.boletimList.collectAsState()
+    val maxOpenHouses by viewModel.maxOpenHouses.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -416,15 +417,14 @@ fun BoletimScreen(
                                          }
                                      }
                                      
-                                     // Individual Status Badge
-                                     StatusBadge(
-                                         text = if (block.isCompleted) "CONCLUÍDO" else "EM ABERTO",
-                                         containerColor = if (block.isCompleted) 
-                                             androidx.compose.ui.graphics.Color(0xFF4CAF50) // Green 
-                                         else 
-                                             androidx.compose.ui.graphics.Color(0xFFFF9800), // Orange
-                                         contentColor = androidx.compose.ui.graphics.Color.White
-                                     )
+                                      StatusBadge(
+                                          text = if (summary.totals.worked >= maxOpenHouses) "CONCLUÍDO" else "EM ABERTO",
+                                          containerColor = if (summary.totals.worked >= maxOpenHouses)
+                                              androidx.compose.ui.graphics.Color(0xFF4CAF50)
+                                          else
+                                              androidx.compose.ui.graphics.Color(0xFFFF9800),
+                                          contentColor = androidx.compose.ui.graphics.Color.White
+                                      )
                                  }
                                  
                                  if (index < summary.blocks.size - 1) {

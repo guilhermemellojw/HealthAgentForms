@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.data.sync.SyncFeedbackManager
 import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
+import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.ui.components.HouseRowItem
 import com.antigravity.healthagent.ui.components.SyncCompactBalloon
 import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
@@ -272,13 +273,25 @@ fun RGScreen(
                         }
                     }
                 } else {
-                    // DETAIL MODE: List of Houses
+                    val groupedByAgent = rgFilteredList.foldIndexed(
+                        emptyList<Triple<Int, String, List<House>>>()
+                    ) { index, acc, house ->
+                        val lastGroup = acc.lastOrNull()
+                        if (lastGroup != null && lastGroup.second == house.agentUid) {
+                            val updated = lastGroup.copy(third = lastGroup.third + house)
+                            acc.dropLast(1) + updated
+                        } else {
+                            acc + Triple(index, house.agentUid, listOf(house))
+                        }
+                    }
+
+                    // DETAIL MODE: List of Houses grouped by agent (order-preserving)
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 100.dp)
                     ) {
                         if (rgFilteredList.isEmpty()) {
-                             item {
+                            item {
                                 Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
                                     Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
                                         Icon(
@@ -297,13 +310,16 @@ fun RGScreen(
                                 }
                             }
                         } else {
-                            items(rgFilteredList, key = { it.id }) { house ->
-                                RGHouseRow(
-                                    house = house,
-                                    isEasyMode = isEasyMode,
-                                    isSolarMode = isSolarMode,
-                                    currentUserUid = currentUserUid ?: ""
-                                )
+                            groupedByAgent.forEach { (sortKey, agentUid, houses) ->
+                                val agentName = houses.first().agentName
+                                item(key = "group_$sortKey") {
+                                    AgentGroupCard(
+                                        agentName = agentName,
+                                        houses = houses,
+                                        isSolarMode = isSolarMode,
+                                        isEasyMode = isEasyMode
+                                    )
+                                }
                             }
                         }
                     }
