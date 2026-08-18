@@ -37,11 +37,13 @@ class SaveHouseUseCase @Inject constructor(
             val tGuard = System.currentTimeMillis()
             val existingHouses = repository.getHousesByDateAndAgent(normalizedData, sanitized.agentUid)
             val existingDuplicate = existingHouses.find {
-                it.id != sanitized.id && it.generatePhysicalKey() == sanitized.generatePhysicalKey()
+                it.id != sanitized.id &&
+                it.address.generateAddressSignature() == sanitized.address.generateAddressSignature() &&
+                it.visitSegment == sanitized.visitSegment
             }
             var toInsert = sanitized
             if (existingDuplicate != null) {
-                AppLogger.w("PERSIST_DEBUG", "DUPLICATE_GUARD: found existing id=${existingDuplicate.id} key=${sanitized.generatePhysicalKey()}. Advancing to next free house.")
+                AppLogger.w("PERSIST_DEBUG", "DUPLICATE_GUARD: found existing id=${existingDuplicate.id} signature=${sanitized.address.generateAddressSignature()}. Advancing to next free house.")
                 val bumped = advanceToNextFree(sanitized, existingHouses)
                 if (bumped == null) {
                     AppLogger.w("PERSIST_DEBUG", "DUPLICATE_GUARD: bump exhausted, returning existing id=${existingDuplicate.id}")
@@ -75,11 +77,11 @@ class SaveHouseUseCase @Inject constructor(
      * candidate is found within [bumpAttempts].
      */
     private fun advanceToNextFree(house: House, existing: List<House>): House? {
-        val occupiedKeys = existing.mapTo(HashSet()) { it.generatePhysicalKey() }
+        val occupiedSignatures = existing.mapTo(HashSet()) { "${it.address.generateAddressSignature()}_${it.visitSegment}" }
         var candidate = house
         repeat(bumpAttempts) {
             candidate = nextOf(candidate)
-            if (candidate.generatePhysicalKey() !in occupiedKeys) {
+            if ("${candidate.address.generateAddressSignature()}_${candidate.visitSegment}" !in occupiedSignatures) {
                 return sanitizeHouse(candidate)
             }
         }

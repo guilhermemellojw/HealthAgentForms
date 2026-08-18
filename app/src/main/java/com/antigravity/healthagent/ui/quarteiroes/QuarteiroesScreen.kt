@@ -59,6 +59,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.antigravity.healthagent.ui.quarteiroes.FolderItem
+import com.antigravity.healthagent.ui.quarteiroes.LayerItem
+import com.antigravity.healthagent.ui.quarteiroes.RenderGeometry
+import com.antigravity.healthagent.ui.quarteiroes.RenderKmlFolders
+import com.antigravity.healthagent.ui.quarteiroes.RenderPlacemark
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.android.gms.location.LocationServices

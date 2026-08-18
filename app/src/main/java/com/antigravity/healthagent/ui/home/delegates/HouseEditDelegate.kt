@@ -144,8 +144,8 @@ class HouseEditDelegate @Inject constructor(
         // Build in-flight houses for fully up-to-date state
         val currentInFlights = state.housesInFlight.value
         val fullyUpToDateHouses = (latestHousesList.filter { it.id != 0 } + currentInFlights).distinctBy {
-            if (it.id != 0) it.id.toString() else "in_flight_${it.listOrder}"
-        }
+            if (it.id != 0) "db_${it.id}" else "inflight_${it.data}_${it.address.generateAddressSignature()}"
+        }.sortedBy { it.listOrder }
 
         // Propagate context from last global house if day is empty
         val isDayEmpty = fullyUpToDateHouses.none { it.data == state.data.value }
@@ -166,13 +166,20 @@ class HouseEditDelegate @Inject constructor(
         // Generate the house optimistically (for in-flight display)
         val houseToInsert = addNewHouseUseCase.generateHouseToInsert(params)
 
+        // Ensure unique listOrder: advance past any existing in-flight orders
+        val maxInFlightOrder = currentInFlights.maxOfOrNull { it.listOrder } ?: -1L
+        val effectiveOrder = maxOf(houseToInsert.listOrder, maxInFlightOrder + 1)
+        val houseWithUniqueOrder = if (effectiveOrder != houseToInsert.listOrder) {
+            houseToInsert.copy(listOrder = effectiveOrder)
+        } else houseToInsert
+
         markAsRecentlyEdited(scope, state, 0)
-        state.housesInFlight.update { it + houseToInsert }
+        state.housesInFlight.update { it + houseWithUniqueOrder }
 
         scope.launch {
             try {
                 val result = addHouseMutex.withLock {
-                    addNewHouseUseCase.execute(params, preparedHouse = houseToInsert)
+                    addNewHouseUseCase.execute(params, preparedHouse = houseWithUniqueOrder)
                 }
 
                 when (result) {
@@ -189,10 +196,10 @@ class HouseEditDelegate @Inject constructor(
                         })
 
                         val finalInFlightState = state.housesInFlight.value.find {
-                            it.listOrder == houseToInsert.listOrder && it.data == houseToInsert.data
+                            it.listOrder == houseWithUniqueOrder.listOrder && it.data == houseWithUniqueOrder.data
                         }
 
-                        if (finalInFlightState != null && finalInFlightState != houseToInsert) {
+                        if (finalInFlightState != null && finalInFlightState != houseWithUniqueOrder) {
                             saveHouseUseCase.updateHouse(
                                 finalInFlightState.copy(id = newId.toInt()),
                                 refreshedLatestHouses,
@@ -200,7 +207,7 @@ class HouseEditDelegate @Inject constructor(
                             )
                         }
 
-                        removeInFlight(state, houseToInsert)
+                        removeInFlight(state, houseWithUniqueOrder)
 
                         soundManager.playPop()
                         markAsRecentlyEdited(scope, state, newId.toInt())
@@ -209,25 +216,25 @@ class HouseEditDelegate @Inject constructor(
                     is AddNewHouseUseCase.Result.Blocked -> {
                         state.uiEvent.value = result.message
                         soundManager.playWarning()
-                        removeInFlight(state, houseToInsert)
+                        removeInFlight(state, houseWithUniqueOrder)
                     }
                     is AddNewHouseUseCase.Result.LimitReached -> {
                         soundManager.playWarning()
                         state.situationLimitConfirmation.value = result.houseTemplate
-                        removeInFlight(state, houseToInsert)
+                        removeInFlight(state, houseWithUniqueOrder)
                     }
                     is AddNewHouseUseCase.Result.Error -> {
                         AppLogger.e("HomeViewModel", "Error adding new house", result.exception)
                         state.uiEvent.value = "Erro ao adicionar imóvel: ${result.exception.message}"
                         soundManager.playWarning()
-                        removeInFlight(state, houseToInsert)
+                        removeInFlight(state, houseWithUniqueOrder)
                     }
                 }
             } catch (e: Exception) {
                 AppLogger.e("HomeViewModel", "Error adding new house", e)
                 state.uiEvent.value = "Erro ao adicionar imóvel: ${e.message}"
                 soundManager.playWarning()
-                removeInFlight(state, houseToInsert)
+                removeInFlight(state, houseWithUniqueOrder)
             } finally {
                 isAddingHouse = false
             }
@@ -491,7 +498,10 @@ class HouseEditDelegate @Inject constructor(
                 recentlyDeletedHouse = house
                 state.pendingUpdateDrafts.update { it - house.id }
                 state.housesInFlight.update { list ->
-                    list.filter { it.listOrder != house.listOrder || it.data != house.data }
+                    list.filter { inFlight ->
+                        inFlight.uuid != house.uuid &&
+                        !(inFlight.listOrder == house.listOrder && inFlight.data == house.data)
+                    }
                 }
 
                 if (house.id == 0) return@launch
@@ -662,7 +672,10 @@ class HouseEditDelegate @Inject constructor(
 
     private fun removeInFlight(state: HomeState, house: House) {
         state.housesInFlight.update { list ->
-            list.filter { it.generatePhysicalKey() != house.generatePhysicalKey() }
+            list.filter { inFlight ->
+                inFlight.uuid != house.uuid &&
+                !(inFlight.listOrder == house.listOrder && inFlight.data == house.data)
+            }
         }
     }
 

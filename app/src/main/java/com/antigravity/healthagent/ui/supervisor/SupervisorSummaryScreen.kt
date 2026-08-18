@@ -31,6 +31,7 @@ import com.antigravity.healthagent.ui.components.MeshGradient
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
 import com.antigravity.healthagent.ui.components.SyncCompactBalloon
+import com.antigravity.healthagent.ui.supervisor.StatDetail
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

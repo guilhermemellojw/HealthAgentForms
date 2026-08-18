@@ -96,10 +96,12 @@ class HouseRepositoryImpl @Inject constructor(
             // identity-based comparison would miss literal duplicates.
             val existingHouses = houseDao.getHousesByDateAndAgent(house.data, house.agentUid)
             val existingDuplicate = existingHouses.find {
-                it.id != house.id && it.generatePhysicalKey() == house.generatePhysicalKey()
+                it.id != house.id &&
+                it.address.generateAddressSignature() == house.address.generateAddressSignature() &&
+                it.visitSegment == house.visitSegment
             }
             if (existingDuplicate != null) {
-                AppLogger.w("HouseRepository", "DUPLICATE_GUARD: Skipped insert of house id=${house.id}. Existing id=${existingDuplicate.id} key=${house.generatePhysicalKey()}")
+                AppLogger.w("HouseRepository", "DUPLICATE_GUARD: Skipped insert of house id=${house.id}. Existing id=${existingDuplicate.id} signature=${house.address.generateAddressSignature()}")
                 return@runInTransactionWithRetry existingDuplicate.id.toLong()
             }
 
