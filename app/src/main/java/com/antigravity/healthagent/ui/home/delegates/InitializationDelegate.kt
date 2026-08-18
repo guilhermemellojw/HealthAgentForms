@@ -162,11 +162,15 @@ class InitializationDelegate @Inject constructor(
                 val (day, dayDb) = args[0] as Pair<String, List<House>>
                 val recentlyEdited = args[1] as Map<Int, Long>
                 val highlightedId = args[2] as Int?
-                val myUid = args[3] as String
+                val myUid = args[3] as String?
                 val errorIds = args[4] as Set<Int>
                 val duplicateIds = args[5] as Set<Int>
                 val drafts = args[6] as Map<Int, House>
                 val inFlights = args[7] as List<House>
+
+                if (myUid == null) {
+                    return@combine HouseUpdate(emptyList(), DashboardTotals(), errorIds, duplicateIds, 0)
+                }
 
                 val dayNorm = day.replace("/", "-")
                 val dayInFlights = inFlights.filter { inFlight ->
