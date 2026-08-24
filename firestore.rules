@@ -29,7 +29,10 @@ service cloud.firestore {
 
     // 1. Coleção de Usuários
     match /users/{userId} {
-      allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin() || (request.auth.uid == userId && 
+        !request.resource.data.role && 
+        !request.resource.data.isAuthorized);
     }
     
     // 2. Coleção de Agentes e subcoleções

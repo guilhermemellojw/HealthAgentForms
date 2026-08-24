@@ -64,6 +64,14 @@ export function useSummariesByAgent(agents: AgentDoc[] | undefined, year: number
   });
 }
 
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    result.push(arr.slice(i, i + size));
+  }
+  return result;
+}
+
 export function useYearSummariesByAgent(agents: AgentDoc[] | undefined, year: number) {
   const agentKey = agents?.map((a) => a.id).sort().join(",") ?? "";
   return useQuery({
@@ -72,15 +80,19 @@ export function useYearSummariesByAgent(agents: AgentDoc[] | undefined, year: nu
     queryFn: async () => {
       const out = new Map<string, MonthlySummaryDoc[]>();
       const monthYears = Array.from({ length: 12 }, (_, i) => `${String(i + 1).padStart(2, "0")}-${year}`);
+      const monthChunks = chunkArray(monthYears, 10);
       await Promise.all(
         (agents as AgentDoc[]).map(async (agent) => {
           const ref = collection(db, "agents", agent.id, "monthly_summaries");
-          const q = query(ref, where("monthYear", "in", monthYears));
-          const snap = await getDocs(q);
-          out.set(
-            agent.id,
-            snap.docs.map((d) => docToData<MonthlySummaryDoc>(d)),
+          const snapPromises = monthChunks.map((chunk) =>
+            getDocs(query(ref, where("monthYear", "in", chunk))),
           );
+          const snapResults = await Promise.all(snapPromises);
+          snapResults.forEach((snap) => {
+            snap.docs.forEach((d) => {
+              out.set(agent.id, [...(out.get(agent.id) || []), docToData<MonthlySummaryDoc>(d)]);
+            });
+          });
         }),
       );
       return out;

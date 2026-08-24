@@ -16,8 +16,9 @@ import {
   updateDoc,
   writeBatch,
 } from "firebase/firestore";
+import { ref, deleteObject, listAll } from "firebase/storage";
 import { AdminTimeline } from "./AdminTimeline";
-import { db } from "../../lib/firebase";
+import { db, storage } from "../../lib/firebase";
 import { MONTHS } from "../../lib/constants";
 import { fetchSystemSettings, useAccessRequests, useAgentNames, useBairros, useUnifiedProfiles } from "../../hooks/useAdminData";
 import { useAgents, useAgentStatsByPeriod } from "../../hooks/usePortalData";
@@ -112,6 +113,7 @@ export function AdminDashboard() {
       if (shouldRename && agentId) {
         await renameCollectionField(agentId, "houses", "agentName", upper);
         await renameCollectionField(agentId, "day_activities", "agentName", upper);
+        await renameCollectionField(agentId, "monthly_summaries", "agentName", upper);
       }
       showToast(`Vinculado a ${upper}${shouldRename ? " (produção renomeada)" : ""}`);
     } catch (e) {
@@ -172,7 +174,7 @@ export function AdminDashboard() {
   };
 
   async function purgeAgentCompletely(agentId: string) {
-    const subs = ["houses", "day_activities", "monthly_summaries", "backups"] as const;
+    const subs = ["houses", "day_activities", "monthly_summaries"] as const;
     for (const sub of subs) {
       let lastDoc: unknown = null;
       while (true) {
@@ -191,6 +193,23 @@ export function AdminDashboard() {
       await deleteDoc(doc(db, "agents", agentId));
     } catch {
       // already deleted or not exists
+    }
+    // Cleanup storage backups folder
+    try {
+      const storageRef = ref(storage, `backups/${agentId}`);
+      const listResult = await listAll(storageRef);
+      for (const item of listResult.items) {
+        await deleteObject(item);
+      }
+      for (const prefix of listResult.prefixes) {
+        // Delete all files under each prefix
+        const innerList = await listAll(prefix);
+        for (const item of innerList.items) {
+          await deleteObject(item);
+        }
+      }
+    } catch {
+      // ignore if bucket not configured or error
     }
   }
 

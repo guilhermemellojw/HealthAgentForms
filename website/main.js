@@ -28,7 +28,7 @@ const SITUATION = {
 };
 
 const PROPERTY_TYPE = {
-    RES: 'RES', COM: 'COM', TB: 'TB', PE: 'PE', OUT: 'OUT', EMPTY: 'EMPTY'
+    RES: 'R', COM: 'C', TB: 'TB', PE: 'PE', OUT: 'O', EMPTY: 'EMPTY'
 };
 
 // UI Elements
@@ -42,8 +42,16 @@ const authError = document.getElementById("auth-error");
 // Navigation elements
 const hero = document.querySelector('.hero');
 const features = document.getElementById('features');
+const about = document.getElementById('about');
+const usuarios = document.getElementById('usuarios');
 const dashboardView = document.getElementById('dashboard-view');
 const dashboardContent = document.getElementById('dashboard-content');
+const navUsuarios = document.getElementById('nav-usuarios');
+
+// User management elements
+const userLoading = document.getElementById('user-loading');
+const userError = document.getElementById('user-error');
+const userList = document.getElementById('user-list');
 
 // Global State
 let leafletMap = null;
@@ -57,9 +65,17 @@ let selectedWeekIndex = -1; // -1 for "Mês Todo"
 let agentsData = [];
 let aggregateSummary = null;
 let isLoadingData = false;
+let currentView = 'features';
 
 // Modal Controls
-const openLogin = () => loginModal.style.display = "block";
+const openLogin = () => {
+    loginModal.style.display = "block";
+    // Hide other views when opening login
+    features.style.display = 'none';
+    usuarios.style.display = 'none';
+    about.style.display = 'none';
+    dashboardView.classList.add('hidden');
+};
 if (loginBtn) loginBtn.onclick = openLogin;
 if (heroLoginBtn) heroLoginBtn.onclick = openLogin;
 if (closeBtn) closeBtn.onclick = () => loginModal.style.display = "none";
@@ -93,6 +109,232 @@ googleLoginBtn.onclick = async () => {
         authError.textContent = translateError(error.code);
     }
 };
+
+// Tab Navigation
+function showView(view) {
+    // Update URL hash
+    window.location.hash = view;
+    
+    // Normalize view name - handle both old and new systems
+    const viewLower = typeof view === 'string' ? view.toLowerCase() : '';
+    
+    // Hide all views
+    ['features', 'usuarios', 'about'].forEach(v => {
+        const el = document.getElementById(v);
+        if (el) el.style.display = 'none';
+    });
+    // Hide dashboard view if not mapa view
+    if (viewLower !== 'mapa' && viewLower !== 'map') {
+        dashboardView.classList.add('hidden');
+    }
+    
+    // Show selected view based on current state
+    if (viewLower === 'mapa' || viewLower === 'map') {
+        features.style.display = 'none';
+        about.style.display = 'none';
+        usuarios.style.display = 'none';
+        dashboardView.classList.remove('hidden');
+        // Initialize map if not already initialized
+        if (!leafletMap) {
+            setTimeout(() => initLeafletMap(), 100);
+        }
+    } else if (viewLower === 'usuarios') {
+        features.style.display = 'none';
+        about.style.display = 'none';
+        dashboardView.classList.add('hidden');
+        usuarios.style.display = 'block';
+        if (userProfile?.role === 'ADMIN' || userProfile?.role === 'SUPERVISOR') {
+            loadUsers();
+        } else {
+            userList.innerHTML = '<p style="color: var(--error-red);">Acesso restrito a administradores.</p>';
+            userLoading.style.display = 'none';
+        }
+    } else if (viewLower === 'features' || viewLower === 'resumo') {
+        features.style.display = 'block';
+        usuarios.style.display = 'none';
+        dashboardView.classList.add('hidden');
+    } else if (viewLower === 'about') {
+        features.style.display = 'none';
+        usuarios.style.display = 'none';
+        dashboardView.classList.add('hidden');
+    }
+    
+    currentView = viewLower;
+}
+
+async function loadUsers() {
+    if (!userProfile || (userProfile.role !== 'ADMIN' && userProfile.role !== 'SUPERVISOR')) {
+        userList.innerHTML = '<p style="color: var(--error-red);">Acesso restrito a administradores e supervisores.</p>';
+        userLoading.style.display = 'none';
+        return;
+    }
+    
+    userLoading.style.display = 'block';
+    userError.style.display = 'none';
+    userList.innerHTML = '';
+    
+    try {
+        const userDoc = await db.collection('users').get();
+        const users = [];
+        userDoc.docs.forEach(doc => {
+            users.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // Sort by role, then name
+        users.sort((a, b) => {
+            const roleOrder = { ADMIN: 0, SUPERVISOR: 1, AGENT: 2 };
+            const aRole = roleOrder[a.role] || 3;
+            const bRole = roleOrder[b.role] || 3;
+            if (aRole !== bRole) return aRole - bRole;
+            return (a.displayName || '').localeCompare(b.displayName || '');
+        });
+        
+        renderUsers(users);
+    } catch (err) {
+        console.error("Erro ao carregar usuários:", err);
+        userError.style.display = 'block';
+        userError.textContent = 'Erro ao carregar usuários: ' + err.message;
+        userLoading.style.display = 'none';
+    }
+}
+
+function renderUsers(users) {
+    if (users.length === 0) {
+        userList.innerHTML = '<p style="color: var(--text-secondary); text-align: center;">Nenhum usuário encontrado.</p>';
+        userLoading.style.display = 'none';
+        return;
+    }
+    
+    userList.innerHTML = users.map((user, index) => {
+        const roleClass = user.role === 'ADMIN' ? 'badge-primary' : user.role === 'SUPERVISOR' ? 'badge-success' : 'badge-warning';
+        const roleText = user.role === 'ADMIN' ? 'Administrador' : user.role === 'SUPERVISOR' ? 'Supervisor' : 'Agente';
+        const statusColor = user.isAuthorized ? 'var(--secondary-green)' : var(--error-red);
+        const statusText = user.isAuthorized ? 'Ativo' : 'Não autorizado';
+        
+        return `
+        <div class="glass" style="padding: 24px; border-radius: 16px; border: 1px solid var(--glass-border); backdrop-filter: blur(var(--glass-blur)); transition: var(--transition-medium);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="agent-avatar" style="width: 40px; height: 40px; font-size: 1.5rem;">${(user.displayName ? user.displayName.charAt(0) : 'U').toUpperCase()}</div>
+                    <div>
+                        <strong style="font-size: 1rem; color: var(--text-primary);">${user.displayName || user.email}</strong>
+                        <span style="font-size: 0.75rem; color: var(--muted-text);">${user.email}</span>
+                    </div>
+                </div>
+                <span class="badge ${roleClass}" style="font-size: 0.65rem; padding: 2px 6px;">${roleText}</span>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                <div>
+                    <strong style="font-size: 0.75rem; color: var(--text-secondary);">Último login:</strong>
+                    <span style="font-size: 0.85rem; color: var(--text-primary);">${user.lastLogin ? new Date(user.lastLogin.seconds * 1000).toLocaleDateString('pt-BR') : 'Nunca'}</span>
+                </div>
+                <div>
+                    <strong style="font-size: 0.75rem; color: var(--text-secondary);">Permissões:</strong>
+                    <span style="font-size: 0.85rem; color: ${statusColor};">${statusText}</span>
+                </div>
+            </div>
+            
+            <div style="display: flex; gap: 8px;">
+                ${user.role === 'ADMIN' ? `
+                <button onclick="deleteUser('${user.id}')" class="btn-danger" style="padding: 6px 12px; font-size: 0.75rem;">Remover</button>
+                ` : ''}
+                ${user.isAuthorized ? `
+                <button onclick="revokeUserAccess('${user.id}')" class="btn-ghost" style="padding: 6px 12px; font-size: 0.75rem;">Revogar</button>
+                ` : `
+                <button onclick="grantUserAccess('${user.id}')" class="btn-accent" style="padding: 6px 12px; font-size: 0.75rem;">Autorizar</button>
+                `}
+            </div>
+        </div>
+        `;
+    }).join('');
+    
+    userLoading.style.display = 'none';
+}
+
+async function deleteUser(uid) {
+    if (!confirm('⚠️ TEM CERTEZA?\n\nDeseja excluir permanentemente este usuário?\n\nEsta ação não pode ser desfeita.')) return;
+    
+    try {
+        await db.collection('users').doc(uid).delete();
+        alert('Usuário removido com sucesso!');
+        loadUsers();
+    } catch (err) {
+        alert('Erro ao excluir usuário: ' + err.message);
+    }
+}
+
+async function grantUserAccess(uid) {
+    try {
+        await db.collection('users').doc(uid).update({
+            isAuthorized: true,
+            role: 'AGENT',
+            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        alert('Acesso concedido com sucesso!');
+        loadUsers();
+    } catch (err) {
+        alert('Erro ao conceder acesso: ' + err.message);
+    }
+}
+
+async function revokeUserAccess(uid) {
+    if (!confirm('Deseja realmente revocar o acesso deste usuário?')) return;
+    
+    try {
+        await db.collection('users').doc(uid).update({
+            isAuthorized: false,
+            role: 'AGENT',
+            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        alert('Acesso revogado com sucesso!');
+        loadUsers();
+    } catch (err) {
+        alert('Erro ao revogar acesso: ' + err.message);
+    }
+}
+
+// Handle hash change
+window.onhashchange = () => {
+    showView(window.location.hash.substring(1) || 'features');
+};
+
+// Update nav link active state based on current view
+function updateNavActiveState() {
+    const hash = window.location.hash.substring(1) || 'features';
+    ['features', 'usuarios', 'about'].forEach(v => {
+        const el = document.getElementById(`nav-${v}`);
+        if (el) {
+            el.classList.toggle('active', v === hash);
+        }
+    });
+}
+
+// Initialize: update nav state on load
+updateNavActiveState();
+
+// Handle hash change
+window.onhashchange = () => {
+    showView(window.location.hash.substring(1) || 'features');
+    updateNavActiveState();
+};
+
+// nav-usuarios click handler
+if (navUsuarios) {
+    navUsuarios.onclick = (e) => {
+        e.preventDefault();
+        const hasAccess = userProfile?.role === 'ADMIN' || userProfile?.role === 'SUPERVISOR';
+        if (!hasAccess) {
+            authError.style.color = "#ff5252";
+            authError.textContent = "Acesso restrito a administradores e supervisores.";
+            setTimeout(() => {
+                authError.textContent = "";
+            }, 3000);
+            return;
+        }
+        showView('usuarios');
+    };
+}
 
 async function fetchUserProfile(user) {
     const email = user.email.toLowerCase();

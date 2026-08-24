@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { collection, doc, getDocs, writeBatch } from "firebase/firestore";
-import { getDownloadURL, getMetadata, listAll, ref } from "firebase/storage";
+import { collection, doc, getDocs, query, orderBy, writeBatch } from "firebase/firestore";
+import { getDownloadURL, ref } from "firebase/storage";
 import { db, storage } from "../../lib/firebase";
 
 interface TimelineItem {
@@ -28,37 +28,22 @@ export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentN
     setLoading(true);
     setError(null);
     try {
-      const listRef = ref(storage, `backups/${uid}`);
-      const list = await listAll(listRef);
+      const backupsRef = collection(db, "agents", uid, "backups");
+      const q = query(backupsRef, orderBy("timestamp", "desc"));
+      const snap = await getDocs(q);
       const mapped: TimelineItem[] = [];
-      for (const item of list.items) {
-        try {
-          const meta = await getMetadata(item);
-          const ts = meta.timeCreated ? new Date(meta.timeCreated).getTime() : (meta.customMetadata?.timestamp ? Number(meta.customMetadata.timestamp) : 0);
-          mapped.push({
-            id: item.name,
-            storagePath: item.fullPath,
-            timestamp: ts || 0,
-            houseCount: meta.customMetadata?.houseCount ? Number(meta.customMetadata.houseCount) : undefined,
-            activityCount: meta.customMetadata?.activityCount ? Number(meta.customMetadata.activityCount) : undefined,
-          });
-        } catch {
-          mapped.push({ id: item.name, storagePath: item.fullPath, timestamp: 0 });
-        }
-      }
-      // also try prefixes if any
-      for (const prefix of list.prefixes) {
-        const sub = await listAll(prefix);
-        for (const item of sub.items) {
-          try {
-            const meta = await getMetadata(item);
-            const ts = meta.timeCreated ? new Date(meta.timeCreated).getTime() : 0;
-            mapped.push({ id: `${prefix.name}/${item.name}`, storagePath: item.fullPath, timestamp: ts });
-          } catch {
-            mapped.push({ id: item.name, storagePath: item.fullPath, timestamp: 0 });
-          }
-        }
-      }
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        const storagePath = data.storagePath as string;
+        const ts = data.timestamp ? Number(data.timestamp) : 0;
+        mapped.push({
+          id: d.id,
+          storagePath,
+          timestamp: ts,
+          houseCount: data.houseCount != null ? Number(data.houseCount) : undefined,
+          activityCount: data.activityCount != null ? Number(data.activityCount) : undefined,
+        });
+      });
       mapped.sort((a, b) => b.timestamp - a.timestamp);
       setItems(mapped);
     } catch (e) {

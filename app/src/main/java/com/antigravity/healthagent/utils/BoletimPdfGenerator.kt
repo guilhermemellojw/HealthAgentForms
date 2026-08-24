@@ -593,6 +593,7 @@ object BoletimPdfGenerator {
         val wConv = PAGE_WIDTH / 2 - MARGIN - 10
         val convX = MARGIN
         PdfComponents.drawRectBoxWithBounds(canvas, convX, cursorY, wConv, footerRowH, "CONVENÇÕES", boldPaint, headerBgPaint)
+        PdfComponents.drawRectBoxWithBounds(canvas, convX, cursorY + footerRowH, wConv, footerRowH, "R-Residência  C-Comércio  TB-Terreno Baldio  PE-Ponto Estratégico  O-Outros  D.A.-Difícil Acesso", Paint(textPaint).apply{textSize=7f}, null)
         
         // Situacao
         val startSit = MARGIN + wConv + 20
@@ -1011,15 +1012,15 @@ object BoletimPdfGenerator {
         val legH = 10f
         val lP = Paint(smallPaint).apply { textSize = 5.5f }
         
-        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "A1 - Caixa d'água (elevado)", MARGIN, cursorY, colW, legH)
-        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "A2 - Outros depósitos de armazenamento de água (baixo)", MARGIN + colW, cursorY, colW, legH)
-        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "B - Pequenos depósitos móveis", MARGIN + 2*colW + 50f, cursorY, colW, legH)
-        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "C - Depósitos fixos", MARGIN + 3*colW +50f, cursorY, colW, legH)
+        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "A1 - Caixa d'água (elevado)", MARGIN, cursorY, colW, legH, true)
+        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "A2 - Outros depósitos de armazenamento de água (baixo)", MARGIN + colW, cursorY, colW, legH, true)
+        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "B - Pequenos depósitos móveis", MARGIN + 2*colW + 50f, cursorY, colW, legH, true)
+        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "C - Depósitos fixos", MARGIN + 3*colW +50f, cursorY, colW, legH, true)
         
         cursorY += legH
-        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "D1 - Pneus e outros materiais rodantes", MARGIN, cursorY, colW, legH)
-        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "D2 - Lixo (recipientes plásticos, latas), sucatas, entulhos", MARGIN + colW, cursorY, colW, legH)
-        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "E - Depósitos naturais", MARGIN + 2*colW + 50f, cursorY, colW, legH)
+        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "D1 - Pneus e outros materiais rodantes", MARGIN, cursorY, colW, legH, true)
+        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "D2 - Lixo (recipientes plásticos, latas), sucatas, entulhos", MARGIN + colW, cursorY, colW, legH, true)
+        PdfComponents.drawTextInBoxWithBounds(canvas, lP, "E - Depósitos naturais", MARGIN + 2*colW + 50f, cursorY, colW, legH, true)
         
         cursorY += legH + 20f
         
