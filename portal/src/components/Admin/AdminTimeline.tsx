@@ -29,11 +29,13 @@ export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentN
     setError(null);
     try {
       console.log("AdminTimeline load:", { uid });
+      // Android parity: query Firestore only (never list Storage directly)
       const backupsRef = collection(db, "agents", uid, "backups");
       const q = query(backupsRef, orderBy("timestamp", "desc"));
       const snap = await getDocs(q);
-      console.log("Backup query result:", { docCount: snap.docs.length, docs: snap.docs.map(d => ({ id: d.id, data: d.data() })) });
-      const mapped: TimelineItem[] = [];
+      console.log("Firestore backup count:", snap.docs.length);
+
+      let mapped: TimelineItem[] = [];
       snap.docs.forEach((d) => {
         const data = d.data();
         const storagePath = data.storagePath as string;
@@ -48,6 +50,7 @@ export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentN
       });
       mapped.sort((a, b) => b.timestamp - a.timestamp);
       setItems(mapped);
+      console.log("Using Firestore backups:", mapped.length);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       console.error("AdminTimeline load error:", e);
