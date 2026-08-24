@@ -1,0 +1,18 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'gmellobkp@gmail.com' ||
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'ADMIN'
+      );
+    }
+    match /backups/{uid}/{allPaths=**} {
+      allow read, write: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+    }
+  }
+}

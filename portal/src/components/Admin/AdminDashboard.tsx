@@ -16,6 +16,7 @@ import {
   updateDoc,
   writeBatch,
 } from "firebase/firestore";
+import { AdminTimeline } from "./AdminTimeline";
 import { db } from "../../lib/firebase";
 import { MONTHS } from "../../lib/constants";
 import { fetchSystemSettings, useAccessRequests, useAgentNames, useBairros, useUnifiedProfiles } from "../../hooks/useAdminData";
@@ -42,6 +43,7 @@ export function AdminDashboard() {
   const [transferFrom, setTransferFrom] = useState<UnifiedProfile | null>(null);
   const [transferTo, setTransferTo] = useState<string>("");
   const [wiping, setWiping] = useState<string | null>(null);
+  const [timeline, setTimeline] = useState<{ uid: string; name: string } | null>(null);
 
   const { profiles, loading } = useUnifiedProfiles(search);
   const { names: masterNames } = useAgentNames();
@@ -565,7 +567,7 @@ export function AdminDashboard() {
                     <div className="flex gap-2" style={{ flexWrap: "wrap" }}>
                       <button className="btn btn-sm btn-outline" onClick={() => setTransferFrom(p)} disabled={!p.uid}>Transferir dados</button>
                       <button className="btn btn-sm btn-outline" onClick={() => handleWipeExecute(p)} disabled={!!wiping || !p.uid}>{wiping === (p.uid || p.agentId) ? "Limpando…" : "Wipe remoto"}</button>
-                      <button className="btn btn-sm btn-outline" disabled title="Use Timeline para restaurar (backup)">Restaurar (Timeline)</button>
+                      <button className="btn btn-sm btn-outline" onClick={() => setTimeline({ uid: p.uid || p.agentId!, name: p.displayName })} disabled={!p.uid && !p.agentId}>Timeline</button>
                       <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p, false)}>Excluir perfil</button>
                       {p.agentId && <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p, true)}>Excluir + nuvem</button>}
                     </div>
@@ -704,6 +706,7 @@ export function AdminDashboard() {
           )}
         </div>
       )}
+      {timeline && <AdminTimeline uid={timeline.uid} agentName={timeline.name} onClose={() => setTimeline(null)} />}
     </div>
   );
 }
