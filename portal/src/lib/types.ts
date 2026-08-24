@@ -3,7 +3,9 @@ export interface UserDoc {
   email?: string;
   role?: "ADMIN" | "SUPERVISOR" | "AGENT";
   isAuthorized?: boolean;
+  isPreRegistered?: boolean;
   displayName?: string;
+  agentName?: string;
   bairro?: string;
   block?: string;
 }

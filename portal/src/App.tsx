@@ -3,8 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useStaffGate, loginWithGoogle, logout } from "./hooks/useAuth";
 import SummaryPage from "./pages/SummaryPage";
 import DocumentsPage from "./pages/DocumentsPage";
-import { UsersPanel } from "./components/Admin/UsersPanel";
-import { AgentsPanel } from "./components/Admin/AgentsPanel";
+import { AdminDashboard } from "./components/Admin/AdminDashboard";
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {
   constructor(props: { children: React.ReactNode }) {
@@ -110,12 +109,7 @@ function AppShell() {
         </div>
       </header>
       <main className="main-content">
-        {gate.isAdmin && tab === "admin" && (
-          <div className="grid grid-2">
-            <UsersPanel />
-            <AgentsPanel />
-          </div>
-        )}
+        {gate.isAdmin && tab === "admin" && <AdminDashboard />}
         {tab === "resumo" && <SummaryPage />}
         {tab === "documentos" && <DocumentsPage />}
       </main>
