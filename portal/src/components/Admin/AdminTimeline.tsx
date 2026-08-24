@@ -28,9 +28,11 @@ export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentN
     setLoading(true);
     setError(null);
     try {
+      console.log("AdminTimeline load:", { uid });
       const backupsRef = collection(db, "agents", uid, "backups");
       const q = query(backupsRef, orderBy("timestamp", "desc"));
       const snap = await getDocs(q);
+      console.log("Backup query result:", { docCount: snap.docs.length, docs: snap.docs.map(d => ({ id: d.id, data: d.data() })) });
       const mapped: TimelineItem[] = [];
       snap.docs.forEach((d) => {
         const data = d.data();
@@ -48,6 +50,7 @@ export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentN
       setItems(mapped);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      console.error("AdminTimeline load error:", e);
     } finally {
       setLoading(false);
     }
