@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { collection, getDocs, query, where, type QueryDocumentSnapshot } from "firebase/firestore";
+import { collection, collectionGroup, getDocs, query, where, type QueryDocumentSnapshot } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { computeStats, dedupHouses, filterByPeriod, monthYearFromPeriod } from "../lib/period";
 import type { AgentDoc, DayActivityDoc, HouseDoc, HouseStats, MonthlySummaryDoc } from "../lib/types";
@@ -239,5 +239,19 @@ export function useAgentSnapshot(agentId: string) {
       };
     },
     staleTime: 30_000,
+  });
+}
+// RG multi-agente: todas as casas de um bairro, de todos os agentes
+// (paridade com o caminho admin do Android — sem filtro de agente, sem dedup)
+export function useRgHouses(bairro: string) {
+  return useQuery({
+    queryKey: ["rg-houses", bairro],
+    enabled: !!bairro,
+    queryFn: async () => {
+      const q = query(collectionGroup(db, "houses"), where("bairro", "==", bairro));
+      const snap = await getDocs(q);
+      return snap.docs.map((d) => docToData<HouseDoc>(d));
+    },
+    staleTime: 60_000,
   });
 }

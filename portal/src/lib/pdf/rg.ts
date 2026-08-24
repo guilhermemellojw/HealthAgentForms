@@ -372,7 +372,8 @@ export async function generateRgPdf(
   houses: HouseDoc[],
   bairro: string,
   block: string,
-  municipio = "Bom Jardim"
+  municipio = "Bom Jardim",
+  participatingAgents?: string[]
 ): Promise<jsPDF> {
   const housesPerPage = 52;
   const totalPages = houses.length === 0 ? 1 : Math.ceil(houses.length / housesPerPage);
@@ -386,7 +387,7 @@ export async function generateRgPdf(
     const startIndex = i * housesPerPage;
     const endIndex = Math.min(startIndex + housesPerPage, houses.length);
     const pageHouses = houses.slice(startIndex, endIndex);
-    await drawRgPage(doc, pageHouses, safeBairro, block, municipio);
+    await drawRgPage(doc, pageHouses, safeBairro, block, municipio, participatingAgents, i + 1, totalPages);
   }
   return doc;
 }
@@ -395,10 +396,15 @@ export async function downloadRg(
   houses: HouseDoc[],
   bairro: string,
   block: string,
-  municipio = "Bom Jardim"
+  municipio = "Bom Jardim",
+  participatingAgents?: string[]
 ): Promise<void> {
   if (!houses.length) throw new Error("Nenhum imóvel para gerar RG");
-  const doc = await generateRgPdf(houses, bairro, block, municipio);
+  const agents =
+    participatingAgents && participatingAgents.length > 0
+      ? participatingAgents
+      : [...new Set(houses.map((h) => (h.agentName || "").trim()).filter(Boolean))];
+  const doc = await generateRgPdf(houses, bairro, block, municipio, agents);
   const safeBairro = bairro.trim().toUpperCase().replace(/\s+/g, "_").replace(/[^A-Z0-9_-]/g, "_");
   const safeBlock = block.replace(/[^a-zA-Z0-9_-]/g, "_");
   const blob = doc.output("blob");

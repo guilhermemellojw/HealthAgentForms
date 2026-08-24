@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useAgents, useAgentSnapshot } from "../hooks/usePortalData";
+import { useAgents, useAgentSnapshot, useRgHouses } from "../hooks/usePortalData";
+import { useBairros } from "../hooks/useAdminData";
 import { MONTHS } from "../lib/constants";
-import { getWeeksForMonth } from "../lib/period";
+import { getWeeksForMonth, sortRgHouses } from "../lib/period";
 import { downloadBoletim } from "../lib/pdf/boletim";
 import { downloadSemanal } from "../lib/pdf/semanal";
 import { downloadRg } from "../lib/pdf/rg";
@@ -18,17 +19,14 @@ function blockKey(h: HouseDoc): string {
 
 export default function DocumentsPage() {
   const now = new Date();
+  const [docTab, setDocTab] = useState<"producao" | "rg">("producao");
+
+  // ---- Produção (agente + semana) ----
+  const [agentId, setAgentId] = useState("");
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [weekIndex, setWeekIndex] = useState(0);
-  const [agentId, setAgentId] = useState("");
-  const [bairro, setBairro] = useState("");
-  const [block, setBlock] = useState("");
   const [dailyDate, setDailyDate] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const { data: agents } = useAgents();
   const snapshot = useAgentSnapshot(agentId);
 
   const weeks = getWeeksForMonth(year, month);
@@ -76,46 +74,61 @@ export default function DocumentsPage() {
     return map;
   }, [weekHouses]);
 
-  const bairros = useMemo(
-    () =>
-      [...new Set(weekHouses.map((h) => (h.bairro || "").trim().toUpperCase()).filter((b) => b !== ""))].sort(),
-    [weekHouses],
-  );
-
-  const blocks = useMemo(() => {
-    const out = new Map<string, string>();
-    for (const h of weekHouses) {
-      if ((h.bairro || "").trim().toUpperCase() !== bairro) continue;
-      const bNum = (h.blockNumber || "").trim();
-      const bSeq = (h.blockSequence || "").trim();
-      const display = bSeq === "" ? bNum : `${bNum}/${bSeq}`;
-      out.set(blockKey(h), display);
-    }
-    return [...out.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [weekHouses, bairro]);
-
-  const rgHouses = useMemo(() => {
-    if (!bairro || !block) return [];
-    const target = blockKey({ blockNumber: block.split("/")[0], blockSequence: block.split("/")[1] ?? "" } as HouseDoc);
-    return weekHouses.filter((h) => (h.bairro || "").trim().toUpperCase() === bairro && blockKey(h) === target);
-  }, [weekHouses, bairro, block]);
-
+  const { data: agents } = useAgents();
   const agentName = agents?.find((a) => a.id === agentId)?.agentName || "";
   const activeAgent = agents?.find((a) => a.id === agentId);
 
   const dailyDates = Object.keys(weeklyData).sort();
   const dailyDatesKey = dailyDates.join("|");
-  const weekDatesKey = weekDates.join("|");
 
   useEffect(() => {
     setDailyDate((prev) => (dailyDates.includes(prev) ? prev : dailyDates[0] || ""));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dailyDatesKey]);
 
+  const canSemanal = weekHouses.length > 0 || Object.keys(weekActivities).length > 0;
+
+  // ---- RG (ano + bairro, multi-agente — paridade Android) ----
+  const [rgYear, setRgYear] = useState(now.getFullYear());
+  const [rgBairro, setRgBairro] = useState("");
+  const [rgBlock, setRgBlock] = useState("");
+  const { bairros: masterBairros } = useBairros();
+  const rgQuery = useRgHouses(rgBairro);
+
+  const rgYearHouses = useMemo(
+    () => (rgQuery.data ?? []).filter((h) => (h.data || "").trim().endsWith(`-${rgYear}`)),
+    [rgQuery.data, rgYear],
+  );
+
+  const rgBlocks = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const h of rgYearHouses) {
+      const bNum = (h.blockNumber || "").trim();
+      const bSeq = (h.blockSequence || "").trim();
+      const display = bSeq === "" ? bNum : `${bNum}/${bSeq}`;
+      out.set(blockKey(h), display);
+    }
+    return [...out.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [rgYearHouses]);
+
+  const rgHouses = useMemo(() => {
+    if (!rgBlock) return [];
+    const target = blockKey({ blockNumber: rgBlock.split("/")[0], blockSequence: rgBlock.split("/")[1] ?? "" } as HouseDoc);
+    return sortRgHouses(rgYearHouses.filter((h) => blockKey(h) === target));
+  }, [rgYearHouses, rgBlock]);
+
+  const rgAgents = useMemo(
+    () => [...new Set(rgHouses.map((h) => (h.agentName || "").trim()).filter(Boolean))].sort(),
+    [rgHouses],
+  );
+
   useEffect(() => {
-    setBairro("");
-    setBlock("");
-  }, [agentId, weekDatesKey]);
+    setRgBlock("");
+  }, [rgBairro, rgYear]);
+
+  // ---- Compartilhado ----
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const withBusy = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -129,128 +142,174 @@ export default function DocumentsPage() {
     }
   };
 
-  const canSemanal = weekHouses.length > 0 || Object.keys(weekActivities).length > 0;
+  const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
 
   return (
     <div className="docs-page">
-      <div className="period-bar">
-        <select className="select" value={agentId} onChange={(e) => setAgentId(e.target.value)}>
-          <option value="">Selecione um agente…</option>
-          {agents?.map((a) => (
-            <option key={a.id} value={a.id}>{a.agentName || a.email}</option>
-          ))}
-        </select>
-        <select className="select" value={year} onChange={(e) => setYear(Number(e.target.value))}>
-          {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
-        <select className="select" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
-          {MONTHS.slice(1).map((m, i) => (
-            <option key={m} value={i}>{m}</option>
-          ))}
-        </select>
-        {weeks.length > 0 && (
-          <select className="select" value={weekIndex} onChange={(e) => setWeekIndex(Number(e.target.value))}>
-            {weeks.map((w, i) => (
-              <option key={i} value={i}>{w.label}</option>
-            ))}
-          </select>
-        )}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <button className={`btn ${docTab === "producao" ? "btn-primary" : "btn-outline"}`} onClick={() => setDocTab("producao")}>
+          Produção
+        </button>
+        <button className={`btn ${docTab === "rg" ? "btn-primary" : "btn-outline"}`} onClick={() => setDocTab("rg")}>
+          RG
+        </button>
       </div>
 
-      {!agentId && <p className="muted">Selecione um agente e o período para gerar os documentos.</p>}
+      {error && <p className="error-text">{error}</p>}
 
-      {agentId && (
-        <div className="docs-grid">
-          <section className="card docs-card">
-            <h3>Boletim Diário</h3>
-            <p className="muted small">Registro diário do serviço antivetorial (frente + verso).</p>
-            <select
-              className="select"
-              value={dailyDate}
-              onChange={(e) => setDailyDate(e.target.value)}
-            >
-              {dailyDates.map((d) => (
-                <option key={d} value={d}>{d.replace(/-/g, "/")}</option>
+      {docTab === "producao" ? (
+        <>
+          <div className="period-bar">
+            <select className="select" value={agentId} onChange={(e) => setAgentId(e.target.value)}>
+              <option value="">Selecione um agente…</option>
+              {agents?.map((a) => (
+                <option key={a.id} value={a.id}>{a.agentName || a.email}</option>
               ))}
             </select>
-            <button
-              className="btn btn-primary btn-block"
-              disabled={!dailyDate || busy !== null}
-              onClick={() =>
-                withBusy("diario", () => downloadBoletim(weeklyData[dailyDate] || [], dailyDate, agentName))
-              }
-            >
-              {busy === "diario" ? "Gerando…" : "Baixar Boletim"}
-            </button>
-          </section>
+            <select className="select" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+              {years.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+            <select className="select" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+              {MONTHS.slice(1).map((m, i) => (
+                <option key={m} value={i}>{m}</option>
+              ))}
+            </select>
+            {weeks.length > 0 && (
+              <select className="select" value={weekIndex} onChange={(e) => setWeekIndex(Number(e.target.value))}>
+                {weeks.map((w, i) => (
+                  <option key={i} value={i}>{w.label}</option>
+                ))}
+              </select>
+            )}
+          </div>
 
-          <section className="card docs-card">
-            <h3>Resumo Semanal</h3>
-            <p className="muted small">Resumo semanal dos agentes (1 página, paisagem).</p>
-            <button
-              className="btn btn-primary btn-block"
-              disabled={!canSemanal || busy !== null}
-              onClick={() =>
-                withBusy("semanal", () => downloadSemanal(weekDates, weekHouses, weekActivities, agentName))
-              }
-            >
-              {busy === "semanal" ? "Gerando…" : "Baixar Resumo Semanal"}
-            </button>
-          </section>
+          {!agentId && <p className="muted">Selecione um agente e o período para gerar os documentos de produção.</p>}
 
-          <section className="card docs-card">
-            <h3>Produção da Semana</h3>
-            <p className="muted small">Frentes + versos de todos os dias da semana + resumo semanal.</p>
-            <button
-              className="btn btn-primary btn-block"
-              disabled={!canSemanal || busy !== null}
-              onClick={() =>
-                withBusy("producao", () => downloadWeeklyBatch(weeklyData, agentName, weekActivities, weekDates))
-              }
-            >
-              {busy === "producao" ? "Gerando…" : "Baixar Produção da Semana"}
-            </button>
-          </section>
+          {agentId && (
+            <div className="docs-grid">
+              <section className="card docs-card">
+                <h3>Boletim Diário</h3>
+                <p className="muted small">Registro diário do serviço antivetorial (frente + verso).</p>
+                <select
+                  className="select"
+                  value={dailyDate}
+                  onChange={(e) => setDailyDate(e.target.value)}
+                >
+                  {dailyDates.map((d) => (
+                    <option key={d} value={d}>{d.replace(/-/g, "/")}</option>
+                  ))}
+                </select>
+                <button
+                  className="btn btn-primary btn-block"
+                  disabled={!dailyDate || busy !== null}
+                  onClick={() =>
+                    withBusy("diario", () => downloadBoletim(weeklyData[dailyDate] || [], dailyDate, agentName))
+                  }
+                >
+                  {busy === "diario" ? "Gerando…" : "Baixar Boletim"}
+                </button>
+              </section>
 
-          <section className="card docs-card">
-            <h3>RG do Quarteirão</h3>
-            <p className="muted small">Roteiro de campo do quarteirão (bairro + quarteirão).</p>
-            <select className="select" value={bairro} onChange={(e) => { setBairro(e.target.value); setBlock(""); }}>
+              <section className="card docs-card">
+                <h3>Resumo Semanal</h3>
+                <p className="muted small">Resumo semanal dos agentes (1 página, paisagem).</p>
+                <button
+                  className="btn btn-primary btn-block"
+                  disabled={!canSemanal || busy !== null}
+                  onClick={() =>
+                    withBusy("semanal", () => downloadSemanal(weekDates, weekHouses, weekActivities, agentName))
+                  }
+                >
+                  {busy === "semanal" ? "Gerando…" : "Baixar Resumo Semanal"}
+                </button>
+              </section>
+
+              <section className="card docs-card">
+                <h3>Produção da Semana</h3>
+                <p className="muted small">Frentes + versos de todos os dias da semana + resumo semanal.</p>
+                <button
+                  className="btn btn-primary btn-block"
+                  disabled={!canSemanal || busy !== null}
+                  onClick={() =>
+                    withBusy("producao", () => downloadWeeklyBatch(weeklyData, agentName, weekActivities, weekDates))
+                  }
+                >
+                  {busy === "producao" ? "Gerando…" : "Baixar Produção da Semana"}
+                </button>
+              </section>
+            </div>
+          )}
+
+          {agentId && <p className="muted small">Agente: {activeAgent?.agentName || agentName}</p>}
+        </>
+      ) : (
+        <>
+          <div className="period-bar">
+            <select className="select" value={rgYear} onChange={(e) => setRgYear(Number(e.target.value))}>
+              {years.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+            <select
+              className="select"
+              value={rgBairro}
+              onChange={(e) => {
+                setRgBairro(e.target.value.toUpperCase());
+                setRgBlock("");
+              }}
+            >
               <option value="">Selecione o bairro…</option>
-              {bairros.map((b) => (
+              {masterBairros.map((b) => (
                 <option key={b} value={b}>{b}</option>
               ))}
             </select>
-            <select className="select" value={block} onChange={(e) => setBlock(e.target.value)} disabled={!bairro}>
+            <select
+              className="select"
+              value={rgBlock}
+              onChange={(e) => setRgBlock(e.target.value)}
+              disabled={!rgBairro}
+            >
               <option value="">Selecione o quarteirão…</option>
-              {blocks.map(([k]) => (
-                <option key={k} value={k}>{k}</option>
+              {rgBlocks.map(([k, display]) => (
+                <option key={k} value={k}>{display}</option>
               ))}
             </select>
-            <button
-              className="btn btn-primary btn-block"
-              disabled={!bairro || !block || rgHouses.length === 0 || busy !== null}
-              onClick={() =>
-                withBusy("rg", () =>
-downloadRg(
-                  rgHouses,
-                  bairro,
-                  block,
-                  "Bom Jardim",
-                ),
-                )
-              }
-            >
-              {busy === "rg" ? "Gerando…" : "Baixar RG"}
-            </button>
-          </section>
-        </div>
-      )}
+          </div>
 
-      {error && <p className="error-text">{error}</p>}
-      {agentId && <p className="muted small">Agente: {activeAgent?.agentName || agentName}</p>}
+          {!rgBairro && <p className="muted">Selecione o ano e o bairro para montar o RG do quarteirão (inclui todos os agentes).</p>}
+          {rgBairro && rgQuery.isLoading && <p className="muted">Carregando imóveis do bairro…</p>}
+          {rgBairro && !rgQuery.isLoading && rgBlocks.length === 0 && (
+            <p className="muted">Nenhum imóvel encontrado em {rgBairro} no ano {rgYear}.</p>
+          )}
+          {rgBlock && rgHouses.length > 0 && (
+            <p className="muted small">
+              Quarteirão {rgBlock} • {rgHouses.length} imóveis • Agentes: {rgAgents.join(" / ") || "—"}
+            </p>
+          )}
+
+          {rgBlock && (
+            <div className="docs-grid">
+              <section className="card docs-card">
+                <h3>RG do Quarteirão</h3>
+                <p className="muted small">
+                  Roteiro de campo do quarteirão {rgBairro} • Q{rgBlock} ({rgYear}) — todas as equipes.
+                </p>
+                <button
+                  className="btn btn-primary btn-block"
+                  disabled={rgHouses.length === 0 || busy !== null}
+                  onClick={() =>
+                    withBusy("rg", () => downloadRg(rgHouses, rgBairro, rgBlock, "Bom Jardim", rgAgents))
+                  }
+                >
+                  {busy === "rg" ? "Gerando…" : "Baixar RG"}
+                </button>
+              </section>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

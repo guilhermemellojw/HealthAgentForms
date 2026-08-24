@@ -159,3 +159,35 @@ export function weekIndexForDate(date: Date): number {
   start.setHours(0, 0, 0, 0);
   return Math.floor((date.getTime() - start.getTime()) / (7 * 86400000));
 }
+// Replicates GetRGBlocksUseCase within-block ordering (Android):
+// day -> earliest createdAt of (day, agentUid) pair -> agentName -> listOrder -> id
+function rgDayTs(data: string): number {
+  const [d, m, y] = data.split("-").map(Number);
+  return new Date(y || 1970, (m || 1) - 1, d || 1).getTime();
+}
+
+export function sortRgHouses(houses: HouseDoc[]): HouseDoc[] {
+  const pairMin = new Map<string, number>();
+  for (const h of houses) {
+    const key = `${h.data || ""}|${h.agentUid || h.agentName || ""}`;
+    const c = Number(h.createdAt ?? 0) || Number.MAX_SAFE_INTEGER;
+    if (!pairMin.has(key) || c < (pairMin.get(key) as number)) pairMin.set(key, c);
+  }
+  return [...houses].sort((a, b) => {
+    const da = dayTsOf(a), dbb = dayTsOf(b);
+    if (da !== dbb) return da - dbb;
+    const ka = `${a.data || ""}|${a.agentUid || a.agentName || ""}`;
+    const kb = `${b.data || ""}|${b.agentUid || b.agentName || ""}`;
+    const pm = (pairMin.get(ka) ?? 0) - (pairMin.get(kb) ?? 0);
+    if (pm) return pm;
+    const an = (a.agentName || "").localeCompare(b.agentName || "");
+    if (an) return an;
+    const lo = (a.listOrder ?? 0) - (b.listOrder ?? 0);
+    if (lo) return lo;
+    return (a.id || "").localeCompare(b.id || "");
+  });
+}
+
+function dayTsOf(h: HouseDoc): number {
+  return rgDayTs((h.data || "").trim());
+}
