@@ -1,7 +1,40 @@
 import { useEffect, useState } from "react";
-import { collection, doc, getDocs, query, orderBy, writeBatch } from "firebase/firestore";
+import { collection, deleteField, doc, getDocs, query, orderBy, updateDoc, writeBatch } from "firebase/firestore";
 import { getDownloadURL, ref } from "firebase/storage";
 import { db, storage } from "../../lib/firebase";
+
+// Replicates Kotlin StringExtensions.normalize(): trim, "/"->"-", "."->"-", collapse spaces/dashes, UPPERCASE
+function normalizeKey(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .replace(/\//g, "-")
+    .replace(/\./g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/-+/g, "-")
+    .toUpperCase();
+}
+
+// Replicates House.generateNaturalKey() (House.kt:65): uuid if present, else
+// AGENTUID_AGENTNAME_DATE_ADDRSIGNATURE_VISITSEGMENT uppercased.
+function houseDocId(h: Record<string, unknown>, uid: string, agentNameUpper: string): string {
+  const uuid = typeof h.uuid === "string" ? h.uuid.trim() : "";
+  if (uuid) return uuid;
+  const addr = (h.address ?? {}) as Record<string, unknown>;
+  const sequence = Number(addr.sequence ?? 0) || 0;
+  const complement = Number(addr.complement ?? 0) || 0;
+  const addressSignature = [
+    normalizeKey(addr.blockNumber),
+    normalizeKey(addr.blockSequence),
+    normalizeKey(addr.streetName),
+    normalizeKey(addr.number),
+    sequence,
+    complement,
+    normalizeKey(addr.bairro),
+  ].join("_");
+  const dataDash = String(h.data ?? "").trim().replace(/\//g, "-");
+  const visitSegment = Number(h.visitSegment ?? 0) || 0;
+  return [uid, normalizeKey(h.agentName || agentNameUpper), dataDash, addressSignature, visitSegment].join("_").toUpperCase();
+}
 
 interface TimelineItem {
   id: string;
@@ -76,59 +109,70 @@ export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentN
       const url = await getDownloadURL(ref(storage, item.storagePath));
       const res = await fetch(url);
       const json = await res.text();
-      let data: { houses?: unknown[]; dayActivities?: unknown[]; housesCount?: number };
+      // Encrypted backups (EncryptedFile AES256 from app) are binary — detect before parsing
+      if (!json.trimStart().startsWith("{")) {
+        throw new Error("Backup criptografado pelo app (AES) não pode ser restaurado no portal. Use o app para restaurar este backup.");
+      }
+      let data: { houses?: unknown[]; dayActivities?: unknown[] };
       try {
         data = JSON.parse(json);
       } catch {
         throw new Error("Backup corrompido ou formato inválido");
       }
-      const houses = (data.houses as unknown[]) || [];
-      const activities = (data.dayActivities as unknown[]) || [];
-      // push to Firestore: clear existing and write new (chunk 400)
+      const houses = (data.houses as Array<Record<string, unknown>>) || [];
+      const activities = (data.dayActivities as Array<Record<string, unknown>>) || [];
+      const agentNameUpper = agentName.toUpperCase();
       // For safety, do not wipe before success parse
-      const houseIds = houses.length;
-      const actIds = activities.length;
-      // use writeBatch to set houses
-      // For simplicity, delete existing houses/activities first (like isFullWipe)
       const existingHouses = await getDocs(collection(db, "agents", uid, "houses"));
       const existingActs = await getDocs(collection(db, "agents", uid, "day_activities"));
-      // delete existing in batches
-      const allExisting = [...existingHouses.docs, ...existingActs.docs];
+      const existingSummaries = await getDocs(collection(db, "agents", uid, "monthly_summaries"));
+      const allExisting = [...existingHouses.docs, ...existingActs.docs, ...existingSummaries.docs];
       for (let i = 0; i < allExisting.length; i += 400) {
         const chunk = allExisting.slice(i, i + 400);
         const batch = writeBatch(db);
         chunk.forEach((d) => batch.delete(d.ref));
         await batch.commit();
       }
-      // write new
-      const houseDocs = houses as Array<Record<string, unknown> & { id?: string }>;
-      for (let i = 0; i < houseDocs.length; i += 400) {
-        const chunk = houseDocs.slice(i, i + 400);
+      // Clear sync tombstones so restored data is not re-deleted by the app on next pull,
+      // and refresh lastSyncTime (parity with Android wipeMetadata)
+      try {
+        await updateDoc(doc(db, "agents", uid), {
+          deleted_house_ids: deleteField(),
+          deleted_activity_dates: deleteField(),
+          lastSyncError: deleteField(),
+          lastSyncTime: Date.now(),
+        });
+      } catch {
+        // agents doc may not exist yet
+      }
+      // Write houses using Android-compatible doc IDs (uuid or natural key)
+      for (let i = 0; i < houses.length; i += 400) {
+        const chunk = houses.slice(i, i + 400);
         const batch = writeBatch(db);
-        chunk.forEach((h, idx) => {
-          const id = (h.id as string) || `restored_${Date.now()}_${i + idx}`;
-          batch.set(doc(db, "agents", uid, "houses", id), { ...h, agentUid: uid, agentName: agentName.toUpperCase() });
+        chunk.forEach((h) => {
+          const id = houseDocId(h, uid, agentNameUpper);
+          batch.set(doc(db, "agents", uid, "houses", id), { ...h, id, agentUid: uid, agentName: agentNameUpper });
         });
         await batch.commit();
       }
-      const actDocs = activities as Array<Record<string, unknown> & { id?: string; date?: string }>;
-      for (let i = 0; i < actDocs.length; i += 400) {
-        const chunk = actDocs.slice(i, i + 400);
+      // Activities use date as doc ID (matches Android dateKey)
+      for (let i = 0; i < activities.length; i += 400) {
+        const chunk = activities.slice(i, i + 400);
         const batch = writeBatch(db);
         chunk.forEach((a, idx) => {
-          const id = (a.id as string) || (a.date as string) || `act_${Date.now()}_${i + idx}`;
-          batch.set(doc(db, "agents", uid, "day_activities", id), { ...a, agentUid: uid, agentName: agentName.toUpperCase() });
+          const dateKey = String(a.date ?? "").trim().replace(/\//g, "-");
+          const id = dateKey || `act_${Date.now()}_${i + idx}`;
+          batch.set(doc(db, "agents", uid, "day_activities", id), { ...a, agentUid: uid, agentName: agentNameUpper });
         });
         await batch.commit();
       }
       // mark requireDataReset for app to pull
       try {
-        const { setDoc } = await import("firebase/firestore");
-        await setDoc(doc(db, "users", uid), { requireDataReset: true }, { merge: true });
+        await updateDoc(doc(db, "users", uid), { requireDataReset: true });
       } catch {
         // ignore
       }
-      showToast(`Restaurado: ${houseIds} imóveis, ${actIds} dias`);
+      showToast(`Restaurado: ${houses.length} imóveis, ${activities.length} dias`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
     } finally {
