@@ -26,6 +26,7 @@ import {
   strokeRect,
   textWidth,
   tightBounds,
+  pdfText,
 } from "./shared";
 
 // ============================================================
@@ -128,8 +129,8 @@ export async function drawFrontPage(doc: jsPDF, houses: HouseDoc[], date: string
   const t1 = "SECRETARIA DE ESTADO DE SAÚDE E DEFESA CIVIL";
   const t2 = "REGISTRO DIÁRIO DO SERVIÇO ANTIVETORIAL";
   setText(doc, titleSize, true);
-  doc.text(t1, centerX - tightBounds(t1, titleSize, true).w / 2, cursorY + 15);
-  doc.text(t2, centerX - tightBounds(t2, titleSize, true).w / 2, cursorY + 32);
+  pdfText(doc,t1, centerX - tightBounds(t1, titleSize, true).w / 2, cursorY + 15);
+  pdfText(doc,t2, centerX - tightBounds(t2, titleSize, true).w / 2, cursorY + 32);
 
   // 3. Contador de folha (sem borda)
   const folhaW = 100;
@@ -181,8 +182,8 @@ export async function drawFrontPage(doc: jsPDF, houses: HouseDoc[], date: string
   const midY = cursorY + labelH + bottomH / 2;
   doc.line(tipoX + wTipo * 0.25, midY, tipoX + wTipo, midY);
   setText(doc, legPaintSize, false);
-  doc.text("1-Sede", legX, midY - 4);
-  doc.text("2-Outros", legX, midY + 9);
+  pdfText(doc,"1-Sede", legX, midY - 4);
+  pdfText(doc,"2-Outros", legX, midY + 9);
 
   cursorY += rowH + 5;
 
@@ -309,8 +310,8 @@ export async function drawFrontPage(doc: jsPDF, houses: HouseDoc[], date: string
   const eCenterY = r2Y + tallH / 2;
   const eb1 = tightBounds("Depósitos", 8, false);
   setText(doc, 8, false);
-  doc.text("Depósitos", eCenterX - 1, eCenterY + textWidth("Depósitos", 8, false) / 2, { angle: 90 });
-  doc.text("Eliminados", eCenterX + eb1.h + 1, eCenterY + textWidth("Eliminados", 8, false) / 2, { angle: 90 });
+  pdfText(doc,"Depósitos", eCenterX - 1, eCenterY + textWidth("Depósitos", 8, false) / 2, { angle: 90 });
+  pdfText(doc,"Eliminados", eCenterX + eb1.h + 1, eCenterY + textWidth("Eliminados", 8, false) / 2, { angle: 90 });
 
   let depX = tx + cwDa;
   for (const d of ["A1", "A2", "B", "C", "D1", "D2", "E"]) {
@@ -780,11 +781,11 @@ export function drawBackPage(doc: jsPDF, chunkHouses: HouseDoc[], date: string, 
   const ttH = b1.h + b2.h + b3.h + 10;
   let curTY = r2Y + (hTubHeader - ttH) / 2 + b1.h;
   setText(doc, textSize, true);
-  doc.text(line1, dx + (wTubitos - b1.w) / 2, curTY);
+  pdfText(doc,line1, dx + (wTubitos - b1.w) / 2, curTY);
   curTY += b2.h + 4;
-  doc.text(line2, dx + (wTubitos - b2.w) / 2, curTY);
+  pdfText(doc,line2, dx + (wTubitos - b2.w) / 2, curTY);
   curTY += b3.h + 4;
-  doc.text(line3, dx + (wTubitos - b3.w) / 2, curTY);
+  pdfText(doc,line3, dx + (wTubitos - b3.w) / 2, curTY);
   drawRectBox(doc, dx, r2Y + hTubHeader, wTubitos, hData, "—", dataSize, true, null);
   dx += wTubitos;
 

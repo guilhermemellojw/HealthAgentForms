@@ -13,7 +13,10 @@ import {
   formatDouble,
   setLine,
   setText,
-  tightBounds,
+  textWidth,
+  pdfText,
+  setTextLeftPad,
+  setTextMode,
 } from "./shared";
 
 // ============================================================
@@ -45,16 +48,16 @@ function drawMetaField(
 ): void {
   const labelW = doc.getTextWidth(label) + 5;
   setText(doc, labelSize, false);
-  doc.text(label, x, y + h - 5);
+  pdfText(doc,label, x, y + h - 5);
   setLine(doc);
   doc.line(x + labelW, y + h - 5, x + w, y + h - 5);
   setText(doc, valueSize, true);
   const ty = y + h - 7;
   if (centerValue) {
     const valW = doc.getTextWidth(value);
-    doc.text(value, x + labelW + (w - labelW - valW) / 2, ty);
+    pdfText(doc,value, x + labelW + (w - labelW - valW) / 2, ty);
   } else {
-    doc.text(value, x + labelW + 5, ty);
+    pdfText(doc,value, x + labelW + 5, ty);
   }
 }
 
@@ -71,7 +74,7 @@ function drawMetaFieldSegmented(
   isSemana = false
 ): void {
   setText(doc, labelSize, false);
-  doc.text(label, x, y + h - 5);
+  pdfText(doc,label, x, y + h - 5);
   const startX = x + doc.getTextWidth(label) + 5;
   let curX = startX;
   setLine(doc);
@@ -82,7 +85,7 @@ function drawMetaFieldSegmented(
     if (value !== "") {
       const valW = doc.getTextWidth(value);
       setText(doc, valueSize, true);
-      doc.text(value, curX + (w - valW) / 2, y + h - 7);
+      pdfText(doc,value, curX + (w - valW) / 2, y + h - 7);
     }
     curX += w;
 
@@ -90,19 +93,19 @@ function drawMetaFieldSegmented(
       if (i === 0 || i === 2) {
         curX += 4;
         setText(doc, labelSize, false);
-        doc.text("/", curX, y + h - 5);
+        pdfText(doc,"/", curX, y + h - 5);
         curX += 12;
       } else if (i === 1) {
         curX += 12;
         setText(doc, labelSize, false);
-        doc.text("a", curX, y + h - 5);
+        pdfText(doc,"a", curX, y + h - 5);
         curX += 18;
       }
     } else {
       if (i < values.length - 1) {
         curX += 8;
         setText(doc, labelSize, false);
-        doc.text("/", curX, y + h - 5);
+        pdfText(doc,"/", curX, y + h - 5);
         curX += 12;
       }
     }
@@ -149,28 +152,21 @@ export async function drawSemanalPage(
 
   const prefText = "PREFEITURA MUNICIPAL DE BOM JARDIM";
   const secText = "SECRETARIA MUNICIPAL DE SAÚDE";
+  // Header esquerdo: alinhado à esquerda (SemanalPdfGenerator.kt:155-156)
   setText(doc, smallBoldSize, true);
-  doc.text(prefText, MARGIN_LEFT, cursorY + 10);
-
-  const prefWidth = doc.getTextWidth(prefText);
-  const secWidth = doc.getTextWidth(secText);
-  const sb = tightBounds(secText, textSize, false);
-  const secTy = cursorY + 10 + (10 + sb.h) / 2 - sb.bottom;
-  const centerPref = MARGIN_LEFT + 4 + prefWidth / 2;
-  const secX = Math.max(centerPref - secWidth / 2, MARGIN_LEFT);
-  setText(doc, textSize, false);
-  doc.text(secText, secX, secTy);
+  pdfText(doc,prefText, MARGIN_LEFT, cursorY + 10);
+  pdfText(doc,secText, MARGIN_LEFT, cursorY + 19);
 
   const titleSize = 20;
   const subTitleSize = 26;
   const headerText1 = "Programa Municipal de Controle da Dengue";
   const headerText2 = "PMCD";
   setText(doc, titleSize, true);
-  const title1W = doc.getTextWidth(headerText1);
+  const title1W = textWidth(headerText1, titleSize, true);
+  pdfText(doc,headerText1, rightEdge - title1W, cursorY + 25);
   setText(doc, subTitleSize, true);
-  const title2W = doc.getTextWidth(headerText2);
-  doc.text(headerText1, rightEdge - title1W, cursorY + 25);
-  doc.text(headerText2, rightEdge - title1W + (title1W - title2W) / 2, cursorY + 55);
+  const title2W = textWidth(headerText2, subTitleSize, true);
+  pdfText(doc,headerText2, rightEdge - title1W + (title1W - title2W) / 2, cursorY + 55);
 
   cursorY += logoH + 30;
 
@@ -489,15 +485,15 @@ export async function drawSemanalPage(
           };
           if (concludedBairrosToday.length === 1) {
             setText(doc, labelSize, false);
-            doc.text(fitLabel(concludedBairrosToday[0]), labelX, baseY);
+            pdfText(doc,fitLabel(concludedBairrosToday[0]), labelX, baseY);
           } else if (concludedBairrosToday.length > 2) {
             setText(doc, labelSize, false);
-            doc.text(fitLabel(concludedBairrosToday[0]), labelX, cursorY + 6.5);
-            doc.text(fitLabel(concludedBairrosToday[1]) + "...", labelX, cursorY + 13.5);
+            pdfText(doc,fitLabel(concludedBairrosToday[0]), labelX, cursorY + 6.5);
+            pdfText(doc,fitLabel(concludedBairrosToday[1]) + "...", labelX, cursorY + 13.5);
           } else {
             setText(doc, labelSize, false);
             concludedBairrosToday.forEach((name, index) => {
-              doc.text(fitLabel(name), labelX, index === 0 ? cursorY + 6.5 : cursorY + 13.5);
+              pdfText(doc,fitLabel(name), labelX, index === 0 ? cursorY + 6.5 : cursorY + 13.5);
             });
           }
           setText(doc, textSize, false);
@@ -548,13 +544,13 @@ export async function drawSemanalPage(
   const cityLabel = "Bom Jardim, ";
   const cityLabelW = doc.getTextWidth(cityLabel);
   setText(doc, textSize, false);
-  doc.text(cityLabel, MARGIN_LEFT + 10, cursorY);
+  pdfText(doc,cityLabel, MARGIN_LEFT + 10, cursorY);
 
   const dateStartX = MARGIN_LEFT + 10 + cityLabelW;
   const dateEndX = dateStartX + 120;
   const valSize = 11;
   setText(doc, valSize, true);
-  doc.text(footerDate, dateStartX + (120 - doc.getTextWidth(footerDate)) / 2, cursorY - 2);
+  pdfText(doc,footerDate, dateStartX + (120 - doc.getTextWidth(footerDate)) / 2, cursorY - 2);
   setLine(doc);
   doc.line(dateStartX, cursorY + 2, dateEndX, cursorY + 2);
 
@@ -563,16 +559,18 @@ export async function drawSemanalPage(
   const agentLineW = 160;
   const agentStartX = MARGIN_LEFT + tableWidth - agentLineW;
   setText(doc, textSize, false);
-  doc.text(agentLabel, agentStartX - agentLabelW - 5, cursorY);
+  pdfText(doc,agentLabel, agentStartX - agentLabelW - 5, cursorY);
   doc.line(agentStartX, cursorY + 2, agentStartX + agentLineW, cursorY + 2);
 
   if (agentName.trim() !== "") {
     setText(doc, 10, true);
-    doc.text(agentName, agentStartX + 5, cursorY - 2);
+    pdfText(doc,agentName, agentStartX + 5, cursorY - 2);
   }
 }
 
 export async function generateSemanalPdf(weekDates: string[], allHouses: HouseDoc[], activities: Record<string, string>, agentName: string): Promise<jsPDF> {
+  setTextLeftPad(0); // SemanalPdfGenerator (Metrics) não usa pad esquerdo
+  setTextMode("metrics");
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: [PAGE_WIDTH, PAGE_HEIGHT], compress: true });
   setLine(doc);
   await drawSemanalPage(doc, weekDates, allHouses, activities, agentName);

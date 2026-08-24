@@ -14,6 +14,8 @@ import {
   strokeRect,
   situationCode,
   tightBounds,
+  pdfText,
+  setTextLeftPad,
 } from "./shared";
 
 // ============================================================
@@ -40,7 +42,7 @@ async function drawHeaderSection(doc: jsPDF, headerAreaWidth: number, headerY: n
   const centerPref = MARGIN + 4 + prefWidth / 2;
   const secX = Math.max(centerPref - secWidth / 2, MARGIN);
   setText(doc, 8, false);
-  doc.text(secText, secX, secTy);
+  pdfText(doc,secText, secX, secTy);
 
   const nextY = headerY + 10 + 10.2;
   const logoWidth = Math.min(140, headerAreaWidth);
@@ -375,6 +377,7 @@ export async function generateRgPdf(
   municipio = "Bom Jardim",
   participatingAgents?: string[]
 ): Promise<jsPDF> {
+  setTextLeftPad(4); // RGPdfGenerator.kt usa x+4f no alignLeft
   const housesPerPage = 52;
   const totalPages = houses.length === 0 ? 1 : Math.ceil(houses.length / housesPerPage);
   const safeBairro = bairro.trim().toUpperCase();
