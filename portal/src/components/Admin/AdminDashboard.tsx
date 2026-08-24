@@ -1,5 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import { arrayRemove, arrayUnion, deleteDoc, doc, setDoc, updateDoc, writeBatch } from "firebase/firestore";
+import {
+  arrayRemove,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  documentId,
+  getDoc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  setDoc,
+  startAfter,
+  updateDoc,
+  writeBatch,
+} from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { MONTHS } from "../../lib/constants";
 import { fetchSystemSettings, useAccessRequests, useAgentNames, useBairros, useUnifiedProfiles } from "../../hooks/useAdminData";
@@ -23,6 +39,9 @@ export function AdminDashboard() {
   const [inviteRole, setInviteRole] = useState<"AGENT" | "SUPERVISOR" | "ADMIN">("AGENT");
   const [inviteAgentName, setInviteAgentName] = useState("");
   const [inviteAuthorized, setInviteAuthorized] = useState(true);
+  const [transferFrom, setTransferFrom] = useState<UnifiedProfile | null>(null);
+  const [transferTo, setTransferTo] = useState<string>("");
+  const [wiping, setWiping] = useState<string | null>(null);
 
   const { profiles, loading } = useUnifiedProfiles(search);
   const { names: masterNames } = useAgentNames();
@@ -75,16 +94,43 @@ export function AdminDashboard() {
     const upper = name.trim().toUpperCase();
     if (!upper) return;
     try {
-      await updateDoc(doc(db, "users", p.uid), { agentName: upper });
-      // also ensure agent doc exists/update
-      const agentId = p.agentId || p.uid;
+      const shouldRename = await (async () => {
+        try {
+          const snap = await getDoc(doc(db, "agents", p.uid!));
+          const existing = snap.exists() ? (snap.data() as { agentName?: string }).agentName?.trim().toUpperCase() : null;
+          return !existing || existing !== upper;
+        } catch {
+          return true;
+        }
+      })();
+      await updateDoc(doc(db, "users", p.uid!), { agentName: upper });
+      const agentId = p.agentId || p.uid!;
       await setDoc(doc(db, "agents", agentId), { agentName: upper, email: p.email.toLowerCase() }, { merge: true });
-      await updateDoc(doc(db, "metadata", "agent_info"), { names: arrayUnion(upper) });
-      showToast(`Vinculado a ${upper}`);
+      await setDoc(doc(db, "metadata", "agent_info"), { names: arrayUnion(upper) }, { merge: true });
+      if (shouldRename && agentId) {
+        await renameCollectionField(agentId, "houses", "agentName", upper);
+        await renameCollectionField(agentId, "day_activities", "agentName", upper);
+      }
+      showToast(`Vinculado a ${upper}${shouldRename ? " (produção renomeada)" : ""}`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
     }
   };
+
+  async function renameCollectionField(agentId: string, subcollection: string, field: string, value: string) {
+    let lastDoc: unknown = null;
+    while (true) {
+      const coll = collection(db, "agents", agentId, subcollection);
+      const q = lastDoc ? query(coll, orderBy(documentId()), startAfter(lastDoc), limit(450)) : query(coll, orderBy(documentId()), limit(450));
+      const snap = await getDocs(q);
+      if (snap.empty) break;
+      const batch = writeBatch(db);
+      snap.docs.forEach((d) => batch.update(d.ref, { [field]: value }));
+      await batch.commit();
+      if (snap.docs.length < 450) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+    }
+  }
 
   const handleClearVinculo = async (p: UnifiedProfile) => {
     if (!p.uid) return;
@@ -98,7 +144,6 @@ export function AdminDashboard() {
 
   const handleDelete = async (p: UnifiedProfile, deleteCloud: boolean) => {
     if (!p.uid && !p.agentId) {
-      // only master name
       if (p.agentName) {
         try {
           await updateDoc(doc(db, "metadata", "agent_info"), { names: arrayRemove(p.agentName) });
@@ -116,14 +161,36 @@ export function AdminDashboard() {
       await deleteDoc(doc(db, "admins", uid));
       await deleteDoc(doc(db, "supervisors", uid));
       if (deleteCloud && p.agentId) {
-        // purge agent subcollections count limited to client; do simple doc delete, subcollections remain but marked
-        await deleteDoc(doc(db, "agents", p.agentId));
+        await purgeAgentCompletely(p.agentId);
       }
       showToast("Excluído");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
     }
   };
+
+  async function purgeAgentCompletely(agentId: string) {
+    const subs = ["houses", "day_activities", "monthly_summaries", "backups"] as const;
+    for (const sub of subs) {
+      let lastDoc: unknown = null;
+      while (true) {
+        const coll = collection(db, "agents", agentId, sub);
+        const q = lastDoc ? query(coll, orderBy(documentId()), startAfter(lastDoc), limit(400)) : query(coll, orderBy(documentId()), limit(400));
+        const snap = await getDocs(q);
+        if (snap.empty) break;
+        const batch = writeBatch(db);
+        snap.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+        if (snap.docs.length < 400) break;
+        lastDoc = snap.docs[snap.docs.length - 1];
+      }
+    }
+    try {
+      await deleteDoc(doc(db, "agents", agentId));
+    } catch {
+      // already deleted or not exists
+    }
+  }
 
   const handleAddMaster = async () => {
     const upper = newMasterName.trim().toUpperCase();
@@ -198,6 +265,87 @@ export function AdminDashboard() {
       showToast("Rejeitado");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleTransferExecute = async () => {
+    if (!transferFrom || !transferTo) return showToast("Selecione origem e destino");
+    if (transferFrom.uid === transferTo) return showToast("Origem e destino iguais");
+    const fromUid = transferFrom.uid || transferFrom.agentId!;
+    const toUid = transferTo;
+    const targetProfile = profiles.find((p) => p.uid === toUid || p.agentId === toUid);
+    const targetName = targetProfile?.agentName?.toUpperCase() || "";
+    if (!confirm(`Transferir TODOS os dados de ${transferFrom.displayName} para ${targetProfile?.displayName || toUid}? Irreversível.`)) return;
+    try {
+      showToast("Transferindo…");
+      // copy houses
+      const fromHousesSnap = await getDocs(collection(db, "agents", fromUid, "houses"));
+      const fromActsSnap = await getDocs(collection(db, "agents", fromUid, "day_activities"));
+      const toHouseIds: string[] = [];
+      const toDates: string[] = [];
+      // chunk 100
+      const houses = fromHousesSnap.docs;
+      for (let i = 0; i < houses.length; i += 100) {
+        const chunk = houses.slice(i, i + 100);
+        const batch = writeBatch(db);
+        for (const d of chunk) {
+          const data = d.data() as Record<string, unknown>;
+          const newData = { ...data, agentUid: toUid, agentName: targetName || data.agentName };
+          batch.set(doc(db, "agents", toUid, "houses", d.id), newData);
+          batch.delete(d.ref);
+          toHouseIds.push(d.id);
+          const date = (data.data as string) || "";
+          if (date) toDates.push(date);
+        }
+        await batch.commit();
+      }
+      const acts = fromActsSnap.docs;
+      for (let i = 0; i < acts.length; i += 100) {
+        const chunk = acts.slice(i, i + 100);
+        const batch = writeBatch(db);
+        for (const d of chunk) {
+          const data = d.data() as Record<string, unknown>;
+          const newData = { ...data, agentUid: toUid, agentName: targetName || data.agentName };
+          batch.set(doc(db, "agents", toUid, "day_activities", d.id), newData);
+          batch.delete(d.ref);
+        }
+        await batch.commit();
+      }
+      if (toHouseIds.length || toDates.length) {
+        const fromRef = doc(db, "agents", fromUid);
+        // tombstones (optional, for app sync)
+        try {
+          await updateDoc(fromRef, {
+            deleted_house_ids: arrayUnion(...toHouseIds.slice(0, 10)),
+            deleted_activity_dates: arrayUnion(...Array.from(new Set(toDates)).slice(0, 10)),
+          });
+        } catch {
+          // ignore if not exists
+        }
+        await setDoc(doc(db, "users", fromUid), { requireDataReset: true }, { merge: true });
+      }
+      await setDoc(doc(db, "agents", toUid), { lastSyncTime: Date.now() }, { merge: true });
+      showToast(`Transferência concluída: ${toHouseIds.length} imóveis`);
+      setTransferFrom(null);
+      setTransferTo("");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleWipeExecute = async (p: UnifiedProfile) => {
+    const uid = p.uid || p.agentId!;
+    if (!confirm(`Wipe remoto de ${p.displayName}? Nuvem será apagada e app fará reset no próximo acesso. Perfil mantido.`)) return;
+    setWiping(uid);
+    try {
+      await purgeAgentCompletely(uid);
+      await setDoc(doc(db, "users", uid), { requireDataReset: true }, { merge: true });
+      await setDoc(doc(db, "agents", uid), { lastSyncTime: Date.now() }, { merge: true });
+      showToast("Wipe concluído — nuvem limpa e reset agendado");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWiping(null);
     }
   };
 
@@ -415,8 +563,9 @@ export function AdminDashboard() {
 
                     {/* Actions row 2 */}
                     <div className="flex gap-2" style={{ flexWrap: "wrap" }}>
-                      <button className="btn btn-sm btn-outline" onClick={() => showToast("Transferir: selecione destino em Config avançada")}>Transferir dados</button>
-                      <button className="btn btn-sm btn-outline" onClick={() => showToast("Restaurar: use arquivo JSON em Config avançada")}>Restaurar backup</button>
+                      <button className="btn btn-sm btn-outline" onClick={() => setTransferFrom(p)} disabled={!p.uid}>Transferir dados</button>
+                      <button className="btn btn-sm btn-outline" onClick={() => handleWipeExecute(p)} disabled={!!wiping || !p.uid}>{wiping === (p.uid || p.agentId) ? "Limpando…" : "Wipe remoto"}</button>
+                      <button className="btn btn-sm btn-outline" disabled title="Use Timeline para restaurar (backup)">Restaurar (Timeline)</button>
                       <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p, false)}>Excluir perfil</button>
                       {p.agentId && <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p, true)}>Excluir + nuvem</button>}
                     </div>
@@ -432,6 +581,23 @@ export function AdminDashboard() {
           {profiles.length === 0 && <p className="muted small">Nenhum perfil encontrado.</p>}
         </div>
       </div>
+
+      {transferFrom && (
+        <div className="card" style={{ borderColor: "var(--warning)", background: "#fffbeb" }}>
+          <h3>Transferir dados de {transferFrom.displayName}</h3>
+          <p className="muted small">Selecione o destino. Todos os imóveis e atividades serão movidos. Origem receberá `requireDataReset` e fará wipe local no próximo acesso. Irreversível.</p>
+          <select className="select" value={transferTo} onChange={(e) => setTransferTo(e.target.value)} style={{ marginTop: 8 }}>
+            <option value="">Selecione destino…</option>
+            {profiles.filter((p) => p.uid && p.uid !== transferFrom.uid && !p.isPreRegistered).map((p) => (
+              <option key={p.uid!} value={p.uid!}>{p.displayName} — {p.email}</option>
+            ))}
+          </select>
+          <div className="flex gap-2" style={{ marginTop: 8 }}>
+            <button className="btn btn-primary btn-sm" onClick={handleTransferExecute} disabled={!transferTo}>Confirmar transferência</button>
+            <button className="btn btn-outline btn-sm" onClick={() => { setTransferFrom(null); setTransferTo(""); }}>Cancelar</button>
+          </div>
+        </div>
+      )}
         </>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

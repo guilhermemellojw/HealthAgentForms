@@ -55,6 +55,18 @@ service cloud.firestore {
       allow read: if isStaff();
     }
 
+    // 3.1 Metadata (agent_info, locations, settings) — leitura aberta, escrita só Admin
+    match /metadata/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 3.2 Solicitações de acesso
+    match /access_requests/{requestId} {
+      allow create: if isSignedIn() && request.auth.uid == request.resource.data.uid;
+      allow read, update, delete: if isAdmin();
+    }
+
     // 4. Catch-all para Admin
     match /{document=**} {
       allow read, write: if isAdmin();
