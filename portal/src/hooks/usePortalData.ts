@@ -241,17 +241,20 @@ export function useAgentSnapshot(agentId: string) {
     staleTime: 30_000,
   });
 }
-// RG multi-agente: todas as casas de um bairro, de todos os agentes
-// (paridade com o caminho admin do Android — sem filtro de agente, sem dedup)
-export function useRgHouses(bairro: string) {
+// RG multi-agente: todas as casas do ano, de todos os agentes (sem dedup — paridade Android).
+// Alimenta os dropdowns de bairro/quarteirão E a geração do PDF com uma única query.
+export function useRgCoverage(year: number) {
   return useQuery({
-    queryKey: ["rg-houses", bairro],
-    enabled: !!bairro,
+    queryKey: ["rg-coverage", year],
     queryFn: async () => {
-      const q = query(collectionGroup(db, "houses"), where("bairro", "==", bairro));
+      const q = query(
+        collectionGroup(db, "houses"),
+        where("data", ">=", `01-01-${year}`),
+        where("data", "<=", `31-12-${year}`),
+      );
       const snap = await getDocs(q);
       return snap.docs.map((d) => docToData<HouseDoc>(d));
     },
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
   });
 }

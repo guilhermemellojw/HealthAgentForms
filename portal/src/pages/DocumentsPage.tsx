@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useAgents, useAgentSnapshot, useRgHouses } from "../hooks/usePortalData";
-import { useBairros } from "../hooks/useAdminData";
+import { useAgents, useAgentSnapshot, useRgCoverage } from "../hooks/usePortalData";
 import { MONTHS } from "../lib/constants";
 import { getWeeksForMonth, sortRgHouses } from "../lib/period";
 import { downloadBoletim } from "../lib/pdf/boletim";
@@ -92,30 +91,42 @@ export default function DocumentsPage() {
   const [rgYear, setRgYear] = useState(now.getFullYear());
   const [rgBairro, setRgBairro] = useState("");
   const [rgBlock, setRgBlock] = useState("");
-  const { bairros: masterBairros } = useBairros();
-  const rgQuery = useRgHouses(rgBairro);
+  const rgCoverage = useRgCoverage(rgYear);
 
-  const rgYearHouses = useMemo(
-    () => (rgQuery.data ?? []).filter((h) => (h.data || "").trim().endsWith(`-${rgYear}`)),
-    [rgQuery.data, rgYear],
+  // Bairros realmente trabalhados no ano (com contagem de imóveis)
+  const rgBairros = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const h of rgCoverage.data ?? []) {
+      const b = (h.bairro || "").trim().toUpperCase();
+      if (!b) continue;
+      counts.set(b, (counts.get(b) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [rgCoverage.data]);
+
+  const rgBairroHouses = useMemo(
+    () => (rgCoverage.data ?? []).filter((h) => (h.bairro || "").trim().toUpperCase() === rgBairro),
+    [rgCoverage.data, rgBairro],
   );
 
   const rgBlocks = useMemo(() => {
-    const out = new Map<string, string>();
-    for (const h of rgYearHouses) {
+    const out = new Map<string, { display: string; count: number }>();
+    for (const h of rgBairroHouses) {
       const bNum = (h.blockNumber || "").trim();
       const bSeq = (h.blockSequence || "").trim();
-      const display = bSeq === "" ? bNum : `${bNum}/${bSeq}`;
-      out.set(blockKey(h), display);
+      const key = bSeq === "" ? bNum : `${bNum}/${bSeq}`;
+      const cur = out.get(key);
+      if (cur) cur.count += 1;
+      else out.set(key, { display: key, count: 1 });
     }
     return [...out.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [rgYearHouses]);
+  }, [rgBairroHouses]);
 
   const rgHouses = useMemo(() => {
     if (!rgBlock) return [];
     const target = blockKey({ blockNumber: rgBlock.split("/")[0], blockSequence: rgBlock.split("/")[1] ?? "" } as HouseDoc);
-    return sortRgHouses(rgYearHouses.filter((h) => blockKey(h) === target));
-  }, [rgYearHouses, rgBlock]);
+    return sortRgHouses(rgBairroHouses.filter((h) => blockKey(h) === target));
+  }, [rgBairroHouses, rgBlock]);
 
   const rgAgents = useMemo(
     () => [...new Set(rgHouses.map((h) => (h.agentName || "").trim()).filter(Boolean))].sort(),
@@ -247,7 +258,7 @@ export default function DocumentsPage() {
       ) : (
         <>
           <div className="period-bar">
-            <select className="select" value={rgYear} onChange={(e) => setRgYear(Number(e.target.value))}>
+            <select className="select" value={rgYear} onChange={(e) => { setRgYear(Number(e.target.value)); setRgBairro(""); setRgBlock(""); }}>
               {years.map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
@@ -256,13 +267,14 @@ export default function DocumentsPage() {
               className="select"
               value={rgBairro}
               onChange={(e) => {
-                setRgBairro(e.target.value.toUpperCase());
+                setRgBairro(e.target.value);
                 setRgBlock("");
               }}
+              disabled={rgCoverage.isLoading}
             >
-              <option value="">Selecione o bairro…</option>
-              {masterBairros.map((b) => (
-                <option key={b} value={b}>{b}</option>
+              <option value="">{rgCoverage.isLoading ? "Carregando bairros…" : "Selecione o bairro…"}</option>
+              {rgBairros.map(([b, count]) => (
+                <option key={b} value={b}>{b} ({count})</option>
               ))}
             </select>
             <select
@@ -272,16 +284,17 @@ export default function DocumentsPage() {
               disabled={!rgBairro}
             >
               <option value="">Selecione o quarteirão…</option>
-              {rgBlocks.map(([k, display]) => (
-                <option key={k} value={k}>{display}</option>
+              {rgBlocks.map(([k, v]) => (
+                <option key={k} value={k}>{v.display} ({v.count})</option>
               ))}
             </select>
           </div>
 
-          {!rgBairro && <p className="muted">Selecione o ano e o bairro para montar o RG do quarteirão (inclui todos os agentes).</p>}
-          {rgBairro && rgQuery.isLoading && <p className="muted">Carregando imóveis do bairro…</p>}
-          {rgBairro && !rgQuery.isLoading && rgBlocks.length === 0 && (
-            <p className="muted">Nenhum imóvel encontrado em {rgBairro} no ano {rgYear}.</p>
+          {!rgCoverage.isLoading && rgBairros.length === 0 && (
+            <p className="muted">Nenhum imóvel registrado no ano {rgYear}. Selecione outro ano.</p>
+          )}
+          {!rgBairro && !rgCoverage.isLoading && rgBairros.length > 0 && (
+            <p className="muted">Selecione o bairro para montar o RG do quarteirão (inclui todos os agentes).</p>
           )}
           {rgBlock && rgHouses.length > 0 && (
             <p className="muted small">
