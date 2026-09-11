@@ -136,6 +136,7 @@ class AgentRepositoryImpl @Inject constructor(
             if (!currentNames.contains(normalizedName)) {
                 currentNames.add(normalizedName)
                 docRef.set(mapOf("names" to currentNames.sorted())).await()
+                cachedNamesList = null // Invalidate cache (was missing: list went stale for 5 min)
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -145,14 +146,113 @@ class AgentRepositoryImpl @Inject constructor(
 
     override suspend fun deleteAgentName(name: String): Result<Unit> {
         return try {
+            val normalizedName = name.trim().uppercase()
+            if (normalizedName.isBlank()) return Result.failure(IllegalArgumentException("Nome inválido"))
             val docRef = firestore.collection("metadata").document("agent_info")
             val snapshot = docRef.get().await()
             val currentNames = (snapshot.get("names") as? List<*>)?.filterIsInstance<String>()?.toMutableList() ?: mutableListOf()
-            if (currentNames.remove(name)) {
-                docRef.set(mapOf("names" to currentNames.sorted())).await()
+            val removed = currentNames.removeAll { it.trim().uppercase() == normalizedName }
+            if (removed) {
+                docRef.set(mapOf("names" to currentNames.map { it.trim().uppercase() }.sorted())).await()
                 cachedNamesList = null // Invalidate cache
             }
             Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun renameAgentName(oldName: String, newName: String): Result<Unit> {
+        val oldCanon = oldName.trim().uppercase().takeIf { it.isNotBlank() }
+            ?: return Result.failure(IllegalArgumentException("Nome atual inválido"))
+        val newCanon = newName.trim().uppercase().takeIf { it.isNotBlank() }
+            ?: return Result.failure(IllegalArgumentException("Novo nome inválido"))
+        if (oldCanon == newCanon) return Result.failure(IllegalArgumentException("Nomes iguais"))
+        return try {
+            val docRef = firestore.collection("metadata").document("agent_info")
+            firestore.runTransaction { txn ->
+                val snap = txn.get(docRef)
+                val current = (snap.get("names") as? List<*>)
+                    ?.filterIsInstance<String>()
+                    ?.map { it.trim().uppercase() }
+                    ?.toMutableList() ?: mutableListOf()
+                if (!current.contains(oldCanon)) throw IllegalStateException("NOME_ORIGEM_NAO_ENCONTRADO")
+                if (current.contains(newCanon)) throw IllegalStateException("NOME_JA_EXISTE")
+                current.remove(oldCanon)
+                current.add(newCanon)
+                txn.set(docRef, mapOf("names" to current.sorted()))
+            }.await()
+            cachedNamesList = null
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun renameAgentData(uid: String, newName: String): Result<com.antigravity.healthagent.domain.repository.RenameReport> {
+        val newCanon = newName.trim().uppercase().takeIf { it.isNotBlank() }
+            ?: return Result.failure(IllegalArgumentException("Novo nome inválido"))
+        return try {
+            val agentRef = firestore.collection("agents").document(uid)
+            val houses = agentRef.collection("houses").get().await()
+            val activities = agentRef.collection("day_activities").get().await()
+
+            var housesMoved = 0
+            var activitiesMoved = 0
+
+            // Houses: move set(newKey)+delete(old) — mesmo padrão do transferAgentData,
+            // mas from==to (só o nome muda, o UID é estável). Idempotente.
+            houses.documents.chunked(100).forEach { chunk ->
+                val batch = firestore.batch()
+                var hasOps = false
+                chunk.forEach { docSnapshot ->
+                    val houseObj = docSnapshot.toHouseSafe(uid, newCanon) ?: return@forEach
+                    val newKey = houseObj.generateNaturalKey()
+                    if (newKey != docSnapshot.id) {
+                        batch.set(agentRef.collection("houses").document(newKey), houseObj.toFirestoreMap())
+                        batch.delete(docSnapshot.reference)
+                        housesMoved++
+                        hasOps = true
+                    } else {
+                        val currentName = docSnapshot.getString("agentName")?.trim()?.uppercase()
+                        if (currentName != newCanon) {
+                            batch.set(docSnapshot.reference, houseObj.toFirestoreMap())
+                            housesMoved++
+                            hasOps = true
+                        }
+                    }
+                }
+                if (hasOps) batch.commit().await()
+            }
+
+            // Activities: doc ID é a data (não contém o nome), então basta re-carimbar o campo.
+            activities.documents.chunked(100).forEach { chunk ->
+                val batch = firestore.batch()
+                var hasOps = false
+                chunk.forEach { docSnapshot ->
+                    val activityObj = docSnapshot.toDayActivitySafe(uid, newCanon) ?: return@forEach
+                    val dateKey = activityObj.date.replace("/", "-")
+                    val currentName = docSnapshot.getString("agentName")?.trim()?.uppercase()
+                    if (currentName != newCanon || docSnapshot.id != dateKey) {
+                        batch.set(agentRef.collection("day_activities").document(dateKey), activityObj.toFirestoreMap())
+                        if (docSnapshot.id != dateKey) batch.delete(docSnapshot.reference)
+                        activitiesMoved++
+                        hasOps = true
+                    }
+                }
+                if (hasOps) batch.commit().await()
+            }
+
+            // Root: converge SyncPush.officialAgentName + força refresh do admin.
+            agentRef.set(
+                mapOf(
+                    "agentName" to newCanon,
+                    "lastSyncTime" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
+                ),
+                com.google.firebase.firestore.SetOptions.merge()
+            ).await()
+
+            Result.success(com.antigravity.healthagent.domain.repository.RenameReport(housesMoved, activitiesMoved))
         } catch (e: Exception) {
             Result.failure(e)
         }

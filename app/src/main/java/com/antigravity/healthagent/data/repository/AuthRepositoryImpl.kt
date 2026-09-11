@@ -492,12 +492,14 @@ class AuthRepositoryImpl @Inject constructor(
         return migratePreRegistration(email, user.uid)
     }
 
-    override suspend fun migratePreRegistration(email: String, targetUid: String): Result<Unit> {
+    override suspend fun migratePreRegistration(email: String, targetUid: String, preferredAgentName: String?): Result<Unit> {
         val normalizedEmail = email.trim().lowercase()
         val preDocId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
         android.util.Log.i("AuthRepository", "Starting atomic migration for $email to $targetUid")
         
         var preAgentName: String? = null
+        // Dialog choice wins over the pre-registered name; blank keeps old behavior.
+        val preferredName = preferredAgentName?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
 
         // 1. Prepare Metadata Migration (users collection)
         try {
@@ -506,7 +508,7 @@ class AuthRepositoryImpl @Inject constructor(
                 val metaBatch = firestore.batch()
                 val updates = mutableMapOf<String, Any?>()
                 preAgentName = preUserDoc.getString("agentName")
-                preAgentName?.let { updates["agentName"] = it }
+                (preferredName ?: preAgentName)?.let { updates["agentName"] = it }
                 preUserDoc.getString("role")?.let { updates["role"] = it }
                 updates["isAuthorized"] = true
                 updates["isPreRegistered"] = false
@@ -514,10 +516,16 @@ class AuthRepositoryImpl @Inject constructor(
                 metaBatch.set(firestore.collection("users").document(targetUid), updates, com.google.firebase.firestore.SetOptions.merge())
                 metaBatch.delete(firestore.collection("users").document(preDocId))
                 metaBatch.commit().await()
+            } else {
+                android.util.Log.i("AuthRepository", "No pre-registered user doc $preDocId: metadata migration skipped (idempotent)")
             }
         } catch (e: Exception) {
             android.util.Log.e("AuthRepository", "Error preparing metadata migration", e)
         }
+
+        // Resolved display name: preferred > pre-registered. Used for the agent
+        // doc and for the local identity update (matching still uses email/prefix).
+        val resolvedName = preferredName ?: preAgentName
 
         // 2. Prepare Agent Data Migration (agents collection + subcollections)
         try {
@@ -526,6 +534,8 @@ class AuthRepositoryImpl @Inject constructor(
                 val agentData = preAgentDoc.data?.toMutableMap() ?: mutableMapOf()
                 agentData["isPreRegistered"] = false
                 agentData["uid"] = targetUid
+                // Respect the admin-confirmed name instead of silently keeping the pre_ one.
+                resolvedName?.let { agentData["agentName"] = it }
                 
                 val newAgentRef = firestore.collection("agents").document(targetUid)
                 var currentBatch = firestore.batch()
@@ -572,10 +582,12 @@ class AuthRepositoryImpl @Inject constructor(
         // 3. Perform Local Migration (Very Important for offline visibility)
         try {
             val emailPrefix = email.substringBefore("@").uppercase()
-            val properName = preAgentName?.trim()?.uppercase() ?: ""
+            // Match broadly (email/prefix/pre name) but stamp the resolved identity.
+            val matchName = preAgentName?.trim()?.uppercase() ?: ""
+            val properName = resolvedName?.trim()?.uppercase() ?: matchName
 
             // 1. House Migration
-            val housesToReclaim = houseDao.getHousesToReclaim(email, emailPrefix, targetUid, properName)
+            val housesToReclaim = houseDao.getHousesToReclaim(email, emailPrefix, targetUid, matchName)
             for (house in housesToReclaim) {
                 val hasClash = houseDao.checkClash(
                     targetUid, house.data, house.address.blockNumber, house.address.blockSequence, 

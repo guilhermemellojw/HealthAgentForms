@@ -133,6 +133,8 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun fetchAgentNames(): Result<List<String>> = Result.success(emptyList())
         override suspend fun addAgentName(name: String): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAgentName(name: String): Result<Unit> = Result.success(Unit)
+        override suspend fun renameAgentName(oldName: String, newName: String): Result<Unit> = Result.success(Unit)
+        override suspend fun renameAgentData(uid: String, newName: String): Result<com.antigravity.healthagent.domain.repository.RenameReport> = Result.success(com.antigravity.healthagent.domain.repository.RenameReport())
         override suspend fun fetchAllAgentsData(sinceTimestamp: Long, untilTimestamp: Long, datePattern: String?): Result<List<AgentData>> = Result.success(emptyList())
         override suspend fun deleteAgentHouse(uid: String, houseId: String): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAgentActivity(uid: String, activityDate: String): Result<Unit> = Result.success(Unit)

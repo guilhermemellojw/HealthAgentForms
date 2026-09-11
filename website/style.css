@@ -260,6 +260,67 @@ nav {
     top: auto;
 }
 
+/* Rename modal (agent names) — same overlay pattern as day-details */
+#rename-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(12px);
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+}
+
+#rename-modal .modal-content {
+    background: linear-gradient(145deg, rgba(30, 40, 50, 0.95), rgba(15, 20, 25, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    width: 95%;
+    max-width: 520px;
+    position: relative;
+    padding: 25px;
+    transform: none;
+    left: auto;
+    top: auto;
+}
+
+/* Master names chips */
+.name-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 10px;
+}
+
+.name-chip .chip-label {
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.name-chip .chip-flag {
+    font-size: 0.8rem;
+    opacity: 0.8;
+}
+
+.name-chip .chip-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: white;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 2px 7px;
+}
+
+.name-chip .chip-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+}
+
 .close-btn {
     font-size: 2rem;
     color: var(--text-secondary);

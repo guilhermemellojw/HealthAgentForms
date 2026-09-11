@@ -52,9 +52,23 @@ fun AdminSettingsTab(viewModel: AdminViewModel) {
     val globalActivities by viewModel.globalCustomActivities.collectAsState()
     val maxHouses by viewModel.maxOpenHouses.collectAsState()
     val systemSettings by viewModel.systemSettings.collectAsState()
+    val agentNames by viewModel.agentNames.collectAsState()
+    val unifiedProfiles by viewModel.unifiedProfiles.collectAsState()
+    val isRenaming by viewModel.isRenaming.collectAsState()
     
     var showAddBairroDialog by remember { mutableStateOf(false) }
     var showAddActivityDialog by remember { mutableStateOf(false) }
+    var newMasterName by remember { mutableStateOf("") }
+    var editingOldName by remember { mutableStateOf<String?>(null) }
+    var editingText by remember { mutableStateOf("") }
+    var pendingDeleteName by remember { mutableStateOf<String?>(null) }
+    // Nomes já vinculados a um UID (trim+uppercase) para validação 1:1 na UI.
+    // O ViewModel revalida no servidor (isAgentNameTaken), isto é só UX antecipada.
+    val linkedNames = remember(unifiedProfiles) {
+        unifiedProfiles.filter { it.uid != null }
+            .mapNotNull { it.agentName?.trim()?.uppercase() }.toSet()
+    }
+    val masterCanon = remember(agentNames) { agentNames.map { it.trim().uppercase() }.toSet() }
     
     val scrollState = rememberScrollState()
     
@@ -278,6 +292,175 @@ fun AdminSettingsTab(viewModel: AdminViewModel) {
                     }
                 }
             }
+        }
+
+        // --- Section 4: Lista Mestra de Agentes (canônica; Gestão mantém espelho) ---
+        SettingsSectionHeader(title = "Lista Mestra de Agentes", icon = Icons.Default.Badge)
+        PremiumCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Renomear aqui atualiza a lista, o perfil vinculado e todas as casas/atividades anteriores.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (isRenaming) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = newMasterName,
+                        onValueChange = { newMasterName = it },
+                        label = { Text("Novo nome") },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true,
+                        enabled = !isRenaming
+                    )
+                    Button(
+                        onClick = {
+                            viewModel.addAgentName(newMasterName.trim())
+                            newMasterName = ""
+                        },
+                        enabled = !isRenaming && newMasterName.trim().isNotBlank() &&
+                            !masterCanon.contains(newMasterName.trim().uppercase()) &&
+                            !linkedNames.contains(newMasterName.trim().uppercase())
+                    ) { Text("Adicionar") }
+                }
+                val newCanon = newMasterName.trim().uppercase()
+                if (newCanon.isNotBlank() && (masterCanon.contains(newCanon) || linkedNames.contains(newCanon))) {
+                    Text(
+                        "Este nome já existe ou já está vinculado.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (agentNames.isEmpty()) {
+                        Text(
+                            "Nenhum nome cadastrado",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    agentNames.forEach { name ->
+                        InputChip(
+                            selected = false,
+                            onClick = { },
+                            label = { Text(name) },
+                            trailingIcon = {
+                                Row {
+                                    IconButton(
+                                        onClick = { editingOldName = name; editingText = name },
+                                        modifier = Modifier.size(20.dp),
+                                        enabled = !isRenaming
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Renomear", modifier = Modifier.size(14.dp))
+                                    }
+                                    IconButton(
+                                        onClick = { pendingDeleteName = name },
+                                        modifier = Modifier.size(20.dp),
+                                        enabled = !isRenaming
+                                    ) {
+                                        Icon(Icons.Default.Close, contentDescription = "Excluir", modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                    }
+                }
+                if (linkedNames.isNotEmpty()) {
+                    Text(
+                        "Nomes vinculados não podem ser excluídos — desvincule primeiro no perfil.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // Rename dialog (mesmo UID quando vinculado: move casas via transfer-style).
+        if (editingOldName != null) {
+            val oldName = editingOldName!!
+            val typedCanon = editingText.trim().uppercase()
+            val ownCanon = oldName.trim().uppercase()
+            val duplicate = typedCanon.isNotBlank() && typedCanon != ownCanon &&
+                (masterCanon.contains(typedCanon) || linkedNames.contains(typedCanon))
+            AlertDialog(
+                onDismissRequest = { if (!isRenaming) editingOldName = null },
+                title = { Text("Renomear agente") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "De \"$oldName\" para o novo nome. Todas as casas e dias anteriores serão atualizados.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        OutlinedTextField(
+                            value = editingText,
+                            onValueChange = { editingText = it },
+                            label = { Text("Novo nome") },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true,
+                            enabled = !isRenaming
+                        )
+                        if (duplicate) {
+                            Text(
+                                "Este nome já existe ou já está vinculado.",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.renameMasterAgentName(oldName, editingText.trim())
+                            editingOldName = null
+                        },
+                        enabled = !isRenaming && typedCanon.isNotBlank() && !duplicate
+                    ) { Text("Renomear tudo") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { editingOldName = null }, enabled = !isRenaming) { Text("Cancelar") }
+                }
+            )
+        }
+
+        // Delete confirm (ViewModel também bloqueia vinculados — dupla trava).
+        if (pendingDeleteName != null) {
+            val target = pendingDeleteName!!
+            val isLinked = linkedNames.contains(target.trim().uppercase())
+            AlertDialog(
+                onDismissRequest = { pendingDeleteName = null },
+                title = { Text(if (isLinked) "Nome vinculado" else "Excluir nome") },
+                text = {
+                    Text(
+                        if (isLinked) "“$target” está vinculado a um usuário. Desvincule primeiro no perfil — a exclusão foi bloqueada para proteger o histórico."
+                        else "Excluir “$target” da lista mestra? O histórico existente não é apagado."
+                    )
+                },
+                confirmButton = {
+                    if (!isLinked) {
+                        Button(
+                            onClick = { viewModel.removeAgentName(target); pendingDeleteName = null },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) { Text("Excluir") }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDeleteName = null }) { Text(if (isLinked) "Entendi" else "Cancelar") }
+                }
+            )
         }
         
         Spacer(Modifier.height(32.dp))
@@ -591,16 +774,38 @@ fun AdminDashboardScreen(
                                             Text("Nenhum usuário encontrado.", color = Color.White.copy(alpha = 0.75f))
                                         }
                                     } else {
+                                        val linkedNames = remember(unifiedProfiles) {
+                                            unifiedProfiles.filter { it.uid != null }
+                                                .mapNotNull { it.agentName?.trim()?.uppercase() }.toSet()
+                                        }
                                         LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
                                             items(unifiedProfiles, key = { it.uid ?: it.email ?: it.agentName ?: it.hashCode() }) { profile ->
                                                 UnifiedProfileCard(
                                                     profile = profile,
                                                     agentNamesList = agentNames,
+                                                    linkedNames = linkedNames,
                                                     isSolarMode = isSolarMode,
                                                     onAuthorize = { authorized -> viewModel.authorizeUser(profile.uid ?: "", authorized) },
                                                     onRoleChange = { role -> viewModel.changeUserRole(profile.uid ?: "", role) },
                                                     onUpdateName = { name ->
-                                                        profile.uid?.let { viewModel.updateUserProfile(it, mapOf("agentName" to name)) }
+                                                        val uid = profile.uid
+                                                        val old = profile.agentName
+                                                        if (uid == null) {
+                                                            // Sem UID não há perfil para vincular (nomes órfãos
+                                                            // usam onRenameMaster/onDeleteMaster).
+                                                        } else if (name == null) {
+                                                            // Desvincular: só limpa o perfil, sem mover casas.
+                                                            viewModel.updateUserProfile(uid, mapOf("agentName" to null))
+                                                        } else if (!old.isNullOrBlank() && name.trim().isNotBlank() &&
+                                                            old.trim().uppercase() != name.trim().uppercase()
+                                                        ) {
+                                                            // Rename vinculado: move TODAS as casas/atividades
+                                                            // via transfer-style + perfil (+mestra se nova).
+                                                            viewModel.renameMasterAgentName(old, name, targetUid = uid)
+                                                        } else {
+                                                            // Vincular (sem nome anterior) ou mesmo nome: só vínculo.
+                                                            viewModel.updateUserProfile(uid, mapOf("agentName" to name))
+                                                        }
                                                     },
                                                     onDelete = {
                                                         userToDelete = profile
@@ -622,7 +827,8 @@ fun AdminDashboardScreen(
                                                     onMigrateData = {
                                                         val authUser = users.find { it.uid == profile.uid }
                                                         if (authUser != null) {
-                                                            confirmTitle = "Migrar Dados"; confirmMessage = "Deseja migrar os dados de conta não vinculada para este perfil (${authUser.email})?"; onConfirmAction = { viewModel.migrateData(authUser) }; showConfirmDialog = true
+                                                            val linkName = profile.agentName
+                                                            confirmTitle = "Migrar Dados"; confirmMessage = "Deseja migrar os dados do pré-registro para ${authUser.email} vinculando o nome \"${linkName ?: "—"}\"? Esta ação é irreversível."; onConfirmAction = { viewModel.migrateData(authUser, linkName) }; showConfirmDialog = true
                                                         }
                                                     },
                                                     onTransferData = {
@@ -636,6 +842,15 @@ fun AdminDashboardScreen(
                                                     onOpenTimeline = { uid, name ->
                                                         showTimelineForUid = uid
                                                         showTimelineForName = name
+                                                    },
+                                                    onRenameMaster = { old, new ->
+                                                        viewModel.renameMasterAgentName(old, new)
+                                                    },
+                                                    onDeleteMaster = { name ->
+                                                        confirmTitle = "Excluir Nome"
+                                                        confirmMessage = "Excluir '$name' da lista mestra?"
+                                                        onConfirmAction = { viewModel.removeAgentName(name) }
+                                                        showConfirmDialog = true
                                                     }
                                                 )
                                             }
@@ -665,6 +880,10 @@ fun AdminDashboardScreen(
     if (showAddProfileDialog) {
         AddProfileDialog(
             agentNamesList = agentNames,
+            existingEmails = remember(users) { users.mapNotNull { it.email?.trim()?.lowercase() }.toSet() },
+            linkedNames = remember(unifiedProfiles) {
+                unifiedProfiles.filter { it.uid != null }.mapNotNull { it.agentName?.trim()?.uppercase() }.toSet()
+            },
             onDismiss = { showAddProfileDialog = false },
             onConfirm = { email: String?, name: String?, role: UserRole, authorized: Boolean ->
                 if (email != null) {
@@ -873,7 +1092,10 @@ fun ApprovalDialog(
 fun AddProfileDialog(
     agentNamesList: List<String>,
     onDismiss: () -> Unit,
-    onConfirm: (String?, String?, UserRole, Boolean) -> Unit
+    onConfirm: (String?, String?, UserRole, Boolean) -> Unit,
+    // Normalized (email: trim+lowercase, names: trim+uppercase) for 1:1 pre-validation.
+    existingEmails: Set<String> = emptySet(),
+    linkedNames: Set<String> = emptySet()
 ) {
     var email by remember { mutableStateOf("") }
     var nameInput by remember { mutableStateOf("") }
@@ -881,6 +1103,12 @@ fun AddProfileDialog(
     var authorized by remember { mutableStateOf(true) }
     var expandedName by remember { mutableStateOf(false) }
     var expandedRole by remember { mutableStateOf(false) }
+
+    val normalizedEmail = remember(email) { email.trim().lowercase() }
+    val normalizedName = remember(nameInput) { nameInput.trim().uppercase() }
+    val emailTaken = normalizedEmail.isNotBlank() && existingEmails.contains(normalizedEmail)
+    val nameTaken = normalizedName.isNotBlank() && linkedNames.contains(normalizedName)
+    val canConfirm = email.isNotBlank() || nameInput.isNotBlank()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -892,8 +1120,17 @@ fun AddProfileDialog(
                     onValueChange = { email = it },
                     label = { Text("E-mail (Para conta Google)") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    isError = emailTaken
                 )
+                if (emailTaken) {
+                    Text(
+                        "Este e-mail já está cadastrado.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                }
 
                 Column {
                     OutlinedTextField(
@@ -943,6 +1180,14 @@ fun AddProfileDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 4.dp, top = 4.dp)
                     )
+                    if (nameTaken) {
+                        Text(
+                            "Este nome já está vinculado a outro usuário.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                        )
+                    }
                 }
 
                 Box {
@@ -972,7 +1217,7 @@ fun AddProfileDialog(
                     role, 
                     authorized
                 ) 
-            }) { Text("Criar") }
+            }, enabled = canConfirm && !emailTaken && !nameTaken) { Text("Criar") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancelar") }
@@ -997,7 +1242,14 @@ fun UnifiedProfileCard(
     onMigrateData: () -> Unit,
     onTransferData: () -> Unit,
     onRemoteWipe: () -> Unit,
-    onOpenTimeline: (String, String) -> Unit
+    onOpenTimeline: (String, String) -> Unit,
+    // Normalized (trim+uppercase) names already linked to a UID, for 1:1 pre-validation.
+    linkedNames: Set<String> = emptySet(),
+    // Master-only (uid==null) actions: rename/delete via metadata/agent_info.names.
+    // onUpdateName é no-op para uid==null (ViewModel usa profile.uid?.let), por isso
+    // esses callbacks dedicados chamam renameMasterAgentName/removeAgentName.
+    onRenameMaster: (oldName: String, newName: String) -> Unit = { _, _ -> },
+    onDeleteMaster: (name: String) -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(false) }
     var expandedRole by remember { mutableStateOf(false) }
@@ -1070,6 +1322,24 @@ fun UnifiedProfileCard(
                                 shape = RoundedCornerShape(6.dp)
                             ) {
                                 Text("PRÉ-REGISTRO", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                            }
+                        }
+
+                        if (profile.hasPendingPreMigration) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("MIGRAÇÃO PENDENTE", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                            }
+                        }
+
+                        if (profile.hasAmbiguousLink) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("VÍNCULO AMBÍGUO", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, fontSize = 9.sp)
                             }
                         }
 
@@ -1284,9 +1554,16 @@ fun UnifiedProfileCard(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (profile.uid != null) {
-                            ActionButton(Icons.Default.DriveFileRenameOutline, "Vincular", onClick = { showEditNameDialog = true })
+                            val buttonLabel = if (profile.agentName.isNullOrBlank()) "Vincular" else "Editar Nome"
+                            ActionButton(Icons.Default.DriveFileRenameOutline, buttonLabel, onClick = { showEditNameDialog = true })
                         }
-                        if (profile.uid != null && profile.agentData == null) {
+                        // Nome órfão da lista mestra (uid==null): renomeia/exclui via metadata,
+                        // sem casas vinculadas. onUpdateName seria no-op aqui.
+                        if (profile.uid == null && !profile.agentName.isNullOrBlank()) {
+                            ActionButton(Icons.Default.DriveFileRenameOutline, "Renomear", onClick = { showEditNameDialog = true })
+                            ActionButton(Icons.Default.DeleteForever, "Excluir Nome", tint = MaterialTheme.colorScheme.error, onClick = { onDeleteMaster(profile.agentName!!) })
+                        }
+                        if (profile.uid != null && (profile.agentData == null || profile.hasPendingPreMigration)) {
                             ActionButton(Icons.Default.MergeType, "Migrar Dados", onClick = onMigrateData)
                         }
                         if (profile.uid != null) {
@@ -1324,13 +1601,29 @@ fun UnifiedProfileCard(
             if (showEditNameDialog) {
                 var nameInput by remember { mutableStateOf(profile.agentName ?: "") }
                 var expandedNameMenu by remember { mutableStateOf(false) }
+                val ownName = remember(profile.agentName) { profile.agentName?.trim()?.uppercase() }
+                val typedName = nameInput.trim().uppercase()
+                val isMasterOnly = profile.uid == null
+                val vincularTaken = typedName.isNotBlank() && typedName != ownName && linkedNames.contains(typedName)
+                val masterTaken = typedName.isNotBlank() && typedName != ownName &&
+                    agentNamesList.any { it.trim().uppercase() == typedName }
+                // Vinculado (uid!=null): destino deve preferencialmente SER um nome da
+                // mestra (autocomplete) — só bloqueia se ligado a outro UID.
+                // Órfão (uid==null): bloqueia duplicata na mestra também.
+                val nameTaken = if (isMasterOnly) (vincularTaken || masterTaken) else vincularTaken
+                val isEdit = !profile.agentName.isNullOrBlank()
 
                 AlertDialog(
                     onDismissRequest = { showEditNameDialog = false },
-                    title = { Text("Vincular Nome ao Perfil") },
+                    title = { Text(if (isMasterOnly) "Renomear nome da lista" else if (isEdit) "Editar Nome do Agente" else "Vincular Nome ao Perfil") },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("Defina o nome da lista mestra para este usuário (${profile.email}):", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                if (isMasterOnly) "Renomeie \"${profile.agentName}\" na lista mestra. É um nome órfão (sem casas vinculadas)."
+                                else if (isEdit) "Altere o nome vinculado a este usuário (${profile.email}): TODAS as casas e dias anteriores serão atualizados."
+                                else "Defina o nome da lista mestra para este usuário (${profile.email}):",
+                                style = MaterialTheme.typography.bodySmall
+                            )
                             
                             Column {
                                 OutlinedTextField(
@@ -1369,15 +1662,36 @@ fun UnifiedProfileCard(
                                     }
                                 }
                             }
-                            
-                            TextButton(onClick = { nameInput = ""; onUpdateName(null); showEditNameDialog = false }) {
-                                Text("Limpar Vínculo Existente", color = MaterialTheme.colorScheme.error)
+
+                            if (nameTaken) {
+                                Text(
+                                    if (isMasterOnly) "Este nome já existe na lista ou está vinculado a outro usuário."
+                                    else "Este nome já está vinculado a outro usuário.",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+
+                            if (!isMasterOnly) {
+                                TextButton(onClick = { nameInput = ""; onUpdateName(null); showEditNameDialog = false }) {
+                                    Text("Limpar Vínculo Existente", color = MaterialTheme.colorScheme.error)
+                                }
                             }
                         }
                     },
                     confirmButton = {
-                        Button(onClick = { onUpdateName(nameInput.takeIf { it.isNotBlank() }); showEditNameDialog = false }) {
-                            Text("Confirmar")
+                        Button(
+                            onClick = {
+                                if (isMasterOnly) {
+                                    onRenameMaster(profile.agentName ?: "", nameInput.trim())
+                                } else {
+                                    onUpdateName(nameInput.takeIf { it.isNotBlank() })
+                                }
+                                showEditNameDialog = false
+                            },
+                            enabled = !nameTaken && typedName.isNotBlank()
+                        ) {
+                            Text(if (isMasterOnly) "Renomear" else "Confirmar")
                         }
                     },
                     dismissButton = {

@@ -49,6 +49,7 @@ const dashboardContent = document.getElementById('dashboard-content');
 let leafletMap = null;
 let currentKmlLayer = null;
 let userProfile = null;
+let currentUserEmail = null;
 
 let selectedYear = new Date().getFullYear();
 let selectedMonth = new Date().getMonth(); // 0-based
@@ -75,6 +76,7 @@ googleLoginBtn.onclick = async () => {
     try {
         const result = await auth.signInWithPopup(provider);
         const user = result.user;
+        currentUserEmail = (user.email || "").toLowerCase();
         
         authError.textContent = "Verificando permissões...";
         userProfile = await fetchUserProfile(user);
@@ -123,7 +125,10 @@ function showDashboard(user) {
     
     loginBtn.textContent = "Sair";
     loginBtn.onclick = () => location.reload();
-    
+
+    const namesBtn = document.getElementById("names-menu-btn");
+    if (namesBtn) namesBtn.style.display = isWebAdmin() ? "" : "none";
+
     refreshDashboardData();
     renderView('summary');
     
@@ -272,11 +277,16 @@ async function cleanupAgentDuplicates(agentUid) {
     }
 }
 
+// --- Admin Gate (single helper; BOOTSTRAP list kept by decision) ---
+function isWebAdmin() {
+    return (currentUserEmail && BOOTSTRAP_ADMINS.includes(currentUserEmail)) ||
+        (userProfile && userProfile.role === 'ADMIN');
+}
+
 // --- Remote Management Functions (Admin Only) ---
 
 async function toggleDayLock(agentUid, date, isLocked) {
-    const admin = BOOTSTRAP_ADMINS.includes(currentUserEmail);
-    if (!admin) {
+    if (!isWebAdmin()) {
         alert("🛡️ Acesso Negado: Apenas supervisores administradores podem alterar bloqueios.");
         return;
     }
@@ -310,8 +320,7 @@ async function toggleDayLock(agentUid, date, isLocked) {
 }
 
 async function deleteHouseRecord(agentUid, houseId, street, num) {
-    const admin = BOOTSTRAP_ADMINS.includes(currentUserEmail);
-    if (!admin) return;
+    if (!isWebAdmin()) return;
 
     if (!confirm(`⚠️ TEM CERTEZA?\n\nDeseja excluir permanentemente a visita em:\n${street}, ${num}?\n\nEsta ação não pode ser desfeita.`)) return;
 
@@ -359,7 +368,7 @@ function viewDayDetails(uid, date) {
     console.log(`[UI] Opening Day Inspector for ${uid} on ${date}`);
     const modal = createDayDetailsModal();
     
-    const isAdmin = BOOTSTRAP_ADMINS.includes(currentUserEmail);
+    const isAdmin = isWebAdmin();
     const dayKey = date.replace(/\//g, "-");
     
     // Filter houses precisely for this day
@@ -413,11 +422,358 @@ window.toggleDayLock = toggleDayLock;
 window.viewDayDetails = viewDayDetails;
 window.deleteHouseRecord = deleteHouseRecord;
 
+// --- Master Agent List + Rename (mirrors Android AgentRepository) ---
+// Canon rule (matches Android trim().uppercase()): used for every name
+// comparison and write. NEVER use normalizeName() for agent names — it
+// strips accents while Android's normalize() preserves them, which would
+// produce divergent naturalKeys and duplicate houses.
+
+function canonName(text) {
+    if (text === null || text === undefined) return "";
+    return text.toString().trim().toUpperCase();
+}
+
+// Mirrors StringExtensions.normalize(): trim, /->-, .->-, single spaces,
+// collapse dashes, UPPERCASE. Keeps accents on purpose.
+function normalizeStr(text) {
+    if (text === null || text === undefined) return "";
+    return text.toString().trim()
+        .replace(/\//g, "-")
+        .replace(/\./g, "-")
+        .replace(/\s+/g, " ")
+        .replace(/-+/g, "-")
+        .toUpperCase();
+}
+
+// Mirrors Extensions.toDashDate()
+function dashDate(text) {
+    return (text || "").toString().replace(/\//g, "-");
+}
+
+// Mirrors VisitAddress.generateAddressSignature()
+function addressSig(h) {
+    const s = (v) => normalizeStr(v || "");
+    return `${s(h.blockNumber)}_${s(h.blockSequence)}_${s(h.streetName)}_${s(h.number)}_${h.sequence || 0}_${h.complement || 0}_${s(h.bairro)}`;
+}
+
+// Mirrors House.generateNaturalKey()
+function naturalKey(uid, agentName, h) {
+    return `${uid}_${normalizeStr(agentName)}_${dashDate(h.data || h.date || "")}_${addressSig(h)}_${h.visitSegment || 0}`.toUpperCase();
+}
+
+// Local duplicate helpers over the cached master list.
+let masterNames = []; // Uppercase, sorted. Loaded by loadMasterNames().
+function masterCanonSet() {
+    return new Set(masterNames.map(canonName));
+}
+function linkedCanonSet() {
+    const set = new Set();
+    agentsData.forEach(a => {
+        const n = canonName(a.agentName);
+        if (n && n !== "SEM NOME") set.add(n);
+    });
+    return set;
+}
+
+async function loadMasterNames() {
+    try {
+        const snap = await db.collection('metadata').doc('agent_info').get();
+        const names = (snap.exists && Array.isArray(snap.get('names')))
+            ? snap.get('names').filter(n => typeof n === 'string')
+            : [];
+        masterNames = names.map(canonName).filter(Boolean).sort();
+    } catch (err) {
+        console.error("Error loading master names:", err);
+        masterNames = [];
+    }
+    return masterNames;
+}
+
+async function addAgentNameTx(name) {
+    const canon = canonName(name);
+    if (!canon) throw new Error("NOME_INVALIDO");
+    const docRef = db.collection('metadata').doc('agent_info');
+    await db.runTransaction(async (txn) => {
+        const snap = await txn.get(docRef);
+        const current = snap.exists && Array.isArray(snap.get('names'))
+            ? snap.get('names').filter(n => typeof n === 'string').map(canonName)
+            : [];
+        if (!current.includes(canon)) {
+            current.push(canon);
+            txn.set(docRef, { names: current.sort() });
+        }
+    });
+    await loadMasterNames();
+}
+
+async function deleteAgentNameTx(name) {
+    const canon = canonName(name);
+    if (!canon) throw new Error("NOME_INVALIDO");
+    // Foolproof latch (mirrors AdminViewModel.removeAgentName): never delete
+    // a name linked to a user profile.
+    const owner = await isAgentNameTaken(canon);
+    if (owner) throw new Error(`Nome vinculado a ${owner} — desvincule primeiro`);
+    const docRef = db.collection('metadata').doc('agent_info');
+    await db.runTransaction(async (txn) => {
+        const snap = await txn.get(docRef);
+        const current = snap.exists && Array.isArray(snap.get('names'))
+            ? snap.get('names').filter(n => typeof n === 'string')
+            : [];
+        const next = current.filter(n => canonName(n) !== canon);
+        if (next.length !== current.length) {
+            txn.set(docRef, { names: next.map(canonName).sort() });
+        }
+    });
+    await loadMasterNames();
+}
+
+// Mirrors AccessControlRepository.isAgentNameTaken(): owner email/uid when
+// another UID links the normalized name, null when free.
+async function isAgentNameTaken(canon, exceptUid = null) {
+    const snap = await db.collection('users').where('agentName', '==', canon).get();
+    for (const doc of snap.docs) {
+        if (doc.id !== exceptUid) {
+            const d = doc.data();
+            return d.email || doc.id;
+        }
+    }
+    return null;
+}
+
+// Mirrors AgentRepository.renameAgentName(): transactional master rename.
+async function renameAgentNameTx(oldName, newName) {
+    const oldCanon = canonName(oldName);
+    const newCanon = canonName(newName);
+    if (!oldCanon) throw new Error("NOME_ATUAL_INVALIDO");
+    if (!newCanon) throw new Error("NOVO_NOME_INVALIDO");
+    if (oldCanon === newCanon) throw new Error("NOMES_IGUAIS");
+    const docRef = db.collection('metadata').doc('agent_info');
+    await db.runTransaction(async (txn) => {
+        const snap = await txn.get(docRef);
+        const current = snap.exists && Array.isArray(snap.get('names'))
+            ? snap.get('names').filter(n => typeof n === 'string').map(canonName)
+            : [];
+        if (!current.includes(oldCanon)) throw new Error("NOME_ORIGEM_NAO_ENCONTRADO");
+        if (current.includes(newCanon)) throw new Error("NOME_JA_EXISTE");
+        txn.set(docRef, { names: current.filter(n => n !== oldCanon).concat([newCanon]).sort() });
+    });
+    await loadMasterNames();
+}
+
+// Mirrors AgentRepository.renameAgentData(): same-UID move reusing the
+// transferAgentData pattern (set newKey + delete oldKey in the same batch,
+// chunked). Idempotent: safe to retry after a partial failure.
+// Deliberately does NOT touch monthly_summaries/backups (frozen history)
+// and writes NO same-UID tombstones (the delete in the same batch suffices).
+async function renameAgentData(uid, newName) {
+    const newCanon = canonName(newName);
+    if (!newCanon) throw new Error("NOVO_NOME_INVALIDO");
+    const agentRef = db.collection('agents').doc(uid);
+    const [housesSnap, activitiesSnap] = await Promise.all([
+        agentRef.collection('houses').get(),
+        agentRef.collection('day_activities').get()
+    ]);
+
+    let housesMoved = 0;
+    let activitiesMoved = 0;
+
+    // Parity guard: recompute each key and warn on mismatch instead of
+    // moving "in the dark" (would create duplicates).
+    for (const doc of housesSnap.docs) {
+        const d = doc.data();
+        if (naturalKey(uid, d.agentName || "", d) !== doc.id) {
+            console.warn(`[RENAME] Parity check: recomputed key differs for house ${doc.id}; will still move by explicit set+delete.`);
+            break;
+        }
+    }
+
+    const houseChunks = [];
+    for (let i = 0; i < housesSnap.docs.length; i += 100) {
+        houseChunks.push(housesSnap.docs.slice(i, i + 100));
+    }
+    for (const chunk of houseChunks) {
+        const batch = db.batch();
+        let hasOps = false;
+        chunk.forEach(doc => {
+            const d = doc.data();
+            const newKey = naturalKey(uid, newCanon, d);
+            const currentName = canonName(d.agentName);
+            if (newKey !== doc.id) {
+                batch.set(agentRef.collection('houses').doc(newKey), {
+                    ...d,
+                    agentName: newCanon,
+                    agentUid: uid,
+                    data: dashDate(d.data || d.date || ""),
+                    lastSyncTime: Date.now(),
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                batch.delete(doc.ref);
+                housesMoved++;
+                hasOps = true;
+            } else if (currentName !== newCanon) {
+                batch.set(doc.ref, {
+                    agentName: newCanon,
+                    agentUid: uid,
+                    lastSyncTime: Date.now(),
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                housesMoved++;
+                hasOps = true;
+            }
+        });
+        if (hasOps) await batch.commit();
+    }
+
+    // Activities: doc ID is the date (name-free), so just re-stamp fields.
+    const actChunks = [];
+    for (let i = 0; i < activitiesSnap.docs.length; i += 100) {
+        actChunks.push(activitiesSnap.docs.slice(i, i + 100));
+    }
+    for (const chunk of actChunks) {
+        const batch = db.batch();
+        let hasOps = false;
+        chunk.forEach(doc => {
+            const d = doc.data();
+            const dateKey = dashDate(d.date || d.data || "");
+            const currentName = canonName(d.agentName);
+            if (!dateKey) return;
+            if (currentName !== newCanon || doc.id !== dateKey) {
+                batch.set(agentRef.collection('day_activities').doc(dateKey), {
+                    ...d,
+                    date: dateKey,
+                    agentName: newCanon,
+                    agentUid: uid,
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                if (doc.id !== dateKey) batch.delete(doc.ref);
+                activitiesMoved++;
+                hasOps = true;
+            }
+        });
+        if (hasOps) await batch.commit();
+    }
+
+    // Root: converges Android SyncPush.officialAgentName + refreshes the web view.
+    await agentRef.set({ agentName: newCanon, lastSyncTime: Date.now() }, { merge: true });
+    return { housesMoved, activitiesMoved };
+}
+
+let isRenaming = false;
+
+// Mirrors AdminViewModel.renameMasterAgentName(): validate -> move history
+// (abortable) -> master list -> linked profiles -> refresh.
+// targetUid == null: pure master rename (old must exist, new must not).
+// targetUid set (linked card): new may already be a master name; the old
+// entry is never auto-removed.
+async function renameMasterAgentName(oldName, newName, targetUid = null) {
+    if (isRenaming) return { ok: false, message: "Aguarde a operação atual." };
+    if (!isWebAdmin()) return { ok: false, message: "Permissão negada." };
+    const oldCanon = canonName(oldName);
+    const newCanon = canonName(newName);
+    if (!oldCanon || !newCanon) return { ok: false, message: "Nome inválido." };
+    if (oldCanon === newCanon) return { ok: false, message: "Nomes iguais." };
+
+    await loadMasterNames();
+    const master = masterCanonSet();
+    if (!targetUid) {
+        if (!master.has(oldCanon)) return { ok: false, message: "Nome não encontrado na lista." };
+        if (master.has(newCanon)) return { ok: false, message: "Este nome já existe na lista." };
+    }
+    const takenOwner = await isAgentNameTaken(newCanon, targetUid).catch(() => null);
+    if (takenOwner) return { ok: false, message: `Este nome já está vinculado a ${takenOwner}.` };
+
+    isRenaming = true;
+    try {
+        // Resolve linked UIDs (auto-update): explicit target or profile match.
+        let uidsToMigrate;
+        if (targetUid) {
+            uidsToMigrate = [targetUid];
+        } else {
+            const usersSnap = await db.collection('users').where('agentName', '==', oldCanon).get();
+            uidsToMigrate = usersSnap.docs.map(d => d.id);
+        }
+        uidsToMigrate = [...new Set(uidsToMigrate)].filter(uid => uid && !uid.startsWith('pre_'));
+
+        // Step 1: move cloud history (aborts before touching the master list).
+        let housesMoved = 0;
+        let activitiesMoved = 0;
+        for (const uid of uidsToMigrate) {
+            try {
+                const r = await renameAgentData(uid, newCanon);
+                housesMoved += r.housesMoved;
+                activitiesMoved += r.activitiesMoved;
+            } catch (err) {
+                await refreshDashboardData();
+                return { ok: false, message: `Erro ao mover casas: ${err.message}. Rename abortado.` };
+            }
+        }
+
+        // Step 2: master list.
+        if (!targetUid) {
+            try {
+                await renameAgentNameTx(oldCanon, newCanon);
+            } catch (err) {
+                await loadMasterNames();
+                await refreshDashboardData();
+                const moved = housesMoved > 0 || activitiesMoved > 0;
+                return { ok: false, message: moved ? `Casas movidas, mas a lista falhou (${err.message}). Tente de novo.` : `Erro ao renomear: ${err.message}` };
+            }
+        } else if (!masterCanonSet().has(newCanon)) {
+            try {
+                await addAgentNameTx(newCanon);
+            } catch (err) {
+                console.warn("[RENAME] Houses moved but master add failed:", err.message);
+            }
+        }
+
+        // Step 3: linked profiles (converges Android officialAgentName).
+        // users/{uid} holds the link; agents/{uid} root was already stamped
+        // by renameAgentData — update both to the same value (idempotent).
+        let linkFailures = 0;
+        for (const uid of uidsToMigrate) {
+            try {
+                await db.collection('users').doc(uid).set({ agentName: newCanon }, { merge: true });
+            } catch (err) {
+                linkFailures++;
+            }
+        }
+
+        await refreshDashboardData();
+        if (linkFailures > 0) return { ok: true, message: `Lista renomeada, mas ${linkFailures} vínculo(s) falharam — verifique.` };
+        if (uidsToMigrate.length === 0) return { ok: true, message: "Nome atualizado na lista mestra." };
+        const parts = [];
+        if (housesMoved > 0) parts.push(`${housesMoved} imóveis`);
+        if (activitiesMoved > 0) parts.push(`${activitiesMoved} dias`);
+        return { ok: true, message: `Nome atualizado${parts.length ? ` (${parts.join(" + ")})` : ""}.` };
+    } finally {
+        isRenaming = false;
+    }
+}
+
+async function removeMasterAgentName(name) {
+    if (!isWebAdmin()) return { ok: false, message: "Permissão negada." };
+    try {
+        await deleteAgentNameTx(name);
+        await refreshDashboardData();
+        return { ok: true, message: "Nome removido com sucesso." };
+    } catch (err) {
+        return { ok: false, message: err.message.startsWith("Nome vinculado") ? err.message : `Erro ao remover: ${err.message}` };
+    }
+}
+
+window.renameMasterAgentName = renameMasterAgentName;
+window.removeMasterAgentName = removeMasterAgentName;
+window.loadMasterNames = loadMasterNames;
+
 // --- Existing Data Fetching Logic ---
 
 async function refreshDashboardData() {
     isLoadingData = true;
     renderView(document.querySelector('.menu-btn.active')?.dataset.view || 'summary');
+
+    // Master list stays in sync with the dashboard (mirrors Android StateFlow).
+    // Never throws (errors resolve to an empty list for non-admins).
+    await loadMasterNames();
 
     try {
         const agentsSnapshot = await db.collection('agents').get();
@@ -650,6 +1006,10 @@ function renderView(view) {
         case 'ace-list':
             dashboardContent.innerHTML = getFiltersHTML() + getAceListHTML();
             break;
+        case 'names':
+            dashboardContent.innerHTML = getNamesViewHTML();
+            wireNamesView();
+            break;
     }
 }
 
@@ -837,6 +1197,7 @@ function getAceListHTML() {
                             <span>Ativo: <strong>${agent.stats.activeDays} dias</strong></span>
                             ${userProfile.role === 'ADMIN' ? `
                                 <button onclick="cleanupAgentDuplicates('${agent.uid}')" class="btn-heal-mini">🛡️ Curar</button>
+                                <button onclick="openRenameModal('${agent.uid}')" class="btn-heal-mini" title="Renomear agente e todo o histórico">✏️</button>
                             ` : ''}
                         </div>
                     </div>
@@ -846,6 +1207,216 @@ function getAceListHTML() {
         </div>
     `;
 }
+
+// --- Master Agent Names view + Rename modal (Admin Only, mirrors Android) ---
+
+function escHtml(text) {
+    return (text || "").toString()
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function getNamesViewHTML() {
+    if (!isWebAdmin()) {
+        return '<div class="glass" style="padding: 30px; text-align: center;">🛡️ Acesso Negado: apenas administradores.</div>';
+    }
+    const linked = linkedCanonSet();
+    const chips = masterNames.map(name => {
+        const isLinked = linked.has(canonName(name));
+        return `
+            <div class="name-chip glass" data-name="${escHtml(name)}">
+                <span class="chip-label">${escHtml(name)}</span>
+                <span class="chip-flag" title="${isLinked ? "Vinculado a um usuário" : "Órfão (sem vínculo)"}">${isLinked ? "🔗" : "○"}</span>
+                <button class="chip-btn" data-action="rename" data-name="${escHtml(name)}" title="Renomear (move todo o histórico)">✏️</button>
+                <button class="chip-btn" data-action="delete" data-name="${escHtml(name)}" title="Excluir da lista">✖</button>
+            </div>`;
+    }).join("");
+
+    return `
+        <div class="fade-in">
+            <h2 class="section-title" style="text-align: left; margin-bottom: 10px;">Lista Mestra de Agentes</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 24px;">Renomear aqui atualiza a lista, o perfil vinculado e todas as casas/atividades anteriores. Backups mantêm o nome da época.</p>
+
+            <div class="glass" style="padding: 20px; margin-bottom: 24px; border-radius: 16px;">
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <input id="new-master-name" class="glass-select" style="flex: 1; min-width: 200px; padding: 10px 14px;" placeholder="Novo nome do agente" maxlength="80">
+                    <button id="add-master-name-btn" class="btn-primary" style="padding: 10px 20px;">Adicionar</button>
+                </div>
+                <div id="names-view-msg" style="margin-top: 12px; font-size: 0.85rem;"></div>
+            </div>
+
+            <div class="glass" style="padding: 20px; border-radius: 16px;">
+                <h4 style="margin-bottom: 4px;">Nomes cadastrados (${masterNames.length})</h4>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 16px;">🔗 vinculado (não pode ser excluído) · ○ órfão</p>
+                <div id="names-chips" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    ${chips || '<p style="color: var(--text-secondary);">Nenhum nome cadastrado.</p>'}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function namesViewMsg(text, isError = false) {
+    const el = document.getElementById("names-view-msg");
+    if (el) {
+        el.textContent = text;
+        el.style.color = isError ? "#ff5252" : "var(--text-secondary)";
+    }
+}
+
+function wireNamesView() {
+    const input = document.getElementById("new-master-name");
+    const addBtn = document.getElementById("add-master-name-btn");
+    if (!input || !addBtn) return;
+
+    const doAdd = async () => {
+        const val = input.value.trim();
+        if (!val || isRenaming) return;
+        const canon = canonName(val);
+        if (masterCanonSet().has(canon) || linkedCanonSet().has(canon)) {
+            namesViewMsg("Este nome já existe ou já está vinculado.", true);
+            return;
+        }
+        addBtn.disabled = true;
+        try {
+            await addAgentNameTx(val);
+            input.value = "";
+            namesViewMsg("Nome adicionado com sucesso.");
+            renderView('names');
+        } catch (err) {
+            namesViewMsg("Erro ao adicionar: " + err.message, true);
+        } finally {
+            addBtn.disabled = false;
+        }
+    };
+    addBtn.onclick = doAdd;
+    input.onkeydown = (e) => { if (e.key === "Enter") doAdd(); };
+
+    document.querySelectorAll("#names-chips .chip-btn").forEach(btn => {
+        btn.onclick = () => {
+            const name = btn.dataset.name;
+            if (btn.dataset.action === "rename") {
+                openRenameModal(null, name);
+            } else if (btn.dataset.action === "delete") {
+                confirmDeleteMasterName(name);
+            }
+        };
+    });
+}
+
+async function confirmDeleteMasterName(name) {
+    if (linkedCanonSet().has(canonName(name))) {
+        namesViewMsg(`"${name}" está vinculado a um usuário. Desvincule primeiro no perfil — exclusão bloqueada para proteger o histórico.`, true);
+        return;
+    }
+    if (!confirm(`Excluir "${name}" da lista mestra?\nO histórico existente não é apagado.`)) return;
+    const res = await removeMasterAgentName(name);
+    namesViewMsg(res.message, !res.ok);
+    if (res.ok) renderView('names');
+}
+
+function openRenameModal(uid, presetOldName = null) {
+    if (!isWebAdmin() || isRenaming) return;
+    const agent = uid ? agentsData.find(a => a.uid === uid) : null;
+    const oldName = presetOldName || (agent ? agent.agentName : "");
+    if (!oldName) return;
+
+    let modal = document.getElementById("rename-modal");
+    if (modal) modal.remove();
+    modal = document.createElement("div");
+    modal.id = "rename-modal";
+    document.body.appendChild(modal);
+
+    const houseCount = agent ? agent.houses.length : 0;
+    const dayCount = agent ? agent.activities.length : 0;
+    const scopeNote = agent
+        ? `Serão atualizados <strong>${houseCount} imóveis</strong> e <strong>${dayCount} dias</strong> deste agente, além da lista e do perfil.`
+        : `Nome órfão (sem casas vinculadas). Apenas a lista mestra será atualizada.`;
+    const options = masterNames.map(n => `<option value="${escHtml(n)}">`).join("");
+
+    modal.innerHTML = `
+        <div class="modal-content glass" style="max-width: 520px; padding: 25px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3 style="margin: 0;">${agent ? "Renomear agente" : "Renomear nome da lista"}</h3>
+                <span class="close-btn" id="rename-close">&times;</span>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 8px;">De "<strong>${escHtml(oldName)}</strong>" para:</p>
+            <div class="input-group">
+                <input id="rename-input" list="rename-names-list" value="${escHtml(oldName)}" maxlength="80" autocomplete="off">
+                <datalist id="rename-names-list">${options}</datalist>
+            </div>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 16px;">${scopeNote}</p>
+            <div id="rename-error" class="error-msg" style="margin: 0 0 12px 0;"></div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button id="rename-cancel" class="btn-secondary">Cancelar</button>
+                <button id="rename-confirm" class="btn-primary">Renomear tudo</button>
+            </div>
+        </div>
+    `;
+    modal.style.display = "flex";
+
+    const close = () => { if (!isRenaming) modal.remove(); };
+    document.getElementById("rename-close").onclick = close;
+    document.getElementById("rename-cancel").onclick = close;
+
+    const input = document.getElementById("rename-input");
+    const confirmBtn = document.getElementById("rename-confirm");
+    const errEl = document.getElementById("rename-error");
+    input.focus();
+    input.select();
+
+    confirmBtn.onclick = async () => {
+        const typed = input.value.trim();
+        const typedCanon = canonName(typed);
+        const ownCanon = canonName(oldName);
+        if (!typedCanon) {
+            errEl.textContent = "Digite o novo nome.";
+            return;
+        }
+        if (typedCanon === ownCanon) {
+            errEl.textContent = "O novo nome é igual ao atual.";
+            return;
+        }
+        // Linked rename: destination SHOULD be a master name; only blocks
+        // names tied to another UID. Orphan rename: blocks master dupes too.
+        const dupMaster = masterCanonSet().has(typedCanon) && typedCanon !== ownCanon;
+        const dupLinked = linkedCanonSet().has(typedCanon) && typedCanon !== ownCanon;
+        if ((!uid && dupMaster) || dupLinked) {
+            // For linked renames the taken check may still pass when the owner
+            // IS this uid (server revalidates with exceptUid) — pre-check here.
+            const owner = await isAgentNameTaken(typedCanon, uid).catch(() => null);
+            if (owner) {
+                errEl.textContent = `Este nome já está vinculado a ${owner}.`;
+                return;
+            }
+            if (!uid && dupMaster) {
+                errEl.textContent = "Este nome já existe na lista.";
+                return;
+            }
+        }
+        if (agent && !confirm(`Renomear "${oldName}" para "${typed}"?\n\n${houseCount} imóveis e ${dayCount} dias serão atualizados. Esta ação move registros no Firestore.`)) return;
+
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = "⏳ Renomeando...";
+        errEl.textContent = "";
+        const res = await renameMasterAgentName(oldName, typed, uid);
+        if (res.ok) {
+            modal.remove();
+            alert(res.message);
+            const active = document.querySelector('.menu-btn.active')?.dataset.view;
+            renderView(active === 'names' ? 'names' : (active || 'summary'));
+        } else {
+            // Dialog stays open on failure with the typed text preserved.
+            errEl.textContent = res.message;
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = "Renomear tudo";
+        }
+    };
+}
+
+window.openRenameModal = openRenameModal;
 
 // --- Map Functions (Kept from previous version) ---
 
