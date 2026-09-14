@@ -10,7 +10,7 @@ service cloud.firestore {
     // Verifica se é Admin (E-mail específico ou Role no Firestore)
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == 'guigomelo9@gmail.com' || 
+        request.auth.token.email == 'gmellobkp@gmail.com' || 
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
       );
@@ -62,9 +62,9 @@ service cloud.firestore {
     }
     
     // 5. Permissão de Grupo de Coleções (Collection Group)
-    // Permite que qualquer agente logado execute a busca unificada por bairros/quarteirões.
+    // Permite apenas que a equipe Staff execute a busca unificada por bairros/quarteirões.
     match /{path=**}/houses/{houseId} {
-      allow read: if isSignedIn();
+      allow read: if isStaff();
     }
 
     // 6. Catch-all para Admin
