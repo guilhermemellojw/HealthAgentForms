@@ -49,13 +49,25 @@ service cloud.firestore {
       }
     }
     
-    // 3. Permissão de Grupo de Coleções (Collection Group)
+    // 3. Acesso e solicitações de acesso
+    match /access_requests/{requestId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() && request.auth.uid == request.resource.data.uid;
+      allow update: if isAdmin() || (isSignedIn() && request.auth.uid == resource.data.uid);
+    }
+    
+    // 4. Admins (espelho do role no users/)
+    match /admins/{uid} {
+      allow read, write: if isAdmin();
+    }
+    
+    // 5. Permissão de Grupo de Coleções (Collection Group)
     // Permite que qualquer agente logado execute a busca unificada por bairros/quarteirões.
     match /{path=**}/houses/{houseId} {
       allow read: if isSignedIn();
     }
 
-    // 4. Catch-all para Admin
+    // 6. Catch-all para Admin
     match /{document=**} {
       allow read, write: if isAdmin();
     }

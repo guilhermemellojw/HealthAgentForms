@@ -163,9 +163,9 @@ function normalizeName(text) {
  * Safety: Added 'sequence' and 'blockSequence' to the key to prevent 
  * collisions on properties without house numbers (S/N).
  */
-let isCleaning = false;
+const cleaningAgents = new Set();
 async function cleanupAgentDuplicates(agentUid) {
-    if (isCleaning) return;
+    if (cleaningAgents.has(agentUid)) return;
     
     const confirmMsg = "🛡️ AVISO DE SEGURANÇA:\n\n" +
         "Esta ferramenta removerá apenas cópias IDÊNTICAS de visitas (mesma data, quarteirão e sequência).\n" +
@@ -183,7 +183,7 @@ async function cleanupAgentDuplicates(agentUid) {
         btn.style.background = "#ff9800";
     }
     
-    isCleaning = true;
+    cleaningAgents.add(agentUid);
     
     try {
         const agentRef = db.collection('agents').doc(agentUid);
@@ -196,11 +196,11 @@ async function cleanupAgentDuplicates(agentUid) {
         housesSnapshot.docs.forEach(doc => {
             const d = doc.data();
             const date = normalizeName(d.data || d.date);
-            const street = normalizeName(d.streetName);
-            const block = normalizeName(d.blockNumber);
-            const bSeq = normalizeName(d.blockSequence || "0");
-            const num = normalizeName(d.number);
-            const comp = normalizeName(d.complement || "0");
+            const street = normalizeStr(d.streetName);
+            const block = normalizeStr(d.blockNumber);
+            const bSeq = normalizeStr(d.blockSequence || "0");
+            const num = normalizeStr(d.number);
+            const comp = normalizeStr(d.complement || "0");
             const seq = d.sequence || 0;
             const segment = d.visitSegment || 0;
             
@@ -211,7 +211,7 @@ async function cleanupAgentDuplicates(agentUid) {
             if (!houseGroups[key]) houseGroups[key] = [];
             
             let ts = 0;
-            if (d.lastUpdated && d.lastUpdated.seconds) ts = d.lastUpdated.seconds;
+            if (d.lastUpdated && d.lastUpdated.seconds) ts = d.lastUpdated.seconds * 1000;
             else if (typeof d.lastUpdated === 'number') ts = d.lastUpdated;
             else if (d.lastSyncTime) ts = d.lastSyncTime;
 
@@ -240,7 +240,7 @@ async function cleanupAgentDuplicates(agentUid) {
             const d = doc.data();
             const date = normalizeName(d.date || d.data);
             if (!activityGroups[date]) activityGroups[date] = [];
-            let ts = d.lastUpdated?.seconds || d.lastUpdated || d.lastSyncTime || 0;
+            let ts = (d.lastUpdated && d.lastUpdated.seconds) ? d.lastUpdated.seconds * 1000 : (d.lastUpdated || d.lastSyncTime || 0);
             activityGroups[date].push({ id: doc.id, ref: doc.ref, ts });
         });
 
@@ -268,7 +268,7 @@ async function cleanupAgentDuplicates(agentUid) {
         console.error("!!! Erro Crítico na Limpeza:", err);
         alert("Erro: " + err.message);
     } finally {
-        isCleaning = false;
+        cleaningAgents.delete(agentUid);
         if (btn) {
             btn.disabled = false;
             btn.textContent = "🛡️ Curar";
@@ -300,10 +300,12 @@ async function toggleDayLock(agentUid, date, isLocked) {
     if (!confirm(confirmMsg)) return;
 
     try {
-        const agentDoc = await db.collection('agents').doc(agentUid).get();
-        const agentName = agentDoc.get('agentName') || '';
+        const dayActivityRef = db.collection('agents').doc(agentUid).collection('day_activities').doc(dateKey);
+        const dayDoc = await dayActivityRef.get();
+        const existingAgentName = dayDoc.exists ? (dayDoc.get('agentName') || '') : '';
+        const agentName = existingAgentName || (await db.collection('agents').doc(agentUid).get()).get('agentName') || '';
 
-        await db.collection('agents').doc(agentUid).collection('day_activities').doc(dateKey).set({
+        await dayActivityRef.set({
             date: dateKey,
             agentName: agentName,
             agentUid: agentUid,
@@ -326,15 +328,35 @@ async function deleteHouseRecord(agentUid, houseId, street, num) {
 
     try {
         const agentRef = db.collection('agents').doc(agentUid);
+        const houseRef = agentRef.collection('houses').doc(houseId);
         const batch = db.batch();
 
-        // 1. Delete document
-        batch.delete(agentRef.collection('houses').doc(houseId));
+        // 1. Fetch house to identify month/year for summary invalidation
+        const houseSnap = await houseRef.get();
+        const houseData = houseSnap.exists ? houseSnap.data() : null;
+        const houseDate = houseData?.data || houseData?.date || "";
+        const monthYear = houseDate ? (() => {
+            const parts = houseDate.replace(/\//g, "-").split("-");
+            if (parts.length === 3) {
+                const mm = String(parseInt(parts[1], 10)).padStart(2, '0');
+                return `${mm}-${parts[2]}`;
+            }
+            return null;
+        })() : null;
 
-        // 2. Add to tombstones (Matches Android Sync Logic)
+        // 2. Delete document
+        batch.delete(houseRef);
+
+        // 3. Add to tombstones + update lastSyncTime (matches Android AgentRepositoryImpl)
         batch.update(agentRef, {
-            deleted_house_ids: firebase.firestore.FieldValue.arrayUnion(houseId)
+            deleted_house_ids: firebase.firestore.FieldValue.arrayUnion(houseId),
+            lastSyncTime: Date.now()
         });
+
+        // 4. Invalidate Monthly Summary if month identified (matches Android)
+        if (monthYear) {
+            batch.delete(agentRef.collection('monthly_summaries').doc(monthYear));
+        }
 
         await batch.commit();
         console.log(`[MANAGEMENT] Surgical deletion for House ID: ${houseId} successful.`);
@@ -393,15 +415,15 @@ function viewDayDetails(uid, date) {
                 ${dayHouses.map(h => `
                     <div class="house-item-mini" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 8px; border: 1px solid rgba(255,255,255,0.05);">
                         <div style="flex: 1;">
-                            <div style="font-weight: 600; font-size: 0.9rem;">${h.streetName || "Sem Rua"}, ${h.number || "SN"}</div>
+                            <div style="font-weight: 600; font-size: 0.9rem;">${escHtml(h.streetName || "Sem Rua")}, ${escHtml(h.number || "SN")}</div>
                             <div style="font-size: 0.75rem; color: var(--text-secondary); display: flex; gap: 10px; margin-top: 4px;">
-                                <span>Seq: ${h.sequence}</span>
-                                <span style="color: ${h.situation === SITUATION.CLOSED ? 'var(--accent-red)' : 'var(--text-secondary)'}">${h.situation || "Aberto"}</span>
-                                <span>${h.propertyType || "RES"}</span>
+                                <span>Seq: ${escHtml(String(h.sequence))}</span>
+                                <span style="color: ${h.situation === SITUATION.CLOSED ? 'var(--accent-red)' : 'var(--text-secondary)'}">${escHtml(h.situation || "Aberto")}</span>
+                                <span>${escHtml(h.propertyType || "RES")}</span>
                             </div>
                         </div>
                         ${isAdmin ? `
-                            <button class="delete-mini-btn" onclick="deleteHouseRecord('${uid}', '${h.id}', '${h.streetName}', '${h.number}')" title="Excluir Visita">
+                            <button class="delete-mini-btn" data-uid="${escAttr(uid)}" data-house-id="${escAttr(h.id)}" data-street="${escAttr(h.streetName || '')}" data-num="${escAttr(h.number || 'SN')}" title="Excluir Visita">
                                 🗑️
                             </button>
                         ` : ''}
@@ -500,7 +522,7 @@ async function addAgentNameTx(name) {
             : [];
         if (!current.includes(canon)) {
             current.push(canon);
-            txn.set(docRef, { names: current.sort() });
+            txn.set(docRef, { names: current.sort() }, { merge: true });
         }
     });
     await loadMasterNames();
@@ -521,7 +543,7 @@ async function deleteAgentNameTx(name) {
             : [];
         const next = current.filter(n => canonName(n) !== canon);
         if (next.length !== current.length) {
-            txn.set(docRef, { names: next.map(canonName).sort() });
+            txn.set(docRef, { names: next.map(canonName).sort() }, { merge: true });
         }
     });
     await loadMasterNames();
@@ -555,7 +577,7 @@ async function renameAgentNameTx(oldName, newName) {
             : [];
         if (!current.includes(oldCanon)) throw new Error("NOME_ORIGEM_NAO_ENCONTRADO");
         if (current.includes(newCanon)) throw new Error("NOME_JA_EXISTE");
-        txn.set(docRef, { names: current.filter(n => n !== oldCanon).concat([newCanon]).sort() });
+        txn.set(docRef, { names: current.filter(n => n !== oldCanon).concat([newCanon]).sort() }, { merge: true });
     });
     await loadMasterNames();
 }
@@ -765,6 +787,20 @@ window.renameMasterAgentName = renameMasterAgentName;
 window.removeMasterAgentName = removeMasterAgentName;
 window.loadMasterNames = loadMasterNames;
 
+// Delegated event listener for delete-mini-btn (avoids inline onclick XSS)
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.delete-mini-btn');
+    if (btn) {
+        const uid = btn.dataset.uid;
+        const houseId = btn.dataset.houseId;
+        const street = btn.dataset.street;
+        const num = btn.dataset.num;
+        if (uid && houseId) {
+            deleteHouseRecord(uid, houseId, street, num);
+        }
+    }
+});
+
 // --- Existing Data Fetching Logic ---
 
 async function refreshDashboardData() {
@@ -895,7 +931,7 @@ function calculateAggregateStats() {
         }).slice(0, 5).map(act => {
             const date = act.date || act.data;
             const houseCount = agent.houses.filter(h => h.data === date && ![SITUATION.VACANT, SITUATION.CLOSED, SITUATION.REFUSED, SITUATION.ABANDONED, SITUATION.L_V, SITUATION.L_F, SITUATION.L_REC, SITUATION.L_A].includes(h.situation)).length;
-            return { date, workedCount: houseCount, isLocked: act.isLocked || act.finalized };
+            return { date, workedCount: houseCount, isLocked: act.isClosed === true && act.isManualUnlock !== true };
         });
 
         return { ...agent, stats, recentActivities: sortedActivities };
@@ -1187,7 +1223,7 @@ function getAceListHTML() {
                                 <div class="prod-line">
                                     <span class="p-date" onclick="viewDayDetails('${agent.uid}', '${act.date}')">${act.date.split('-')[0]}/${act.date.split('-')[1]}</span>
                                     <span class="p-count" onclick="viewDayDetails('${agent.uid}', '${act.date}')">${act.workedCount} trabalhados</span>
-                                    <span class="p-status" onclick="toggleDayLock('${agent.uid}', '${act.date}', ${act.isLocked})">${act.isLocked ? '🔒' : '🔓'}</span>
+                                    <span class="p-status" data-uid="${agent.uid}" data-date="${act.date}" data-is-locked="${act.isClosed === true && act.isManualUnlock !== true}">${act.isClosed === true && act.isManualUnlock !== true ? '🔒' : '🔓'}</span>
                                 </div>
                             `).join('')}
                         </div>
@@ -1195,7 +1231,7 @@ function getAceListHTML() {
                         <!-- Footer -->
                         <div class="card-footer-compact">
                             <span>Ativo: <strong>${agent.stats.activeDays} dias</strong></span>
-                            ${userProfile.role === 'ADMIN' ? `
+                            ${isWebAdmin() ? `
                                 <button onclick="cleanupAgentDuplicates('${agent.uid}')" class="btn-heal-mini">🛡️ Curar</button>
                                 <button onclick="openRenameModal('${agent.uid}')" class="btn-heal-mini" title="Renomear agente e todo o histórico">✏️</button>
                             ` : ''}
@@ -1216,6 +1252,10 @@ function escHtml(text) {
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
+}
+
+function escAttr(text) {
+    return escHtml(text).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
 }
 
 function getNamesViewHTML() {
