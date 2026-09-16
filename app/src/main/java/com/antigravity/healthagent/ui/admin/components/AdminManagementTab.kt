@@ -79,7 +79,12 @@ fun UnifiedProfileCard(
     onMigrateData: () -> Unit,
     onTransferData: () -> Unit,
     onRemoteWipe: () -> Unit,
-    onOpenTimeline: (String, String) -> Unit
+    onOpenTimeline: (String, String) -> Unit,
+    // Normalized (trim+uppercase) names already linked to a UID, for 1:1 pre-validation.
+    linkedNames: Set<String> = emptySet(),
+    // Master-only (uid==null) actions: rename/delete via metadata/agent_info.names.
+    onRenameMaster: (oldName: String, newName: String) -> Unit = { _, _ -> },
+    onDeleteMaster: (name: String) -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(false) }
     var expandedRole by remember { mutableStateOf(false) }
@@ -366,7 +371,14 @@ fun UnifiedProfileCard(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (profile.uid != null) {
-                            ActionButton(Icons.Default.DriveFileRenameOutline, "Vincular", onClick = { showEditNameDialog = true })
+                            val buttonLabel = if (profile.agentName.isNullOrBlank()) "Vincular" else "Editar Nome"
+                            ActionButton(Icons.Default.DriveFileRenameOutline, buttonLabel, onClick = { showEditNameDialog = true })
+                        }
+                        // Nome órfão da lista mestra (uid==null): renomeia/exclui via metadata,
+                        // sem casas vinculadas. onUpdateName seria no-op aqui.
+                        if (profile.uid == null && !profile.agentName.isNullOrBlank()) {
+                            ActionButton(Icons.Default.DriveFileRenameOutline, "Renomear Nome", onClick = { showEditNameDialog = true })
+                            ActionButton(Icons.Default.DeleteForever, "Excluir Nome", tint = MaterialTheme.colorScheme.error, onClick = { onDeleteMaster(profile.agentName!!) })
                         }
                         if (profile.uid != null && profile.agentData == null) {
                             ActionButton(Icons.Default.MergeType, "Migrar Dados", onClick = onMigrateData)
@@ -406,13 +418,30 @@ fun UnifiedProfileCard(
             if (showEditNameDialog) {
                 var nameInput by remember { mutableStateOf(profile.agentName ?: "") }
                 var expandedNameMenu by remember { mutableStateOf(false) }
+                val ownName = profile.agentName?.trim()?.uppercase()
+                val typedName = nameInput.trim().uppercase()
+                val isMasterOnly = profile.uid == null
+                val vincularTaken = typedName.isNotBlank() && typedName != ownName && linkedNames.contains(typedName)
+                val masterTaken = typedName.isNotBlank() && typedName != ownName &&
+                    agentNamesList.any { it.trim().uppercase() == typedName }
+                val nameTaken = if (isMasterOnly) (vincularTaken || masterTaken) else vincularTaken
+                val isEdit = !profile.agentName.isNullOrBlank()
 
                 AlertDialog(
                     onDismissRequest = { showEditNameDialog = false },
-                    title = { Text("Vincular Nome ao Perfil") },
+                    title = { Text(if (isMasterOnly) "Renomear nome da lista" else if (isEdit) "Editar Nome do Agente" else "Vincular Nome ao Perfil") },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("Defina o nome da lista mestra para este usuário (${profile.email}):", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                if (isMasterOnly) {
+                                    "Renomeie \"${profile.agentName}\" na lista mestra. É um nome órfão (sem casas vinculadas)."
+                                } else if (isEdit) {
+                                    "Altere o nome vinculado a este usuário (${profile.email}): TODAS as casas e dias anteriores serão atualizados."
+                                } else {
+                                    "Defina o nome da lista mestra para este usuário (${profile.email}):"
+                                },
+                                style = MaterialTheme.typography.bodySmall
+                            )
                             
                             ExposedDropdownMenuBox(
                                     expanded = expandedNameMenu && agentNamesList.isNotEmpty(),
@@ -422,6 +451,7 @@ fun UnifiedProfileCard(
                                         value = nameInput,
                                         onValueChange = { nameInput = it; expandedNameMenu = true },
                                         label = { Text("Nome do Agente") },
+                                        isError = nameTaken,
                                         modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
                                         shape = RoundedCornerShape(12.dp),
                                         trailingIcon = {
@@ -451,14 +481,35 @@ fun UnifiedProfileCard(
                                     }
                                 }
                             
-                            TextButton(onClick = { nameInput = ""; onUpdateName(null); showEditNameDialog = false }) {
-                                Text("Limpar Vínculo Existente", color = MaterialTheme.colorScheme.error)
+                            if (nameTaken) {
+                                Text(
+                                    if (isMasterOnly) "Este nome já existe na lista ou está vinculado a outro usuário."
+                                    else "Este nome já está vinculado a outro usuário.",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+
+                            if (!isMasterOnly) {
+                                TextButton(onClick = { nameInput = ""; onUpdateName(null); showEditNameDialog = false }) {
+                                    Text("Limpar Vínculo Existente", color = MaterialTheme.colorScheme.error)
+                                }
                             }
                         }
                     },
                     confirmButton = {
-                        Button(onClick = { onUpdateName(nameInput.takeIf { it.isNotBlank() }); showEditNameDialog = false }) {
-                            Text("Confirmar")
+                        Button(
+                            onClick = {
+                                if (isMasterOnly) {
+                                    onRenameMaster(profile.agentName ?: "", nameInput.trim())
+                                } else {
+                                    onUpdateName(nameInput.takeIf { it.isNotBlank() })
+                                }
+                                showEditNameDialog = false
+                            },
+                            enabled = !nameTaken && typedName.isNotBlank()
+                        ) {
+                            Text(if (isMasterOnly) "Renomear" else "Confirmar")
                         }
                     },
                     dismissButton = {

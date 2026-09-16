@@ -84,6 +84,9 @@ fun ApprovalDialog(
 @Composable
 fun CreateUserDialog(
     agentNamesList: List<String>,
+    // Normalized (email: trim+lowercase, names: trim+uppercase) for 1:1 pre-validation.
+    existingEmails: Set<String> = emptySet(),
+    linkedNames: Set<String> = emptySet(),
     onDismiss: () -> Unit,
     onConfirm: (email: String, role: UserRole, agentName: String?, isAuthorized: Boolean) -> Unit
 ) {
@@ -93,6 +96,11 @@ fun CreateUserDialog(
     var authorized by remember { mutableStateOf(true) }
     var expandedName by remember { mutableStateOf(false) }
     var expandedRole by remember { mutableStateOf(false) }
+
+    val normalizedEmail = email.trim().lowercase()
+    val normalizedName = nameInput.trim().uppercase()
+    val emailTaken = normalizedEmail.isNotBlank() && existingEmails.contains(normalizedEmail)
+    val nameTaken = normalizedName.isNotBlank() && linkedNames.contains(normalizedName)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -112,10 +120,19 @@ fun CreateUserDialog(
                     value = email,
                     onValueChange = { email = it },
                     label = { Text("E-mail (obrigatório)") },
+                    isError = emailTaken,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     singleLine = true
                 )
+
+                if (emailTaken) {
+                    Text(
+                        "Este e-mail já está cadastrado.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
 
                 ExposedDropdownMenuBox(
                     expanded = expandedName && agentNamesList.isNotEmpty(),
@@ -152,6 +169,14 @@ fun CreateUserDialog(
                     }
                 }
 
+                if (nameTaken) {
+                    Text(
+                        "Este nome já está vinculado a outro usuário.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+
                 ExposedDropdownMenuBox(
                     expanded = expandedRole,
                     onExpandedChange = { expandedRole = it }
@@ -186,7 +211,7 @@ fun CreateUserDialog(
                 onClick = {
                     onConfirm(email, role, nameInput.takeIf { it.isNotBlank() }, authorized)
                 },
-                enabled = email.isNotBlank()
+                enabled = email.isNotBlank() && !emailTaken && !nameTaken
             ) { Text("Criar Usuário") }
         },
         dismissButton = {

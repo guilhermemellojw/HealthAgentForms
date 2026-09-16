@@ -2,16 +2,21 @@ package com.antigravity.healthagent.data.repository
 
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.DayActivity
+import com.antigravity.healthagent.data.util.toHouseSafe
+import com.antigravity.healthagent.data.util.toDayActivitySafe
+import com.antigravity.healthagent.data.util.toFirestoreMap
 import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.AgentRepository
 import com.antigravity.healthagent.data.remote.AgentRemoteDataSource
 import com.antigravity.healthagent.data.remote.HouseRemoteDataSource
 import com.antigravity.healthagent.domain.logger.AppLogger
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,7 +24,8 @@ import javax.inject.Singleton
 class AgentRepositoryImpl @Inject constructor(
     private val agentRemoteDataSource: AgentRemoteDataSource,
     private val houseRemoteDataSource: HouseRemoteDataSource,
-    private val agentCacheDao: com.antigravity.healthagent.data.local.dao.AgentCacheDao
+    private val agentCacheDao: com.antigravity.healthagent.data.local.dao.AgentCacheDao,
+    private val firestore: FirebaseFirestore
 ) : AgentRepository {
 
     private var cachedNamesList: List<String>? = null

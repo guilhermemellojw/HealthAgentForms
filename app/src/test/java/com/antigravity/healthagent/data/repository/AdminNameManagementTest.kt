@@ -4,6 +4,7 @@ import com.antigravity.healthagent.data.local.dao.AgentCacheDao
 import com.antigravity.healthagent.data.remote.AgentRemoteDataSource
 import com.antigravity.healthagent.data.remote.HouseRemoteDataSource
 import com.antigravity.healthagent.domain.repository.UserRole
+import com.google.firebase.firestore.FirebaseFirestore
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -81,7 +82,8 @@ class AdminNameManagementTest {
         val dataSource = mockk<AgentRemoteDataSource>()
         val houseRemote = mockk<HouseRemoteDataSource>()
         val cacheDao = mockk<AgentCacheDao>()
-        val repo = AgentRepositoryImpl(dataSource, houseRemote, cacheDao)
+        val firestore = mockk<FirebaseFirestore>()
+        val repo = AgentRepositoryImpl(dataSource, houseRemote, cacheDao, firestore)
 
         coEvery { dataSource.fetchAgentNames() } returnsMany listOf(
             Result.success(listOf("ANA")),

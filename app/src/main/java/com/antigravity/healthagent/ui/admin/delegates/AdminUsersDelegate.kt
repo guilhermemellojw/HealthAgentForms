@@ -281,13 +281,133 @@ class AdminUsersDelegate @Inject constructor(
         }
     }
 
-    fun migrateData(scope: CoroutineScope, state: AdminState, authUser: AuthUser, onRefreshAll: () -> Unit) {
+    fun renameMasterAgentName(scope: CoroutineScope, state: AdminState, oldName: String, newName: String, targetUid: String? = null) {
         scope.launch {
             if (!accessControlRepository.isUserAdmin()) {
                 state.uiEvent.emit("Permissão negada")
                 return@launch
             }
-            val result = authRepository.migratePreRegistration(authUser)
+            val oldCanon = oldName.trim().uppercase().takeIf { it.isNotBlank() }
+            val newCanon = newName.trim().uppercase().takeIf { it.isNotBlank() }
+            if (oldCanon == null || newCanon == null) {
+                state.uiEvent.emit("Nome inválido")
+                return@launch
+            }
+            if (oldCanon == newCanon) {
+                state.uiEvent.emit("Nomes iguais")
+                return@launch
+            }
+            val masterHasOld = state.agentNames.value.any { it.trim().uppercase() == oldCanon }
+            val masterHasNew = state.agentNames.value.any { it.trim().uppercase() == newCanon }
+            if (targetUid == null) {
+                // Rename puro da mestra (chips da Config./órfãos): old precisa existir, new não.
+                if (!masterHasOld) {
+                    state.uiEvent.emit("Nome não encontrado na lista")
+                    return@launch
+                }
+                if (masterHasNew) {
+                    state.uiEvent.emit("Este nome já existe na lista")
+                    return@launch
+                }
+            }
+            // No caminho vinculado (targetUid != null) o destino pode/deve ser um nome
+            // já existente da mestra (autocomplete) — só o vínculo 1:1 bloqueia.
+            val takenOwner = try {
+                accessControlRepository.isAgentNameTaken(newCanon, exceptUid = targetUid).getOrNull()
+            } catch (_: Exception) { null }
+            if (takenOwner != null) {
+                state.uiEvent.emit("Este nome já está vinculado a $takenOwner")
+                return@launch
+            }
+
+            try {
+                val uidsToMigrate: List<String> = if (targetUid != null) {
+                    listOf(targetUid)
+                } else {
+                    state.users.value
+                        .filter { it.agentName?.trim()?.uppercase() == oldCanon }
+                        .map { it.uid }
+                        .distinct()
+                }.filter { !it.startsWith("pre_") }
+
+                var housesMoved = 0
+                var activitiesMoved = 0
+                for (uid in uidsToMigrate) {
+                    val dataResult = agentRepository.renameAgentData(uid, newCanon)
+                    if (dataResult.isFailure) {
+                        state.uiEvent.emit("Erro ao mover casas: ${dataResult.exceptionOrNull()?.message}. Rename abortado.")
+                        loadAgentsData(state, state.selectedYear.value, state.selectedMonth.value)
+                        return@launch
+                    }
+                    dataResult.getOrNull()?.let {
+                        housesMoved += it.housesMoved
+                        activitiesMoved += it.activitiesMoved
+                    }
+                }
+
+                if (targetUid == null) {
+                    val masterResult = agentRepository.renameAgentName(oldCanon, newCanon)
+                    if (masterResult.isFailure) {
+                        val msg = masterResult.exceptionOrNull()?.message
+                        if (housesMoved > 0 || activitiesMoved > 0) {
+                            state.uiEvent.emit("Casas movidas, mas a lista falhou ($msg). Tente renomear de novo.")
+                        } else {
+                            state.uiEvent.emit("Erro ao renomear: $msg")
+                        }
+                        loadAgentNames(state)
+                        loadAgentsData(state, state.selectedYear.value, state.selectedMonth.value)
+                        return@launch
+                    }
+                } else if (!masterHasNew) {
+                    val addResult = agentRepository.addAgentName(newCanon)
+                    if (addResult.isFailure) {
+                        state.uiEvent.emit("Casas movidas, mas não foi possível registrar o nome na lista. Verifique.")
+                        loadAgentNames(state)
+                    }
+                }
+
+                var linkFailures = 0
+                for (uid in uidsToMigrate) {
+                    val upd = accessControlRepository.updateUserProfile(uid, mapOf("agentName" to newCanon))
+                    if (upd.isFailure) linkFailures++
+                }
+
+                loadUsers(state)
+                loadAgentNames(state)
+                loadAgentsData(state, state.selectedYear.value, state.selectedMonth.value)
+                if (linkFailures > 0) {
+                    state.uiEvent.emit("Lista renomeada, mas $linkFailures vínculo(s) falharam — verifique")
+                } else if (uidsToMigrate.isEmpty()) {
+                    state.uiEvent.emit("Nome atualizado na lista mestra")
+                } else {
+                    val parts = mutableListOf<String>()
+                    if (housesMoved > 0) parts.add("$housesMoved imóveis")
+                    if (activitiesMoved > 0) parts.add("$activitiesMoved dias")
+                    val detail = if (parts.isEmpty()) "" else " (${parts.joinToString(" + ")})"
+                    state.uiEvent.emit("Nome atualizado$detail")
+                }
+            } catch (e: Exception) {
+                state.uiEvent.emit("Erro no rename: ${e.message}")
+            }
+        }
+    }
+
+    fun migrateData(scope: CoroutineScope, state: AdminState, authUser: AuthUser, resolvedAgentName: String? = null, onRefreshAll: () -> Unit) {
+        scope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                state.uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            val pending = accessControlRepository.findPendingPreMigration(authUser.uid).getOrNull()
+            if (pending == null) {
+                state.uiEvent.emit("Nenhum pré-registro pendente para este usuário")
+                return@launch
+            }
+            val result = accessControlRepository.migratePreRegistrationExplicit(
+                preUid = pending.preUid,
+                targetUid = authUser.uid,
+                resolvedAgentName = resolvedAgentName ?: pending.preAgentName ?: authUser.agentName
+            )
             if (result.isSuccess) {
                 state.uiEvent.emit("Dados migrados com sucesso")
                 onRefreshAll()

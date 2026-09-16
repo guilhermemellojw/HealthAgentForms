@@ -138,6 +138,8 @@ class AdminViewModel @Inject constructor(
         selectedAgentForEdit.value = agent
     }
 
+    fun updateSearchQuery(query: String) { searchQuery.value = query }
+
     // Delegacao limpa para os metodos gerenciados por Delegates
     fun approveAccess(requestId: String, agentName: String?) = usersDelegate.approveAccess(viewModelScope, stateDelegate, requestId, agentName)
     fun rejectAccess(requestId: String) = usersDelegate.rejectAccess(viewModelScope, stateDelegate, requestId)
