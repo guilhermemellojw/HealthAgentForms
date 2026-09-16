@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
     id("com.google.gms.google-services")
@@ -46,14 +45,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+
     buildFeatures {
         compose = true
-    }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.4"
     }
     packaging {
         resources {
@@ -77,6 +71,12 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
 
     implementation("androidx.core:core-ktx:1.12.0")
@@ -93,14 +93,14 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.5")
 
     // Room
-    val roomVersion = "2.6.1"
+    val roomVersion = "2.7.0-alpha13"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 
     // Hilt
-    implementation("com.google.dagger:hilt-android:2.51.1")
-    ksp("com.google.dagger:hilt-android-compiler:2.51.1")
+    implementation("com.google.dagger:hilt-android:2.60.1")
+    ksp("com.google.dagger:hilt-android-compiler:2.60.1")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
     
     // JSON
@@ -163,11 +163,11 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
 }
     // Custom task for data audit (local export + comparison)
-    val exportLocalDb by tasks.registering(Exec::class) {
+    val exportLocalDb = tasks.register<Exec>("exportLocalDb") {
         commandLine("bash", "./scripts/export_local_db.sh")
     }
 
-    val compareDatasets by tasks.registering(Exec::class) {
+    val compareDatasets = tasks.register<Exec>("compareDatasets") {
         commandLine("python3", "../scripts/compare_datasets.py", "guigomelo9@gmail.com")
     }
 

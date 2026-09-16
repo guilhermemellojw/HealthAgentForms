@@ -69,7 +69,7 @@ class InitializationDelegate @Inject constructor(
 
         // CRITICAL: Basic Header Info Observer
         scope.launch {
-            combine(
+            combine<Any, Triple<String, String, Array<Any>>>(
                 viewModel.data, viewModel.agentName, viewModel.municipio, viewModel.bairro,
                 viewModel.zona, viewModel.ciclo, viewModel.tipo, viewModel.atividade,
                 viewModel.isSupervisor, viewModel.isAdmin
