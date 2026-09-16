@@ -4,6 +4,7 @@ import android.graphics.Color
 import com.google.android.gms.maps.model.LatLng
 import org.w3c.dom.Element
 import org.w3c.dom.Node
+import com.antigravity.healthagent.domain.logger.AppLogger
 import java.io.InputStream
 import java.util.UUID
 import javax.inject.Inject
@@ -129,14 +130,14 @@ class KmlManager @Inject constructor() {
             // 2. Parse Folder Structure
             Result.success(parseChildren(rootNode))
         } catch (e: Exception) {
-            android.util.Log.e("KmlManager", "Error parsing KML", e)
+            AppLogger.e("KmlManager", "Error parsing KML", e)
             Result.failure(e)
         }
     }
 
     private fun parseGlobalStyles(document: Element) {
         val children = document.childNodes
-        android.util.Log.d("KmlManager", "Scanning Document children for Styles. Total children: ${children.length}")
+        AppLogger.d("KmlManager", "Scanning Document children for Styles. Total children: ${children.length}")
         
         for (i in 0 until children.length) {
             val node = children.item(i)
@@ -150,9 +151,9 @@ class KmlManager @Inject constructor() {
                       val style = parseStyleNode(element)
                       styleMap["#$id"] = style
                       styleMap[id] = style
-                     android.util.Log.d("KmlManager", "Parsed Global Style: $name id=$id")
+                     AppLogger.d("KmlManager", "Parsed Global Style: $name id=$id")
                  } else {
-                     android.util.Log.w("KmlManager", "Skipping Global Style ($name) without ID")
+                     AppLogger.w("KmlManager", "Skipping Global Style ($name) without ID")
                  }
             } else if (name == "StyleMap") {
                  val id = getId(element)
@@ -183,7 +184,7 @@ class KmlManager @Inject constructor() {
                  if (styleUrl != null) {
                      styleMapMap["#$id"] = styleUrl
                      styleMapMap[id] = styleUrl
-                     android.util.Log.d("KmlManager", "Mapped StyleMap (ref): $id -> $styleUrl")
+                     AppLogger.d("KmlManager", "Mapped StyleMap (ref): $id -> $styleUrl")
                      return // Found normal style, done
                  }
 
@@ -195,7 +196,7 @@ class KmlManager @Inject constructor() {
                      
                      styleMap["#$id"] = style
                      styleMap[id] = style
-                     android.util.Log.d("KmlManager", "Mapped StyleMap (inline): $id")
+                     AppLogger.d("KmlManager", "Mapped StyleMap (inline): $id")
                      return
                  }
              }
@@ -325,7 +326,7 @@ class KmlManager @Inject constructor() {
                     }
 
                     if (resolvedStyle == null && styleUrl != null) {
-                        // android.util.Log.w("KmlManager", "Failed to resolve style for Placemark '$name' with styleUrl='$styleUrl'")
+                        // AppLogger.w("KmlManager", "Failed to resolve style for Placemark '$name' with styleUrl='$styleUrl'")
                     }
                     placemarks.add(KmlPlacemark(name, description, styleUrl, geometry, resolvedStyle))
                 }
@@ -462,7 +463,7 @@ class KmlManager @Inject constructor() {
                 return Color.parseColor(androidColorHex)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            AppLogger.e("KmlManager", "Erro ao converter cor KML", e)
         }
         return Color.BLACK
     }

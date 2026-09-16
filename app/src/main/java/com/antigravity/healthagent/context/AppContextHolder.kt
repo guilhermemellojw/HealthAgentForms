@@ -10,9 +10,7 @@ object AppContextHolder {
         contextRef = WeakReference(context.applicationContext)
     }
 
-    fun getContext(): Context {
-        return contextRef?.get() ?: throw IllegalStateException("Context not initialized")
-    }
+    fun getContext(): Context? = contextRef?.get()
 }
 
-fun getContext(): Context = AppContextHolder.getContext()
+fun getContext(): Context? = AppContextHolder.getContext()

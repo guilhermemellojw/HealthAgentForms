@@ -29,7 +29,10 @@ service cloud.firestore {
 
     // 1. Coleção de Usuários
     match /users/{userId} {
-      allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin() || (request.auth.uid == userId && 
+        !request.resource.data.role && 
+        !request.resource.data.isAuthorized);
     }
     
     // 2. Coleção de Agentes e subcoleções
@@ -49,25 +52,31 @@ service cloud.firestore {
       }
     }
     
-    // 3. Acesso e solicitações de acesso
-    match /access_requests/{requestId} {
-      allow read: if isAdmin();
-      allow create: if isSignedIn() && request.auth.uid == request.resource.data.uid;
-      allow update: if isAdmin() || (isSignedIn() && request.auth.uid == resource.data.uid);
+    // 3. Metadata (agent_info, locations, settings) — leitura aberta para logados, escrita só Admin
+    match /metadata/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
     
-    // 4. Admins (espelho do role no users/)
+    // 4. Acesso e solicitações de acesso (Merge unificado)
+    match /access_requests/{requestId} {
+      allow create: if isSignedIn() && request.auth.uid == request.resource.data.uid;
+      allow update: if isAdmin() || (isSignedIn() && request.auth.uid == resource.data.uid);
+      allow read, delete: if isAdmin();
+    }
+    
+    // 5. Admins (espelho do role no users/ usado pelos repositórios)
     match /admins/{uid} {
       allow read, write: if isAdmin();
     }
     
-    // 5. Permissão de Grupo de Coleções (Collection Group)
+    // 6. Permissão de Grupo de Coleções (Collection Group)
     // Permite apenas que a equipe Staff execute a busca unificada por bairros/quarteirões.
     match /{path=**}/houses/{houseId} {
       allow read: if isStaff();
     }
 
-    // 6. Catch-all para Admin
+    // 7. Catch-all de segurança para Admin
     match /{document=**} {
       allow read, write: if isAdmin();
     }

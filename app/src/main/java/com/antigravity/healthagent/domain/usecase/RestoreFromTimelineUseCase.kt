@@ -33,7 +33,8 @@ class RestoreFromTimelineUseCase @Inject constructor(
                 houses = houses,
                 activities = activities,
                 targetUid = agentUid,
-                shouldReplace = true
+                shouldReplace = true,
+                isFullWipe = true
             )
 
             if (syncResult.isSuccess) {

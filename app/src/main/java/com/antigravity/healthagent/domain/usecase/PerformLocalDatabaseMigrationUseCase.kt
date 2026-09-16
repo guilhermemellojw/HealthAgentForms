@@ -1,13 +1,37 @@
 package com.antigravity.healthagent.domain.usecase
 
+import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.toDashDate
+import com.antigravity.healthagent.domain.logger.AppLogger
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
 class PerformLocalDatabaseMigrationUseCase @Inject constructor(
-    private val repository: HouseRepository
+    private val repository: HouseRepository,
+    private val settingsManager: SettingsManager
 ) {
+
+    companion object {
+        const val CURRENT_MIGRATION_VERSION = 1
+    }
+
+    suspend fun runMigrationsIfNeeded() {
+        val currentVersion = settingsManager.dataMigrationVersion.first()
+        if (currentVersion >= CURRENT_MIGRATION_VERSION) {
+            AppLogger.i("PerformLocalDatabaseMigrationUseCase", "Migrations already applied (v$currentVersion), skipping.")
+            return
+        }
+
+        AppLogger.i("PerformLocalDatabaseMigrationUseCase", "Running data migrations (v$currentVersion -> v$CURRENT_MIGRATION_VERSION)...")
+        migrateStreetNamesToFormat()
+        migrateBairrosToUppercase()
+        migrateDateFormats()
+
+        settingsManager.setDataMigrationVersion(CURRENT_MIGRATION_VERSION)
+        AppLogger.i("PerformLocalDatabaseMigrationUseCase", "Data migrations completed, version set to $CURRENT_MIGRATION_VERSION.")
+    }
 
     suspend fun migrateStreetNamesToFormat() {
         val allHouses = repository.getAllHousesSnapshot()
@@ -15,6 +39,7 @@ class PerformLocalDatabaseMigrationUseCase @Inject constructor(
         if (toUpdate.isNotEmpty()) {
             val updated = toUpdate.map { it.copy(address = it.address.copy(streetName = it.address.streetName.formatStreetName())) }
             repository.updateHouses(updated, force = true)
+            AppLogger.i("HouseManagement", "Migrated ${toUpdate.size} street names to format.")
         }
     }
 
@@ -24,6 +49,7 @@ class PerformLocalDatabaseMigrationUseCase @Inject constructor(
         if (toUpdate.isNotEmpty()) {
             val updated = toUpdate.map { it.copy(address = it.address.copy(bairro = it.address.bairro.trim().uppercase())) }
             repository.updateHouses(updated, force = true)
+            AppLogger.i("HouseManagement", "Migrated ${toUpdate.size} bairros to uppercase.")
         }
     }
 
@@ -32,7 +58,7 @@ class PerformLocalDatabaseMigrationUseCase @Inject constructor(
         val housesToUpdate = allHouses.filter { it.data.contains("/") }
         
         if (housesToUpdate.isNotEmpty()) {
-            android.util.Log.i("HouseManagement", "Migrating ${housesToUpdate.size} legacy date formats (/) to standard (-)")
+            AppLogger.i("HouseManagement", "Migrating ${housesToUpdate.size} legacy date formats (/) to standard (-)")
             val updatedHouses = housesToUpdate.map { it.copy(data = it.data.toDashDate()) }
             repository.updateHouses(updatedHouses, force = true)
         }
@@ -41,14 +67,14 @@ class PerformLocalDatabaseMigrationUseCase @Inject constructor(
         val activitiesToUpdate = allActivities.filter { it.date.contains("/") }
         
         if (activitiesToUpdate.isNotEmpty()) {
-             android.util.Log.i("HouseManagement", "Migrating ${activitiesToUpdate.size} legacy activity dates (/) to standard (-)")
-             activitiesToUpdate.forEach { activity ->
-                 val newDate = activity.date.toDashDate()
-                  repository.runInTransaction {
-                      repository.deleteProduction(activity.date, activity.agentUid, force = true)
-                      repository.updateDayActivity(activity.copy(date = newDate))
-                  }
-             }
+            AppLogger.i("HouseManagement", "Migrating ${activitiesToUpdate.size} legacy activity dates (/) to standard (-)")
+            repository.runInTransaction {
+                activitiesToUpdate.forEach { activity ->
+                    val newDate = activity.date.toDashDate()
+                    repository.deleteProduction(activity.date, activity.agentUid, force = true)
+                    repository.updateDayActivity(activity.copy(date = newDate))
+                }
+            }
         }
     }
 }

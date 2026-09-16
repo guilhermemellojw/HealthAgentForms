@@ -27,6 +27,7 @@ import com.antigravity.healthagent.data.sync.VersionChecker
 import com.antigravity.healthagent.data.sync.IdentityDiscoveryService
 import com.antigravity.healthagent.data.sync.TeamworkSyncHandler
 import com.antigravity.healthagent.data.sync.SyncReconciler
+import com.antigravity.healthagent.domain.repository.SyncRepository
 
 @Singleton
 class SyncPullHandler @Inject constructor(
@@ -41,7 +42,7 @@ class SyncPullHandler @Inject constructor(
     private val syncReconciler: SyncReconciler
 ) {
 
-    suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean, syncMutex: Mutex): Result<Unit> {
+    suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean, syncMutex: Mutex): Result<SyncRepository.SyncResult> {
         val result = withTimeoutOrNull(600000L) {
             syncMutex.withLock {
                 withContext(Dispatchers.IO) {
@@ -237,10 +238,20 @@ class SyncPullHandler @Inject constructor(
                         if (!isTargetDifferentUser) {
                             val maxObservedTime = (cloudHouses.map { it.lastUpdated } + cloudDayActivities.map { it.lastUpdated }).maxOrNull() ?: 0L
                             val safetyAnchor = serverTime - 600000L 
-                            settingsManager.setLastSyncTimestamp(maxOf(maxObservedTime, safetyAnchor))
+                            val finalSyncTime = maxOf(maxObservedTime, safetyAnchor)
+                            settingsManager.setLastSyncTimestamp(finalSyncTime)
+                            
+                            val currentDeviceTime = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
+                            val skew = maxObservedTime - currentDeviceTime
+                            settingsManager.setClockSkewMs(skew)
+                            
+                            Result.success(SyncRepository.SyncResult(
+                                cloudMaxTime = finalSyncTime,
+                                clockSkewMs = skew
+                            ))
+                        } else {
+                            Result.success(SyncRepository.SyncResult())
                         }
-
-                        Result.success(Unit)
                     } catch (e: Exception) {
                         AppLogger.e("SyncPullHandler", "Pull failed", e)
                         Result.failure(e)

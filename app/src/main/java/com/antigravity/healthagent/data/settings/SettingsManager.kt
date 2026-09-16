@@ -40,6 +40,7 @@ class SettingsManager @Inject constructor(
     private val REMOTE_AGENT_NAME_KEY = stringPreferencesKey("remote_agent_name")
     private val LAST_SYNC_TIMESTAMP_KEY = androidx.datastore.preferences.core.longPreferencesKey("last_sync_timestamp")
     private val CLOCK_SKEW_MS_KEY = androidx.datastore.preferences.core.longPreferencesKey("clock_skew_ms")
+    private val DATA_MIGRATION_VERSION_KEY = androidx.datastore.preferences.core.intPreferencesKey("data_migration_version")
     
     // User Profile Cache for Offline Support
     private val CACHED_USER_UID_KEY = stringPreferencesKey("cached_user_uid")
@@ -274,6 +275,18 @@ class SettingsManager @Inject constructor(
     suspend fun setClockSkewMs(skew: Long) {
         context.dataStore.edit { preferences ->
             preferences[CLOCK_SKEW_MS_KEY] = skew
+        }
+    }
+
+    val dataMigrationVersion: Flow<Int> = context.dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { preferences ->
+            preferences[DATA_MIGRATION_VERSION_KEY] ?: 0
+        }
+
+    suspend fun setDataMigrationVersion(version: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[DATA_MIGRATION_VERSION_KEY] = version
         }
     }
 

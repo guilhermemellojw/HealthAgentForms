@@ -25,7 +25,7 @@ class SyncDataUseCase @Inject constructor(
     /**
      * Pulls data from the cloud to local storage.
      */
-    suspend fun pullData(targetUid: String? = null, force: Boolean = false): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun pullData(targetUid: String? = null, force: Boolean = false): Result<SyncRepository.SyncResult> = withContext(Dispatchers.IO) {
         syncRepository.pullCloudDataToLocal(targetUid, force)
     }
 }

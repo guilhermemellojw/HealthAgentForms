@@ -4,6 +4,7 @@ import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.settings.SettingsManager
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -22,7 +23,7 @@ class SyncAdminHandler @Inject constructor(
             settingsManager.setLastSyncTimestamp(0L)
             Result.success(Unit)
         } catch (e: Exception) {
-            android.util.Log.e("SyncRepository", "Internal Wipe Failed: ${e.message}")
+            AppLogger.e("SyncRepository", "Internal Wipe Failed: ${e.message}")
             Result.failure(e)
         }
     }
@@ -32,7 +33,7 @@ class SyncAdminHandler @Inject constructor(
             houseRepository.clearAgentData(agentUid)
             Result.success(Unit)
         } catch (e: Exception) {
-            android.util.Log.e("SyncRepository", "Surgical Wipe Failed for $agentUid: ${e.message}")
+            AppLogger.e("SyncRepository", "Surgical Wipe Failed for $agentUid: ${e.message}")
             Result.failure(e)
         }
     }
@@ -67,7 +68,7 @@ class SyncAdminHandler @Inject constructor(
             val settings = snapshot.data ?: emptyMap()
             Result.success(settings)
         } catch (e: Exception) {
-            android.util.Log.w("SyncRepository", "fetchSystemSettings offline fallback: ${e.message}")
+            AppLogger.w("SyncRepository", "fetchSystemSettings offline fallback: ${e.message}")
             Result.success(emptyMap())
         }
     }

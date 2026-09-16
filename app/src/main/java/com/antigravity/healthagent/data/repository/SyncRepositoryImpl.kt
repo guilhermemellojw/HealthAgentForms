@@ -45,23 +45,30 @@ class SyncRepositoryImpl @Inject constructor(
         houses: List<House>,
         activities: List<DayActivity>,
         targetUid: String?,
-        shouldReplace: Boolean
+        shouldReplace: Boolean,
+        isFullWipe: Boolean
     ): Result<Unit> {
         return syncPushHandler.pushLocalDataToCloud(
             houses = houses,
             activities = activities,
             targetUid = targetUid,
             shouldReplace = shouldReplace,
+            isFullWipe = isFullWipe,
             syncMutex = syncMutex
         )
     }
 
-    override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> {
+    override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<SyncRepository.SyncResult> {
         return syncPullHandler.pullCloudDataToLocal(
             targetUid = targetUid,
             force = force,
             syncMutex = syncMutex
-        )
+        ).map { 
+            SyncRepository.SyncResult(
+                cloudMaxTime = it.cloudMaxTime,
+                clockSkewMs = it.clockSkewMs
+            )
+        }
     }
 
     override suspend fun clearLocalData(): Result<Unit> {

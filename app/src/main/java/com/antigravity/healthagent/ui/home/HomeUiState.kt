@@ -1,10 +1,19 @@
 package com.antigravity.healthagent.ui.home
 
+import androidx.compose.runtime.Immutable
 import com.antigravity.healthagent.data.local.model.House
 
 
-
-import com.antigravity.healthagent.ui.state.SyncUiState
+data class HomeSettingsState(
+    val easyMode: Boolean = false,
+    val solarMode: Boolean = false,
+    val editingToolsMode: Boolean = true,
+    val maxOpenHouses: Int = 5,
+    val backupFrequency: com.antigravity.healthagent.data.backup.BackupFrequency = com.antigravity.healthagent.data.backup.BackupFrequency.DAILY,
+    val themeMode: String? = null,
+    val themeColor: String? = null,
+    val customActivities: Set<String> = emptySet()
+)
 
 data class BackupConfirmation(
     val backupAgentName: String,
@@ -15,6 +24,7 @@ data class BackupConfirmation(
     val isFullRestore: Boolean
 )
 
+@Immutable
 data class HomeUiState(
     val houses: List<HouseUiState> = emptyList(),
     val dashboardTotals: DashboardTotals = DashboardTotals(),
@@ -60,7 +70,6 @@ data class HomeUiState(
     val isSolarMode: Boolean = false,
     val isEditingToolsEnabled: Boolean = false,
     val maxOpenHouses: Int = 25,
-    val syncStatus: SyncUiState = SyncUiState.Idle(),
     val backupConfirmation: BackupConfirmation? = null,
     val isDuplicateIds: Set<Int> = emptySet(),
     val highlightedHouseId: Int? = null,

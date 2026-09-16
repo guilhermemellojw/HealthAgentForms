@@ -54,7 +54,7 @@ object TimeManager {
                 val dateHeader = connection.getHeaderField("Date")
                 if (dateHeader != null) {
                     // Date header format: EEE, dd MMM yyyy HH:mm:ss z
-                    val format = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US)
+                    val format = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US)
                     format.timeZone = TimeZone.getTimeZone("GMT")
                     
                     val networkDate = format.parse(dateHeader)
