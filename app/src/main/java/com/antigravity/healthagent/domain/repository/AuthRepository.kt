@@ -9,7 +9,14 @@ interface AuthRepository {
     suspend fun signOut()
     fun getCurrentUserUid(): String?
     suspend fun migratePreRegistration(user: AuthUser): Result<Unit>
-    suspend fun migratePreRegistration(email: String, targetUid: String): Result<Unit>
+    /**
+     * Migrates the pre-registered profile ("pre_<email>") to [targetUid].
+     *
+     * @param preferredAgentName when non-blank, wins over the pre-registered
+     * name (dialog choice > pre_ name > keep current). Null/blank keeps the
+     * previous behavior of carrying over the pre-registered name.
+     */
+    suspend fun migratePreRegistration(email: String, targetUid: String, preferredAgentName: String? = null): Result<Unit>
     
 }
 

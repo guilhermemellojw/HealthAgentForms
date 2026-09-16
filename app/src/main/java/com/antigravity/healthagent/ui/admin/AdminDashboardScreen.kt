@@ -36,7 +36,471 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.*
-import com.antigravity.healthagent.ui.admin.components.*
+import androidx.compose.ui.draw.scale
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.text.style.TextAlign
+
+// --- Helper Components ---
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AdminSettingsTab(viewModel: AdminViewModel) {
+    val bairros by viewModel.bairros.collectAsState()
+    val globalActivities by viewModel.globalCustomActivities.collectAsState()
+    val maxHouses by viewModel.maxOpenHouses.collectAsState()
+    val systemSettings by viewModel.systemSettings.collectAsState()
+    val agentNames by viewModel.agentNames.collectAsState()
+    val unifiedProfiles by viewModel.unifiedProfiles.collectAsState()
+    val isRenaming by viewModel.isRenaming.collectAsState()
+    
+    var showAddBairroDialog by remember { mutableStateOf(false) }
+    var showAddActivityDialog by remember { mutableStateOf(false) }
+    var newMasterName by remember { mutableStateOf("") }
+    var editingOldName by remember { mutableStateOf<String?>(null) }
+    var editingText by remember { mutableStateOf("") }
+    var pendingDeleteName by remember { mutableStateOf<String?>(null) }
+    // Nomes já vinculados a um UID (trim+uppercase) para validação 1:1 na UI.
+    // O ViewModel revalida no servidor (isAgentNameTaken), isto é só UX antecipada.
+    val linkedNames = remember(unifiedProfiles) {
+        unifiedProfiles.filter { it.uid != null }
+            .mapNotNull { it.agentName?.trim()?.uppercase() }.toSet()
+    }
+    val masterCanon = remember(agentNames) { agentNames.map { it.trim().uppercase() }.toSet() }
+    
+    val scrollState = rememberScrollState()
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
+    ) {
+        Text(
+            "Central de Configuração", 
+            style = MaterialTheme.typography.headlineSmall, 
+            fontWeight = FontWeight.Black,
+            color = Color.White
+        )
+
+        // --- Section 1: Jornada e Metas ---
+        SettingsSectionHeader(title = "Jornada e Metas", icon = Icons.Default.Timer)
+        PremiumCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                // Meta Diária
+                var tempMaxHouses by remember(maxHouses) { mutableFloatStateOf(maxHouses.toFloat().coerceIn(25f, 35f)) }
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Meta Diária (Imóveis)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                tempMaxHouses.toInt().toString(),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Slider(
+                        value = tempMaxHouses,
+                        onValueChange = { tempMaxHouses = it },
+                        onValueChangeFinished = { viewModel.updateSystemSetting("max_open_houses", tempMaxHouses.toLong()) },
+                        valueRange = 25f..35f,
+                        steps = 9
+                    )
+                    Text(
+                        "Define a meta padrão para todos os agentes.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                // Gerenciar Bairros
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Bairros Atendidos", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        FilledTonalButton(
+                            onClick = { showAddBairroDialog = true },
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Novo", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        bairros.forEach { bairro ->
+                            InputChip(
+                                selected = false,
+                                onClick = { },
+                                label = { Text(bairro) },
+                                trailingIcon = { 
+                                    IconButton(onClick = { viewModel.deleteBairro(bairro) }, modifier = Modifier.size(16.dp)) {
+                                        Icon(Icons.Default.Close, null)
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                        }
+                        if (bairros.isEmpty()) {
+                            Text("Nenhum bairro cadastrado", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Section 2: Atividades Padrão ---
+        SettingsSectionHeader(title = "Atividades Padrão", icon = Icons.AutoMirrored.Filled.PlaylistAddCheck)
+        PremiumCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Opções de Atividades", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    FilledTonalButton(
+                        onClick = { showAddActivityDialog = true },
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Adicionar", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+                Text(
+                    "Define o que aparece na seção 'Resumo do Dia' dos agentes.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    globalActivities.forEach { activity ->
+                        InputChip(
+                            selected = false,
+                            onClick = { },
+                            label = { Text(activity) },
+                            trailingIcon = { 
+                                IconButton(onClick = { viewModel.removeGlobalActivity(activity) }, modifier = Modifier.size(16.dp)) {
+                                    Icon(Icons.Default.Close, null)
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = InputChipDefaults.inputChipColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
+                        )
+                    }
+                    if (globalActivities.isEmpty()) {
+                        Text("Nenhuma atividade padrão configurada.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
+        // --- Section 3: Sistema ---
+        SettingsSectionHeader(title = "Preferências de Sistema", icon = Icons.Default.SettingsSuggest)
+        PremiumCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                // Easy Mode Default
+                val isEasyModeDefault = (systemSettings["default_easy_mode"] as? Boolean) ?: false
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Modo Simplificado por Padrão", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text("Novos usuários entrarão no modo fácil automaticamente.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = isEasyModeDefault,
+                        onCheckedChange = { viewModel.updateSystemSetting("default_easy_mode", it) }
+                    )
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                // Recommended Theme Color
+                val recommendedColor = (systemSettings["recommended_theme_color"] as? String) ?: "EMERALD"
+                Column {
+                    Text("Cor de Tema Recomendada", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Text("Define a cor de destaque principal do aplicativo.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                    
+                    val colors = listOf("EMERALD", "OCEAN", "VIOLET", "AMBER", "ROSE")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        colors.forEach { name ->
+                            val colorValue = when(name) {
+                                "EMERALD" -> Color(0xFF10B981)
+                                "OCEAN" -> Color(0xFF0EA5E9)
+                                "VIOLET" -> Color(0xFF8B5CF6)
+                                "AMBER" -> Color(0xFFF59E0B)
+                                "ROSE" -> Color(0xFFF43F5E)
+                                else -> Color.Gray
+                            }
+                            
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(colorValue, CircleShape)
+                                    .border(
+                                        width = if (recommendedColor == name) 3.dp else 1.dp,
+                                        color = if (recommendedColor == name) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                                        shape = CircleShape
+                                    )
+                                    .clickable { viewModel.updateSystemSetting("recommended_theme_color", name) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (recommendedColor == name) {
+                                    Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Section 4: Lista Mestra de Agentes (canônica; Gestão mantém espelho) ---
+        SettingsSectionHeader(title = "Lista Mestra de Agentes", icon = Icons.Default.Badge)
+        PremiumCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Renomear aqui atualiza a lista, o perfil vinculado e todas as casas/atividades anteriores.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (isRenaming) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = newMasterName,
+                        onValueChange = { newMasterName = it },
+                        label = { Text("Novo nome") },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true,
+                        enabled = !isRenaming
+                    )
+                    Button(
+                        onClick = {
+                            viewModel.addAgentName(newMasterName.trim())
+                            newMasterName = ""
+                        },
+                        enabled = !isRenaming && newMasterName.trim().isNotBlank() &&
+                            !masterCanon.contains(newMasterName.trim().uppercase()) &&
+                            !linkedNames.contains(newMasterName.trim().uppercase())
+                    ) { Text("Adicionar") }
+                }
+                val newCanon = newMasterName.trim().uppercase()
+                if (newCanon.isNotBlank() && (masterCanon.contains(newCanon) || linkedNames.contains(newCanon))) {
+                    Text(
+                        "Este nome já existe ou já está vinculado.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (agentNames.isEmpty()) {
+                        Text(
+                            "Nenhum nome cadastrado",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    agentNames.forEach { name ->
+                        InputChip(
+                            selected = false,
+                            onClick = { },
+                            label = { Text(name) },
+                            trailingIcon = {
+                                Row {
+                                    IconButton(
+                                        onClick = { editingOldName = name; editingText = name },
+                                        modifier = Modifier.size(20.dp),
+                                        enabled = !isRenaming
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Renomear", modifier = Modifier.size(14.dp))
+                                    }
+                                    IconButton(
+                                        onClick = { pendingDeleteName = name },
+                                        modifier = Modifier.size(20.dp),
+                                        enabled = !isRenaming
+                                    ) {
+                                        Icon(Icons.Default.Close, contentDescription = "Excluir", modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                    }
+                }
+                if (linkedNames.isNotEmpty()) {
+                    Text(
+                        "Nomes vinculados não podem ser excluídos — desvincule primeiro no perfil.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // Rename dialog (mesmo UID quando vinculado: move casas via transfer-style).
+        if (editingOldName != null) {
+            val oldName = editingOldName!!
+            val typedCanon = editingText.trim().uppercase()
+            val ownCanon = oldName.trim().uppercase()
+            val duplicate = typedCanon.isNotBlank() && typedCanon != ownCanon &&
+                (masterCanon.contains(typedCanon) || linkedNames.contains(typedCanon))
+            AlertDialog(
+                onDismissRequest = { if (!isRenaming) editingOldName = null },
+                title = { Text("Renomear agente") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "De \"$oldName\" para o novo nome. Todas as casas e dias anteriores serão atualizados.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        OutlinedTextField(
+                            value = editingText,
+                            onValueChange = { editingText = it },
+                            label = { Text("Novo nome") },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true,
+                            enabled = !isRenaming
+                        )
+                        if (duplicate) {
+                            Text(
+                                "Este nome já existe ou já está vinculado.",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.renameMasterAgentName(oldName, editingText.trim())
+                            editingOldName = null
+                        },
+                        enabled = !isRenaming && typedCanon.isNotBlank() && !duplicate
+                    ) { Text("Renomear tudo") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { editingOldName = null }, enabled = !isRenaming) { Text("Cancelar") }
+                }
+            )
+        }
+
+        // Delete confirm (ViewModel também bloqueia vinculados — dupla trava).
+        if (pendingDeleteName != null) {
+            val target = pendingDeleteName!!
+            val isLinked = linkedNames.contains(target.trim().uppercase())
+            AlertDialog(
+                onDismissRequest = { pendingDeleteName = null },
+                title = { Text(if (isLinked) "Nome vinculado" else "Excluir nome") },
+                text = {
+                    Text(
+                        if (isLinked) "“$target” está vinculado a um usuário. Desvincule primeiro no perfil — a exclusão foi bloqueada para proteger o histórico."
+                        else "Excluir “$target” da lista mestra? O histórico existente não é apagado."
+                    )
+                },
+                confirmButton = {
+                    if (!isLinked) {
+                        Button(
+                            onClick = { viewModel.removeAgentName(target); pendingDeleteName = null },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) { Text("Excluir") }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDeleteName = null }) { Text(if (isLinked) "Entendi" else "Cancelar") }
+                }
+            )
+        }
+        
+        Spacer(Modifier.height(32.dp))
+    }
+
+    // Dialogs
+    if (showAddBairroDialog) {
+        var name by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showAddBairroDialog = false },
+            title = { Text("Novo Bairro") },
+            text = { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nome do Bairro") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) },
+            confirmButton = { Button(onClick = { if (name.isNotBlank()) viewModel.addBairro(name); showAddBairroDialog = false }) { Text("Adicionar") } },
+            dismissButton = { TextButton(onClick = { showAddBairroDialog = false }) { Text("Cancelar") } }
+        )
+    }
+    
+    if (showAddActivityDialog) {
+        var activity by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showAddActivityDialog = false },
+            title = { Text("Nova Atividade Padrão") },
+            text = { 
+                Column {
+                    Text("Esta atividade aparecerá como opção para todos os agentes.", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 8.dp))
+                    OutlinedTextField(value = activity, onValueChange = { activity = it }, label = { Text("Nome da Atividade") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                }
+            },
+            confirmButton = { Button(onClick = { if (activity.isNotBlank()) viewModel.addGlobalActivity(activity); showAddActivityDialog = false }) { Text("Adicionar") } },
+            dismissButton = { TextButton(onClick = { showAddActivityDialog = false }) { Text("Cancelar") } }
+        )
+    }
+    }
+
+@Composable
+fun SettingsSectionHeader(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -335,16 +799,38 @@ fun AdminDashboardScreen(
                                             Text("Nenhum usuário encontrado.", color = Color.White.copy(alpha = 0.75f))
                                         }
                                     } else {
+                                        val linkedNames = remember(unifiedProfiles) {
+                                            unifiedProfiles.filter { it.uid != null }
+                                                .mapNotNull { it.agentName?.trim()?.uppercase() }.toSet()
+                                        }
                                         LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
                                             items(unifiedProfiles, key = { it.uid ?: it.email ?: it.agentName ?: it.hashCode() }) { profile ->
                                                 UnifiedProfileCard(
                                                     profile = profile,
                                                     agentNamesList = agentNames,
+                                                    linkedNames = linkedNames,
                                                     isSolarMode = isSolarMode,
                                                     onAuthorize = { authorized -> viewModel.authorizeUser(profile.uid ?: "", authorized) },
                                                     onRoleChange = { role -> viewModel.changeUserRole(profile.uid ?: "", role) },
                                                     onUpdateName = { name ->
-                                                        profile.uid?.let { viewModel.updateUserProfile(it, mapOf("agentName" to name)) }
+                                                        val uid = profile.uid
+                                                        val old = profile.agentName
+                                                        if (uid == null) {
+                                                            // Sem UID não há perfil para vincular (nomes órfãos
+                                                            // usam onRenameMaster/onDeleteMaster).
+                                                        } else if (name == null) {
+                                                            // Desvincular: só limpa o perfil, sem mover casas.
+                                                            viewModel.updateUserProfile(uid, mapOf("agentName" to null))
+                                                        } else if (!old.isNullOrBlank() && name.trim().isNotBlank() &&
+                                                            old.trim().uppercase() != name.trim().uppercase()
+                                                        ) {
+                                                            // Rename vinculado: move TODAS as casas/atividades
+                                                            // via transfer-style + perfil (+mestra se nova).
+                                                            viewModel.renameMasterAgentName(old, name, targetUid = uid)
+                                                        } else {
+                                                            // Vincular (sem nome anterior) ou mesmo nome: só vínculo.
+                                                            viewModel.updateUserProfile(uid, mapOf("agentName" to name))
+                                                        }
                                                     },
                                                     onDelete = {
                                                         userToDelete = profile
@@ -366,7 +852,8 @@ fun AdminDashboardScreen(
                                                     onMigrateData = {
                                                         val authUser = users.find { it.uid == profile.uid }
                                                         if (authUser != null) {
-                                                            confirmTitle = "Migrar Dados"; confirmMessage = "Deseja migrar os dados de conta não vinculada para este perfil (${authUser.email})?"; onConfirmAction = { viewModel.migrateData(authUser) }; showConfirmDialog = true
+                                                            val linkName = profile.agentName
+                                                            confirmTitle = "Migrar Dados"; confirmMessage = "Deseja migrar os dados do pré-registro para ${authUser.email} vinculando o nome \"${linkName ?: "—"}\"? Esta ação é irreversível."; onConfirmAction = { viewModel.migrateData(authUser, linkName) }; showConfirmDialog = true
                                                         }
                                                     },
                                                     onTransferData = {
@@ -380,6 +867,15 @@ fun AdminDashboardScreen(
                                                     onOpenTimeline = { uid, name ->
                                                         showTimelineForUid = uid
                                                         showTimelineForName = name
+                                                    },
+                                                    onRenameMaster = { old, new ->
+                                                        viewModel.renameMasterAgentName(old, new)
+                                                    },
+                                                    onDeleteMaster = { name ->
+                                                        confirmTitle = "Excluir Nome"
+                                                        confirmMessage = "Excluir '$name' da lista mestra?"
+                                                        onConfirmAction = { viewModel.removeAgentName(name) }
+                                                        showConfirmDialog = true
                                                     }
                                                 )
                                             }
@@ -409,20 +905,18 @@ fun AdminDashboardScreen(
     if (showCreateUserDialog) {
         CreateUserDialog(
             agentNamesList = agentNames,
-            onDismiss = { showCreateUserDialog = false },
-            onConfirm = { email, role, name, authorized ->
-                viewModel.createUser(email, role, name, authorized)
-                showCreateUserDialog = false
-            }
-        )
-    }
-    
-    if (showAddNameDialog) {
-        AddNameDialog(
-            onDismiss = { showAddNameDialog = false },
-            onConfirm = { name ->
-                viewModel.addAgentName(name)
-                showAddNameDialog = false
+            existingEmails = remember(users) { users.mapNotNull { it.email?.trim()?.lowercase() }.toSet() },
+            linkedNames = remember(unifiedProfiles) {
+                unifiedProfiles.filter { it.uid != null }.mapNotNull { it.agentName?.trim()?.uppercase() }.toSet()
+            },
+            onDismiss = { showAddProfileDialog = false },
+            onConfirm = { email: String?, name: String?, role: UserRole, authorized: Boolean ->
+                if (email != null) {
+                    viewModel.createUser(email, role, name, authorized)
+                } else if (name != null) {
+                    viewModel.addAgentName(name)
+                }
+                showAddProfileDialog = false
             }
         )
     }
@@ -526,5 +1020,925 @@ fun AdminDashboardScreen(
                 TextButton(onClick = { showWipeDialog = false }) { Text("Cancelar") }
             }
         )
+    }
+}
+
+
+@Composable
+fun AccessRequestCard(
+    request: AccessRequest,
+    isSolarMode: Boolean = false,
+    onApprove: () -> Unit,
+    onReject: () -> Unit
+) {
+    PremiumCard(
+        modifier = Modifier.width(280.dp),
+        isSolarMode = isSolarMode
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.PersonSearch, null, modifier = Modifier.padding(6.dp), tint = MaterialTheme.colorScheme.primary)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(request.email, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(request.requestedName ?: request.displayName ?: "Sem nome", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onApprove, modifier = Modifier.weight(1f), contentPadding = PaddingValues(0.dp)) { Text("Aprovar", style = MaterialTheme.typography.labelSmall) }
+                OutlinedButton(onClick = onReject, modifier = Modifier.weight(1f), contentPadding = PaddingValues(0.dp)) { Text("Rejeitar", style = MaterialTheme.typography.labelSmall) }
+            }
+        }
+    }
+}
+
+@Composable
+fun ApprovalDialog(
+    request: AccessRequest,
+    agentNamesList: List<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (String?) -> Unit
+) {
+    var selectedName by remember { mutableStateOf<String?>(request.requestedName?.takeIf { it.isNotBlank() }) }
+    var expanded by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Aprovar Acesso") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Vincular conta ${request.email} a um nome da lista mestra:")
+                Column {
+                    OutlinedTextField(
+                        value = selectedName ?: "",
+                        onValueChange = { selectedName = it; expanded = true },
+                        label = { Text("Nome do Agente (da Lista Mestra)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        trailingIcon = { 
+                            IconButton(onClick = { expanded = !expanded }) {
+                                Icon(Icons.Default.ArrowDropDown, null)
+                            }
+                        }
+                    )
+                    
+                    DropdownMenu(
+                        expanded = expanded && agentNamesList.isNotEmpty(),
+                        onDismissRequest = { expanded = false },
+                        properties = PopupProperties(focusable = false),
+                        modifier = Modifier.fillMaxWidth(0.8f)
+                    ) {
+                        val filteredNames = agentNamesList.filter { 
+                            it.contains(selectedName ?: "", ignoreCase = true) 
+                        }.take(5)
+
+                        filteredNames.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = { 
+                                    selectedName = name
+                                    expanded = false 
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { onConfirm(selectedName) }) { Text("Aprovar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
+    )
+}
+
+@Composable
+fun AddProfileDialog(
+    agentNamesList: List<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (String?, String?, UserRole, Boolean) -> Unit,
+    // Normalized (email: trim+lowercase, names: trim+uppercase) for 1:1 pre-validation.
+    existingEmails: Set<String> = emptySet(),
+    linkedNames: Set<String> = emptySet()
+) {
+    var email by remember { mutableStateOf("") }
+    var nameInput by remember { mutableStateOf("") }
+    var role by remember { mutableStateOf(UserRole.AGENT) }
+    var authorized by remember { mutableStateOf(true) }
+    var expandedName by remember { mutableStateOf(false) }
+    var expandedRole by remember { mutableStateOf(false) }
+
+    val normalizedEmail = remember(email) { email.trim().lowercase() }
+    val normalizedName = remember(nameInput) { nameInput.trim().uppercase() }
+    val emailTaken = normalizedEmail.isNotBlank() && existingEmails.contains(normalizedEmail)
+    val nameTaken = normalizedName.isNotBlank() && linkedNames.contains(normalizedName)
+    val canConfirm = email.isNotBlank() || nameInput.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Novo Perfil / Agente", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("E-mail (Para conta Google)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    isError = emailTaken
+                )
+                if (emailTaken) {
+                    Text(
+                        "Este e-mail já está cadastrado.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                }
+
+                Column {
+                    OutlinedTextField(
+                        value = nameInput,
+                        onValueChange = { nameInput = it; expandedName = true },
+                        label = { Text("Nome Completo do Agente (Lista Mestra)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        trailingIcon = { 
+                            IconButton(onClick = { expandedName = !expandedName }) {
+                                Icon(Icons.Default.ArrowDropDown, null)
+                            }
+                        }
+                    )
+                    
+                    DropdownMenu(
+                        expanded = expandedName && agentNamesList.isNotEmpty(),
+                        onDismissRequest = { expandedName = false },
+                        properties = PopupProperties(focusable = false),
+                        modifier = Modifier.fillMaxWidth(0.8f)
+                    ) {
+                        val filteredNames = agentNamesList.filter { 
+                            it.contains(nameInput, ignoreCase = true) 
+                        }.take(5)
+
+                        filteredNames.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = { 
+                                    nameInput = name
+                                    expandedName = false 
+                                }
+                            )
+                        }
+                        
+                        if (nameInput.isNotBlank() && !agentNamesList.contains(nameInput)) {
+                            DropdownMenuItem(
+                                text = { Text("Adicionar como novo: \"$nameInput\"") },
+                                onClick = { expandedName = false }
+                            )
+                        }
+                    }
+                    
+                    Text(
+                        "O nome deve preferencialmente corresponder ao da lista oficial.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                    )
+                    if (nameTaken) {
+                        Text(
+                            "Este nome já está vinculado a outro usuário.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                        )
+                    }
+                }
+
+                Box {
+                    OutlinedButton(onClick = { expandedRole = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                        Text("Função: ${role.name}")
+                        Spacer(modifier = Modifier.weight(1f))
+                        Icon(Icons.Default.ArrowDropDown, null)
+                    }
+                    DropdownMenu(expanded = expandedRole, onDismissRequest = { expandedRole = false }) {
+                        UserRole.entries.forEach { r ->
+                            DropdownMenuItem(text = { Text(r.name) }, onClick = { role = r; expandedRole = false })
+                        }
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = authorized, onCheckedChange = { authorized = it })
+                    Text("Autorizado a operar", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { 
+                onConfirm(
+                    email.takeIf { it.isNotBlank() }, 
+                    nameInput.takeIf { it.isNotBlank() }, 
+                    role, 
+                    authorized
+                ) 
+            }, enabled = canConfirm && !emailTaken && !nameTaken) { Text("Criar") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar") }
+        }
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun UnifiedProfileCard(
+    profile: UnifiedProfile,
+    agentNamesList: List<String>,
+    isSolarMode: Boolean = false,
+    onAuthorize: (Boolean) -> Unit,
+    onRoleChange: (UserRole) -> Unit,
+    onUpdateName: (String?) -> Unit,
+    onDelete: () -> Unit,
+    onRestore: () -> Unit,
+    onRestoreDay: (String?) -> Unit,
+    onEditAgent: () -> Unit,
+    onClearSyncError: () -> Unit,
+    onMigrateData: () -> Unit,
+    onTransferData: () -> Unit,
+    onRemoteWipe: () -> Unit,
+    onOpenTimeline: (String, String) -> Unit,
+    // Normalized (trim+uppercase) names already linked to a UID, for 1:1 pre-validation.
+    linkedNames: Set<String> = emptySet(),
+    // Master-only (uid==null) actions: rename/delete via metadata/agent_info.names.
+    // onUpdateName é no-op para uid==null (ViewModel usa profile.uid?.let), por isso
+    // esses callbacks dedicados chamam renameMasterAgentName/removeAgentName.
+    onRenameMaster: (oldName: String, newName: String) -> Unit = { _, _ -> },
+    onDeleteMaster: (name: String) -> Unit = {}
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var expandedRole by remember { mutableStateOf(false) }
+    var showEditNameDialog by remember { mutableStateOf(false) }
+    
+    val agent = profile.agentData
+    val lastSync = remember(agent?.lastSyncTime) {
+        if (agent != null && agent.lastSyncTime > 0) {
+            SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(agent.lastSyncTime))
+        } else "Nunca"
+    }
+
+    PremiumCard(
+        modifier = Modifier.fillMaxWidth(),
+        isSolarMode = isSolarMode,
+        onClick = { expanded = !expanded }
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                com.antigravity.healthagent.ui.components.UserAvatar(
+                    uid = profile.uid ?: "",
+                    displayName = profile.agentName,
+                    email = profile.email ?: "Sem Email",
+                    photoUrl = agent?.photoUrl,
+                    size = 48.dp
+                )
+                
+                Spacer(modifier = Modifier.width(16.dp))
+                
+                Column(modifier = Modifier.weight(1f)) {
+                    val displayName = profile.agentName?.takeIf { it.isNotBlank() } ?: profile.email?.ifBlank { "Sem Email" } ?: "Sem Nome"
+                    Text(
+                        text = displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Role Badge
+                        Box {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(6.dp),
+                                onClick = { expandedRole = true }
+                            ) {
+                                Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.AdminPanelSettings, null, modifier = Modifier.size(10.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(profile.role.name, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                                }
+                            }
+                            DropdownMenu(expanded = expandedRole, onDismissRequest = { expandedRole = false }) {
+                                UserRole.entries.forEach { role ->
+                                    DropdownMenuItem(
+                                        text = { Text(role.name) },
+                                        onClick = { onRoleChange(role); expandedRole = false }
+                                    )
+                                }
+                            }
+                        }
+
+                        if (profile.isPreRegistered) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("PRÉ-REGISTRO", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                            }
+                        }
+
+                        if (profile.hasPendingPreMigration) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("MIGRAÇÃO PENDENTE", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                            }
+                        }
+
+                        if (profile.hasAmbiguousLink) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("VÍNCULO AMBÍGUO", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                            }
+                        }
+
+                        if (agent != null) {
+                            Text(
+                                text = "Sinc: $lastSync",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+                }
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (profile.uid != null) {
+                        Checkbox(
+                            checked = profile.isAuthorized,
+                            onCheckedChange = { onAuthorize(it) },
+                            modifier = Modifier.scale(0.8f)
+                        )
+                    }
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+                    HorizontalDivider(modifier = Modifier.padding(bottom = 12.dp))
+                    
+                    // Production Stats (Supervisor Style)
+                    if (agent != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            val housesCount = agent.summary?.totalHouses?.toString() ?: agent.houses.size.toString()
+                            val daysCount = agent.summary?.daysWorked?.toString() ?: agent.activities.size.toString()
+                            val focusCount = agent.summary?.focusCount?.toString() ?: agent.houses.count { it.treatment.comFoco }.toString()
+                            val treatedCount = agent.summary?.treatedCount?.toString() ?: agent.houses.count { it.treatment.a1 > 0 || it.treatment.a2 > 0 || it.treatment.b > 0 || it.treatment.c > 0 || it.treatment.d1 > 0 || it.treatment.d2 > 0 || it.treatment.e > 0 }.toString()
+                            
+                            AgentStatItem(label = "IMÓVEIS", value = housesCount, modifier = Modifier.weight(1f))
+                            AgentStatItem(label = "TRATADOS", value = treatedCount, modifier = Modifier.weight(1f))
+                            AgentStatItem(label = "DIAS", value = daysCount, modifier = Modifier.weight(1f))
+                            AgentStatItem(
+                                label = "FOCOS", 
+                                value = focusCount,
+                                color = if ((agent.summary?.focusCount ?: 0) > 0 || agent.houses.any { it.treatment.comFoco }) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Text(
+                            text = "SITUAÇÃO DAS VISITAS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Black
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                val openCount = agent.summary?.let { s -> 
+                                    (s.situationCounts["NONE"] ?: 0) + (s.situationCounts["EMPTY"] ?: 0)
+                                }?.toString() ?: agent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE || it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY }.toString()
+                                val vCount = agent.summary?.situationCounts?.get("V")?.toString() ?: agent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.V }.toString()
+                                val fCount = agent.summary?.situationCounts?.get("F")?.toString() ?: agent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.F }.toString()
+                                
+                                CompactStatChip(label = "ABERTOS", value = openCount, modifier = Modifier.weight(1f))
+                                CompactStatChip(label = "V", value = vCount, modifier = Modifier.weight(1f))
+                                CompactStatChip(label = "F", value = fCount, modifier = Modifier.weight(1f))
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                val recCount = agent.summary?.situationCounts?.get("REC")?.toString() ?: agent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.REC }.toString()
+                                val aCount = agent.summary?.situationCounts?.get("A")?.toString() ?: agent.houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }.toString()
+                                
+                                CompactStatChip(label = "REC", value = recCount, modifier = Modifier.weight(1f))
+                                CompactStatChip(label = "A", value = aCount, modifier = Modifier.weight(1f))
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "TIPOS DE IMÓVEIS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Black
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                val rCount = agent.summary?.propertyTypeCounts?.get("R")?.toString() ?: agent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.R }.toString()
+                                val cCount = agent.summary?.propertyTypeCounts?.get("C")?.toString() ?: agent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.C }.toString()
+                                val tbCount = agent.summary?.propertyTypeCounts?.get("TB")?.toString() ?: agent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.TB }.toString()
+                                
+                                CompactStatChip(label = "RES", value = rCount, modifier = Modifier.weight(1f))
+                                CompactStatChip(label = "COM", value = cCount, modifier = Modifier.weight(1f))
+                                CompactStatChip(label = "TB", value = tbCount, modifier = Modifier.weight(1f))
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                val peCount = agent.summary?.propertyTypeCounts?.get("PE")?.toString() ?: agent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.PE }.toString()
+                                val oCount = agent.summary?.propertyTypeCounts?.get("O")?.toString() ?: agent.houses.count { it.propertyType == com.antigravity.healthagent.data.local.model.PropertyType.O }.toString()
+                                
+                                CompactStatChip(label = "PE", value = peCount, modifier = Modifier.weight(1f))
+                                CompactStatChip(label = "OUT", value = oCount, modifier = Modifier.weight(1f))
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Text(
+                            text = "ÚLTIMAS PRODUÇÕES",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Black
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        val sortedActivities = remember(agent.activities) {
+                            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+                            agent.activities.sortedByDescending { activity ->
+                                try {
+                                    val normalized = activity.date.replace("/", "-")
+                                    sdf.parse(normalized)?.time ?: 0L
+                                } catch (_: Exception) {
+                                    0L
+                                }
+                            }.take(5)
+                        }
+
+                        if (sortedActivities.isEmpty()) {
+                            Text("Nenhuma produção registrada", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            sortedActivities.forEach { activity ->
+                                val normalizedDate = activity.date.replace("/", "-")
+                                val activityHouses = agent.houses.filter { it.data.replace("/", "-") == normalizedDate }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            if (activity.isClosed) Icons.Default.Lock else Icons.Default.LockOpen,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = if (activity.isClosed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            activity.date,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Text(
+                                        "${activityHouses.size} imóveis",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                            }
+                        }
+                        
+                        // Sync Error if any
+                        if (agent.lastSyncError != null) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Erro: ${agent.lastSyncError}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                                    IconButton(onClick = onClearSyncError, modifier = Modifier.size(24.dp)) {
+                                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                    } else {
+                        Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                            Text("Sem dados de produção para o período.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+
+                    // --- Admin Actions ---
+                    Text("GERENCIAMENTO", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (profile.uid != null) {
+                            val buttonLabel = if (profile.agentName.isNullOrBlank()) "Vincular" else "Editar Nome"
+                            ActionButton(Icons.Default.DriveFileRenameOutline, buttonLabel, onClick = { showEditNameDialog = true })
+                        }
+                        // Nome órfão da lista mestra (uid==null): renomeia/exclui via metadata,
+                        // sem casas vinculadas. onUpdateName seria no-op aqui.
+                        if (profile.uid == null && !profile.agentName.isNullOrBlank()) {
+                            ActionButton(Icons.Default.DriveFileRenameOutline, "Renomear", onClick = { showEditNameDialog = true })
+                            ActionButton(Icons.Default.DeleteForever, "Excluir Nome", tint = MaterialTheme.colorScheme.error, onClick = { onDeleteMaster(profile.agentName!!) })
+                        }
+                        if (profile.uid != null && (profile.agentData == null || profile.hasPendingPreMigration)) {
+                            ActionButton(Icons.Default.MergeType, "Migrar Dados", onClick = onMigrateData)
+                        }
+                        if (profile.uid != null) {
+                            ActionButton(Icons.Default.DeleteForever, "Excluir Conta", tint = MaterialTheme.colorScheme.error, onClick = onDelete)
+                            ActionButton(Icons.Default.MoveUp, "Transferir", onClick = onTransferData)
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("PRODUÇÃO E BACKUP", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Only show data restoration/wipe for profiles that actually exist (have a UID)
+                        if (profile.uid != null) {
+                            ActionButton(Icons.Default.SettingsBackupRestore, "Restauração", onClick = onRestore)
+                            ActionButton(Icons.Default.PostAdd, "Importar Dia", onClick = { onRestoreDay(profile.uid) })
+                            ActionButton(Icons.Default.DeleteSweep, "Wipe Remoto", tint = MaterialTheme.colorScheme.error, onClick = onRemoteWipe)
+                        }
+                        
+                        if (agent != null) {
+                            ActionButton(Icons.Default.QueryStats, "Analisar", onClick = onEditAgent)
+                        }
+
+                        if (profile.uid != null) {
+                            ActionButton(Icons.Default.History, "Timeline", onClick = { onOpenTimeline(profile.uid, profile.agentName ?: profile.email ?: "") })
+                        }
+                    }
+                }
+            }
+
+            if (showEditNameDialog) {
+                var nameInput by remember { mutableStateOf(profile.agentName ?: "") }
+                var expandedNameMenu by remember { mutableStateOf(false) }
+                val ownName = remember(profile.agentName) { profile.agentName?.trim()?.uppercase() }
+                val typedName = nameInput.trim().uppercase()
+                val isMasterOnly = profile.uid == null
+                val vincularTaken = typedName.isNotBlank() && typedName != ownName && linkedNames.contains(typedName)
+                val masterTaken = typedName.isNotBlank() && typedName != ownName &&
+                    agentNamesList.any { it.trim().uppercase() == typedName }
+                // Vinculado (uid!=null): destino deve preferencialmente SER um nome da
+                // mestra (autocomplete) — só bloqueia se ligado a outro UID.
+                // Órfão (uid==null): bloqueia duplicata na mestra também.
+                val nameTaken = if (isMasterOnly) (vincularTaken || masterTaken) else vincularTaken
+                val isEdit = !profile.agentName.isNullOrBlank()
+
+                AlertDialog(
+                    onDismissRequest = { showEditNameDialog = false },
+                    title = { Text(if (isMasterOnly) "Renomear nome da lista" else if (isEdit) "Editar Nome do Agente" else "Vincular Nome ao Perfil") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(
+                                if (isMasterOnly) "Renomeie \"${profile.agentName}\" na lista mestra. É um nome órfão (sem casas vinculadas)."
+                                else if (isEdit) "Altere o nome vinculado a este usuário (${profile.email}): TODAS as casas e dias anteriores serão atualizados."
+                                else "Defina o nome da lista mestra para este usuário (${profile.email}):",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            
+                            Column {
+                                OutlinedTextField(
+                                    value = nameInput,
+                                    onValueChange = { nameInput = it; expandedNameMenu = true },
+                                    label = { Text("Nome do Agente") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    trailingIcon = { 
+                                        IconButton(onClick = { expandedNameMenu = !expandedNameMenu }) {
+                                            Icon(Icons.Default.ArrowDropDown, null)
+                                        }
+                                    }
+                                )
+                                
+                                DropdownMenu(
+                                    expanded = expandedNameMenu && agentNamesList.isNotEmpty(),
+                                    onDismissRequest = { expandedNameMenu = false },
+                                    properties = PopupProperties(focusable = false),
+                                    modifier = Modifier.fillMaxWidth(0.8f)
+                                ) {
+                                    val filteredNames = remember(nameInput, agentNamesList) {
+                                        agentNamesList.filter { 
+                                            it.contains(nameInput, ignoreCase = true) 
+                                        }.take(5)
+                                    }
+
+                                    filteredNames.forEach { name ->
+                                        DropdownMenuItem(
+                                            text = { Text(name) },
+                                            onClick = { 
+                                                nameInput = name
+                                                expandedNameMenu = false 
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (nameTaken) {
+                                Text(
+                                    if (isMasterOnly) "Este nome já existe na lista ou está vinculado a outro usuário."
+                                    else "Este nome já está vinculado a outro usuário.",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+
+                            if (!isMasterOnly) {
+                                TextButton(onClick = { nameInput = ""; onUpdateName(null); showEditNameDialog = false }) {
+                                    Text("Limpar Vínculo Existente", color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (isMasterOnly) {
+                                    onRenameMaster(profile.agentName ?: "", nameInput.trim())
+                                } else {
+                                    onUpdateName(nameInput.takeIf { it.isNotBlank() })
+                                }
+                                showEditNameDialog = false
+                            },
+                            enabled = !nameTaken && typedName.isNotBlank()
+                        ) {
+                            Text(if (isMasterOnly) "Renomear" else "Confirmar")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showEditNameDialog = false }) {
+                            Text("Cancelar")
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun QuickStat(icon: androidx.compose.ui.graphics.vector.ImageVector, count: Int, label: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        shape = RoundedCornerShape(6.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        ) {
+            Icon(icon, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(4.dp))
+            Text("$count $label", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+@Composable
+private fun ActionButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector, 
+    label: String, 
+    tint: Color = MaterialTheme.colorScheme.primary,
+    onClick: () -> Unit
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.height(32.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, tint.copy(alpha = 0.3f))
+    ) {
+        Icon(icon, null, modifier = Modifier.size(16.dp), tint = tint)
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = tint)
+    }
+}
+
+@Composable
+fun TransferDataDialog(
+    sourceProfile: UnifiedProfile,
+    availableTargets: List<UnifiedProfile>,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedTargetUid by remember { mutableStateOf<String?>(null) }
+    var showStep2 by remember { mutableStateOf(false) }
+
+    val filteredTargets = availableTargets.filter {
+        it.agentName?.contains(searchQuery, ignoreCase = true) == true ||
+        it.email?.contains(searchQuery, ignoreCase = true) == true
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (!showStep2) "Transferir Dados de Produção" else "CONFIRMAR TRANSFERÊNCIA") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (!showStep2) {
+                    Text("Selecione o destino para os dados de ${sourceProfile.agentName ?: sourceProfile.email}:", style = MaterialTheme.typography.bodyMedium)
+                    
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Pesquisar destino...") },
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    
+                    Box(modifier = Modifier.heightIn(max = 300.dp)) {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(filteredTargets) { target ->
+                                Surface(
+                                    onClick = { selectedTargetUid = target.uid },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (selectedTargetUid == target.uid) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                    border = BorderStroke(1.dp, if (selectedTargetUid == target.uid) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                ) {
+                                    Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        RadioButton(selected = selectedTargetUid == target.uid, onClick = { selectedTargetUid = target.uid })
+                                        Spacer(Modifier.width(8.dp))
+                                        Column {
+                                            Text(target.agentName ?: "Sem nome", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                                            Text(target.email ?: "", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                            }
+                            if (filteredTargets.isEmpty()) {
+                                item { 
+                                    Text("Nenhum alvo de transferência disponível.", 
+                                        style = MaterialTheme.typography.bodySmall, 
+                                        modifier = Modifier.padding(16.dp),
+                                        textAlign = TextAlign.Center
+                                    ) 
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val target = availableTargets.find { it.uid == selectedTargetUid }
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error)
+                                Spacer(Modifier.width(8.dp))
+                                Text("AÇÃO IRREVERSÍVEL", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
+                            }
+                            Text(
+                                "Você está movendo TODA a produção de:",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(sourceProfile.agentName ?: sourceProfile.email ?: "", fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.ArrowDownward, null, modifier = Modifier.align(Alignment.CenterHorizontally))
+                            Text(
+                                "Para a conta de:",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(target?.agentName ?: target?.email ?: "", fontWeight = FontWeight.Bold)
+                            
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Os dados serão REMOVIDOS da conta de origem e mesclados ao destino. Este processo não pode ser desfeito.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (!showStep2) {
+                Button(
+                    onClick = { showStep2 = true },
+                    enabled = selectedTargetUid != null
+                ) { Text("Próximo") }
+            } else {
+                Button(
+                    onClick = { selectedTargetUid?.let { onConfirm(it) } },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("CONFIRMAR TRANSFERÊNCIA") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = if (showStep2) { { showStep2 = false } } else onDismiss) { 
+                Text(if (showStep2) "Voltar" else "Cancelar") 
+            }
+        }
+    )
+}
+
+@Composable
+fun StatItem(label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color = Color.White) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, null, tint = color.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = color)
+        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = color.copy(alpha = 0.6f), fontSize = 9.sp)
+    }
+}
+
+@Composable
+fun AgentStatItem(label: String, value: String, color: Color = MaterialTheme.colorScheme.primary, modifier: Modifier = Modifier) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Black,
+            color = color
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.primary,
+            fontSize = 9.sp
+        )
+    }
+}
+
+@Composable
+fun CompactStatChip(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier.padding(6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }

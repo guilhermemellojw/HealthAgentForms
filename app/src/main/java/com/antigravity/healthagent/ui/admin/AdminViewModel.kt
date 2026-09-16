@@ -29,6 +29,30 @@ class AdminViewModel @Inject constructor(
     val solarMode: StateFlow<Boolean> = settingsManager.solarMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    private val _bairros = MutableStateFlow<List<String>>(emptyList())
+    val bairros: StateFlow<List<String>> = _bairros.asStateFlow()
+
+    private val _systemSettings = MutableStateFlow<Map<String, Any>>(emptyMap())
+    val systemSettings: StateFlow<Map<String, Any>> = _systemSettings.asStateFlow()
+
+    private val _agentNames = MutableStateFlow<List<String>>(emptyList())
+    val agentNames: StateFlow<List<String>> = _agentNames.asStateFlow()
+
+    private val _isRenaming = MutableStateFlow(false)
+    val isRenaming: StateFlow<Boolean> = _isRenaming.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    fun updateSearchQuery(query: String) { _searchQuery.value = query }
+    
+    // Filtering State
+    private val _selectedYear = MutableStateFlow(java.util.Calendar.getInstance().get(java.util.Calendar.YEAR))
+    val selectedYear = _selectedYear.asStateFlow()
+
+    private val _selectedMonth = MutableStateFlow(java.util.Calendar.getInstance().get(java.util.Calendar.MONTH)) // Default current month
+    val selectedMonth = _selectedMonth.asStateFlow()
+
     val availableYears = (2025..java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)).reversed().toList()
     val availableMonths = listOf("Ano Todo", "Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
 
@@ -43,86 +67,16 @@ class AdminViewModel @Inject constructor(
         } else {
             emptyList()
         }
-        
-        val agentsByUid = agentsList.associateBy { it.uid }
-        val agentsByEmail = agentsList.filter { it.uid == null || it.uid.startsWith(com.antigravity.healthagent.utils.AppConstants.PRE_PREFIX) }.associateBy { it.email }
 
-        val result = mutableListOf<UnifiedProfile>()
-        val processedAgentUids = mutableSetOf<String?>()
-        val processedEmails = mutableSetOf<String?>()
-        
-        val sortedUsers = usersList.sortedWith(compareBy { it.uid.startsWith(com.antigravity.healthagent.utils.AppConstants.PRE_PREFIX) })
-        sortedUsers.forEach { user ->
-            val normalizedEmail = user.email?.trim()?.lowercase()
-            if (normalizedEmail != null && processedEmails.contains(normalizedEmail)) {
-                return@forEach
-            }
-            
-            var agentData = agentsByUid[user.uid]
-            if (agentData == null && user.email != null) {
-                agentData = agentsByEmail[user.email]
-            }
-
-            result.add(
-                UnifiedProfile(
-                    uid = user.uid,
-                    email = user.email,
-                    agentName = agentData?.agentName ?: user.agentName,
-                    role = user.role,
-                    isAuthorized = user.isAuthorized,
-                    isPreRegistered = user.uid.startsWith(com.antigravity.healthagent.utils.AppConstants.PRE_PREFIX),
-                    agentData = agentData
-                )
-            )
-            processedAgentUids.add(user.uid)
-            processedEmails.add(normalizedEmail)
-            agentData?.uid?.let { processedAgentUids.add(it) }
-            agentData?.email?.trim()?.lowercase()?.let { processedEmails.add(it) }
-        }
-        
-        agentsList.forEach { agent ->
-            val normalizedEmail = agent.email?.trim()?.lowercase()
-            if (!processedAgentUids.contains(agent.uid) && !processedEmails.contains(normalizedEmail)) {
-                val isPre = agent.uid?.startsWith(com.antigravity.healthagent.utils.AppConstants.PRE_PREFIX) == true
-                result.add(
-                    UnifiedProfile(
-                        uid = agent.uid,
-                        email = agent.email,
-                        agentName = agent.agentName,
-                        role = UserRole.AGENT, 
-                        isAuthorized = true,
-                        isPreRegistered = isPre,
-                        agentData = agent
-                    )
-                )
-                processedAgentUids.add(agent.uid)
-                processedEmails.add(normalizedEmail)
-            }
-        }
-        
-        val existingNamesUpperCase = result.mapNotNull { it.agentName?.trim()?.uppercase() }.toSet()
-        namesList.forEach { name ->
-            val normalizedName = name.trim().uppercase()
-            if (!existingNamesUpperCase.contains(normalizedName)) {
-                result.add(
-                    UnifiedProfile(
-                        uid = null,
-                        email = null,
-                        agentName = name,
-                        role = UserRole.AGENT,
-                        isAuthorized = false,
-                        isPreRegistered = true,
-                        agentData = null
-                    )
-                )
-            }
-        }
-
-        if (query.isBlank()) result
-        else result.filter { 
-            it.email?.contains(query, true) == true || 
-            it.agentName?.contains(query, true) == true 
-        }
+        // Linking rules live in UnifiedProfilesMapper (pure + unit-tested):
+        // pre_ + real with the same email merge into ONE card owned by the
+        // real UID; the real user is never dropped.
+        UnifiedProfilesMapper.buildUnifiedProfiles(
+            usersList = usersList,
+            agentsList = agentsList,
+            namesList = namesList,
+            query = query
+        )
     }
     .flowOn(kotlinx.coroutines.Dispatchers.Default)
     .distinctUntilChanged()
@@ -139,12 +93,19 @@ class AdminViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 25)
 
-    val globalCustomActivities: StateFlow<Set<String>> = systemSettings.map { settings ->
-        val raw = settings["custom_activities"]
-        when(raw) {
-            is List<*> -> raw.mapNotNull { it?.toString() }.toSet()
-            is String -> raw.split(",").filter { it.isNotBlank() }.toSet()
-            else -> emptySet()
+    fun approveAccess(requestId: String, agentName: String?) {
+        viewModelScope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            val result = accessControlRepository.respondToAccessRequest(requestId, true, agentName)
+            if (result.isSuccess) {
+                loadUsers()
+                _uiEvent.emit("Acesso aprovado")
+            } else {
+                _uiEvent.emit("Erro ao aprovar: ${result.exceptionOrNull()?.message}")
+            }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
@@ -167,7 +128,295 @@ class AdminViewModel @Inject constructor(
         return if (selectedYear.value == currentYear) {
             availableMonths.take(currentMonth + 2)
         } else {
-            availableMonths
+            _uiState.value = AdminUiState.Error(result.exceptionOrNull()?.message ?: "Erro ao carregar dados dos agentes")
+        }
+    }
+
+    private suspend fun loadUsers() {
+        val result = accessControlRepository.fetchAllUsers()
+        if (result.isSuccess) {
+            _users.value = result.getOrNull() ?: emptyList()
+        }
+    }
+
+
+    private suspend fun loadAgentNames() {
+        val result = agentRepository.fetchAgentNames()
+        if (result.isSuccess) {
+            _agentNames.value = result.getOrNull() ?: emptyList()
+        }
+    }
+
+    fun addAgentName(name: String) {
+        viewModelScope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            val result = agentRepository.addAgentName(name)
+            if (result.isSuccess) {
+                loadAgentNames()
+                _uiEvent.emit("Nome adicionado com sucesso")
+            } else {
+                _uiEvent.emit("Erro ao adicionar nome")
+            }
+        }
+    }
+
+    fun removeAgentName(name: String) {
+        viewModelScope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            val canon = name.trim().uppercase()
+            if (canon.isBlank()) {
+                _uiEvent.emit("Nome inválido")
+                return@launch
+            }
+            // Trava à prova de erros: não excluir nome vinculado a um usuário.
+            val owner = try {
+                accessControlRepository.isAgentNameTaken(canon).getOrNull()
+            } catch (_: Exception) { null }
+            if (owner != null) {
+                _uiEvent.emit("Nome vinculado a $owner — desvincule primeiro")
+                return@launch
+            }
+            val result = agentRepository.deleteAgentName(name)
+            if (result.isSuccess) {
+                loadAgentNames()
+                _uiEvent.emit("Nome removido com sucesso")
+            } else {
+                _uiEvent.emit("Erro ao remover nome")
+            }
+        }
+    }
+
+    /**
+     * Renomeia a lista mestra e propaga para todo o histórico (casas + atividades)
+     * reutilizando o padrão move do transferAgentData (set newKey + delete oldKey).
+     *
+     * Ordem à prova de falha parcial:
+     * 1) valida + checa duplicata (mestra e vínculo 1:1)
+     * 2) move casas/atividades na nuvem (abortável, idempotente)
+     * 3) lista mestra: rename transacional (caminho mestra) ou add do destino
+     *    (caminho vinculado; nunca remove o antigo automaticamente)
+     * 4) atualiza users/{uid}.agentName vinculados
+     * 5) refreshAll para convergir o dashboard
+     *
+     * @param targetUid quando fornecido, propaga para esse UID mesmo que o vínculo
+     * atual ainda não reflita o nome antigo; quando null, resolve pelos usuários
+     * cujo agentName normalizado == oldName (caso uid==null não tem casas).
+     */
+    fun renameMasterAgentName(oldName: String, newName: String, targetUid: String? = null) {
+        if (_isRenaming.value) return
+        viewModelScope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            val oldCanon = oldName.trim().uppercase().takeIf { it.isNotBlank() }
+            val newCanon = newName.trim().uppercase().takeIf { it.isNotBlank() }
+            if (oldCanon == null || newCanon == null) {
+                _uiEvent.emit("Nome inválido")
+                return@launch
+            }
+            if (oldCanon == newCanon) {
+                _uiEvent.emit("Nomes iguais")
+                return@launch
+            }
+            val masterHasOld = _agentNames.value.any { it.trim().uppercase() == oldCanon }
+            val masterHasNew = _agentNames.value.any { it.trim().uppercase() == newCanon }
+            if (targetUid == null) {
+                // Rename puro da mestra (chips da Config./órfãos): old precisa existir, new não.
+                if (!masterHasOld) {
+                    _uiEvent.emit("Nome não encontrado na lista")
+                    return@launch
+                }
+                if (masterHasNew) {
+                    _uiEvent.emit("Este nome já existe na lista")
+                    return@launch
+                }
+            }
+            // No caminho vinculado (targetUid != null) o destino pode/deve ser um nome
+            // já existente da mestra (autocomplete) — só o vínculo 1:1 bloqueia.
+            val takenOwner = try {
+                accessControlRepository.isAgentNameTaken(newCanon, exceptUid = targetUid).getOrNull()
+            } catch (_: Exception) { null }
+            if (takenOwner != null) {
+                _uiEvent.emit("Este nome já está vinculado a $takenOwner")
+                return@launch
+            }
+
+            _isRenaming.value = true
+            try {
+                // Resolve UIDs vinculados ao nome antigo (auto-update do plano).
+                val uidsToMigrate: List<String> = if (targetUid != null) {
+                    listOf(targetUid)
+                } else {
+                    _users.value
+                        .filter { it.agentName?.trim()?.uppercase() == oldCanon }
+                        .map { it.uid }
+                        .distinct()
+                }.filter { !it.startsWith("pre_") }
+
+                // Passo 1: mover histórico na nuvem (aborta antes de tocar a mestra).
+                var housesMoved = 0
+                var activitiesMoved = 0
+                for (uid in uidsToMigrate) {
+                    val dataResult = agentRepository.renameAgentData(uid, newCanon)
+                    if (dataResult.isFailure) {
+                        _uiEvent.emit("Erro ao mover casas: ${dataResult.exceptionOrNull()?.message}. Rename abortado.")
+                        loadAgentsData(_selectedYear.value, _selectedMonth.value)
+                        return@launch
+                    }
+                    dataResult.getOrNull()?.let {
+                        housesMoved += it.housesMoved
+                        activitiesMoved += it.activitiesMoved
+                    }
+                }
+
+                // Passo 2: lista mestra.
+                // - Caminho mestra (targetUid==null): rename transacional old->new.
+                // - Caminho vinculado: nunca remove o old automaticamente (pode ser
+                //   typo fora da lista ou entrada ainda usada); só garante o new na lista.
+                if (targetUid == null) {
+                    val masterResult = agentRepository.renameAgentName(oldCanon, newCanon)
+                    if (masterResult.isFailure) {
+                        val msg = masterResult.exceptionOrNull()?.message
+                        if (housesMoved > 0 || activitiesMoved > 0) {
+                            _uiEvent.emit("Casas movidas, mas a lista falhou ($msg). Tente renomear de novo.")
+                        } else {
+                            _uiEvent.emit("Erro ao renomear: $msg")
+                        }
+                        loadAgentNames()
+                        loadAgentsData(_selectedYear.value, _selectedMonth.value)
+                        return@launch
+                    }
+                } else if (!masterHasNew) {
+                    val addResult = agentRepository.addAgentName(newCanon)
+                    if (addResult.isFailure) {
+                        _uiEvent.emit("Casas movidas, mas não foi possível registrar o nome na lista. Verifique.")
+                        loadAgentNames()
+                    }
+                }
+
+                // Passo 3: atualizar perfis vinculados (converge SyncPush.officialAgentName).
+                var linkFailures = 0
+                for (uid in uidsToMigrate) {
+                    val upd = accessControlRepository.updateUserProfile(uid, mapOf("agentName" to newCanon))
+                    if (upd.isFailure) linkFailures++
+                }
+
+                refreshAll()
+                if (linkFailures > 0) {
+                    _uiEvent.emit("Lista renomeada, mas $linkFailures vínculo(s) falharam — verifique")
+                } else if (uidsToMigrate.isEmpty()) {
+                    _uiEvent.emit("Nome atualizado na lista mestra")
+                } else {
+                    val parts = mutableListOf<String>()
+                    if (housesMoved > 0) parts.add("$housesMoved imóveis")
+                    if (activitiesMoved > 0) parts.add("$activitiesMoved dias")
+                    val detail = if (parts.isEmpty()) "" else " (${parts.joinToString(" + ")})"
+                    _uiEvent.emit("Nome atualizado$detail")
+                }
+            } finally {
+                _isRenaming.value = false
+            }
+        }
+    }
+
+    private val _selectedAgentForEdit = MutableStateFlow<AgentData?>(null)
+    val selectedAgentForEdit: StateFlow<AgentData?> = _selectedAgentForEdit.asStateFlow()
+
+    fun selectAgentForEdit(agent: AgentData?) {
+        _selectedAgentForEdit.value = agent
+    }
+
+    fun authorizeUser(uid: String, isAuthorized: Boolean) {
+        viewModelScope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            val result = accessControlRepository.authorizeUser(uid, isAuthorized)
+            if (result.isSuccess) {
+                loadUsers()
+                if (isAuthorized) {
+                    // Fase 2: authorizing never migrates implicitly. Hint the admin
+                    // when a pre-registered profile is waiting for explicit migration.
+                    val pending = accessControlRepository.findPendingPreMigration(uid).getOrNull()
+                    if (pending != null) {
+                        _uiEvent.emit("Existe pré-registro pendente. Use Migrar Dados para concluir.")
+                    }
+                }
+            } else {
+                _uiEvent.emit("Erro ao autorizar: ${result.exceptionOrNull()?.message}")
+            }
+        }
+    }
+
+    fun changeUserRole(uid: String, role: com.antigravity.healthagent.domain.repository.UserRole) {
+        viewModelScope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            val result = accessControlRepository.changeUserRole(uid, role)
+            if (result.isSuccess) {
+                loadUsers()
+            }
+        }
+    }
+
+    fun updateUserProfile(uid: String, updates: Map<String, Any?>) {
+        viewModelScope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            val result = accessControlRepository.updateUserProfile(uid, updates)
+            if (result.isSuccess) {
+                loadUsers()
+                if (updates.containsKey("agentName")) {
+                    _uiEvent.emit("Vínculo atualizado")
+                }
+            } else {
+                _uiEvent.emit("Erro ao vincular: ${result.exceptionOrNull()?.message}")
+            }
+        }
+    }
+
+    fun createUser(email: String, role: com.antigravity.healthagent.domain.repository.UserRole, agentName: String?, isAuthorized: Boolean) {
+        viewModelScope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            val result = accessControlRepository.createUserProfile(email, role, agentName, isAuthorized)
+            if (result.isSuccess) {
+                loadUsers()
+                _uiEvent.emit("Perfil criado com sucesso")
+            } else {
+                _uiEvent.emit("Erro ao criar perfil: ${result.exceptionOrNull()?.message}")
+            }
+        }
+    }
+
+    fun createAgent(email: String, agentName: String?) {
+        viewModelScope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            try {
+                val result = agentRepository.createAgent(email, agentName)
+                if (result.isSuccess) {
+                    loadAgentsData(_selectedYear.value, _selectedMonth.value)
+                }
+            } catch (e: Exception) {
+                _uiEvent.emit("Erro ao criar agente: ${e.message}")
+            }
         }
     }
 
@@ -248,9 +497,35 @@ class AdminViewModel @Inject constructor(
         backupDelegate.restoreAgentBackup(viewModelScope, stateDelegate, context, agentUid, uri, targetDate, autoShift) {
             usersDelegate.loadAgentsData(stateDelegate, selectedYear.value, selectedMonth.value)
         }
-    fun deleteAgentHouse(agentUid: String, houseId: String) =
-        backupDelegate.deleteAgentHouse(viewModelScope, stateDelegate, agentUid, houseId) {
-            usersDelegate.loadAgentsData(stateDelegate, selectedYear.value, selectedMonth.value)
+    }
+
+    /**
+     * Explicit, admin-confirmed migration (Fase 2 decision: never implicit).
+     * The UI must confirm before calling. [resolvedAgentName] is the
+     * admin-confirmed link name (dialog choice > pre_ name).
+     */
+    fun migrateData(authUser: com.antigravity.healthagent.domain.repository.AuthUser, resolvedAgentName: String? = null) {
+        viewModelScope.launch {
+            if (!accessControlRepository.isUserAdmin()) {
+                _uiEvent.emit("Permissão negada")
+                return@launch
+            }
+            val pending = accessControlRepository.findPendingPreMigration(authUser.uid).getOrNull()
+            if (pending == null) {
+                _uiEvent.emit("Nenhum pré-registro pendente para este usuário")
+                return@launch
+            }
+            val result = accessControlRepository.migratePreRegistrationExplicit(
+                preUid = pending.preUid,
+                targetUid = authUser.uid,
+                resolvedAgentName = resolvedAgentName ?: pending.preAgentName ?: authUser.agentName
+            )
+            if (result.isSuccess) {
+                _uiEvent.emit("Dados migrados com sucesso")
+                refreshAll()
+            } else {
+                _uiEvent.emit("Erro ao migrar dados: ${result.exceptionOrNull()?.message}")
+            }
         }
     fun deleteAgentActivity(agentUid: String, activityDate: String) =
         backupDelegate.deleteAgentActivity(viewModelScope, stateDelegate, agentUid, activityDate) {
@@ -278,7 +553,12 @@ data class UnifiedProfile(
     val role: UserRole,
     val isAuthorized: Boolean,
     val isPreRegistered: Boolean,
-    val agentData: AgentData? = null
+    val agentData: AgentData? = null,
+    // True when a pre-registered doc exists for the same email but the card
+    // is owned by the real UID (migration pending, explicit confirmation required).
+    val hasPendingPreMigration: Boolean = false,
+    // True when the email fallback found >1 candidate agent doc and attached none.
+    val hasAmbiguousLink: Boolean = false
 )
 
 sealed class AdminUiState {

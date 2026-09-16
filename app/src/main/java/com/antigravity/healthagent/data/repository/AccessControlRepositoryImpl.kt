@@ -58,42 +58,84 @@ class AccessControlRepositoryImpl @Inject constructor(
 
     override suspend fun authorizeUser(uid: String, isAuthorized: Boolean): Result<Unit> {
         return try {
-            val userRef = firestore.collection("users").document(uid)
-            val userDoc = userRef.get().await()
-            val email = userDoc.getString("email")
-            
-            userRef.update("isAuthorized", isAuthorized).await()
-            
-            if (isAuthorized && email != null) {
-                val normalizedEmail = email.trim().lowercase()
-                val preDocId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
-                
-                if (uid == preDocId) {
-                    // Admin authorized the pre-registered profile card.
-                    // Find the real user account if they have signed up
-                    val realUsers = firestore.collection("users")
-                        .whereEqualTo("email", normalizedEmail)
-                        .get().await()
-                    
-                    for (realUserDoc in realUsers.documents) {
-                        if (realUserDoc.id != uid && !realUserDoc.id.startsWith(com.antigravity.healthagent.utils.AppConstants.PRE_PREFIX)) {
-                            val realUid = realUserDoc.id
-                            AppLogger.i("AccessControlRepository", "Admin authorizing pre-registered profile. Auto-migrating to real UID: $realUid")
-                            firestore.collection("users").document(realUid).update("isAuthorized", true).await()
-                            authRepository.migratePreRegistration(normalizedEmail, realUid)
-                        }
-                    }
-                } else if (!uid.startsWith(com.antigravity.healthagent.utils.AppConstants.PRE_PREFIX)) {
-                    // Admin authorized the real user card.
-                    // Check if there is a pre-registered profile to migrate
-                    val preUserDoc = firestore.collection("users").document(preDocId).get().await()
-                    if (preUserDoc.exists()) {
-                        AppLogger.i("AccessControlRepository", "Admin authorizing real user account. Auto-migrating from pre-registered profile $preDocId")
-                        authRepository.migratePreRegistration(normalizedEmail, uid)
-                    }
+            // Fase 2: authorizing ONLY flips the flag. Any pending pre-registered
+            // data is migrated exclusively through the explicit, admin-confirmed
+            // migratePreRegistrationExplicit() flow (never implicitly here).
+            firestore.collection("users").document(uid).update("isAuthorized", isAuthorized).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun findPendingPreMigration(targetUid: String): Result<AccessControlRepository.PendingPreMigration?> {
+        return try {
+            if (targetUid.startsWith("pre_")) return Result.success(null)
+            val targetDoc = firestore.collection("users").document(targetUid).get().await()
+            if (!targetDoc.exists()) return Result.success(null)
+            val email = targetDoc.getString("email") ?: return Result.success(null)
+            val normalizedEmail = email.trim().lowercase()
+            val preDocId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
+            val preDoc = firestore.collection("users").document(preDocId).get().await()
+            if (!preDoc.exists()) return Result.success(null)
+            Result.success(
+                AccessControlRepository.PendingPreMigration(
+                    preUid = preDocId,
+                    targetUid = targetUid,
+                    preAgentName = preDoc.getString("agentName"),
+                    targetAgentName = targetDoc.getString("agentName")
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun migratePreRegistrationExplicit(
+        preUid: String,
+        targetUid: String,
+        resolvedAgentName: String?
+    ): Result<Unit> {
+        return try {
+            if (targetUid.startsWith("pre_")) {
+                return Result.failure(Exception("Migração inválida: o destino não pode ser um pré-registro"))
+            }
+            val preDoc = firestore.collection("users").document(preUid).get().await()
+            if (!preDoc.exists()) {
+                return Result.failure(Exception("Pré-registro não encontrado (já migrado?)"))
+            }
+            val targetDoc = firestore.collection("users").document(targetUid).get().await()
+            if (!targetDoc.exists()) {
+                return Result.failure(Exception("Conta de destino não encontrada"))
+            }
+            val preEmail = preDoc.getString("email")?.trim()?.lowercase()
+            val targetEmail = targetDoc.getString("email")?.trim()?.lowercase()
+            if (preEmail == null || targetEmail == null || preEmail != targetEmail) {
+                return Result.failure(Exception("E-mails incompatíveis: migração bloqueada"))
+            }
+
+            val resolved = resolvedAgentName?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+            if (resolved != null) {
+                // Strict 1:1: the name must not belong to another UID
+                // (the pre_ doc itself is allowed to hold it).
+                val ownerResult = isAgentNameTaken(resolved, exceptUid = targetUid)
+                if (ownerResult.isFailure) {
+                    return Result.failure(ownerResult.exceptionOrNull() ?: Exception("Falha ao validar nome"))
+                }
+                val owner = ownerResult.getOrNull()
+                if (owner != null && owner != preEmail && owner != preUid) {
+                    return Result.failure(Exception("Nome já vinculado a $owner"))
                 }
             }
-            
+
+            val migration = authRepository.migratePreRegistration(preEmail, targetUid, resolved)
+            if (migration.isFailure) {
+                return Result.failure(migration.exceptionOrNull() ?: Exception("Falha na migração"))
+            }
+            android.util.Log.i(
+                "AccessControlRepository",
+                "Explicit migration confirmed: $preUid -> $targetUid (name=$resolved)"
+            )
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -135,24 +177,67 @@ class AccessControlRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun isEmailTaken(email: String, exceptUid: String?): Result<Boolean> {
+        return try {
+            val normalizedEmail = email.trim().lowercase()
+            if (normalizedEmail.isBlank()) return Result.success(false)
+            val preDocId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
+            if (preDocId != exceptUid) {
+                val preDoc = firestore.collection("users").document(preDocId).get().await()
+                if (preDoc.exists()) return Result.success(true)
+            }
+            val matches = firestore.collection("users")
+                .whereEqualTo("email", normalizedEmail)
+                .get().await()
+            Result.success(matches.documents.any { it.id != exceptUid })
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun isAgentNameTaken(agentName: String, exceptUid: String?): Result<String?> {
+        return try {
+            val normalized = agentName.trim().uppercase()
+            if (normalized.isBlank()) return Result.success(null)
+            val matches = firestore.collection("users")
+                .whereEqualTo("agentName", normalized)
+                .get().await()
+            val owner = matches.documents.firstOrNull { it.id != exceptUid }
+            Result.success(owner?.getString("email") ?: owner?.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun updateUserProfile(uid: String, updates: Map<String, Any?>): Result<Unit> {
         return try {
             val finalUpdates = updates.toMutableMap()
-            val nameChange = resolveProfileAgentNameChange(updates)
-            when (nameChange) {
-                is AgentNameChange.Set -> {
-                    finalUpdates["agentName"] = nameChange.name
-                    agentRepository.addAgentName(nameChange.name).onFailure { error ->
-                        AppLogger.w("AccessControlRepository", "Failed to register agentName ${nameChange.name}: ${error.message}")
-                    }
-                    if (shouldRenameProduction(uid, nameChange.name)) {
-                        renameAgentProduction(uid, nameChange.name)
-                    }
+            val nameKeyPresent = updates.containsKey("agentName")
+            val rawName = updates["agentName"] as? String
+            val newAgentName = rawName?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+            if (nameKeyPresent && newAgentName == null) {
+                // Explicit unlink: remove the field instead of writing null
+                // (Firestore update() rejects null values).
+                finalUpdates["agentName"] = com.google.firebase.firestore.FieldValue.delete()
+                try {
+                    firestore.collection("agents").document(uid)
+                        .update("agentName", com.google.firebase.firestore.FieldValue.delete()).await()
+                } catch (e: Exception) { }
+            } else if (newAgentName != null) {
+                // Strict 1:1: refuse names already linked to another UID.
+                val ownerResult = isAgentNameTaken(newAgentName, exceptUid = uid)
+                val owner = ownerResult.getOrNull()
+                if (ownerResult.isFailure) {
+                    return Result.failure(ownerResult.exceptionOrNull() ?: Exception("Falha ao validar nome"))
                 }
-                is AgentNameChange.Clear -> {
-                    finalUpdates["agentName"] = com.google.firebase.firestore.FieldValue.delete()
+                if (owner != null) {
+                    return Result.failure(Exception("Nome já vinculado a $owner"))
                 }
-                is AgentNameChange.None -> Unit
+                finalUpdates["agentName"] = newAgentName
+                agentRepository.addAgentName(newAgentName)
+                try {
+                    firestore.collection("agents").document(uid).update("agentName", newAgentName).await()
+                } catch(e: Exception) { }
             }
 
             firestore.collection("users").document(uid).update(finalUpdates).await()
@@ -176,18 +261,36 @@ class AccessControlRepositoryImpl @Inject constructor(
     override suspend fun createUserProfile(email: String, role: UserRole, agentName: String?, isAuthorized: Boolean): Result<Unit> {
         return try {
             val normalizedEmail = email.trim().lowercase()
+            if (normalizedEmail.isBlank()) {
+                return Result.failure(Exception("E-mail inválido"))
+            }
             val docId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
-            val userData = buildPreRegisteredUserData(
-                email = normalizedEmail,
-                role = role,
-                agentName = agentName,
-                isAuthorized = isAuthorized,
-                createdAt = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
-            ).toMutableMap()
+            val normalizedAgentName = agentName?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
 
+            // Strict 1:1 backstop (UI pre-validates; repo enforces).
+            val emailTaken = isEmailTaken(normalizedEmail).getOrElse { return Result.failure(it) }
+            if (emailTaken) {
+                return Result.failure(Exception("E-mail já cadastrado"))
+            }
+            if (normalizedAgentName != null) {
+                val owner = isAgentNameTaken(normalizedAgentName).getOrElse { return Result.failure(it) }
+                if (owner != null) {
+                    return Result.failure(Exception("Nome já vinculado a $owner"))
+                }
+            }
+            
+            val userData = mutableMapOf(
+                "email" to normalizedEmail,
+                "role" to role.name,
+                "isAuthorized" to isAuthorized,
+                "agentName" to normalizedAgentName,
+                "createdAt" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
+                "isPreRegistered" to true
+            )
+            
             firestore.collection("users").document(docId).set(userData).await()
-            (userData["agentName"] as? String)?.takeIf { it.isNotBlank() }?.let {
-                agentRepository.addAgentName(it)
+            if (normalizedAgentName != null) {
+                agentRepository.addAgentName(normalizedAgentName)
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -290,24 +393,28 @@ class AccessControlRepositoryImpl @Inject constructor(
             batch.update(requestRef, "status", if (approved) "APPROVED" else "REJECTED")
             
             if (approved) {
-                val userRef = firestore.collection("users").document(uid)
-                val updates = mutableMapOf<String, Any>("isAuthorized" to true)
-                
-                val finalAgentName = resolveApprovalAgentName(agentName, doc.getString("requestedName"))
-                
-                if (finalAgentName != null) {
-                    updates["agentName"] = finalAgentName
-                    try {
-                        agentRepository.addAgentName(finalAgentName)
-                    } catch (e: Exception) {
-                        AppLogger.w("AccessControlRepository", "Failed to register approved agentName $finalAgentName: ${e.message}")
+                // Resolve the name FIRST (dialog choice > requestedName), then
+                // migrate with it as preferred so the migration never overwrites
+                // the admin-confirmed name with the stale pre_ one.
+                val finalAgentName = agentName?.takeIf { it.isNotBlank() }
+                    ?: doc.getString("requestedName")?.takeIf { it.isNotBlank() }
+                val resolvedName = finalAgentName?.trim()?.uppercase()
+
+                if (email != null) {
+                    val migration = authRepository.migratePreRegistration(email, uid, resolvedName)
+                    if (migration.isFailure) {
+                        return Result.failure(
+                            migration.exceptionOrNull()
+                                ?: Exception("Falha ao migrar pré-registro; aprovação não aplicada")
+                        )
                     }
                 }
+
+                val userRef = firestore.collection("users").document(uid)
+                val updates = mutableMapOf<String, Any>("isAuthorized" to true)
+
+                if (resolvedName != null) updates["agentName"] = resolvedName
                 batch.update(userRef, updates)
-                
-                if (email != null) {
-                    authRepository.migratePreRegistration(email, uid)
-                }
             }
             
             batch.commit().await()
