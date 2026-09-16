@@ -1,5 +1,7 @@
 package com.antigravity.healthagent.domain.model
 
+import androidx.compose.runtime.Immutable
+
 /**
  * Value Object para agrupar os campos de geolocalização de focos.
  * Estes campos são nulláveis e só são preenchidos quando o agente
@@ -7,6 +9,7 @@ package com.antigravity.healthagent.domain.model
  *
  * Used as @Embedded in the House entity — column names match the SQLite schema.
  */
+@Immutable
 data class GeoCapture(
     val latitude: Double? = null,
     val longitude: Double? = null,

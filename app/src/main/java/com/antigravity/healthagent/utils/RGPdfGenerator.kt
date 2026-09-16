@@ -13,6 +13,7 @@ import com.antigravity.healthagent.R
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.fitToWidth
 import java.io.File
@@ -81,7 +82,7 @@ object RGPdfGenerator {
         try {
             pdfDocument.writeTo(FileOutputStream(file))
         } catch (e: IOException) {
-            e.printStackTrace()
+            AppLogger.e("RGPdfGenerator", "Erro ao salvar RG PDF", e)
         } finally {
             pdfDocument.close()
         }
@@ -117,7 +118,7 @@ object RGPdfGenerator {
         canvas.drawText(secText, finalSecX, secTyCalculated, textPaint)
         
         val nextY = headerY + 10 + 10.2f
-        val logoBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.logo_vigilancia_ambiental)
+        val logoBitmap = com.antigravity.healthagent.utils.BitmapCache.getLogo(context, R.drawable.logo_vigilancia_ambiental)
         if (logoBitmap != null) {
             val logoWidth = 140
             val finalLogoWidth = if (logoWidth > headerAreaWidth) headerAreaWidth.toInt() else logoWidth

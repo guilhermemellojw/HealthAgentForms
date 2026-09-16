@@ -2,9 +2,8 @@ package com.antigravity.healthagent.domain.usecase
 
 import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.domain.repository.HouseRepository
+import com.antigravity.healthagent.utils.DateUtils
 import javax.inject.Inject
-import java.text.SimpleDateFormat
-import java.util.Locale
 import java.util.Calendar
 import java.util.Date
 
@@ -52,8 +51,7 @@ class DayManagementUseCase @Inject constructor(
         try {
             if (isAdmin) return true
             
-            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
-            val todayStr = sdf.format(Date())
+            val todayStr = DateUtils.formatDash(Date())
             
             if (currentDate == todayStr) return true
             
@@ -68,9 +66,8 @@ class DayManagementUseCase @Inject constructor(
 
     suspend fun getPreviousWorkDay(agentUid: String?): String? {
         return try {
-            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
-            val todayStr = sdf.format(Date())
-            val todayObj = sdf.parse(todayStr) ?: return null
+            val todayStr = DateUtils.formatDash(Date())
+            val todayObj = DateUtils.parseDash(todayStr) ?: return null
             
             val activities = repository.getAllDayActivitiesOnce(agentUid ?: "")
             
@@ -80,7 +77,7 @@ class DayManagementUseCase @Inject constructor(
                     try {
                         // FIX: Normalize date to prevent parsing failure if it contains '/'
                         val normalizedDate = activity.date.replace("/", "-")
-                        val dateObj = sdf.parse(normalizedDate)
+                        val dateObj = DateUtils.parseDash(normalizedDate)
                         if (dateObj != null && dateObj.before(todayObj)) {
                             dateObj to normalizedDate
                         } else null
@@ -95,9 +92,8 @@ class DayManagementUseCase @Inject constructor(
 
     suspend fun getNextBusinessDay(date: String, agentUid: String? = null): String {
         return try {
-            val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
             val cal = Calendar.getInstance()
-            val dateObj = sdf.parse(date) ?: return ""
+            val dateObj = DateUtils.parseDash(date) ?: return ""
             cal.time = dateObj
             
             var attempts = 0
@@ -112,7 +108,7 @@ class DayManagementUseCase @Inject constructor(
                 }
                 
                 // Check if this day has a non-NORMAL status
-                val nextDateStr = sdf.format(cal.time)
+                val nextDateStr = DateUtils.formatDash(cal.time)
                 val activity = repository.getDayActivity(nextDateStr, agentUid)
                 val status = activity?.status ?: "NORMAL"
                 
@@ -124,7 +120,7 @@ class DayManagementUseCase @Inject constructor(
                 // Otherwise, skip this day (FERIADO, TEMPO CHUVOSO, etc.)
             } while (attempts < 30) // Safety limit to prevent infinite loop
             
-            sdf.format(cal.time)
+            DateUtils.formatDash(cal.time)
         } catch (e: Exception) {
             ""
         }

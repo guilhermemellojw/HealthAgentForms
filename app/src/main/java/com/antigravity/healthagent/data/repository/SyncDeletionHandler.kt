@@ -21,10 +21,6 @@ class SyncDeletionHandler @Inject constructor(
     private val settingsManager: SettingsManager,
     private val syncSchedulerProvider: Provider<SyncScheduler>
 ) {
-    private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        return houseRepository.runInTransaction { block() }
-    }
-
     suspend fun deleteAgentHouse(agentUid: String, houseId: String): Result<Unit> {
         return try {
             val agentRef = firestore.collection("agents").document(agentUid)
@@ -153,7 +149,7 @@ class SyncDeletionHandler @Inject constructor(
                         agentUid = currentUid
                     )
                 }
-                runInTransactionWithRetry {
+                houseRepository.runInTransaction {
                     houseRepository.insertTombstones(houseTombstones)
                     houseRepository.insertTombstones(activityTombstones)
                 }
@@ -247,7 +243,7 @@ class SyncDeletionHandler @Inject constructor(
             
             recordBulkDeletions(houseKeys, emptyList(), agentUid)
             
-            runInTransactionWithRetry {
+            houseRepository.runInTransaction {
                 houses.forEach { house ->
                     houseRepository.deleteHouseById(house.id)
                 }

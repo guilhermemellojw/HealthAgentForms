@@ -12,15 +12,23 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.ui.state.SyncUiState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.text.font.FontWeight
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
+import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.ui.components.HouseRowItem
-import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.rg.RgViewModel
 import android.widget.Toast
@@ -42,7 +50,8 @@ fun RGScreen(
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val rgBlocks by viewModel.rgBlocks.collectAsState()
     val selectedRgBlock by viewModel.selectedRgBlock.collectAsState()
@@ -118,7 +127,7 @@ fun RGScreen(
                                  }
                                  sharePdf(context, file)
                              } catch (e: Exception) {
-                                 e.printStackTrace()
+                                 AppLogger.e("RGScreen", "Erro ao gerar PDF", e)
                                  Toast.makeText(context, "Erro ao gerar PDF: ${e.message}", Toast.LENGTH_SHORT).show()
                              }
                         }
@@ -131,17 +140,39 @@ fun RGScreen(
             }
         }
     ) { paddingValues ->
-        val syncState by viewModel.syncState.collectAsState()
+        val syncFeedback by feedbackManager.feedback.collectAsState()
         val currentUserUid by viewModel.currentUserUid.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
 
+        val isRefreshing = syncFeedback is SyncUiState.Syncing
+        val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
+
         PullToRefreshBox(
-            isRefreshing = syncState is SyncUiState.Syncing,
+            isRefreshing = isRefreshing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
+            indicator = {
+                CustomSyncPullIndicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    isSolarMode = isSolarMode,
+                    syncStatus = syncFeedback
+                )
+            },
             modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
+                if (!isPullActive) {
+                    SyncCompactBalloon(
+                        feedbackManager = feedbackManager,
+                        isEasyMode = isEasyMode,
+                        isSolarMode = isSolarMode,
+                        isPullActive = isPullActive,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(3000f)
+                    )
+                }
                 com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
                 Column(
                     modifier = Modifier
@@ -242,13 +273,25 @@ fun RGScreen(
                         }
                     }
                 } else {
-                    // DETAIL MODE: List of Houses
+                    val groupedByAgent = rgFilteredList.foldIndexed(
+                        emptyList<Triple<Int, String, List<House>>>()
+                    ) { index, acc, house ->
+                        val lastGroup = acc.lastOrNull()
+                        if (lastGroup != null && lastGroup.second == house.agentUid) {
+                            val updated = lastGroup.copy(third = lastGroup.third + house)
+                            acc.dropLast(1) + updated
+                        } else {
+                            acc + Triple(index, house.agentUid, listOf(house))
+                        }
+                    }
+
+                    // DETAIL MODE: List of Houses grouped by agent (order-preserving)
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 100.dp)
                     ) {
                         if (rgFilteredList.isEmpty()) {
-                             item {
+                            item {
                                 Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
                                     Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
                                         Icon(
@@ -267,13 +310,16 @@ fun RGScreen(
                                 }
                             }
                         } else {
-                            items(rgFilteredList, key = { it.id }) { house ->
-                                RGHouseRow(
-                                    house = house,
-                                    isEasyMode = isEasyMode,
-                                    isSolarMode = isSolarMode,
-                                    currentUserUid = currentUserUid ?: ""
-                                )
+                            groupedByAgent.forEach { (sortKey, agentUid, houses) ->
+                                val agentName = houses.first().agentName
+                                item(key = "group_$sortKey") {
+                                    AgentGroupCard(
+                                        agentName = agentName,
+                                        houses = houses,
+                                        isSolarMode = isSolarMode,
+                                        isEasyMode = isEasyMode
+                                    )
+                                }
                             }
                         }
                     }

@@ -44,18 +44,22 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
+import com.antigravity.healthagent.domain.logger.AppLogger
+import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.ui.home.HomeViewModel
 import com.antigravity.healthagent.ui.home.BoletimSummary
 import com.antigravity.healthagent.ui.home.BlockSummary
 import com.antigravity.healthagent.ui.home.DashboardTotals
 import com.antigravity.healthagent.data.local.model.House
 
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.CompactDropdown
 import com.antigravity.healthagent.ui.components.MeshGradient
-import com.antigravity.healthagent.ui.components.SyncStatusOverlay
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
-import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
 import com.antigravity.healthagent.utils.formatStreetName
 
 
@@ -66,10 +70,12 @@ fun BoletimScreen(
     onOpenSettings: () -> Unit = {},
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
-    onSwitchAccount: () -> Unit = {}
+    onSwitchAccount: () -> Unit = {},
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val boletimList by viewModel.boletimList.collectAsState()
+    val maxOpenHouses by viewModel.maxOpenHouses.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -77,31 +83,34 @@ fun BoletimScreen(
     
     // Logic for Manual Date Transfer
     var moveSourceDate by remember { mutableStateOf("") }
-    if (moveSourceDate.isNotBlank()) {
-        val calendar = java.util.Calendar.getInstance()
-        try {
-            val parts = moveSourceDate.split("-")
-            if (parts.size == 3) {
-                calendar.set(parts[2].toInt(), parts[1].toInt() - 1, parts[0].toInt())
-            }
-        } catch (e: Exception) { e.printStackTrace() }
+    var showMoveDatePicker by remember { mutableStateOf(false) }
 
-        DatePickerDialog(
-            context,
-            { _, year, month, dayOfMonth ->
-                val newDate = String.format(java.util.Locale("pt", "BR"), "%02d-%02d-%04d", dayOfMonth, month + 1, year)
-                if (newDate != moveSourceDate) {
-                    viewModel.moveHousesToDate(moveSourceDate, newDate)
-                    // Snackbar removed here; ViewModel's uiEvent will handle success/error feedback
+    if (showMoveDatePicker && moveSourceDate.isNotBlank()) {
+        LaunchedEffect(moveSourceDate) {
+            val calendar = java.util.Calendar.getInstance()
+            try {
+                val parts = moveSourceDate.split("-")
+                if (parts.size == 3) {
+                    calendar.set(parts[2].toInt(), parts[1].toInt() - 1, parts[0].toInt())
                 }
-                moveSourceDate = ""
-            },
-            calendar.get(java.util.Calendar.YEAR),
-            calendar.get(java.util.Calendar.MONTH),
-            calendar.get(java.util.Calendar.DAY_OF_MONTH)
-        ).apply {
-            setOnDismissListener { moveSourceDate = "" }
-            show()
+            } catch (e: Exception) { AppLogger.e("BoletimScreen", "Erro no DatePickerDialog", e) }
+
+            val dialog = DatePickerDialog(
+                context,
+                { _, year, month, dayOfMonth ->
+                    val newDate = String.format(java.util.Locale("pt", "BR"), "%02d-%02d-%04d", dayOfMonth, month + 1, year)
+                    if (newDate != moveSourceDate) {
+                        viewModel.moveHousesToDate(moveSourceDate, newDate)
+                    }
+                    moveSourceDate = ""
+                },
+                calendar.get(java.util.Calendar.YEAR),
+                calendar.get(java.util.Calendar.MONTH),
+                calendar.get(java.util.Calendar.DAY_OF_MONTH)
+            )
+            dialog.setOnDismissListener { moveSourceDate = "" }
+            showMoveDatePicker = false
+            dialog.show()
         }
     }
     
@@ -124,7 +133,7 @@ fun BoletimScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var deleteDate by remember { mutableStateOf("") }
     
-    val dateSdf = remember { java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US) }
+    val dateSdf = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get()
     
     fun isDateOld(dateStr: String): Boolean {
         return try {
@@ -262,16 +271,40 @@ fun BoletimScreen(
         }
     ) { paddingValues ->
         val isSyncing by viewModel.isSyncing.collectAsState()
+        val syncFeedback by feedbackManager.feedback.collectAsState()
+        val isRefreshing = syncFeedback is SyncUiState.Syncing || isSyncing
         val pullToRefreshState = rememberPullToRefreshState()
 
+        val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
+
         PullToRefreshBox(
-            isRefreshing = isSyncing,
+            isRefreshing = isRefreshing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
+            indicator = {
+                CustomSyncPullIndicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    isSolarMode = uiState.isSolarMode,
+                    syncStatus = syncFeedback
+                )
+            },
             modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-            com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
+                if (!isPullActive) {
+                    SyncCompactBalloon(
+                        feedbackManager = feedbackManager,
+                        isEasyMode = uiState.isEasyMode,
+                        isSolarMode = uiState.isSolarMode,
+                        isPullActive = isPullActive,
+                        showWhenIdle = true,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(3000f)
+                    )
+                }
+                com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
             
             Column(modifier = Modifier.fillMaxSize()) {
                 
@@ -384,15 +417,14 @@ fun BoletimScreen(
                                          }
                                      }
                                      
-                                     // Individual Status Badge
-                                     StatusBadge(
-                                         text = if (block.isCompleted) "CONCLUÍDO" else "EM ABERTO",
-                                         containerColor = if (block.isCompleted) 
-                                             androidx.compose.ui.graphics.Color(0xFF4CAF50) // Green 
-                                         else 
-                                             androidx.compose.ui.graphics.Color(0xFFFF9800), // Orange
-                                         contentColor = androidx.compose.ui.graphics.Color.White
-                                     )
+                                      StatusBadge(
+                                          text = if (summary.totals.worked >= maxOpenHouses) "CONCLUÍDO" else "EM ABERTO",
+                                          containerColor = if (summary.totals.worked >= maxOpenHouses)
+                                              androidx.compose.ui.graphics.Color(0xFF4CAF50)
+                                          else
+                                              androidx.compose.ui.graphics.Color(0xFFFF9800),
+                                          contentColor = androidx.compose.ui.graphics.Color.White
+                                      )
                                  }
                                  
                                  if (index < summary.blocks.size - 1) {
@@ -440,7 +472,7 @@ fun BoletimScreen(
                                                 context.startActivity(Intent.createChooser(intent, "Compartilhar FAD"))
                                             } catch (e: Exception) {
                                                 scope.launch { snackbarHostState.showSnackbar("Erro ao gerar PDF") }
-                                                e.printStackTrace()
+                                                AppLogger.e("BoletimScreen", "Erro ao gerar PDF", e)
                                             }
                                         }
                                     }
@@ -467,7 +499,7 @@ fun BoletimScreen(
                                                 shareToWhatsApp(context, shareName, summary.date, houses)
                                             } catch (e: Exception) {
                                                 Toast.makeText(context, "Erro ao compartilhar.", Toast.LENGTH_SHORT).show()
-                                                e.printStackTrace()
+                                                AppLogger.e("BoletimScreen", "Erro ao compartilhar WhatsApp", e)
                                             }
                                         }
                                     }
@@ -505,6 +537,7 @@ fun BoletimScreen(
                                             showMenu = false
                                             checkHistoryAndProceed(summary.date) {
                                                 moveSourceDate = summary.date
+                                                showMoveDatePicker = true
                                             }
                                         }
                                     )
@@ -548,10 +581,9 @@ fun BoletimScreen(
                         )
                     }
                 }
-            }
-
         }
     }
+}
 }
 }
 }
@@ -599,6 +631,13 @@ private fun shareToWhatsApp(
     val abandonados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
     val vazios = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.V }
     val comFoco = houses.count { it.treatment.comFoco }
+    val bairros = houses
+        .filter { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE || it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY }
+        .map { it.address.bairro.uppercase() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .sorted()
+    val totalLarvicida = houses.sumOf { it.treatment.larvicida }
 
     // Format WhatsApp message
     val sb = StringBuilder()
@@ -613,6 +652,11 @@ private fun shareToWhatsApp(
     sb.append("🚫 Recusados: $recusados\n")
     sb.append("🏚️ Abandonados: $abandonados\n")
     sb.append("📭 Vazios: $vazios\n")
+    sb.append("🧪 Larvicida: ${String.format(java.util.Locale("pt", "BR"), "%.1f", totalLarvicida)}g\n")
+
+    if (bairros.isNotEmpty()) {
+        sb.append("\n📍 *Bairro(s):* ${bairros.joinToString("/ ")}\n")
+    }
 
 
     val message = sb.toString().trim()

@@ -1,6 +1,7 @@
 package com.antigravity.healthagent.data.local.model
 
 import androidx.room.*
+import androidx.compose.runtime.Immutable
 import com.antigravity.healthagent.domain.model.DailyContext
 import com.antigravity.healthagent.domain.model.GeoCapture
 import com.antigravity.healthagent.domain.model.TreatmentData
@@ -14,11 +15,12 @@ import com.antigravity.healthagent.utils.toDashDate
     indices = [
         Index(
             value = ["agentUid", "agentName", "data", "blockNumber", "blockSequence", "streetName", "number", "sequence", "complement", "bairro", "visitSegment"],
-            unique = true
+            unique = false
         ),
         Index(value = ["data", "agentUid"])
     ]
 )
+@Immutable
 data class House(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     @Embedded val address: VisitAddress = VisitAddress(),
@@ -38,6 +40,7 @@ data class House(
     @ColumnInfo(defaultValue = "0") val createdAt: Long = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
     @ColumnInfo(defaultValue = "0") val isSynced: Boolean = false,
     @ColumnInfo(defaultValue = "0") val editedByAdmin: Boolean = false,
+    @ColumnInfo(defaultValue = "''") val uuid: String = "",
     /**
      * Timestamp of the last local or remote modification.
      * 
@@ -60,6 +63,8 @@ data class House(
      * will break synchronization by changing the document ID in Firestore, leading to duplicates.
      */
     fun generateNaturalKey(): String {
+        if (uuid.isNotBlank()) return uuid
+        
         val normalizedDate = data.toDashDate()
         
         // Uniqueness is guaranteed by agentUid + normalizedAgent + date + address details + visitSegment.
@@ -71,52 +76,29 @@ data class House(
      * or visit segments shift. Used for deduplication and healing during sync.
      */
     fun generateIdentityKey(): String {
+        if (uuid.isNotBlank()) return uuid
+        
         val normalizedDate = data.toDashDate()
         
         // Identity is Agent(UID) + Day + Address Signature (excluding segment)
         return "${agentUid}_${normalizedDate}_${address.generateAddressSignature()}".uppercase()
     }
 
-
-    fun toFirestoreMap(): Map<String, Any?> {
-        return mapOf(
-            "blockNumber" to address.blockNumber,
-            "streetName" to address.streetName,
-            "number" to address.number,
-            "sequence" to address.sequence,
-            "complement" to address.complement,
-            "bairro" to address.bairro,
-            "blockSequence" to address.blockSequence,
-            "propertyType" to propertyType.name,
-            "situation" to situation.name,
-            "municipio" to context.municipio,
-            "categoria" to context.categoria,
-            "zona" to context.zona,
-            "tipo" to context.tipo,
-            "data" to data.toDashDate(),
-            "ciclo" to context.ciclo,
-            "atividade" to context.atividade,
-            "agentName" to agentName.uppercase(),
-            "a1" to treatment.a1, "a2" to treatment.a2, "b" to treatment.b, "c" to treatment.c,
-            "d1" to treatment.d1, "d2" to treatment.d2, "e" to treatment.e,
-            "eliminados" to treatment.eliminados,
-            "larvicida" to treatment.larvicida,
-            "comFoco" to treatment.comFoco,
-            "localidadeConcluida" to localidadeConcluida,
-            "quarteiraoConcluido" to quarteiraoConcluido,
-            "listOrder" to listOrder,
-            "visitSegment" to visitSegment,
-            "agentUid" to agentUid,
-            "lastSyncTime" to com.antigravity.healthagent.utils.TimeManager.currentTimeMillis(),
-            "createdAt" to createdAt,
-            "observation" to observation,
-            "latitude" to geo.latitude,
-            "longitude" to geo.longitude,
-            "focusCaptureTime" to geo.focusCaptureTime,
-            "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-            "editedByAdmin" to editedByAdmin
-        )
+    /**
+     * Physical dedup key: NEVER uses uuid. Two inserts producing the same key for the
+     * same agent+day represent the same house (same number/sequence/complement on the
+     * same street/block/bairro). Used by the duplicate guards and the in-flight merge
+     * so that quickly re-added houses (which get fresh UUIDs) cannot create duplicates.
+     * Sync identity (uuid) is intentionally NOT used here.
+     */
+    fun generatePhysicalKey(): String {
+        if (uuid.isNotBlank()) return uuid
+        val normalizedDate = data.toDashDate()
+        return "${agentUid}_${normalizedDate}_${address.generateAddressSignature()}".uppercase()
     }
+
+
+
 
     @get:com.google.firebase.firestore.Exclude
     val hasAnyTreatment: Boolean 
