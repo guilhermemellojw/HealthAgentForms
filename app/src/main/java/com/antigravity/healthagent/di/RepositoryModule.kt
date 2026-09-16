@@ -1,6 +1,8 @@
 package com.antigravity.healthagent.di
 
 import com.antigravity.healthagent.domain.repository.HouseRepository
+import com.antigravity.healthagent.domain.repository.HouseReadRepository
+import com.antigravity.healthagent.domain.repository.HouseWriteRepository
 import com.antigravity.healthagent.data.repository.HouseRepositoryImpl
 import dagger.Binds
 import dagger.Module
@@ -17,6 +19,18 @@ abstract class RepositoryModule {
     abstract fun bindHouseRepository(
         houseRepositoryImpl: HouseRepositoryImpl
     ): HouseRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindHouseReadRepository(
+        houseRepositoryImpl: HouseRepositoryImpl
+    ): HouseReadRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindHouseWriteRepository(
+        houseRepositoryImpl: HouseRepositoryImpl
+    ): HouseWriteRepository
 
     @Binds
     @Singleton
@@ -47,4 +61,10 @@ abstract class RepositoryModule {
     abstract fun bindAppLogger(
         androidLoggerImpl: com.antigravity.healthagent.data.util.AndroidLoggerImpl
     ): com.antigravity.healthagent.domain.logger.AppLogger
+
+    @Binds
+    @Singleton
+    abstract fun bindStreetRepository(
+        streetRepositoryImpl: com.antigravity.healthagent.data.repository.StreetRepository
+    ): com.antigravity.healthagent.domain.repository.StreetRepository
 }

@@ -14,10 +14,6 @@ class TeamworkSyncHandler @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val houseRepository: HouseRepository
 ) {
-    private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        return houseRepository.runInTransaction { block() }
-    }
-
     suspend fun performTeamworkSync(
         uid: String,
         cloudHouses: MutableList<House>,
@@ -61,7 +57,7 @@ class TeamworkSyncHandler @Inject constructor(
                     }
                     if (safeToDeleteTeam.isNotEmpty()) {
                         AppLogger.i("TeamworkSyncHandler", "Team Sync: Deleting ${safeToDeleteTeam.size} houses removed by colleagues.")
-                        runInTransactionWithRetry {
+                        houseRepository.runInTransaction {
                             safeToDeleteTeam.forEach { houseRepository.deleteHouse(it) }
                         }
                     }

@@ -6,6 +6,7 @@ import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.repository.AccessRequest
 import com.antigravity.healthagent.domain.repository.AgentRepository
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Source
@@ -143,7 +144,33 @@ class AccessControlRepositoryImpl @Inject constructor(
 
     override suspend fun changeUserRole(uid: String, role: UserRole): Result<Unit> {
         return try {
-            firestore.collection("users").document(uid).update("role", role.name).await()
+            val batch = firestore.batch()
+            val userRef = firestore.collection("users").document(uid)
+            batch.update(userRef, "role", role.name)
+            
+            val adminRef = firestore.collection("admins").document(uid)
+            val supervisorRef = firestore.collection("supervisors").document(uid)
+            
+            when (role) {
+                UserRole.ADMIN -> {
+                    val userDoc = userRef.get().await()
+                    val email = userDoc.getString("email") ?: ""
+                    batch.set(adminRef, mapOf("email" to email.trim().lowercase()))
+                    batch.delete(supervisorRef)
+                }
+                UserRole.SUPERVISOR -> {
+                    val userDoc = userRef.get().await()
+                    val email = userDoc.getString("email") ?: ""
+                    batch.set(supervisorRef, mapOf("email" to email.trim().lowercase()))
+                    batch.delete(adminRef)
+                }
+                else -> {
+                    batch.delete(adminRef)
+                    batch.delete(supervisorRef)
+                }
+            }
+            
+            batch.commit().await()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -212,18 +239,19 @@ class AccessControlRepositoryImpl @Inject constructor(
                     firestore.collection("agents").document(uid).update("agentName", newAgentName).await()
                 } catch(e: Exception) { }
             }
-            
+
             firestore.collection("users").document(uid).update(finalUpdates).await()
-            
+
             val agentMetadata = mutableMapOf<String, Any?>()
+            val newAgentName = (nameChange as? AgentNameChange.Set)?.name
             if (newAgentName != null) agentMetadata["agentName"] = newAgentName
             updates["email"]?.let { agentMetadata["email"] = it }
             updates["photoUrl"]?.let { agentMetadata["photoUrl"] = it }
-            
+
             if (agentMetadata.isNotEmpty()) {
                 firestore.collection("agents").document(uid).set(agentMetadata, com.google.firebase.firestore.SetOptions.merge()).await()
             }
-            
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -272,8 +300,8 @@ class AccessControlRepositoryImpl @Inject constructor(
 
     override suspend fun deleteUser(uid: String): Result<Unit> {
         return try {
-            agentRepository.deleteAgent(uid).onFailure { error -> 
-                android.util.Log.e("AccessControlRepository", "Failed to delete agent data: ${error.message}")
+            agentRepository.purgeAgentCompletely(uid).onFailure { error -> 
+                AppLogger.e("AccessControlRepository", "Failed to purge agent data completely: ${error.message}")
             }
 
             val batch = firestore.batch()
@@ -305,7 +333,7 @@ class AccessControlRepositoryImpl @Inject constructor(
                     userRef.set(newUser).await()
                 }
             } catch (e: Exception) {
-                android.util.Log.w("AccessControlRepository", "Could not ensure user profile: ${e.message}")
+                AppLogger.w("AccessControlRepository", "Could not ensure user profile: ${e.message}")
             }
 
             val request = mapOf(
@@ -408,4 +436,90 @@ class AccessControlRepositoryImpl @Inject constructor(
             }
         awaitClose { listener.remove() }
     }
+
+    private suspend fun shouldRenameProduction(uid: String, newName: String): Boolean {
+        return try {
+            val existing = firestore.collection("agents").document(uid)
+                .get(Source.DEFAULT).await()
+                .getString("agentName")?.trim()?.uppercase()
+            existing != newName
+        } catch (e: Exception) {
+            AppLogger.w("AccessControlRepository", "Could not read current agentName for $uid, renaming anyway: ${e.message}")
+            true
+        }
+    }
+
+    private suspend fun renameAgentProduction(uid: String, newAgentName: String) {
+        try {
+            val agentRef = firestore.collection("agents").document(uid)
+            renameCollectionField(agentRef.collection("houses"), newAgentName)
+            renameCollectionField(agentRef.collection("day_activities"), newAgentName)
+            AppLogger.d("AccessControlRepository", "Renamed production for $uid to $newAgentName")
+        } catch (e: Exception) {
+            AppLogger.e("AccessControlRepository", "Failed to rename production for $uid", e)
+        }
+    }
+
+    private suspend fun renameCollectionField(ref: com.google.firebase.firestore.CollectionReference, value: String) {
+        var lastDoc: com.google.firebase.firestore.DocumentSnapshot? = null
+        while (true) {
+            val query = if (lastDoc == null) {
+                ref.orderBy(com.google.firebase.firestore.FieldPath.documentId()).limit(450).get(Source.SERVER).await()
+            } else {
+                ref.orderBy(com.google.firebase.firestore.FieldPath.documentId()).startAfter(lastDoc).limit(450).get(Source.SERVER).await()
+            }
+            if (query.isEmpty) return
+            var batch = firestore.batch()
+            var ops = 0
+            query.documents.forEach { doc ->
+                batch.update(doc.reference, "agentName", value)
+                ops++
+                lastDoc = doc
+                if (ops == 450) {
+                    batch.commit().await()
+                    batch = firestore.batch()
+                    ops = 0
+                }
+            }
+            if (ops > 0) batch.commit().await()
+        }
+    }
+}
+
+internal fun buildPreRegisteredUserData(
+    email: String,
+    role: UserRole,
+    agentName: String?,
+    isAuthorized: Boolean,
+    createdAt: Long
+): Map<String, Any?> {
+    val normalizedAgentName = agentName?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+    val userData = mutableMapOf<String, Any?>(
+        "email" to email,
+        "role" to role.name,
+        "isAuthorized" to isAuthorized,
+        "createdAt" to createdAt,
+        "isPreRegistered" to true
+    )
+    if (normalizedAgentName != null) {
+        userData["agentName"] = normalizedAgentName
+    }
+    return userData
+}
+
+internal sealed class AgentNameChange {
+    data class Set(val name: String) : AgentNameChange()
+    object Clear : AgentNameChange()
+    object None : AgentNameChange()
+}
+
+internal fun resolveProfileAgentNameChange(updates: Map<String, Any?>): AgentNameChange {
+    if (!updates.containsKey("agentName")) return AgentNameChange.None
+    val name = (updates["agentName"] as? String)?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+    return if (name != null) AgentNameChange.Set(name) else AgentNameChange.Clear
+}
+
+internal fun resolveApprovalAgentName(dialogAgentName: String?, requestedName: String?): String? {
+    return dialogAgentName?.takeIf { it.isNotBlank() }?.trim()?.uppercase()
+        ?: requestedName?.takeIf { it.isNotBlank() }?.trim()?.uppercase()
 }

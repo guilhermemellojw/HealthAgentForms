@@ -13,14 +13,20 @@ interface SyncRepository {
         houses: List<House>, 
         activities: List<DayActivity>, 
         targetUid: String? = null,
-        shouldReplace: Boolean = false
+        shouldReplace: Boolean = false,
+        isFullWipe: Boolean = false
     ): Result<Unit>
     
-
     /**
      * Pulls data from Firestore and replaces the local Room database content.
+     * Returns SyncResult with cloudMaxTime and clockSkewMs for timestamp synchronization.
      */
-    suspend fun pullCloudDataToLocal(targetUid: String? = null, force: Boolean = false): Result<Unit>
+    suspend fun pullCloudDataToLocal(targetUid: String? = null, force: Boolean = false): Result<SyncResult>
+
+    data class SyncResult(
+        val cloudMaxTime: Long? = null,
+        val clockSkewMs: Long = 0L
+    )
 
 
     /**

@@ -44,6 +44,7 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun deleteHouse(house: House, force: Boolean) { deletedHouses.add(house) }
         override suspend fun replaceAllHouses(houses: List<House>) {}
         override suspend fun getHousesByDateAndAgent(date: String, agentUid: String): List<House> = emptyList()
+        override fun getHousesByDateAndAgentFlow(date: String, agentUid: String): Flow<List<House>> = flowOf(emptyList())
 
         override fun getDayActivities(dates: List<String>, agentUid: String?): Flow<List<DayActivity>> = flowOf(emptyList())
         override fun getDayActivityFlow(date: String, agentUid: String?): Flow<DayActivity?> = flowOf(null)
@@ -102,11 +103,14 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun deleteTombstones(ids: List<Int>) {}
         override suspend fun deleteTombstonesByAgent(agentUid: String) {}
         override suspend fun pruneOldTombstones(threshold: Long) {}
+        override suspend fun updateBatchOrders(updates: List<Triple<Int, Long, Int>>) {}
+        override suspend fun updateBatchSegments(updates: List<Pair<Int, Int>>) {}
     }
 
     private val mockSyncRepository = object : SyncRepository {
-        override suspend fun pushLocalDataToCloud(houses: List<House>, activities: List<DayActivity>, targetUid: String?, shouldReplace: Boolean): Result<Unit> = Result.success(Unit)
-        override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> = Result.success(Unit)
+        override suspend fun pushLocalDataToCloud(houses: List<House>, activities: List<DayActivity>, targetUid: String?, shouldReplace: Boolean, isFullWipe: Boolean): Result<Unit> = Result.success(Unit)
+        override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<SyncRepository.SyncResult> =
+            Result.success(SyncRepository.SyncResult(cloudMaxTime = null, clockSkewMs = 0L))
         override suspend fun clearLocalData(): Result<Unit> = Result.success(Unit)
         override suspend fun clearAgentData(agentUid: String): Result<Unit> = Result.success(Unit)
         override suspend fun restoreLocalData(houses: List<House>, activities: List<DayActivity>, agentUid: String?): Result<Unit> = Result.success(Unit)
@@ -126,10 +130,10 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun pruneOldTombstones(): Result<Unit> = Result.success(Unit)
         override suspend fun deleteHousesSurgically(agentUid: String, houses: List<House>): Result<Unit> = Result.success(Unit)
     }
-
     private val mockAgentRepository = object : AgentRepository {
         override suspend fun createAgent(email: String, agentName: String?): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAgent(uid: String): Result<Unit> = Result.success(Unit)
+        override suspend fun purgeAgentCompletely(uid: String): Result<Unit> = Result.success(Unit)
         override suspend fun fetchAgentNames(): Result<List<String>> = Result.success(emptyList())
         override suspend fun addAgentName(name: String): Result<Unit> = Result.success(Unit)
         override suspend fun deleteAgentName(name: String): Result<Unit> = Result.success(Unit)
@@ -141,7 +145,6 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun clearSyncError(uid: String): Result<Unit> = Result.success(Unit)
         override suspend fun transferAgentData(fromUid: String, toUid: String): Result<Unit> = Result.success(Unit)
         override fun observeAgentProduction(uid: String, datePattern: String?): Flow<AgentData> = flowOf()
-
     }
 
     private val useCase = CleanupHistoricalDataUseCase(mockHouseRepository, mockSyncRepository, mockAgentRepository)

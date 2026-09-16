@@ -16,9 +16,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.domain.repository.UserRole
+import kotlinx.coroutines.launch
 import com.antigravity.healthagent.ui.auth.AuthState
 import com.antigravity.healthagent.ui.auth.LoginViewModel
 import com.antigravity.healthagent.ui.components.*
@@ -30,7 +30,10 @@ import com.antigravity.healthagent.ui.settings.SettingsScreen
 import com.antigravity.healthagent.ui.boletim.BoletimScreen
 
 @Composable
-fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.healthagent.ui.home.HomeViewModel) {
+fun MainScreen(
+    loginViewModel: LoginViewModel, 
+    homeViewModel: com.antigravity.healthagent.ui.home.HomeViewModel
+) {
     val authState by loginViewModel.authState.collectAsState()
     val user = (authState as? AuthState.Authenticated)?.user
     val isAdmin = user?.role == com.antigravity.healthagent.domain.repository.UserRole.ADMIN
@@ -40,8 +43,11 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
     val adminViewModel: com.antigravity.healthagent.ui.admin.AdminViewModel = androidx.hilt.navigation.compose.hiltViewModel()
     val weeklySummaryViewModel: com.antigravity.healthagent.ui.semanal.WeeklySummaryViewModel = androidx.hilt.navigation.compose.hiltViewModel()
 
-    var selectedTab by remember(isSupervisor) { 
-        mutableIntStateOf(if (isSupervisor) 0 else 2) 
+    val selectedRemoteAgent by adminViewModel.selectedAgentForEdit.collectAsState()
+    val showSupervisorEnvironment = (isSupervisor || isAdmin) && selectedRemoteAgent == null
+
+    var selectedTab by remember(showSupervisorEnvironment) { 
+        mutableIntStateOf(if (showSupervisorEnvironment) 0 else 2) 
     }
     var showSettings by remember { mutableStateOf(false) }
     var showExitDialog by remember { mutableStateOf(false) }
@@ -77,8 +83,6 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
         val activity = context as? Activity
         // Use the shared homeViewModel passed from MainActivity
         
-        val selectedRemoteAgent by adminViewModel.selectedAgentForEdit.collectAsState()
-
         // Sync local context with remote agent selection
         LaunchedEffect(selectedRemoteAgent) {
             homeViewModel.setRemoteAgent(selectedRemoteAgent)
@@ -112,7 +116,7 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
         }
 
         BackHandler {
-            if (isSupervisor) {
+            if (showSupervisorEnvironment) {
                 if (selectedTab != 0) selectedTab = 0
                 else showExitDialog = true
                 return@BackHandler
@@ -147,7 +151,7 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
 
         Scaffold(
             topBar = {
-                if (!isSupervisor && selectedRemoteAgent != null) {
+                if (!showSupervisorEnvironment && selectedRemoteAgent != null) {
                     Surface(
                         color = MaterialTheme.colorScheme.secondaryContainer,
                         tonalElevation = 8.dp,
@@ -205,10 +209,10 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
             },
             bottomBar = {
                 com.antigravity.healthagent.ui.components.GlassBottomNavigationBar(
-                    isSupervisor = isSupervisor,
+                    isSupervisor = showSupervisorEnvironment,
                     selectedTab = selectedTab,
                     onTabSelected = { index ->
-                        if (isSupervisor) {
+                        if (showSupervisorEnvironment) {
                             selectedTab = index
                         } else {
                             if (index == 0 && selectedTab != 0) {
@@ -242,8 +246,8 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
             }
         ) { paddingValues ->
             Box(modifier = Modifier.padding(paddingValues)) {
-                com.antigravity.healthagent.ui.navigation.AppNavigation(
-                    isSupervisor = isSupervisor,
+                 com.antigravity.healthagent.ui.navigation.AppNavigation(
+                    isSupervisor = showSupervisorEnvironment,
                     selectedTab = selectedTab,
                     isEasyMode = isEasyMode,
                     user = user,
@@ -252,26 +256,6 @@ fun MainScreen(loginViewModel: LoginViewModel, homeViewModel: com.antigravity.he
                     onLogout = { loginViewModel.signOut() },
                     onSwitchAccount = { loginViewModel.signOut() },
                     onOpenSettings = { showSettings = true }
-                )
-                
-                // Unified Sync Status Feedback for all screens
-                val uiState by homeViewModel.uiState.collectAsState()
-                
-                SyncFloatingBalloon(
-                    syncStatus = uiState.syncStatus,
-                    isEasyMode = uiState.isEasyMode,
-                    isSolarMode = uiState.isSolarMode,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .zIndex(3000f)
-                )
-
-                SyncStatusOverlay(
-                    syncStatus = uiState.syncStatus,
-                    isEasyMode = uiState.isEasyMode,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .zIndex(4000f)
                 )
             }
         }

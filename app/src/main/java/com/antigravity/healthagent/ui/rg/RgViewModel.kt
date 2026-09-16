@@ -10,12 +10,13 @@ import com.antigravity.healthagent.domain.usecase.SyncDataUseCase
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.ui.home.BlockSegment
 import com.antigravity.healthagent.domain.repository.UserRole
-import com.antigravity.healthagent.ui.state.SyncUiState
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
+import com.antigravity.healthagent.domain.logger.AppLogger
+import com.antigravity.healthagent.utils.DateUtils
 import java.util.*
 import javax.inject.Inject
 
@@ -25,10 +26,11 @@ class RgViewModel @Inject constructor(
     private val getRGBlocksUseCase: GetRGBlocksUseCase,
     private val settingsManager: SettingsManager,
     private val syncRepository: SyncRepository,
-    private val syncDataUseCase: SyncDataUseCase
+    private val syncDataUseCase: SyncDataUseCase,
+    private val feedbackManager: SyncFeedbackManager
 ) : ViewModel() {
 
-    private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+    private val dateFormatter get() = DateUtils.DASH_DATE.get()
 
     private val _agentName = MutableStateFlow("")
     private val _currentUserUid = MutableStateFlow<String?>(null)
@@ -45,12 +47,11 @@ class RgViewModel @Inject constructor(
     private val _selectedRgBlock = MutableStateFlow("")
     val selectedRgBlock: StateFlow<String> = _selectedRgBlock.asStateFlow()
 
-    private val _syncState = MutableStateFlow<SyncUiState>(SyncUiState.Idle())
-    val syncState: StateFlow<SyncUiState> = _syncState.asStateFlow()
-
     val isSolarMode: StateFlow<Boolean> = settingsManager.solarMode
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val isEasyMode: StateFlow<Boolean> = settingsManager.easyMode
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     
     // Default or dynamically observed from database/settings
@@ -220,8 +221,8 @@ class RgViewModel @Inject constructor(
     }
 
     fun syncDataToCloud() {
-        if (_syncState.value is SyncUiState.Syncing) return
-        _syncState.value = SyncUiState.Syncing(progress = 0.5f, message = "Sincronizando...")
+        if (feedbackManager.isSyncing) return
+        feedbackManager.syncing(progress = 0.5f, message = "Sincronizando...")
         viewModelScope.launch {
             try {
                 val currentUid = _remoteAgentUid.value ?: _currentUserUid.value
@@ -233,15 +234,15 @@ class RgViewModel @Inject constructor(
                     if (pushResult.isSuccess) {
                         syncRepository.pruneOldTombstones()
                     }
-                    syncRepository.pullCloudDataToLocal(currentUid)
-                    _syncState.value = SyncUiState.Success(System.currentTimeMillis())
+                    val pullResult = syncRepository.pullCloudDataToLocal(currentUid)
+                    feedbackManager.success(
+                        cloudMaxTime = pullResult.getOrNull()?.cloudMaxTime,
+                        clockSkew = pullResult.getOrNull()?.clockSkewMs ?: 0L
+                    )
                 }
             } catch (e: Exception) {
-                android.util.Log.e("RgViewModel", "Sync failed", e)
-                _syncState.value = SyncUiState.Error(e.message ?: "Erro na sincronização")
-            } finally {
-                kotlinx.coroutines.delay(2000)
-                _syncState.value = SyncUiState.Idle(_syncState.value.lastSyncTime)
+                AppLogger.e("RgViewModel", "Sync failed", e)
+                feedbackManager.error(e.message ?: "Erro na sincronização")
             }
         }
     }

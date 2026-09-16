@@ -13,7 +13,6 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -21,19 +20,18 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.AccessRequest
-import java.text.SimpleDateFormat
-import java.util.*
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.MeshGradient
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.foundation.shape.CircleShape
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -512,7 +510,8 @@ fun AdminDashboardScreen(
     user: AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val users by viewModel.users.collectAsState()
@@ -524,7 +523,8 @@ fun AdminDashboardScreen(
     val selectedMonth by viewModel.selectedMonth.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    var showAddProfileDialog by remember { mutableStateOf(false) }
+    var showCreateUserDialog by remember { mutableStateOf(false) }
+    var showAddNameDialog by remember { mutableStateOf(false) }
     var selectedUidForRestore by remember { mutableStateOf<String?>(null) }
     var isSmartRestore by remember { mutableStateOf(false) }
     
@@ -588,8 +588,8 @@ fun AdminDashboardScreen(
         floatingActionButton = { 
             if (selectedTab == 0) { 
                 FloatingActionButton(onClick = { 
-                    showAddProfileDialog = true
-                }) { Icon(Icons.Default.Add, null) } 
+                    showCreateUserDialog = true
+                }) { Icon(Icons.Default.PersonAdd, null) } 
             } 
         }
     ) { padding ->
@@ -619,17 +619,42 @@ fun AdminDashboardScreen(
                     }
                 }
                 
+                val syncFeedback by feedbackManager.feedback.collectAsState()
+                val isSolarMode by viewModel.solarMode.collectAsState()
+                
                 val pullToRefreshState = rememberPullToRefreshState()
-                val isRefreshing by viewModel.isLoading.collectAsState()
+                val isRefreshing = syncFeedback is com.antigravity.healthagent.ui.state.SyncUiState.Syncing
+                val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
 
                 PullToRefreshBox(
                     isRefreshing = isRefreshing,
                     onRefresh = { viewModel.refreshAll() },
                     state = pullToRefreshState,
+                    indicator = {
+                        CustomSyncPullIndicator(
+                            state = pullToRefreshState,
+                            isRefreshing = isRefreshing,
+                            isSolarMode = isSolarMode,
+                            syncStatus = syncFeedback,
+                            pullText = "Puxe para atualizar...",
+                            releaseText = "Solte para atualizar!"
+                        )
+                    },
                     modifier = Modifier.weight(1f).fillMaxWidth()
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                    if (selectedTab == 0) {
+                        if (!isPullActive) {
+                            SyncCompactBalloon(
+                                feedbackManager = feedbackManager,
+                                isEasyMode = false,
+                                isSolarMode = isSolarMode,
+                                isPullActive = isPullActive,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .zIndex(3000f)
+                            )
+                        }
+                        if (selectedTab == 0) {
                         // Gestão Tab (Combined Profiles, Requests, and Master List)
                         Column(modifier = Modifier.fillMaxSize()) {
                             var showMasterList by remember { mutableStateOf(false) }
@@ -644,7 +669,7 @@ fun AdminDashboardScreen(
                                             request = request,
                                             isSolarMode = isSolarMode,
                                             onApprove = { showApprovalDialog = true; pendingRequest = request },
-                                            onReject = { viewModel.rejectAccess(request.id) }
+                                            onReject = { confirmTitle = "Rejeitar Acesso"; confirmMessage = "Rejeitar a solicitação de ${request.email}?"; onConfirmAction = { viewModel.rejectAccess(request.id) }; showConfirmDialog = true }
                                         )
                                     }
                                 }
@@ -754,7 +779,7 @@ fun AdminDashboardScreen(
                                                 )
                                             }
                                             AssistChip(
-                                                onClick = { showAddProfileDialog = true },
+                                                onClick = { showAddNameDialog = true },
                                                 label = { Text("Adicionar Nome") },
                                                 leadingIcon = { Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)) }
                                             )
@@ -877,8 +902,8 @@ fun AdminDashboardScreen(
         }
     }
 
-    if (showAddProfileDialog) {
-        AddProfileDialog(
+    if (showCreateUserDialog) {
+        CreateUserDialog(
             agentNamesList = agentNames,
             existingEmails = remember(users) { users.mapNotNull { it.email?.trim()?.lowercase() }.toSet() },
             linkedNames = remember(unifiedProfiles) {

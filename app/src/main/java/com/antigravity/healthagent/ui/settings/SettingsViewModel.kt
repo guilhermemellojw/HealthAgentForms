@@ -8,14 +8,14 @@ import com.antigravity.healthagent.data.backup.BackupManager
 import com.antigravity.healthagent.data.backup.BackupData
 import com.antigravity.healthagent.data.backup.BackupFrequency
 import com.antigravity.healthagent.domain.repository.HouseRepository
-import com.antigravity.healthagent.data.repository.StreetRepository
+import com.antigravity.healthagent.domain.repository.StreetRepository
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.domain.repository.AuthRepository
 import com.antigravity.healthagent.domain.repository.LocalizationRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.usecase.CleanupHistoricalDataUseCase
-import com.antigravity.healthagent.ui.state.SyncUiState
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
 import com.antigravity.healthagent.domain.usecase.RestoreDataUseCase
 import com.antigravity.healthagent.utils.SoundManager
 import com.antigravity.healthagent.ui.home.BackupConfirmation
@@ -24,8 +24,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.antigravity.healthagent.domain.logger.AppLogger
+import com.antigravity.healthagent.utils.DateUtils
 import java.io.File
-import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
 
@@ -41,49 +42,58 @@ class SettingsViewModel @Inject constructor(
     private val accessControlRepository: com.antigravity.healthagent.domain.repository.AccessControlRepository,
     private val restoreDataUseCase: RestoreDataUseCase,
     private val localizationRepository: LocalizationRepository,
-    private val syncRepository: SyncRepository
+    private val syncRepository: SyncRepository,
+    private val feedbackManager: SyncFeedbackManager
 ) : ViewModel() {
 
-    private val dateFormatter = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+    private val dateFormatter get() = DateUtils.DASH_DATE.get()
 
     val easyMode: StateFlow<Boolean> = settingsManager.easyMode
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val solarMode: StateFlow<Boolean> = settingsManager.solarMode
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val editingToolsMode: StateFlow<Boolean> = settingsManager.editingToolsMode
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     val maxOpenHouses: StateFlow<Int> = settingsManager.maxOpenHouses
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, 25)
 
     val backupFrequency: StateFlow<BackupFrequency> = settingsManager.backupFrequency
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, BackupFrequency.DAILY)
 
     val themeMode: StateFlow<String?> = settingsManager.themeMode
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val themeColor: StateFlow<String?> = settingsManager.themeColor
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val popSound: StateFlow<String> = settingsManager.popSound
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, "SILENT")
 
     val successSound: StateFlow<String> = settingsManager.successSound
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, "SILENT")
 
     val celebrationSound: StateFlow<String> = settingsManager.celebrationSound
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, "SILENT")
 
     val warningSound: StateFlow<String> = settingsManager.warningSound
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, "SILENT")
 
     private val _uiEvent = MutableStateFlow<String?>(null)
     val uiEvent: StateFlow<String?> = _uiEvent.asStateFlow()
-
-    private val _syncState = MutableStateFlow<SyncUiState>(SyncUiState.Idle())
-    val syncState: StateFlow<SyncUiState> = _syncState.asStateFlow()
 
     private val _backupConfirmation = MutableStateFlow<BackupConfirmation?>(null)
     val backupConfirmation: StateFlow<BackupConfirmation?> = _backupConfirmation.asStateFlow()
@@ -94,6 +104,7 @@ class SettingsViewModel @Inject constructor(
 
     val pendingAccessRequestsCount: StateFlow<Int> = accessControlRepository.pendingAccessRequests
         .map { it.size }
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     init {
@@ -242,8 +253,7 @@ class SettingsViewModel @Inject constructor(
                 val a = repository.getAllDayActivitiesOnce(effectiveUid ?: "")
                 val backupData = BackupData(h, a, effectiveUid ?: "", agentName)
                 
-                val sdf = SimpleDateFormat("dd-MM-yyyy_HH-mm", Locale.US)
-                val now = sdf.format(Date())
+                val now = DateUtils.formatTimestampFileExtended(Date())
                 val safeAgentName = _agentName.value.trim().replace(" ", "_").ifBlank { "Agente" }
                 val fileName = "Backup_${safeAgentName}_$now.json"
                 
@@ -252,7 +262,7 @@ class SettingsViewModel @Inject constructor(
                 backupDir.mkdirs()
                 
                 val file = File(backupDir, fileName)
-                backupManager.exportToFile(file, backupData)
+                backupManager.exportToFile(context, file, backupData)
                 
                 val authority = "${context.packageName}.fileprovider"
                 val uri = androidx.core.content.FileProvider.getUriForFile(context, authority, file)
@@ -272,7 +282,7 @@ class SettingsViewModel @Inject constructor(
                     context.startActivity(chooser)
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                AppLogger.e("SettingsViewModel", "Erro ao gerar backup", e)
                 withContext(Dispatchers.Main) {
                     _uiEvent.value = "Erro ao gerar backup para compartilhamento: ${e.message}"
                     soundManager.playWarning()
@@ -445,8 +455,8 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun cleanupHistoricalData(beforeDate: String) {
-        if (_syncState.value is SyncUiState.Syncing) return
-        _syncState.value = SyncUiState.Syncing(progress = 0.5f, message = "Limpando histórico...")
+        if (feedbackManager.isSyncing) return
+        feedbackManager.syncing(progress = 0.5f, message = "Limpando histórico...")
         _uiEvent.value = "Iniciando limpeza de histórico..."
         
         viewModelScope.launch(Dispatchers.IO) {
@@ -478,7 +488,7 @@ class SettingsViewModel @Inject constructor(
                     soundManager.playWarning()
                 }
             } finally {
-                _syncState.value = SyncUiState.Idle()
+                feedbackManager.idle()
             }
         }
     }
@@ -486,7 +496,7 @@ class SettingsViewModel @Inject constructor(
     fun clearAllData() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                _syncState.value = SyncUiState.Syncing(progress = 0.5f, message = "Limpando todos os dados...")
+                feedbackManager.syncing(progress = 0.5f, message = "Limpando todos os dados...")
                 _uiEvent.value = "Iniciando limpeza completa..."
                 
                 val user = authRepository.currentUserAsync.first()
@@ -514,7 +524,7 @@ class SettingsViewModel @Inject constructor(
                     _uiEvent.value = "Erro ao apagar dados: ${e.message}"
                 }
             } finally {
-                _syncState.value = SyncUiState.Idle()
+                feedbackManager.idle()
             }
         }
     }

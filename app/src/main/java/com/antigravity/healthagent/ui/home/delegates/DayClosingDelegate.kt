@@ -12,6 +12,8 @@ import com.antigravity.healthagent.utils.SoundManager
 import com.antigravity.healthagent.domain.logger.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,6 +23,7 @@ class DayClosingDelegate @Inject constructor(
     private val dayManagementUseCase: DayManagementUseCase,
     private val soundManager: SoundManager
 ) {
+    private val dayMutex = Mutex()
 
     fun startDayClosingFlow(
         scope: CoroutineScope,
@@ -37,15 +40,15 @@ class DayClosingDelegate @Inject constructor(
                 return@launch
             }
 
-            // count day houses in active memory (overlays + DB values)
-            // Wait, we can fetch all houses for this date or use state.houses list
-            // In the UI state or mapper, allHouses are mapped. Let's check state's houses or database.
-            // Since we want to be highly accurate, let's fetch from the repository for the selected date
             val uid = state.remoteAgentUid.value ?: state.currentUserUid.value ?: ""
             val dbHouses = repository.getHousesByDateAndAgent(state.data.value, uid)
-            val workedCount = dbHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
+            val drafts = state.pendingUpdateDrafts.value
+            val inFlights = state.housesInFlight.value
+            val allHouses = (dbHouses.map { drafts[it.id] ?: it } + inFlights)
+                .filter { it.data == state.data.value }
+            val workedCount = allHouses.count { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
 
-            val todayStr = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US).format(java.util.Date())
+            val todayStr = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get().format(java.util.Date())
             val isToday = state.data.value == todayStr
 
             if (isToday && workedCount < maxOpenHouses) {
@@ -54,7 +57,7 @@ class DayClosingDelegate @Inject constructor(
             }
 
             if (validateCurrentDay(true)) {
-                val summary = calculateAuditSummary(state.data.value, dbHouses)
+                val summary = calculateAuditSummary(state.data.value, allHouses)
                 state.showClosingAudit.value = summary
             }
         }
@@ -68,25 +71,26 @@ class DayClosingDelegate @Inject constructor(
         triggerImmediateSync: () -> Unit
     ) {
         scope.launch {
+            dayMutex.withLock {
             try {
                 val isAdmin = state.isAdmin.value
                 val effectiveUid = state.remoteAgentUid.value ?: state.currentUserUid.value
                 dayManagementUseCase.closeDay(audit.date, effectiveUid, isAdmin)
                 state.showClosingAudit.value = null
-                if (audit.totalWorked >= maxOpenHouses && maxOpenHouses > 0) {
-                    state.showGoalReached.value = true
-                }
 
                 triggerImmediateSync()
+                state.showGoalReached.value = true
             } catch (e: Exception) {
                 state.uiEvent.value = "Erro ao fechar o dia: ${e.message}"
                 soundManager.playWarning()
             }
+            }
         }
     }
 
-    fun toggleDayLock(scope: CoroutineScope, state: HomeState, isDayClosed: Boolean) {
+    fun toggleDayLock(scope: CoroutineScope, state: HomeState) {
         scope.launch {
+            dayMutex.withLock {
             try {
                 val isViewingRemoteAgent = state.remoteAgent.value != null
                 if (isViewingRemoteAgent && state.isSupervisor.value && !state.isAdmin.value) {
@@ -95,7 +99,7 @@ class DayClosingDelegate @Inject constructor(
                     return@launch
                 }
 
-                val closed = isDayClosed
+                val closed = state.uiState.value.isDayClosed
                 val isAdmin = state.isAdmin.value
                 val effectiveUid = state.remoteAgentUid.value ?: state.currentUserUid.value
                 if (closed) {
@@ -112,9 +116,16 @@ class DayClosingDelegate @Inject constructor(
                     val activity = dayManagementUseCase.getDayActivity(currentData, effectiveUid)
                         ?: DayActivity(date = currentData, agentName = currentAgent, agentUid = effectiveUid ?: "")
 
-                    repository.updateDayActivity(activity.copy(isManualUnlock = !manualUnlock), isAdmin)
+                    val newManualUnlock = !manualUnlock
+                    repository.updateDayActivity(
+                        activity.copy(
+                            isManualUnlock = newManualUnlock,
+                            isClosed = if (newManualUnlock) false else true
+                        ),
+                        isAdmin
+                    )
 
-                    if (!manualUnlock) {
+                    if (newManualUnlock) {
                         state.uiEvent.value = "Edição extra habilitada para este dia."
                     } else {
                         state.uiEvent.value = "Edição extra desabilitada."
@@ -125,6 +136,7 @@ class DayClosingDelegate @Inject constructor(
                 soundManager.playWarning()
             }
         }
+    }
     }
 
     fun advanceToNextDay(scope: CoroutineScope, state: HomeState) {
@@ -148,9 +160,11 @@ class DayClosingDelegate @Inject constructor(
 
     fun confirmUnlockHistory(scope: CoroutineScope, state: HomeState) {
         scope.launch {
+            dayMutex.withLock {
             val effectiveUid = state.remoteAgentUid.value ?: state.currentUserUid.value
             dayManagementUseCase.unlockDay(state.data.value, effectiveUid)
             state.showHistoryUnlockConfirmation.value = false
+            }
         }
     }
 

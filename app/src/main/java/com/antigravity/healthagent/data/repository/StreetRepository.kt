@@ -8,6 +8,8 @@ import com.antigravity.healthagent.utils.formatStreetName
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -15,12 +17,12 @@ import javax.inject.Singleton
 class StreetRepository @Inject constructor(
     private val houseDao: HouseDao,
     private val customStreetDao: CustomStreetDao
-) {
+) : com.antigravity.healthagent.domain.repository.StreetRepository {
     /**
      * Combines the static Bom Jardim street database with historical street names
      * from the local database.
      */
-    fun getStreetSuggestions(bairro: String, agentName: String, agentUid: String): Flow<List<String>> {
+    override fun getStreetSuggestions(bairro: String, agentName: String, agentUid: String): Flow<List<String>> {
         val housesFlow = houseDao.getHousesByAgentSnapshotFlow(agentUid)
         val customStreetsFlow = customStreetDao.getAllCustomStreets()
 
@@ -44,10 +46,10 @@ class StreetRepository @Inject constructor(
                 .filter { it.isNotBlank() }
                 .distinct()
                 .sorted()
-        }
+        }.flowOn(Dispatchers.Default)
     }
 
-    suspend fun saveCustomStreet(name: String, bairro: String) {
+    override suspend fun saveCustomStreet(name: String, bairro: String) {
         if (name.isBlank() || bairro.isBlank()) return
         val formattedName = name.trim().formatStreetName()
         val formattedBairro = bairro.trim().uppercase()

@@ -22,10 +22,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.domain.repository.AgentData
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
+import androidx.compose.ui.zIndex
 import com.antigravity.healthagent.ui.components.MeshGradient
 import com.antigravity.healthagent.ui.components.PremiumCard
-import java.text.SimpleDateFormat
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
 import java.util.*
 import android.content.Context
 import android.net.Uri
@@ -37,7 +41,8 @@ fun SupervisorAgentsScreen(
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val agents by viewModel.agents.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -65,16 +70,39 @@ fun SupervisorAgentsScreen(
         },
         containerColor = Color.Transparent
     ) { paddingValues ->
+        val syncFeedback by feedbackManager.feedback.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
+        val isRefreshing = syncFeedback is com.antigravity.healthagent.ui.state.SyncUiState.Syncing
+        val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
 
         PullToRefreshBox(
-            isRefreshing = isLoading,
+            isRefreshing = isRefreshing,
             onRefresh = { viewModel.refreshData() },
             state = pullToRefreshState,
             modifier = Modifier.padding(paddingValues).fillMaxSize(),
-            indicator = { /* Hide the simple loading circle as we use a premium overlay */ }
+            indicator = {
+                CustomSyncPullIndicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    isSolarMode = isSolarMode,
+                    syncStatus = syncFeedback,
+                    pullText = "Puxe para atualizar...",
+                    releaseText = "Solte para atualizar!"
+                )
+            }
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
+                if (!isPullActive) {
+                    SyncCompactBalloon(
+                        feedbackManager = feedbackManager,
+                        isEasyMode = false,
+                        isSolarMode = isSolarMode,
+                        isPullActive = isPullActive,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(3000f)
+                    )
+                }
                 MeshGradient(modifier = Modifier.fillMaxSize())
                 
                 Column(modifier = Modifier.fillMaxSize()) {
@@ -226,7 +254,7 @@ fun SupervisorAgentsScreen(
                 }
 
                 // Premium Loading Overlay (Matches Agent Design)
-                com.antigravity.healthagent.ui.components.SupervisorLoadingOverlay(isVisible = isLoading)
+                com.antigravity.healthagent.ui.components.SupervisorLoadingOverlay(isVisible = isLoading && !isRefreshing)
             }
         }
     }
@@ -245,7 +273,7 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
 
     val lastSync = remember(displayAgent.lastSyncTime) {
         if (displayAgent.lastSyncTime > 0) {
-            SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(displayAgent.lastSyncTime))
+            com.antigravity.healthagent.utils.DateUtils.DATE_TIME_FULL.get().format(Date(displayAgent.lastSyncTime))
         } else "Nunca"
     }
 
@@ -444,7 +472,7 @@ fun SupervisorAgentCard(agent: AgentData, viewModel: SupervisorViewModel, isSola
                     Spacer(modifier = Modifier.height(8.dp))
 
                     val sortedActivities = remember(displayAgent.activities) {
-                        val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.US)
+                        val sdf = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get()
                         displayAgent.activities.sortedByDescending { activity ->
                             try {
                                 val normalized = activity.date.replace("/", "-")

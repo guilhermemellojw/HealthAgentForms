@@ -12,7 +12,10 @@ import com.antigravity.healthagent.R
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
-import com.antigravity.healthagent.utils.formatStreetName
+import com.antigravity.healthagent.domain.logger.AppLogger
+import com.antigravity.healthagent.utils.pdf.PdfComponents
+import com.antigravity.healthagent.utils.pdf.PdfTableBuilder
+import com.antigravity.healthagent.utils.pdf.PdfHeaderFooter
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -37,20 +40,18 @@ object SemanalPdfGenerator {
         val page = pdfDocument.startPage(pageInfo)
         val canvas = page.canvas
 
-        // Hoist bitmap decoding
-        val logoVigilancia = try { BitmapFactory.decodeResource(context.resources, R.drawable.logo_vigilancia_ambiental) } catch (e: Exception) { null }
-        val logoGoverno = try { BitmapFactory.decodeResource(context.resources, R.drawable.governo_rj_logo) } catch (e: Exception) { null }
+        val logoVigilancia = BitmapCache.getLogo(context, R.drawable.logo_vigilancia_ambiental)
+        val logoGoverno = BitmapCache.getLogo(context, R.drawable.governo_rj_logo)
 
         try {
-            drawSemanalPage(context, canvas, weekDates, allHouses, activities, agentName, logoVigilancia, logoGoverno)
+            drawSemanalPage(canvas, weekDates, allHouses, activities, agentName, logoVigilancia, logoGoverno)
         } finally {
-            logoVigilancia?.recycle()
-            logoGoverno?.recycle()
+            // Don't recycle — managed by BitmapCache
         }
 
         pdfDocument.finishPage(page)
 
-        val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US)
+        val sdf = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get()
         val firstDateStr = weekDates.firstOrNull()
         
         var fileNameStr = "Semanal_export"
@@ -86,7 +87,7 @@ object SemanalPdfGenerator {
                     fileNameStr = "Semanal_${startDayStr}_a_${endDayStr}_${monthName}_$sanitizedAgent"
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                AppLogger.e("SemanalPdfGenerator", "Erro ao gerar nome do arquivo", e)
             }
         }
         
@@ -98,7 +99,7 @@ object SemanalPdfGenerator {
                 pdfDocument.writeTo(out)
             }
         } catch (e: IOException) {
-            e.printStackTrace()
+            AppLogger.e("SemanalPdfGenerator", "Falha ao salvar PDF", e)
             throw IOException("Falha ao salvar o arquivo PDF: ${e.message}", e)
         } finally {
             pdfDocument.close()
@@ -108,7 +109,6 @@ object SemanalPdfGenerator {
     }
 
     fun drawSemanalPage(
-        context: Context,
         canvas: Canvas,
         weekDates: List<String>,
         allHouses: List<House>,
@@ -128,11 +128,7 @@ object SemanalPdfGenerator {
             isAntiAlias = true
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
-        val linePaint = Paint().apply {
-            color = Color.BLACK
-            strokeWidth = 0.5f
-            style = Paint.Style.STROKE
-        }
+        val linePaint = PdfComponents.linePaint
         val headerBgPaint = Paint().apply {
             color = Color.parseColor("#E0E0E0") // Light gray
             style = Paint.Style.FILL
@@ -146,16 +142,9 @@ object SemanalPdfGenerator {
 
         // LEFT SIDE: Logo and Municipality Info
         val logoH = 38f
-        // Bitmaps are passed as arguments to avoid redundant decoding
         val actualLogo = logoGoverno ?: logoVigilancia
-        
-        if (actualLogo != null) {
-            val logoW = (actualLogo.width.toFloat() / actualLogo.height.toFloat() * logoH)
-            val logoX = MARGIN_LEFT // Start at table left edge
-            val logoY = cursorY + 24f // Moved down to avoid overlapping text
-            val destRect = Rect(logoX.toInt(), logoY.toInt(), (logoX + logoW).toInt(), (logoY + logoH).toInt())
-            canvas.drawBitmap(actualLogo, null, destRect, null)
-        }
+        val logoY = cursorY + 24f
+        PdfHeaderFooter.drawHeaderLogo(canvas, actualLogo, MARGIN_LEFT, logoY, logoH)
 
         val smallBold = Paint(boldPaint).apply { textSize = 7.5f }
         val prefText = "PREFEITURA MUNICIPAL DE BOM JARDIM"
@@ -173,35 +162,29 @@ object SemanalPdfGenerator {
         val title2W = subTitlePaint.measureText(headerText2)
         
         canvas.drawText(headerText1, rightEdge - title1W, cursorY + 25f, titlePaint)
-        // Center headerText2 within the width of headerText1
         canvas.drawText(headerText2, (rightEdge - title1W) + (title1W - title2W) / 2f, cursorY + 55f, subTitlePaint)
 
-        cursorY += logoH + 30f // Increased slightly to maintain spacing after logo
+        cursorY += logoH + 30f
 
         // Metadata Header
         val uniqueWeekBairros = allHouses.filter { weekDates.contains(it.data) }.map { it.address.bairro.trim().uppercase() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }
         val bairro = uniqueWeekBairros.joinToString(" / ")
         val firstHouse = allHouses.find { h -> weekDates.contains(h.data) }
         val categoria = firstHouse?.context?.categoria ?: "BRR"
-        // Fix: If no houses (e.g. holiday week), calculate cycle from the first date of the week
         val firstDateOfWeek = weekDates.firstOrNull() ?: ""
-        val calculatedCiclo = if (firstDateOfWeek.isNotBlank()) calculateCiclo(firstDateOfWeek) else ""
-        val ciclo = calculatedCiclo
+        val ciclo = if (firstDateOfWeek.isNotBlank()) PdfComponents.calculateCicloSemanal(firstDateOfWeek) else ""
         val ano = if (weekDates.isNotEmpty()) weekDates.first().takeLast(4) else ""
 
         // Gray bar "RESUMO SEMANAL DOS AGENTES"
         val grayBarH = 15f
-        val barBgPaint = Paint().apply {
-            color = Color.parseColor("#F2F2F2") // Very light gray like sample
-            style = Paint.Style.FILL
-        }
-        drawRectBox(canvas, MARGIN_LEFT, cursorY, tableWidth, grayBarH, "RESUMO SEMANAL DOS AGENTES", boldPaint, barBgPaint)
+        val barBgPaint = PdfComponents.barBgPaintLight
+        PdfComponents.drawRectBoxWithMetrics(canvas, MARGIN_LEFT, cursorY, tableWidth, grayBarH, "RESUMO SEMANAL DOS AGENTES", boldPaint, barBgPaint)
         cursorY += grayBarH
 
         // Row with Bairro, Ciclo, Turma, Dates
         val metaRowH = 20f
         var cx = MARGIN_LEFT
-        val col2X = MARGIN_LEFT + 480f // Wider gap like sample
+        val col2X = MARGIN_LEFT + 480f
         
         val labelCB = "Código/Bairro"
         val wLabelCB = textPaint.measureText(labelCB)
@@ -209,17 +192,13 @@ object SemanalPdfGenerator {
         val wBName = 290f
         drawMetaFieldSegmented(canvas, textPaint, linePaint, labelCB, listOf(categoria, bairro), listOf(wCat, wBName), cx, cursorY, metaRowH)
         
-        // Calculated endpoint for left column to ensure Turma aligns with Bairro
-        // drawMetaFieldSegmented adds 5px after label, then segments with 20px separator for Bairro
         val endLeft = MARGIN_LEFT + wLabelCB + 5f + wCat + 20f + wBName
 
         cx = col2X
         
-        // Ano/Ciclo Segments - Align to right edge
         val labelAC = "Ano/Ciclo"
         val wLabelAC = textPaint.measureText(labelAC)
-        // rightEdge already defined above
-        val availAC = rightEdge - (col2X + wLabelAC + 25f) // 5 (label gap) + 20 (separator)
+        val availAC = rightEdge - (col2X + wLabelAC + 25f)
         val wAno = availAC * 0.55f
         val wCicloVal = availAC * 0.45f
         drawMetaFieldSegmented(canvas, textPaint, linePaint, labelAC, listOf(ano, ciclo), listOf(wAno, wCicloVal), cx, cursorY, metaRowH)
@@ -227,7 +206,6 @@ object SemanalPdfGenerator {
         cursorY += metaRowH + 8f
         cx = MARGIN_LEFT
         
-        // Turma (Halved width and centered value)
         val labelTurma = "Turma:"
         val fullTurmaW = endLeft - MARGIN_LEFT
         val wTurma = (fullTurmaW / 2f) 
@@ -235,15 +213,12 @@ object SemanalPdfGenerator {
         
         cx = col2X
         
-        // Semana de Segments - Align to right edge
         val labelSD = "Semana de"
         val wLabelSD = textPaint.measureText(labelSD)
-        // Spacing in drawMetaFieldSegmented for isSemana: 4+8 (/) + 12+18 (a) + 4+8 (/) = 54
         val availSD = rightEdge - (col2X + wLabelSD + 5f + 54f)
         val wSeg = availSD / 4f
         
-        // Calculate Sunday (Start) and Saturday (End) based on the first date (Monday)
-        val sdf = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US)
+        val sdf = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get()
         val firstDateStr = weekDates.firstOrNull()
         
         var weekStartDay = ""
@@ -258,7 +233,6 @@ object SemanalPdfGenerator {
                     val cal = java.util.Calendar.getInstance()
                     cal.time = parsedDate
                 
-                // Set to Sunday (Start of week)
                 val dayOfWeek = cal.get(java.util.Calendar.DAY_OF_WEEK)
                 val daysFromSunday = dayOfWeek - java.util.Calendar.SUNDAY
                 cal.add(java.util.Calendar.DAY_OF_YEAR, -daysFromSunday)
@@ -266,14 +240,12 @@ object SemanalPdfGenerator {
                 weekStartDay = String.format(java.util.Locale("pt", "BR"), "%02d", cal.get(java.util.Calendar.DAY_OF_MONTH))
                 weekStartMonth = String.format(java.util.Locale("pt", "BR"), "%02d", cal.get(java.util.Calendar.MONTH) + 1)
                 
-                // Set to Saturday (End of week) - add 6 days to Sunday
                 cal.add(java.util.Calendar.DAY_OF_YEAR, 6)
                 weekEndDay = String.format(java.util.Locale("pt", "BR"), "%02d", cal.get(java.util.Calendar.DAY_OF_MONTH))
                 weekEndMonth = String.format(java.util.Locale.US, "%02d", cal.get(java.util.Calendar.MONTH) + 1)
-                } // End of if (parsedDate != null)
+                }
             } catch (e: Exception) {
-                e.printStackTrace()
-                // Fallback to existing logic if parsing fails
+                AppLogger.e("SemanalPdfGenerator", "Erro ao calcular semana", e)
                 weekStartDay = weekDates.firstOrNull()?.take(2) ?: ""
                 weekStartMonth = weekDates.firstOrNull()?.substring(3, 5) ?: ""
                 weekEndDay = weekDates.lastOrNull()?.take(2) ?: ""
@@ -286,9 +258,8 @@ object SemanalPdfGenerator {
         cursorY += metaRowH + 15f
 
         // --- Table Headers ---
-        val th1 = 20f // Top header height
-        val th2 = 35f // Middle header height
-        // Bottom header height (for dep types) removed unused th3
+        val th1 = 20f
+        val th2 = 35f
         val totalHeaderH = th1 + th2
 
         val colData = 60f
@@ -313,63 +284,52 @@ object SemanalPdfGenerator {
         val colTotalDeps = 52f
         val colElim = 65f
         val colLarv = 57f
-        val colQuart = 60f // Standardized width
+        val colQuart = 60f
 
-        // Vertical split headers
         var tx = MARGIN_LEFT
         
-        // Column Data
-        drawRectBox(canvas, tx, cursorY, colData, totalHeaderH, "Data", boldPaint, null)
+        PdfComponents.drawRectBoxWithMetrics(canvas, tx, cursorY, colData, totalHeaderH, "Data", boldPaint, null)
         tx += colData
         
-        // Group Imóveis Trabalhados
-        drawRectBox(canvas, tx, cursorY, groupVisits, th1, "Imóveis Trabalhados", boldPaint, null)
+        PdfComponents.drawRectBoxWithMetrics(canvas, tx, cursorY, groupVisits, th1, "Imóveis Trabalhados", boldPaint, null)
         var stx = tx
-        drawVerticalTextInBox(canvas, textPaint, "Res", stx, cursorY + th1, colRes, th2); stx += colRes
-        drawVerticalTextInBox(canvas, textPaint, "Com", stx, cursorY + th1, colCom, th2); stx += colCom
-        drawVerticalTextInBox(canvas, textPaint, "TB", stx, cursorY + th1, colTB, th2); stx += colTB
-        drawVerticalTextInBox(canvas, textPaint, "Out", stx, cursorY + th1, colOut, th2); stx += colOut
-        drawVerticalTextInBox(canvas, textPaint, "PE", stx, cursorY + th1, colPE, th2); stx += colPE
-        drawVerticalTextInBox(canvas, boldPaint, "Total", stx, cursorY + th1, colTotalVisits, th2)
+        PdfComponents.drawVerticalTextInBox(canvas, textPaint, "Res", stx, cursorY + th1, colRes, th2); stx += colRes
+        PdfComponents.drawVerticalTextInBox(canvas, textPaint, "Com", stx, cursorY + th1, colCom, th2); stx += colCom
+        PdfComponents.drawVerticalTextInBox(canvas, textPaint, "TB", stx, cursorY + th1, colTB, th2); stx += colTB
+        PdfComponents.drawVerticalTextInBox(canvas, textPaint, "Out", stx, cursorY + th1, colOut, th2); stx += colOut
+        PdfComponents.drawVerticalTextInBox(canvas, textPaint, "PE", stx, cursorY + th1, colPE, th2); stx += colPE
+        PdfComponents.drawVerticalTextInBox(canvas, boldPaint, "Total", stx, cursorY + th1, colTotalVisits, th2)
         tx += groupVisits
         
-        // Group Pendências
-        drawRectBox(canvas, tx, cursorY, groupPend, th1, "Pendências", boldPaint, null)
+        PdfComponents.drawRectBoxWithMetrics(canvas, tx, cursorY, groupPend, th1, "Pendências", boldPaint, null)
         stx = tx
-        drawVerticalTextInBox(canvas, textPaint, "FEC", stx, cursorY + th1, colFEC, th2); stx += colFEC
-        drawVerticalTextInBox(canvas, textPaint, "REC", stx, cursorY + th1, colREC, th2); stx += colREC
-        drawVerticalTextInBox(canvas, textPaint, "Recup", stx, cursorY + th1, colRecup, th2)
+        PdfComponents.drawVerticalTextInBox(canvas, textPaint, "FEC", stx, cursorY + th1, colFEC, th2); stx += colFEC
+        PdfComponents.drawVerticalTextInBox(canvas, textPaint, "REC", stx, cursorY + th1, colREC, th2); stx += colREC
+        PdfComponents.drawVerticalTextInBox(canvas, textPaint, "Recup", stx, cursorY + th1, colRecup, th2)
         tx += groupPend
         
-        // Amostras Coletadas
-        drawVerticalHeader(canvas, linePaint, textPaint, null, "Amostras\nColetadas", tx, cursorY, colAmostras, totalHeaderH)
+        PdfComponents.drawVerticalHeaderWithMetrics(canvas, linePaint, textPaint, null, "Amostras\nColetadas", tx, cursorY, colAmostras, totalHeaderH)
         tx += colAmostras
         
-        // Group Quantidades de Depósitos Tratados
-        drawRectBox(canvas, tx, cursorY, groupDeps, th1, "Quantidades de Depósitos Tratados", boldPaint, null)
-        // Sub-headers A1..E
+        PdfComponents.drawRectBoxWithMetrics(canvas, tx, cursorY, groupDeps, th1, "Quantidades de Depósitos Tratados", boldPaint, null)
         stx = tx
         listOf("A1", "A2", "B", "C", "D1", "D2", "E").forEach { label ->
-            drawRectBox(canvas, stx, cursorY + th1, colDep, th2, label, textPaint, null)
+            PdfComponents.drawRectBoxWithMetrics(canvas, stx, cursorY + th1, colDep, th2, label, textPaint, null)
             stx += colDep
         }
         tx += groupDeps
         
-        // Total Depósitos
-        drawVerticalHeader(canvas, linePaint, textPaint, null, "Total de\nDepósitos\nTratados", tx, cursorY, colTotalDeps, totalHeaderH)
+        PdfComponents.drawVerticalHeaderWithMetrics(canvas, linePaint, textPaint, null, "Total de\nDepósitos\nTratados", tx, cursorY, colTotalDeps, totalHeaderH)
         tx += colTotalDeps
         
-        // Depósitos Eliminados
         val elimLabel = "Depósitos\nEliminados\nCaixas\nd'água Difícil\nacesso"
-        drawVerticalHeader(canvas, linePaint, textPaint, null, elimLabel, tx, cursorY, colElim, totalHeaderH)
+        PdfComponents.drawVerticalHeaderWithMetrics(canvas, linePaint, textPaint, null, elimLabel, tx, cursorY, colElim, totalHeaderH)
         tx += colElim
         
-        // Larvicida
-        drawVerticalHeader(canvas, linePaint, textPaint, null, "Larvicida\nBPU(Gr)", tx, cursorY, colLarv, totalHeaderH)
+        PdfComponents.drawVerticalHeaderWithMetrics(canvas, linePaint, textPaint, null, "Larvicida\nBPU(Gr)", tx, cursorY, colLarv, totalHeaderH)
         tx += colLarv
         
-        // Quarteirões Concluídos
-        drawVerticalHeader(canvas, linePaint, textPaint, null, "Quarteirões\nConcluídos", tx, cursorY, colQuart, totalHeaderH)
+        PdfComponents.drawVerticalHeaderWithMetrics(canvas, linePaint, textPaint, null, "Quarteirões\nConcluídos", tx, cursorY, colQuart, totalHeaderH)
         
         cursorY += totalHeaderH
 
@@ -386,28 +346,23 @@ object SemanalPdfGenerator {
         }
 
         val housesByDate = allHousesSorted.groupBy { it.data }
-        val allBlockCompletions = mutableListOf<Triple<String, String, String>>() // (BlockDisplayName, Bairro, Date)
+        val allBlockCompletions = mutableListOf<Triple<String, String, String>>()
 
         weekDates.forEach { date ->
             val dayHouses = housesByDate[date] ?: return@forEach
             val dayHouseIds = dayHouses.map { it.id }.toSet()
-            
-            // 1. Identify all unique blocks worked on this day
             val dayBlocks = dayHouses.map { Triple(it.address.blockNumber, it.address.blockSequence, it.address.bairro.trim().uppercase()) }.distinct()
 
             dayBlocks.forEach { (bNum, bSeq, bairro) ->
                 val blockHousesInDay = dayHouses.filter { it.address.blockNumber == bNum && it.address.blockSequence == bSeq && it.address.bairro.trim().uppercase() == bairro }
-                
                 val hasManual = blockHousesInDay.any { it.quarteiraoConcluido }
                 val hasBairroManual = blockHousesInDay.any { it.localidadeConcluida }
                 
                 val key = "$bNum|$bSeq|$bairro"
                 val lastIndexInFull = blockToLastIndex[key] ?: -1
                 val lastHouseInFull = if (lastIndexInFull != -1) allHousesSorted[lastIndexInFull] else null
-                
                 val isLastHouseInDay = lastHouseInFull != null && dayHouseIds.contains(lastHouseInFull.id)
                 val hasSuccessor = lastIndexInFull != -1 && lastIndexInFull < allHousesSorted.size - 1
-
                 val autoConcluido = isLastHouseInDay && hasSuccessor
 
                 if (hasManual || hasBairroManual || autoConcluido) {
@@ -433,30 +388,24 @@ object SemanalPdfGenerator {
 
             tx = MARGIN_LEFT
             
-            // Data Cell
-            val displayDate = date.replace("-", "/").substring(0, 5) // Format DD/MM
-            drawCell(canvas, linePaint, textPaint, displayDate, tx, cursorY, colData, rowH)
+            val displayDate = date.replace("-", "/").substring(0, 5)
+            PdfComponents.drawCellWithMetrics(canvas, linePaint, textPaint, displayDate, tx, cursorY, colData, rowH)
             tx += colData
             
             if (status.isNotBlank() && !status.equals("NORMAL", ignoreCase = true)) {
                 val statusPaint = Paint(boldPaint).apply { textSize = 9f; letterSpacing = 0.1f }
                 val annotationWidth = tableWidth - colData - colQuart
                 
-                // Annotation area
-                drawCell(canvas, linePaint, statusPaint, status, tx, cursorY, annotationWidth, rowH)
+                PdfComponents.drawCellWithMetrics(canvas, linePaint, statusPaint, status, tx, cursorY, annotationWidth, rowH)
                 tx += annotationWidth
-                
-                // Final Quarteirão cell
-                drawCell(canvas, linePaint, textPaint, "", tx, cursorY, colQuart, rowH)
+                PdfComponents.drawCellWithMetrics(canvas, linePaint, textPaint, "", tx, cursorY, colQuart, rowH)
             } else {
                 if (dayHouses.isEmpty()) {
-                    // Empty working day with no specific status (should not happen normally but for safety)
                     val annotationWidth = tableWidth - colData - colQuart
-                    drawCell(canvas, linePaint, textPaint, dash, tx, cursorY, annotationWidth, rowH)
+                    PdfComponents.drawCellWithMetrics(canvas, linePaint, textPaint, dash, tx, cursorY, annotationWidth, rowH)
                     tx += annotationWidth
-                    drawCell(canvas, linePaint, textPaint, dash, tx, cursorY, colQuart, rowH)
+                    PdfComponents.drawCellWithMetrics(canvas, linePaint, textPaint, dash, tx, cursorY, colQuart, rowH)
                 } else {
-                    // Property Types - Filter by OPEN houses only
                     val res = dayHouses.count { it.propertyType == PropertyType.R && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
                     val com = dayHouses.count { it.propertyType == PropertyType.C && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
                     val tb = dayHouses.count { it.propertyType == PropertyType.TB && (it.situation == Situation.NONE || it.situation == Situation.EMPTY) }
@@ -466,8 +415,8 @@ object SemanalPdfGenerator {
                     
                     val fec = dayHouses.count { it.situation == Situation.F || it.situation == Situation.A || it.situation == Situation.V }
                     val rec = dayHouses.count { it.situation == Situation.REC }
-                    val recup = 0 // Placeholder
-                    val samples = 0 
+                    val recup = 0
+                    val samples = 0
                     
                     val workedDayHouses = dayHouses.filter { it.situation == Situation.NONE || it.situation == Situation.EMPTY }
                     val dists = intArrayOf(
@@ -482,38 +431,34 @@ object SemanalPdfGenerator {
                     val dayTotalDeps = dists.sum()
                     val elim = workedDayHouses.sumOf { it.treatment.eliminados }
                     val larv = workedDayHouses.sumOf { it.treatment.larvicida }
-                    
-                // formatDouble and dsh are now shared helpers below
 
-                    drawCell(canvas, linePaint, textPaint, dsh(res), tx, cursorY, colRes, rowH); tx += colRes
-                    drawCell(canvas, linePaint, textPaint, dsh(com), tx, cursorY, colCom, rowH); tx += colCom
-                    drawCell(canvas, linePaint, textPaint, dsh(tb), tx, cursorY, colTB, rowH); tx += colTB
-                    drawCell(canvas, linePaint, textPaint, dsh(out), tx, cursorY, colOut, rowH); tx += colOut
-                    drawCell(canvas, linePaint, textPaint, dsh(pe), tx, cursorY, colPE, rowH); tx += colPE
-                    drawCell(canvas, linePaint, boldPaint, dsh(dayTotalVisits), tx, cursorY, colTotalVisits, rowH); tx += colTotalVisits
+                    val rowWidths = listOf(
+                        colRes, colCom, colTB, colOut, colPE, colTotalVisits,
+                        colFEC, colREC, colRecup, colAmostras,
+                        colDep, colDep, colDep, colDep, colDep, colDep, colDep,
+                        colTotalDeps, colElim, colLarv
+                    )
+                    val rowVals = listOf(
+                        PdfComponents.dsh(res), PdfComponents.dsh(com), PdfComponents.dsh(tb), PdfComponents.dsh(out), PdfComponents.dsh(pe), PdfComponents.dsh(dayTotalVisits),
+                        PdfComponents.dsh(fec), PdfComponents.dsh(rec), PdfComponents.dsh(recup), PdfComponents.dsh(samples),
+                        PdfComponents.dsh(dists[0]), PdfComponents.dsh(dists[1]), PdfComponents.dsh(dists[2]), PdfComponents.dsh(dists[3]), PdfComponents.dsh(dists[4]), PdfComponents.dsh(dists[5]), PdfComponents.dsh(dists[6]),
+                        PdfComponents.dsh(dayTotalDeps), PdfComponents.dsh(elim), PdfComponents.formatDouble(larv)
+                    )
+                    val rowBolds = listOf(
+                        false, false, false, false, false, true,
+                        false, false, false, false,
+                        false, false, false, false, false, false, false,
+                        true, false, false
+                    )
                     
-                    drawCell(canvas, linePaint, textPaint, dsh(fec), tx, cursorY, colFEC, rowH); tx += colFEC
-                    drawCell(canvas, linePaint, textPaint, dsh(rec), tx, cursorY, colREC, rowH); tx += colREC
-                    drawCell(canvas, linePaint, textPaint, dsh(recup), tx, cursorY, colRecup, rowH); tx += colRecup
-                    drawCell(canvas, linePaint, textPaint, dsh(samples), tx, cursorY, colAmostras, rowH); tx += colAmostras
-                    
-                    for (i in 0..6) {
-                        drawCell(canvas, linePaint, textPaint, dsh(dists[i]), tx, cursorY, colDep, rowH)
-                        tx += colDep
-                        totDeps[i] += dists[i]
-                    }
+                    PdfTableBuilder.drawRow(canvas, linePaint, textPaint, tx, cursorY, rowH, rowWidths, rowVals, bolds = rowBolds)
+                    tx += rowWidths.sum()
                     
                     val dayCompletions = allBlockCompletions.filter { it.third == date }
                     val dayCompletedBlocks = dayCompletions.map { it.first }.distinct().sorted()
-                    
                     val blocksStr = if (dayCompletedBlocks.isEmpty()) dash else dayCompletedBlocks.joinToString("   ")
                     totCompletedBlocks.addAll(dayCompletedBlocks)
-
-                    drawCell(canvas, linePaint, boldPaint, dsh(dayTotalDeps), tx, cursorY, colTotalDeps, rowH); tx += colTotalDeps
-                    drawCell(canvas, linePaint, textPaint, dsh(elim), tx, cursorY, colElim, rowH); tx += colElim
-                    drawCell(canvas, linePaint, textPaint, formatDouble(larv), tx, cursorY, colLarv, rowH); tx += colLarv
-                    
-                    // Draw Blocks with auto-scale
+ 
                     if (blocksStr != dash) {
                         val availableW = colQuart - 4f
                         var currentTextSize = 8f
@@ -522,14 +467,14 @@ object SemanalPdfGenerator {
                             currentTextSize -= 0.5f
                             fitPaint = Paint(textPaint).apply { textSize = currentTextSize }
                         }
-                        drawCell(canvas, linePaint, fitPaint, blocksStr, tx, cursorY, colQuart, rowH)
+                        PdfComponents.drawCellWithMetrics(canvas, linePaint, fitPaint, blocksStr, tx, cursorY, colQuart, rowH)
                     } else {
-                        drawCell(canvas, linePaint, textPaint, blocksStr, tx, cursorY, colQuart, rowH)
+                        PdfComponents.drawCellWithMetrics(canvas, linePaint, textPaint, blocksStr, tx, cursorY, colQuart, rowH)
                     }
+                    tx += colQuart
                     
-                    // Neighborhoods for completed blocks
                     val concludedBairrosToday = dayCompletions.map { it.second }.distinct().sorted()
-
+ 
                     if (concludedBairrosToday.isNotEmpty()) {
                         val labelPaint = Paint(textPaint).apply { textSize = 7f }
                         val labelX = MARGIN_LEFT + tableWidth + 5f
@@ -548,7 +493,6 @@ object SemanalPdfGenerator {
                         }
                     }
                     
-                    // Accumulate totals
                     totRes += res; totCom += com; totTB += tb; totOut += out; totPE += pe; totVisits += dayTotalVisits
                     totFEC += fec; totREC += rec; totRecup += recup
                     totAmostras += samples
@@ -559,40 +503,29 @@ object SemanalPdfGenerator {
             }
             cursorY += rowH
         }
-
+ 
         // --- Totals Row ---
         tx = MARGIN_LEFT
-        drawRectBox(canvas, tx, cursorY, colData, rowH, "TOTAIS", boldPaint, headerBgPaint)
-        tx += colData
+        PdfComponents.drawRectBoxWithMetrics(canvas, tx, cursorY, colData, rowH, "TOTAIS", boldPaint, headerBgPaint)
         
-        // dshT and formatDouble are now shared helpers below
-
-        drawRectBox(canvas, tx, cursorY, colRes, rowH, dsh(totRes), boldPaint, headerBgPaint); tx += colRes
-        drawRectBox(canvas, tx, cursorY, colCom, rowH, dsh(totCom), boldPaint, headerBgPaint); tx += colCom
-        drawRectBox(canvas, tx, cursorY, colTB, rowH, dsh(totTB), boldPaint, headerBgPaint); tx += colTB
-        drawRectBox(canvas, tx, cursorY, colOut, rowH, dsh(totOut), boldPaint, headerBgPaint); tx += colOut
-        drawRectBox(canvas, tx, cursorY, colPE, rowH, dsh(totPE), boldPaint, headerBgPaint); tx += colPE
-        drawRectBox(canvas, tx, cursorY, colTotalVisits, rowH, dsh(totVisits), boldPaint, headerBgPaint); tx += colTotalVisits
+        val weeklyTotalWidths = listOf(
+            colRes, colCom, colTB, colOut, colPE, colTotalVisits,
+            colFEC, colREC, colRecup, colAmostras,
+            colDep, colDep, colDep, colDep, colDep, colDep, colDep,
+            colTotalDeps, colElim, colLarv, colQuart
+        )
+        val weeklyTotalVals = listOf(
+            PdfComponents.dsh(totRes), PdfComponents.dsh(totCom), PdfComponents.dsh(totTB), PdfComponents.dsh(totOut), PdfComponents.dsh(totPE), PdfComponents.dsh(totVisits),
+            PdfComponents.dsh(totFEC), PdfComponents.dsh(totREC), PdfComponents.dsh(totRecup), PdfComponents.dsh(totAmostras),
+            PdfComponents.dsh(totDeps[0]), PdfComponents.dsh(totDeps[1]), PdfComponents.dsh(totDeps[2]), PdfComponents.dsh(totDeps[3]), PdfComponents.dsh(totDeps[4]), PdfComponents.dsh(totDeps[5]), PdfComponents.dsh(totDeps[6]),
+            PdfComponents.dsh(totTotalDeps), PdfComponents.dsh(totElim), PdfComponents.formatDouble(totLarv),
+            if (totCompletedBlocks.isEmpty()) dash else totCompletedBlocks.sorted().joinToString("   ")
+        )
         
-        drawRectBox(canvas, tx, cursorY, colFEC, rowH, dsh(totFEC), boldPaint, headerBgPaint); tx += colFEC
-        drawRectBox(canvas, tx, cursorY, colREC, rowH, dsh(totREC), boldPaint, headerBgPaint); tx += colREC
-        drawRectBox(canvas, tx, cursorY, colRecup, rowH, dsh(totRecup), boldPaint, headerBgPaint); tx += colRecup
-        
-        drawRectBox(canvas, tx, cursorY, colAmostras, rowH, dsh(totAmostras), boldPaint, headerBgPaint); tx += colAmostras
-        
-        for (i in 0..6) {
-            drawRectBox(canvas, tx, cursorY, colDep, rowH, dsh(totDeps[i]), boldPaint, headerBgPaint)
-            tx += colDep
-        }
-        
-        drawRectBox(canvas, tx, cursorY, colTotalDeps, rowH, dsh(totTotalDeps), boldPaint, headerBgPaint); tx += colTotalDeps
-        drawRectBox(canvas, tx, cursorY, colElim, rowH, dsh(totElim), boldPaint, headerBgPaint); tx += colElim
-        drawRectBox(canvas, tx, cursorY, colLarv, rowH, formatDouble(totLarv), boldPaint, headerBgPaint); tx += colLarv
-        val totBlocksStr = if (totCompletedBlocks.isEmpty()) dash else totCompletedBlocks.sorted().joinToString("   ")
-        drawRectBox(canvas, tx, cursorY, colQuart, rowH, totBlocksStr, boldPaint, headerBgPaint)
+        PdfTableBuilder.drawRow(canvas, linePaint, boldPaint, MARGIN_LEFT + colData, cursorY, rowH, weeklyTotalWidths, weeklyTotalVals, bgPaint = headerBgPaint)
         
         cursorY += rowH + 5f
-        drawTextInRect(canvas, textPaint, "Resumo Semanal dos Agentes / SMS / Município de Bom Jardim / PMCD", MARGIN_LEFT, cursorY, PAGE_WIDTH.toFloat(), 10f, alignLeft = true)
+        PdfComponents.drawTextInRectWithMetrics(canvas, textPaint, "Resumo Semanal dos Agentes / SMS / Município de Bom Jardim / PMCD", MARGIN_LEFT, cursorY, PAGE_WIDTH.toFloat(), 10f, alignLeft = true)
 
         // --- Footer Section ---
         cursorY += 50f
@@ -610,32 +543,21 @@ object SemanalPdfGenerator {
         
         val agentLabel = "Agente: "
         val agentLabelW = textPaint.measureText(agentLabel)
-        val agentLineW = 160f // Halved width (from 320f)
+        val agentLineW = 160f
         val agentStartX = MARGIN_LEFT + tableWidth - agentLineW
         canvas.drawText(agentLabel, agentStartX - agentLabelW - 5f, cursorY, textPaint)
         canvas.drawLine(agentStartX, cursorY + 2, agentStartX + agentLineW, cursorY + 2, linePaint)
         
         if (agentName.isNotBlank()) {
             val namePaint = Paint(boldPaint).apply { 
-                textSize = 10f // Matching Boletim
+                textSize = 10f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
             }
-            // Left-aligned on the line as in Boletim
             canvas.drawText(agentName, agentStartX + 5f, cursorY - 2f, namePaint)
         }
-}
-
-    // --- Helper Methods (Similar to BoletimPdfGenerator) ---
-
-    private fun drawRectBox(canvas: Canvas, x: Float, y: Float, w: Float, h: Float, text: String, paint: Paint, bgPaint: Paint?, alignLeft: Boolean = false) {
-        if (bgPaint != null) {
-            canvas.drawRect(x, y, x + w, y + h, bgPaint)
-        }
-        canvas.drawRect(x, y, x + w, y + h, Paint().apply { style = Paint.Style.STROKE; strokeWidth = 0.5f })
-        if (text.isNotBlank()) {
-            drawCenteredText(canvas, paint, text, x, y, w, h, alignLeft)
-        }
     }
+
+    // --- Private Segmented Field Drawers for Metadata ---
 
     private fun drawMetaField(canvas: Canvas, paint: Paint, linePaint: Paint, label: String, value: String, x: Float, y: Float, w: Float, h: Float, centerValue: Boolean = false) {
         canvas.drawText(label, x, y + h - 5, paint)
@@ -686,85 +608,5 @@ object SemanalPdfGenerator {
                 }
             }
         }
-    }
-
-    private fun drawVerticalHeader(canvas: Canvas, linePaint: Paint, textPaint: Paint, bgPaint: Paint?, label: String, x: Float, y: Float, w: Float, h: Float) {
-        if (bgPaint != null) {
-            canvas.drawRect(x, y, x + w, y + h, bgPaint)
-        }
-        canvas.drawRect(x, y, x + w, y + h, linePaint)
-        
-        val lines = label.split("\n")
-        val paint = Paint(textPaint).apply { textSize = 7f }
-        val lineHeight = paint.textSize + 2f
-        val totalH = lines.size * lineHeight
-        
-        var curY = y + (h - totalH) / 2f + paint.textSize
-        lines.forEach { line ->
-            val textW = paint.measureText(line)
-            canvas.drawText(line, x + w / 2f - textW / 2f, curY, paint)
-            curY += lineHeight
-        }
-    }
-
-    private fun drawVerticalTextInBox(canvas: Canvas, paint: Paint, text: String, x: Float, y: Float, w: Float, h: Float) {
-        canvas.drawRect(x, y, x + w, y + h, Paint().apply { style = Paint.Style.STROKE; strokeWidth = 0.5f })
-        val centerX = x + w / 2f
-        val centerY = y + h / 2f
-        canvas.withRotation(-90f, centerX, centerY) {
-            val textW = paint.measureText(text)
-            drawText(text, centerX - textW / 2f, centerY + paint.textSize / 3f, paint)
-        }
-    }
-
-    private fun drawCell(canvas: Canvas, linePaint: Paint, textPaint: Paint, text: String, x: Float, y: Float, w: Float, h: Float, alignLeft: Boolean = false) {
-        canvas.drawRect(x, y, x + w, y + h, linePaint)
-        if (text.isNotBlank()) {
-            drawCenteredText(canvas, textPaint, text, x, y, w, h, alignLeft)
-        }
-    }
-
-    private fun drawCenteredText(canvas: Canvas, paint: Paint, text: String, x: Float, y: Float, w: Float, h: Float, alignLeft: Boolean = false) {
-        val bounds = Rect()
-        paint.getTextBounds(text, 0, text.length, bounds)
-        val textX = if (alignLeft) x + 5f else x + (w - bounds.width()) / 2f
-        
-        // Use font metrics for consistent vertical alignment
-        val textY = y + h / 2f - (paint.descent() + paint.ascent()) / 2f
-        canvas.drawText(text, textX, textY, paint)
-    }
-
-    private fun drawTextInRect(canvas: Canvas, paint: Paint, text: String, x: Float, y: Float, w: Float, h: Float, alignLeft: Boolean = false) {
-        val bounds = Rect()
-        paint.getTextBounds(text, 0, text.length, bounds)
-        val textX = if (alignLeft) x else x + (w - bounds.width()) / 2f
-        
-        // Use font metrics for consistent vertical alignment
-        val textY = y + h / 2f - (paint.descent() + paint.ascent()) / 2f
-        canvas.drawText(text, textX, textY, paint)
-    }
-
-    private fun calculateCiclo(date: String): String {
-        try {
-            val parts = date.split("-")
-            if (parts.size == 3) {
-                val month = parts[1].toInt()
-                val cicloNum = ((month - 1) / 2) + 1
-                return "${cicloNum}º"
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return ""
-    }
-
-    private val DASH = "—"
-
-    private fun dsh(v: Int): String = if (v == 0) DASH else v.toString()
-
-    private fun formatDouble(v: Double): String {
-        if (v == 0.0) return DASH
-        return if (v % 1.0 == 0.0) v.toInt().toString() 
-        else String.format(java.util.Locale("pt", "BR"), "%.1f", v)
     }
 }

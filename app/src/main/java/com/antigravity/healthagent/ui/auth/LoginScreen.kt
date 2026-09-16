@@ -1,7 +1,6 @@
 package com.antigravity.healthagent.ui.auth
 
 import android.app.Activity
-import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,19 +48,11 @@ import androidx.compose.material.icons.filled.Person
 
 @Composable
 fun LoginScreen(
-    viewModel: LoginViewModel,
-    onLoginSuccess: () -> Unit
+    viewModel: LoginViewModel
 ) {
     val authState by viewModel.authState.collectAsState()
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    
-    // We navigate away when authenticated
-    LaunchedEffect(authState) {
-        if (authState is AuthState.Authenticated) {
-            onLoginSuccess()
-        }
-    }
 
     var showContent by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -245,6 +236,7 @@ fun LoginScreen(
                                         )
                                     }
                                 } else {
+                                    val isRequesting by viewModel.isRequesting.collectAsState()
                                     OutlinedTextField(
                                         value = requestedName,
                                         onValueChange = { requestedName = it },
@@ -260,9 +252,18 @@ fun LoginScreen(
                                     Button(
                                         onClick = { viewModel.requestAccess(requestedName.ifBlank { null }) },
                                         modifier = Modifier.fillMaxWidth().height(56.dp),
-                                        shape = RoundedCornerShape(16.dp)
+                                        shape = RoundedCornerShape(16.dp),
+                                        enabled = !isRequesting
                                     ) {
-                                        Text("Solicitar Autorização", fontWeight = FontWeight.Bold)
+                                        if (isRequesting) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(24.dp),
+                                                strokeWidth = 2.dp,
+                                                color = MaterialTheme.colorScheme.onPrimary
+                                            )
+                                        } else {
+                                            Text("Solicitar Autorização", fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
                                 
@@ -314,11 +315,13 @@ fun LoginScreen(
                                                 if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                                                     val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
                                                     viewModel.signInWithGoogle(googleIdTokenCredential.idToken)
+                                                } else {
+                                                    viewModel.setError("Tipo de credencial não suportado. Use uma conta Google.")
                                                 }
                                             } catch (e: androidx.credentials.exceptions.GetCredentialCancellationException) {
-                                                Log.i("LoginScreen", "User cancelled")
+                                                com.antigravity.healthagent.domain.logger.AppLogger.i("LoginScreen", "User cancelled")
                                             } catch (e: Exception) {
-                                                Log.e("LoginScreen", "Login error", e)
+                                                com.antigravity.healthagent.domain.logger.AppLogger.e("LoginScreen", "Login error", e)
                                                 viewModel.setError("Erro no login: ${e.message}")
                                             }
                                         }
