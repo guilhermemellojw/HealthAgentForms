@@ -54,7 +54,6 @@ fun AdminDashboardScreen(
     val agentNames by viewModel.agentNames.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val unifiedProfiles by viewModel.unifiedProfiles.collectAsState()
-    val isSolarMode by viewModel.solarMode.collectAsState()
     val selectedYear by viewModel.selectedYear.collectAsState()
     val selectedMonth by viewModel.selectedMonth.collectAsState()
 
@@ -335,16 +334,33 @@ fun AdminDashboardScreen(
                                             Text("Nenhum usuário encontrado.", color = Color.White.copy(alpha = 0.75f))
                                         }
                                     } else {
+                                        val linkedNames = remember(unifiedProfiles) {
+                                            unifiedProfiles.filter { it.uid != null }
+                                                .mapNotNull { it.agentName?.trim()?.uppercase() }.toSet()
+                                        }
                                         LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
                                             items(unifiedProfiles, key = { it.uid ?: it.email ?: it.agentName ?: it.hashCode() }) { profile ->
                                                 UnifiedProfileCard(
                                                     profile = profile,
                                                     agentNamesList = agentNames,
+                                                    linkedNames = linkedNames,
                                                     isSolarMode = isSolarMode,
                                                     onAuthorize = { authorized -> viewModel.authorizeUser(profile.uid ?: "", authorized) },
                                                     onRoleChange = { role -> viewModel.changeUserRole(profile.uid ?: "", role) },
                                                     onUpdateName = { name ->
-                                                        profile.uid?.let { viewModel.updateUserProfile(it, mapOf("agentName" to name)) }
+                                                        val uid = profile.uid
+                                                        val old = profile.agentName
+                                                        if (uid == null) {
+                                                            // Sem UID não há perfil para vincular
+                                                        } else if (name == null) {
+                                                            viewModel.updateUserProfile(uid, mapOf("agentName" to null))
+                                                        } else if (!old.isNullOrBlank() && name.trim().isNotBlank() &&
+                                                            old.trim().uppercase() != name.trim().uppercase()
+                                                        ) {
+                                                            viewModel.renameMasterAgentName(old, name, targetUid = uid)
+                                                        } else {
+                                                            viewModel.updateUserProfile(uid, mapOf("agentName" to name))
+                                                        }
                                                     },
                                                     onDelete = {
                                                         userToDelete = profile
@@ -366,7 +382,8 @@ fun AdminDashboardScreen(
                                                     onMigrateData = {
                                                         val authUser = users.find { it.uid == profile.uid }
                                                         if (authUser != null) {
-                                                            confirmTitle = "Migrar Dados"; confirmMessage = "Deseja migrar os dados de conta não vinculada para este perfil (${authUser.email})?"; onConfirmAction = { viewModel.migrateData(authUser) }; showConfirmDialog = true
+                                                            val linkName = profile.agentName
+                                                            confirmTitle = "Migrar Dados"; confirmMessage = "Deseja migrar os dados do pré-registro para ${authUser.email} vinculando o nome \"${linkName ?: "—"}\"? Esta ação é irreversível."; onConfirmAction = { viewModel.migrateData(authUser, linkName) }; showConfirmDialog = true
                                                         }
                                                     },
                                                     onTransferData = {
@@ -380,6 +397,15 @@ fun AdminDashboardScreen(
                                                     onOpenTimeline = { uid, name ->
                                                         showTimelineForUid = uid
                                                         showTimelineForName = name
+                                                    },
+                                                    onRenameMaster = { old, new ->
+                                                        viewModel.renameMasterAgentName(old, new)
+                                                    },
+                                                    onDeleteMaster = { name ->
+                                                        confirmTitle = "Excluir Nome"
+                                                        confirmMessage = "Excluir '$name' da lista mestra?"
+                                                        onConfirmAction = { viewModel.removeAgentName(name) }
+                                                        showConfirmDialog = true
                                                     }
                                                 )
                                             }
@@ -407,8 +433,13 @@ fun AdminDashboardScreen(
     }
 
     if (showCreateUserDialog) {
+        val linkedNames = remember(unifiedProfiles) {
+            unifiedProfiles.filter { it.uid != null }.mapNotNull { it.agentName?.trim()?.uppercase() }.toSet()
+        }
         CreateUserDialog(
             agentNamesList = agentNames,
+            existingEmails = remember(users) { users.mapNotNull { it.email?.trim()?.lowercase() }.toSet() },
+            linkedNames = linkedNames,
             onDismiss = { showCreateUserDialog = false },
             onConfirm = { email, role, name, authorized ->
                 viewModel.createUser(email, role, name, authorized)

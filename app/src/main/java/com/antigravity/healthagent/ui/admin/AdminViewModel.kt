@@ -43,86 +43,14 @@ class AdminViewModel @Inject constructor(
         } else {
             emptyList()
         }
-        
-        val agentsByUid = agentsList.associateBy { it.uid }
-        val agentsByEmail = agentsList.filter { it.uid == null || it.uid.startsWith(com.antigravity.healthagent.utils.AppConstants.PRE_PREFIX) }.associateBy { it.email }
 
-        val result = mutableListOf<UnifiedProfile>()
-        val processedAgentUids = mutableSetOf<String?>()
-        val processedEmails = mutableSetOf<String?>()
-        
-        val sortedUsers = usersList.sortedWith(compareBy { it.uid.startsWith(com.antigravity.healthagent.utils.AppConstants.PRE_PREFIX) })
-        sortedUsers.forEach { user ->
-            val normalizedEmail = user.email?.trim()?.lowercase()
-            if (normalizedEmail != null && processedEmails.contains(normalizedEmail)) {
-                return@forEach
-            }
-            
-            var agentData = agentsByUid[user.uid]
-            if (agentData == null && user.email != null) {
-                agentData = agentsByEmail[user.email]
-            }
-
-            result.add(
-                UnifiedProfile(
-                    uid = user.uid,
-                    email = user.email,
-                    agentName = agentData?.agentName ?: user.agentName,
-                    role = user.role,
-                    isAuthorized = user.isAuthorized,
-                    isPreRegistered = user.uid.startsWith(com.antigravity.healthagent.utils.AppConstants.PRE_PREFIX),
-                    agentData = agentData
-                )
-            )
-            processedAgentUids.add(user.uid)
-            processedEmails.add(normalizedEmail)
-            agentData?.uid?.let { processedAgentUids.add(it) }
-            agentData?.email?.trim()?.lowercase()?.let { processedEmails.add(it) }
-        }
-        
-        agentsList.forEach { agent ->
-            val normalizedEmail = agent.email?.trim()?.lowercase()
-            if (!processedAgentUids.contains(agent.uid) && !processedEmails.contains(normalizedEmail)) {
-                val isPre = agent.uid?.startsWith(com.antigravity.healthagent.utils.AppConstants.PRE_PREFIX) == true
-                result.add(
-                    UnifiedProfile(
-                        uid = agent.uid,
-                        email = agent.email,
-                        agentName = agent.agentName,
-                        role = UserRole.AGENT, 
-                        isAuthorized = true,
-                        isPreRegistered = isPre,
-                        agentData = agent
-                    )
-                )
-                processedAgentUids.add(agent.uid)
-                processedEmails.add(normalizedEmail)
-            }
-        }
-        
-        val existingNamesUpperCase = result.mapNotNull { it.agentName?.trim()?.uppercase() }.toSet()
-        namesList.forEach { name ->
-            val normalizedName = name.trim().uppercase()
-            if (!existingNamesUpperCase.contains(normalizedName)) {
-                result.add(
-                    UnifiedProfile(
-                        uid = null,
-                        email = null,
-                        agentName = name,
-                        role = UserRole.AGENT,
-                        isAuthorized = false,
-                        isPreRegistered = true,
-                        agentData = null
-                    )
-                )
-            }
-        }
-
-        if (query.isBlank()) result
-        else result.filter { 
-            it.email?.contains(query, true) == true || 
-            it.agentName?.contains(query, true) == true 
-        }
+        // Mapeamento canonico isolado em componente de dominio unit-tested da main
+        UnifiedProfilesMapper.buildUnifiedProfiles(
+            usersList = usersList,
+            agentsList = agentsList,
+            namesList = namesList,
+            query = query
+        )
     }
     .flowOn(kotlinx.coroutines.Dispatchers.Default)
     .distinctUntilChanged()
@@ -157,8 +85,6 @@ class AdminViewModel @Inject constructor(
             }
         }
     }
-
-    fun updateSearchQuery(query: String) { searchQuery.value = query }
 
     fun getFilteredMonths(): List<String> {
         val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
@@ -212,6 +138,7 @@ class AdminViewModel @Inject constructor(
         selectedAgentForEdit.value = agent
     }
 
+    // Delegacao limpa para os metodos gerenciados por Delegates
     fun approveAccess(requestId: String, agentName: String?) = usersDelegate.approveAccess(viewModelScope, stateDelegate, requestId, agentName)
     fun rejectAccess(requestId: String) = usersDelegate.rejectAccess(viewModelScope, stateDelegate, requestId)
     fun addAgentName(name: String) = usersDelegate.addAgentName(viewModelScope, stateDelegate, name)
@@ -226,19 +153,23 @@ class AdminViewModel @Inject constructor(
     fun addBairro(name: String) = usersDelegate.addBairro(viewModelScope, stateDelegate, name)
     fun deleteBairro(name: String) = usersDelegate.deleteBairro(viewModelScope, stateDelegate, name)
     fun updateSystemSetting(key: String, value: Any) = usersDelegate.updateSystemSetting(viewModelScope, stateDelegate, key, value)
+    fun renameMasterAgentName(oldName: String, newName: String, targetUid: String? = null) = usersDelegate.renameMasterAgentName(viewModelScope, stateDelegate, oldName, newName, targetUid)
+
     fun addGlobalActivity(activity: String) {
         val current = globalCustomActivities.value
         if (activity !in current) {
             updateSystemSetting("custom_activities", (current + activity).toList())
         }
     }
+    
     fun removeGlobalActivity(activity: String) {
         val current = globalCustomActivities.value
         if (activity in current) {
             updateSystemSetting("custom_activities", (current - activity).toList())
         }
     }
-    fun migrateData(authUser: AuthUser) = usersDelegate.migrateData(viewModelScope, stateDelegate, authUser) { refreshAll() }
+    
+    fun migrateData(authUser: AuthUser, resolvedAgentName: String? = null) = usersDelegate.migrateData(viewModelScope, stateDelegate, authUser, resolvedAgentName) { refreshAll() }
     fun transferData(fromUid: String, toUid: String) = usersDelegate.transferData(viewModelScope, stateDelegate, fromUid, toUid) { refreshAll() }
 
     fun getCurrentUserUid(): String? = authRepository.getCurrentUserUid()
@@ -248,23 +179,29 @@ class AdminViewModel @Inject constructor(
         backupDelegate.restoreAgentBackup(viewModelScope, stateDelegate, context, agentUid, uri, targetDate, autoShift) {
             usersDelegate.loadAgentsData(stateDelegate, selectedYear.value, selectedMonth.value)
         }
+
     fun deleteAgentHouse(agentUid: String, houseId: String) =
         backupDelegate.deleteAgentHouse(viewModelScope, stateDelegate, agentUid, houseId) {
             usersDelegate.loadAgentsData(stateDelegate, selectedYear.value, selectedMonth.value)
         }
+        
     fun deleteAgentActivity(agentUid: String, activityDate: String) =
         backupDelegate.deleteAgentActivity(viewModelScope, stateDelegate, agentUid, activityDate) {
             usersDelegate.loadAgentsData(stateDelegate, selectedYear.value, selectedMonth.value)
         }
+        
     fun clearSyncError(uid: String) =
         backupDelegate.clearSyncError(viewModelScope, stateDelegate, uid) {
             usersDelegate.loadAgentsData(stateDelegate, selectedYear.value, selectedMonth.value)
         }
+        
     fun loadTimeline(uid: String) = backupDelegate.loadTimeline(viewModelScope, stateDelegate, uid)
+    
     fun restoreFromTimeline(agentUid: String, storagePath: String) =
         backupDelegate.restoreFromTimeline(viewModelScope, stateDelegate, agentUid, storagePath) {
             usersDelegate.loadAgentsData(stateDelegate, selectedYear.value, selectedMonth.value)
         }
+        
     fun performSurgicalCleanup(uid: String) =
         backupDelegate.performSurgicalCleanup(viewModelScope, stateDelegate, uid) {
             usersDelegate.loadAgentsData(stateDelegate, selectedYear.value, selectedMonth.value)
@@ -278,7 +215,9 @@ data class UnifiedProfile(
     val role: UserRole,
     val isAuthorized: Boolean,
     val isPreRegistered: Boolean,
-    val agentData: AgentData? = null
+    val agentData: AgentData? = null,
+    val hasPendingPreMigration: Boolean = false,
+    val hasAmbiguousLink: Boolean = false
 )
 
 sealed class AdminUiState {
