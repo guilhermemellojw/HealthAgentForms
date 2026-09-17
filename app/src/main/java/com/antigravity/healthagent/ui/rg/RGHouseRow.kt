@@ -96,10 +96,17 @@ fun RGHouseRow(
 @Composable
 fun AgentGroupHeader(
     agentName: String,
+    houseCount: Int,
     isSolarMode: Boolean
 ) {
+    val label = buildString {
+        append(agentName.ifBlank { "Agente" }.uppercase())
+        append(" — ")
+        append(houseCount)
+        append(if (houseCount == 1) " imóvel" else " imóveis")
+    }
     Text(
-        text = agentName.ifBlank { "Agente" }.uppercase(),
+        text = label,
         style = MaterialTheme.typography.labelMedium,
         fontWeight = FontWeight.SemiBold,
         textAlign = TextAlign.Center,
@@ -132,7 +139,7 @@ fun AgentGroupCard(
             .padding(vertical = 4.dp)
     ) {
         Column {
-            AgentGroupHeader(agentName = agentName, isSolarMode = isSolarMode)
+            AgentGroupHeader(agentName = agentName, houseCount = houses.size, isSolarMode = isSolarMode)
             Divider(
                 color = if (isSolarMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
                 else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),

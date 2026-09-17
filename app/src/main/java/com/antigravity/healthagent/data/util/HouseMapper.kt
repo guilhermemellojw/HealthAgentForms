@@ -153,7 +153,7 @@ fun House.toFirestoreMap(): Map<String, Any?> {
         "number" to address.number,
         "sequence" to address.sequence,
         "complement" to address.complement,
-        "bairro" to address.bairro,
+        "bairro" to address.bairro.normalize(),
         "blockSequence" to address.blockSequence,
         "propertyType" to propertyType.name,
         "situation" to situation.name,

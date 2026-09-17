@@ -273,17 +273,8 @@ fun RGScreen(
                         }
                     }
                 } else {
-                    val groupedByAgent = rgFilteredList.foldIndexed(
-                        emptyList<Triple<Int, String, List<House>>>()
-                    ) { index, acc, house ->
-                        val lastGroup = acc.lastOrNull()
-                        if (lastGroup != null && lastGroup.second == house.agentUid) {
-                            val updated = lastGroup.copy(third = lastGroup.third + house)
-                            acc.dropLast(1) + updated
-                        } else {
-                            acc + Triple(index, house.agentUid, listOf(house))
-                        }
-                    }
+                    // One card per agent (order of first appearance preserved by groupBy's LinkedHashMap)
+                    val groupedByAgent = rgFilteredList.groupBy { it.agentUid }
 
                     // DETAIL MODE: List of Houses grouped by agent (order-preserving)
                     LazyColumn(
@@ -310,9 +301,9 @@ fun RGScreen(
                                 }
                             }
                         } else {
-                            groupedByAgent.forEach { (sortKey, agentUid, houses) ->
+                            groupedByAgent.forEach { (agentUid, houses) ->
                                 val agentName = houses.first().agentName
-                                item(key = "group_$sortKey") {
+                                item(key = "group_$agentUid") {
                                     AgentGroupCard(
                                         agentName = agentName,
                                         houses = houses,

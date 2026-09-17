@@ -23,12 +23,16 @@ class TeamworkSyncHandler @Inject constructor(
         if (isTargetDifferentUser) return teammateHouses
 
         try {
-            val activeBairros = (houseRepository.getActiveBairros(uid) + cloudHouses.map { it.address.bairro })
-                .map { it.trim().uppercase() }
+            val rawActiveBairros = (houseRepository.getActiveBairros(uid) + cloudHouses.map { it.address.bairro })
+                .map { it.trim() }
                 .filter { it.isNotBlank() }
                 .distinct()
-            if (activeBairros.isNotEmpty()) {
-                val teamHouses = activeBairros.chunked(10).flatMap { bairroChunk ->
+            val activeBairros = rawActiveBairros.map { it.uppercase() }.distinct()
+            if (rawActiveBairros.isNotEmpty()) {
+                // Tolerate legacy casing drift: query both raw and uppercase, chunked to respect the 10-value cap
+                // (raw + uppercase doubling keeps each chunk within Firestore's 30-value limit).
+                val bairroQueryValues = (rawActiveBairros + rawActiveBairros.map { it.uppercase() }).distinct()
+                val teamHouses = bairroQueryValues.chunked(10).flatMap { bairroChunk ->
                     firestore.collectionGroup("houses")
                         .whereIn("bairro", bairroChunk)
                         .get().await().documents
