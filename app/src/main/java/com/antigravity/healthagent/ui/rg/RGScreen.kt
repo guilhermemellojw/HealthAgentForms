@@ -273,10 +273,18 @@ fun RGScreen(
                         }
                     }
                 } else {
-                    // One card per agent (order of first appearance preserved by groupBy's LinkedHashMap)
-                    val groupedByAgent = rgFilteredList.groupBy { it.agentUid }
+                    // Runs consecutivos por agente (ordem de produção: A -> B -> A...)
+                    val groupedByAgent = mutableListOf<Pair<String, List<House>>>()
+                    for (house in rgFilteredList) {
+                        val last = groupedByAgent.lastOrNull()
+                        if (last != null && last.first == house.agentUid) {
+                            groupedByAgent[groupedByAgent.lastIndex] = last.first to (last.second + house)
+                        } else {
+                            groupedByAgent += house.agentUid to listOf(house)
+                        }
+                    }
 
-                    // DETAIL MODE: List of Houses grouped by agent (order-preserving)
+                    // DETAIL MODE: List of Houses grouped by consecutive agent runs (order-preserving)
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 100.dp)
@@ -301,9 +309,9 @@ fun RGScreen(
                                 }
                             }
                         } else {
-                            groupedByAgent.forEach { (agentUid, houses) ->
+                            groupedByAgent.forEachIndexed { runIndex, (agentUid, houses) ->
                                 val agentName = houses.first().agentName
-                                item(key = "group_$agentUid") {
+                                item(key = "group_${agentUid}_$runIndex") {
                                     AgentGroupCard(
                                         agentName = agentName,
                                         houses = houses,
