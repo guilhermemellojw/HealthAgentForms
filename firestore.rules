@@ -27,6 +27,16 @@ service cloud.firestore {
       );
     }
 
+    // Nome canônico (agentName) do usuário logado. Gravado em MAIÚSCULAS no
+    // perfil users/{uid} (o app normaliza ao gravar). Usado para endereçar
+    // transferências de dia agente→agente pela correspondência exata do nome.
+    function signedInAgentName() {
+      let profileRef = /databases/$(database)/documents/users/$(request.auth.uid);
+      return (exists(profileRef) && get(profileRef).data.agentName != null)
+        ? get(profileRef).data.agentName
+        : '';
+    }
+
     // 1. Coleção de Usuários
     match /users/{userId} {
       allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
@@ -43,6 +53,15 @@ service cloud.firestore {
       // Qualquer agente logado pode ler imóveis de outros agentes para montar o RG unificado.
       // Modificações nos imóveis continuam exclusivas ao dono (agentId) ou à equipe Staff.
       match /houses/{houseId} {
+        allow read: if isSignedIn();
+        allow write: if (isSignedIn() && request.auth.uid == agentId) || isStaff();
+      }
+
+      // Cabeçalho de produção por dia (coleção day_activities).
+      // LEITURA: aberta a qualquer agente logado — o RG unificado e a transferência
+      // agente→agente precisam ler o header (produtividade/java) do dono.
+      // ESCRITA: exclusiva ao dono (agentId) ou staff.
+      match /day_activities/{activityId} {
         allow read: if isSignedIn();
         allow write: if (isSignedIn() && request.auth.uid == agentId) || isStaff();
       }
@@ -71,14 +90,52 @@ service cloud.firestore {
     }
     
     // 6. Permissão de Grupo de Coleções (Collection Group)
-    // Permite apenas que a equipe Staff execute a busca unificada por bairros/quarteirões.
+    // Qualquer agente logado pode ler imóveis de outros para montar o RG unificado.
     match /{path=**}/houses/{houseId} {
-      allow read: if isStaff();
+      allow read: if isSignedIn();
     }
 
     // 7. Catch-all de segurança para Admin
     match /{document=**} {
       allow read, write: if isAdmin();
+    }
+
+    // 8. Transferência de dia agente→agente (sem admin, sem arquivo)
+    // Origem cria a oferta (fromUid == auth.uid); destino aceita/recusa pela
+    // correspondência de nome canônico (toKey) ou UID; origem cancela pendências.
+    match /day_transfers/{transferId} {
+      allow create: if isSignedIn()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.toKey is string
+        && request.resource.data.toKey != ''
+        && request.resource.data.toKey != signedInAgentName()
+        && request.resource.data.toAgentName is string
+        && request.resource.data.fromDate is string
+        && request.resource.data.fromDate.matches('[0-9]{2}-[0-9]{2}-[0-9]{4}')
+        && request.resource.data.status == 'PENDING'
+        && request.resource.data.houseCount is int
+        && request.resource.data.houseCount >= 0;
+      allow read: if isSignedIn() && (
+        // Doc ainda não existe? Libera a checagem de duplicidade da origem (get
+        // em doc inexistente) sem vazar nada — doc inexistente não tem conteúdo.
+        !exists(/databases/$(database)/documents/day_transfers/$(transferId)) ||
+        resource.data.fromUid == request.auth.uid ||
+        resource.data.toUid == request.auth.uid ||
+        signedInAgentName() == resource.data.toKey
+      );
+      allow update: if isSignedIn() && (
+        // Destino aceita/recusa uma oferta pendente endereçada a ele
+        (resource.data.toUid == request.auth.uid || signedInAgentName() == resource.data.toKey)
+        && resource.data.status == 'PENDING'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'finalDate', 'acceptedAt', 'toUid'])
+      ) || (
+        // Origem cancela a própria oferta pendente
+        resource.data.fromUid == request.auth.uid
+        && resource.data.status == 'PENDING'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+      );
+      allow delete: if isSignedIn() && resource.data.fromUid == request.auth.uid
+        && resource.data.status != 'PENDING';
     }
   }
 }

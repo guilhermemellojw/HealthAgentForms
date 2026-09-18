@@ -14,6 +14,8 @@ import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.domain.repository.SyncRepository
+import com.antigravity.healthagent.domain.repository.DayTransferRepository
+import com.antigravity.healthagent.domain.repository.AgentRepository
 import com.antigravity.healthagent.data.repository.StreetRepository
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.ui.semanal.WeeklySummaryViewModel
@@ -65,6 +67,10 @@ class AdminHomologationLockTest {
     private val selectDayActivityUseCase = mockk<SelectDayActivityUseCase>(relaxed = true)
     private val updateDayHeaderUseCase = mockk<UpdateDayHeaderUseCase>(relaxed = true)
     private val checkWorkedHouseLimitUseCase = mockk<CheckWorkedHouseLimitUseCase>(relaxed = true)
+    private val dayTransferRepository = mockk<DayTransferRepository>(relaxed = true)
+    private val offerDayTransferUseCase = mockk<OfferDayTransferUseCase>(relaxed = true)
+    private val acceptDayTransferUseCase = mockk<AcceptDayTransferUseCase>(relaxed = true)
+    private val agentRepository = mockk<AgentRepository>(relaxed = true)
     private val clock = object : Clock {
         private var counter = 500L
         override fun currentTimeMillis(): Long {
@@ -177,7 +183,11 @@ class AdminHomologationLockTest {
             remoteAgentDelegate = remoteAgentDelegate,
             boletimDataDelegate = boletimDataDelegate,
             initializationDelegate = initializationDelegate,
-            houseEditDelegate = houseEditDelegate
+            houseEditDelegate = houseEditDelegate,
+            dayTransferRepository = dayTransferRepository,
+            offerDayTransferUseCase = offerDayTransferUseCase,
+            acceptDayTransferUseCase = acceptDayTransferUseCase,
+            agentRepository = agentRepository
         )
 
         // Force viewModel state loading.
@@ -253,7 +263,11 @@ class AdminHomologationLockTest {
             remoteAgentDelegate = remoteAgentDelegate,
             boletimDataDelegate = boletimDataDelegate,
             initializationDelegate = initializationDelegate,
-            houseEditDelegate = houseEditDelegate
+            houseEditDelegate = houseEditDelegate,
+            dayTransferRepository = dayTransferRepository,
+            offerDayTransferUseCase = offerDayTransferUseCase,
+            acceptDayTransferUseCase = acceptDayTransferUseCase,
+            agentRepository = agentRepository
         )
 
         testDispatcher.scheduler.advanceUntilIdle()
@@ -384,7 +398,11 @@ class AdminHomologationLockTest {
             remoteAgentDelegate = remoteAgentDelegate,
             boletimDataDelegate = boletimDataDelegate,
             initializationDelegate = initializationDelegate,
-            houseEditDelegate = houseEditDelegate
+            houseEditDelegate = houseEditDelegate,
+            dayTransferRepository = dayTransferRepository,
+            offerDayTransferUseCase = offerDayTransferUseCase,
+            acceptDayTransferUseCase = acceptDayTransferUseCase,
+            agentRepository = agentRepository
         )
 
         viewModel.navigateToDate("18-05-2026")
@@ -466,7 +484,11 @@ class AdminHomologationLockTest {
             remoteAgentDelegate = remoteAgentDelegate,
             boletimDataDelegate = boletimDataDelegate,
             initializationDelegate = initializationDelegate,
-            houseEditDelegate = houseEditDelegate
+            houseEditDelegate = houseEditDelegate,
+            dayTransferRepository = dayTransferRepository,
+            offerDayTransferUseCase = offerDayTransferUseCase,
+            acceptDayTransferUseCase = acceptDayTransferUseCase,
+            agentRepository = agentRepository
         )
 
         viewModel.navigateToDate("18-05-2026")

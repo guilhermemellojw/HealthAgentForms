@@ -7,6 +7,8 @@ import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.StreetRepository
 import com.antigravity.healthagent.domain.repository.AgentData
+import com.antigravity.healthagent.domain.repository.DayTransfer
+import com.antigravity.healthagent.domain.repository.DayTransferStatus
 import com.antigravity.healthagent.domain.usecase.SaveHouseUseCase
 import com.antigravity.healthagent.domain.usecase.RecalculateVisitSegmentsUseCase
 import com.antigravity.healthagent.domain.usecase.DayManagementUseCase
@@ -63,7 +65,12 @@ class HomeViewModel @Inject constructor(
     private val dayClosingDelegate: DayClosingDelegate,
     private val remoteAgentDelegate: RemoteAgentDelegate,
     private val boletimDataDelegate: BoletimDataDelegate,
-    private val initializationDelegate: InitializationDelegate
+    private val initializationDelegate: InitializationDelegate,
+
+    private val dayTransferRepository: com.antigravity.healthagent.domain.repository.DayTransferRepository,
+    private val offerDayTransferUseCase: com.antigravity.healthagent.domain.usecase.OfferDayTransferUseCase,
+    private val acceptDayTransferUseCase: com.antigravity.healthagent.domain.usecase.AcceptDayTransferUseCase,
+    private val agentRepository: com.antigravity.healthagent.domain.repository.AgentRepository
 ) : ViewModel(), HomeState by homeStateDelegate {
 
     private val dateFormatter get() = DateUtils.DASH_DATE.get()
@@ -269,6 +276,34 @@ class HomeViewModel @Inject constructor(
         remoteAgentUidFlow = remoteAgentUid,
         currentUserUidFlow = currentUserUid
     )
+
+    // ───── Transferência de dia agente→agente ─────
+    private val _agentNames = MutableStateFlow<List<String>>(emptyList())
+    val agentNames: StateFlow<List<String>> = _agentNames.asStateFlow()
+
+    val incomingTransfers: StateFlow<List<DayTransfer>> = combine(
+        currentUserUid, agentName, remoteAgentUid
+    ) { uid, name, remote ->
+        if (remote == null && uid != null && name.isNotBlank()) uid to name else null to ""
+    }.distinctUntilChanged().flatMapLatest { (uid, name) ->
+        if (uid != null && name.isNotBlank()) {
+            dayTransferRepository.observeIncoming(uid, name)
+        } else {
+            flowOf(emptyList())
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val outgoingTransfers: StateFlow<List<DayTransfer>> = combine(
+        currentUserUid, remoteAgentUid
+    ) { cur, remote ->
+        if (remote == null) cur else null
+    }.distinctUntilChanged().flatMapLatest { uid ->
+        if (uid != null) {
+            dayTransferRepository.observeOutgoing(uid)
+        } else {
+            flowOf(emptyList())
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val activityOptions: StateFlow<List<String>> = settingsManager.customActivities.map { custom ->
         (listOf("NORMAL", "FERIADO", "PONTO FACULTATIVO", "REUNIÃO", "TREINAMENTO") + custom.toList()).distinct()
@@ -627,6 +662,88 @@ class HomeViewModel @Inject constructor(
             } catch (e: Exception) {
                 AppLogger.e("HomeViewModel", "Error deleting production", e)
                 uiEvent.value = "Erro ao excluir produção: ${e.message}"
+            }
+        }
+    }
+
+    fun refreshAgentNames() {
+        viewModelScope.launch {
+            agentRepository.fetchAgentNames().onSuccess { names ->
+                _agentNames.value = names.sorted()
+            }
+        }
+    }
+
+    fun offerDayTransfer(date: String, targetName: String) {
+        viewModelScope.launch {
+            val myUid = currentUserUid.value
+            val myName = agentName.value
+            if (myUid == null) {
+                uiEvent.value = "Não foi possível identificar sua conta. Refaça o login."
+                return@launch
+            }
+            offerDayTransferUseCase(date, myUid, myName, targetName)
+                .onSuccess {
+                    uiEvent.value = "Oferta enviada para ${targetName.trim().uppercase()}. Aguardando aceite."
+                    soundManager.playPop()
+                }
+                .onFailure { error ->
+                    uiEvent.value = error.message ?: "Erro ao enviar oferta"
+                    soundManager.playWarning()
+                }
+        }
+    }
+
+    fun acceptIncoming(transfer: DayTransfer) {
+        viewModelScope.launch {
+            val myUid = currentUserUid.value
+            val myName = agentName.value
+            if (myUid == null) {
+                uiEvent.value = "Não foi possível identificar sua conta. Refaça o login."
+                return@launch
+            }
+            acceptDayTransferUseCase(transfer, myUid, myName, maxOpenHouses = maxOpenHouses.value)
+                .onSuccess { finalDate ->
+                    uiEvent.value = "Produção recebida em $finalDate. Sincronizando..."
+                    soundManager.playPop()
+                    triggerImmediateSync()
+                }
+                .onFailure { error ->
+                    uiEvent.value = error.message ?: "Erro ao aceitar transferência"
+                    soundManager.playWarning()
+                }
+        }
+    }
+
+    fun declineIncoming(transfer: DayTransfer) {
+        viewModelScope.launch {
+            dayTransferRepository.markDeclined(transfer.id)
+                .onSuccess { uiEvent.value = "Oferta recusada." }
+                .onFailure { uiEvent.value = it.message ?: "Erro ao recusar oferta" }
+        }
+    }
+
+    fun cancelTransfer(transfer: DayTransfer) {
+        viewModelScope.launch {
+            dayTransferRepository.cancelOffer(transfer.id)
+                .onSuccess { uiEvent.value = "Oferta cancelada." }
+                .onFailure { uiEvent.value = it.message ?: "Erro ao cancelar oferta" }
+        }
+    }
+
+    fun deleteDayAfterTransfer(transfer: DayTransfer) {
+        viewModelScope.launch {
+            try {
+                val currentUid = remoteAgentUid.value ?: currentUserUid.value
+                repository.deleteProduction(transfer.fromDate, currentUid)
+                if (transfer.id.isNotBlank()) {
+                    dayTransferRepository.deleteTransfer(transfer.id)
+                        .onFailure { AppLogger.w("HomeViewModel", "Falha ao remover doc de transferência: ${it.message}") }
+                }
+                uiEvent.value = "Dia apagado."
+            } catch (e: Exception) {
+                AppLogger.e("HomeViewModel", "Error deleting day after transfer", e)
+                uiEvent.value = "Erro ao apagar dia: ${e.message}"
             }
         }
     }

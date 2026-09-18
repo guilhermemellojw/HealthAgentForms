@@ -359,7 +359,7 @@ fun AdminDashboardScreen(
                                                         ) {
                                                             viewModel.renameMasterAgentName(old, name, targetUid = uid)
                                                         } else {
-                                                            viewModel.updateUserProfile(uid, mapOf("agentName" to name))
+                                                            viewModel.updateUserProfile(uid, mapOf("agentName" to name.trim().uppercase()))
                                                         }
                                                     },
                                                     onDelete = {

@@ -360,7 +360,7 @@ export async function drawRgPage(
   const sigLabel = "ASSINATURA:";
   const sigLabelWidth = doc.getTextWidth(sigLabel);
   drawTextInRect(doc, sigLabel, MARGIN, fy, sigLabelWidth + 10, sigH, 8, false, true);
-  // assinatura em branco para coleta manuscrita
+  drawTextInRect(doc, agentNameDisplay, MARGIN + sigLabelWidth + 5, fy, sigColWidth - sigLabelWidth - 5, sigH, 8, false, true);
 
   const dataX = MARGIN + sigColWidth;
   strokeRect(doc, dataX, fy, dateColWidth, sigH);

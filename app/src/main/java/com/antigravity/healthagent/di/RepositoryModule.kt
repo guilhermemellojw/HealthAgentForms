@@ -67,4 +67,10 @@ abstract class RepositoryModule {
     abstract fun bindStreetRepository(
         streetRepositoryImpl: com.antigravity.healthagent.data.repository.StreetRepository
     ): com.antigravity.healthagent.domain.repository.StreetRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindDayTransferRepository(
+        dayTransferRepositoryImpl: com.antigravity.healthagent.data.repository.DayTransferRepositoryImpl
+    ): com.antigravity.healthagent.domain.repository.DayTransferRepository
 }

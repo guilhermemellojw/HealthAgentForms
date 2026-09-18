@@ -13,7 +13,6 @@ import androidx.compose.material.icons.Icons
 
 import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -61,6 +60,8 @@ import com.antigravity.healthagent.ui.components.GlassTopAppBar
 import com.antigravity.healthagent.ui.components.SyncCompactBalloon
 import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
 import com.antigravity.healthagent.utils.formatStreetName
+import com.antigravity.healthagent.domain.repository.DayTransfer
+import com.antigravity.healthagent.domain.repository.DayTransferStatus
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -132,6 +133,15 @@ fun BoletimScreen(
     // Delete Confirmation Dialog
     var showDeleteDialog by remember { mutableStateOf(false) }
     var deleteDate by remember { mutableStateOf("") }
+
+    // Transfer Day to another agent
+    var showTransferDialog by remember { mutableStateOf(false) }
+    var transferDate by remember { mutableStateOf("") }
+    var transferTargetName by remember { mutableStateOf("") }
+
+    val incomingTransfers by viewModel.incomingTransfers.collectAsState()
+    val outgoingTransfers by viewModel.outgoingTransfers.collectAsState()
+    val agentNames by viewModel.agentNames.collectAsState()
     
     val dateSdf = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get()
     
@@ -250,7 +260,21 @@ fun BoletimScreen(
         )
     }
 
-
+    if (showTransferDialog) {
+        TransferDayDialog(
+            date = transferDate,
+            agentNames = agentNames,
+            houseCount = viewModel.getHousesForDate(transferDate).size,
+            onTargetChange = { transferTargetName = it },
+            onConfirm = {
+                if (transferTargetName.isNotBlank()) {
+                    viewModel.offerDayTransfer(transferDate, transferTargetName)
+                }
+                showTransferDialog = false
+            },
+            onDismiss = { showTransferDialog = false }
+        )
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -313,6 +337,20 @@ fun BoletimScreen(
                     contentPadding = PaddingValues(top = 12.dp, start = 12.dp, end = 12.dp, bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+            if (incomingTransfers.isNotEmpty() || outgoingTransfers.isNotEmpty()) {
+                item(key = "day_transfers") {
+                    DayTransferSection(
+                        incoming = incomingTransfers,
+                        outgoing = outgoingTransfers,
+                        isEasyMode = uiState.isEasyMode,
+                        isSolarMode = uiState.isSolarMode,
+                        onAccept = { viewModel.acceptIncoming(it) },
+                        onDecline = { viewModel.declineIncoming(it) },
+                        onCancel = { viewModel.cancelTransfer(it) },
+                        onDeleteDay = { viewModel.deleteDayAfterTransfer(it) }
+                    )
+                }
+            }
             itemsIndexed(boletimList, key = { _, summary -> "${summary.date}|${summary.agentName}" }) { index, summary ->
                 PremiumCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -541,14 +579,17 @@ fun BoletimScreen(
                                             }
                                         }
                                     )
-                                    // Export JSON
+                                    // Transfer to another agent
                                     DropdownMenuItem(
-                                        text = { Text("Exportar JSON") },
-                                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                                        text = { Text("Transferir p/ Agente") },
+                                        leadingIcon = { Icon(Icons.Default.SwapHoriz, contentDescription = null) },
                                         onClick = {
                                             showMenu = false
                                             checkHistoryAndProceed(summary.date) {
-                                                viewModel.exportDayDataAndShare(context, summary.date)
+                                                viewModel.refreshAgentNames()
+                                                transferDate = summary.date
+                                                transferTargetName = ""
+                                                showTransferDialog = true
                                             }
                                         }
                                     )
@@ -677,5 +718,182 @@ private fun shareToWhatsApp(
             putExtra(Intent.EXTRA_TEXT, message)
         }
         context.startActivity(Intent.createChooser(genericIntent, "Compartilhar via"))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TransferDayDialog(
+    date: String,
+    agentNames: List<String>,
+    houseCount: Int,
+    onTargetChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var target by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "Transferir dia $date",
+                fontWeight = FontWeight.ExtraBold,
+                style = MaterialTheme.typography.titleLarge
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    "Produção a transferir: $houseCount imóveis. Após o aceite, quem recebe fica responsável pelo dia.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded }
+                ) {
+                    OutlinedTextField(
+                        value = target,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Agente de destino") },
+                        placeholder = { Text("Selecione o agente") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        agentNames.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = {
+                                    target = name
+                                    onTargetChange(name)
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = target.isNotBlank()
+            ) {
+                Text("Enviar Oferta", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancelar", fontWeight = FontWeight.Bold)
+            }
+        },
+        shape = RoundedCornerShape(24.dp)
+    )
+}
+
+@Composable
+private fun DayTransferSection(
+    incoming: List<DayTransfer>,
+    outgoing: List<DayTransfer>,
+    isEasyMode: Boolean,
+    isSolarMode: Boolean,
+    onAccept: (DayTransfer) -> Unit,
+    onDecline: (DayTransfer) -> Unit,
+    onCancel: (DayTransfer) -> Unit,
+    onDeleteDay: (DayTransfer) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        incoming.forEach { transfer ->
+            PremiumCard(
+                modifier = Modifier.fillMaxWidth(),
+                isSolarMode = isSolarMode
+            ) {
+                Column(Modifier.padding(if (isEasyMode) 16.dp else 14.dp)) {
+                    Text(
+                        "📥 ${transfer.fromName} quer transferir ${transfer.fromDate} (${transfer.houseCount} imóveis)",
+                        fontWeight = FontWeight.Bold,
+                        style = if (isEasyMode) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelLarge
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { onAccept(transfer) },
+                            modifier = Modifier.weight(1f).height(if (isEasyMode) 48.dp else 40.dp),
+                            shape = RoundedCornerShape(if (isEasyMode) 14.dp else 10.dp)
+                        ) {
+                            Text("Aceitar", fontWeight = FontWeight.Bold)
+                        }
+                        OutlinedButton(
+                            onClick = { onDecline(transfer) },
+                            modifier = Modifier.weight(1f).height(if (isEasyMode) 48.dp else 40.dp),
+                            shape = RoundedCornerShape(if (isEasyMode) 14.dp else 10.dp)
+                        ) {
+                            Text("Recusar", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Text(
+                        "Receber em ${transfer.fromDate} se estiver livre; senão no próximo dia útil.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        outgoing.forEach { transfer ->
+            val reachedTerminal = transfer.statusEnum == DayTransferStatus.ACCEPTED ||
+                    transfer.statusEnum == DayTransferStatus.DECLINED ||
+                    transfer.statusEnum == DayTransferStatus.CANCELLED ||
+                    transfer.statusEnum == DayTransferStatus.EXPIRED
+            if (!reachedTerminal || transfer.statusEnum == DayTransferStatus.ACCEPTED) {
+                PremiumCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    isSolarMode = isSolarMode
+                ) {
+                    Column(Modifier.padding(if (isEasyMode) 16.dp else 14.dp)) {
+                        when (transfer.statusEnum) {
+                            DayTransferStatus.PENDING -> {
+                                Text(
+                                    "📤 Aguardando ${transfer.toAgentName} aceitar ${transfer.fromDate} (${transfer.houseCount} imóveis)",
+                                    fontWeight = FontWeight.Bold,
+                                    style = if (isEasyMode) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelLarge
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                OutlinedButton(
+                                    onClick = { onCancel(transfer) },
+                                    modifier = Modifier.height(if (isEasyMode) 48.dp else 40.dp),
+                                    shape = RoundedCornerShape(if (isEasyMode) 14.dp else 10.dp)
+                                ) {
+                                    Text("Cancelar oferta", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            DayTransferStatus.ACCEPTED -> {
+                                Text(
+                                    "✅ ${transfer.toAgentName} recebeu ${transfer.fromDate} (transferido para ${transfer.finalDate.ifBlank { transfer.fromDate }})",
+                                    fontWeight = FontWeight.Bold,
+                                    style = if (isEasyMode) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelLarge
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Button(
+                                    onClick = { onDeleteDay(transfer) },
+                                    modifier = Modifier.height(if (isEasyMode) 48.dp else 40.dp),
+                                    shape = RoundedCornerShape(if (isEasyMode) 14.dp else 10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                ) {
+                                    Text("Apagar meu dia", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            else -> Unit
+                        }
+                    }
+                }
+            }
+        }
     }
 }

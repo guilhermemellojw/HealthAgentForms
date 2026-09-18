@@ -18,6 +18,10 @@ import com.antigravity.healthagent.domain.usecase.LoadDynamicConfigUseCase
 import com.antigravity.healthagent.domain.usecase.TriggerImmediateSyncUseCase
 import com.antigravity.healthagent.domain.usecase.SelectDayActivityUseCase
 import com.antigravity.healthagent.domain.usecase.UpdateDayHeaderUseCase
+import com.antigravity.healthagent.domain.repository.DayTransferRepository
+import com.antigravity.healthagent.domain.repository.AgentRepository
+import com.antigravity.healthagent.domain.usecase.OfferDayTransferUseCase
+import com.antigravity.healthagent.domain.usecase.AcceptDayTransferUseCase
 import com.antigravity.healthagent.domain.model.VisitAddress
 import com.antigravity.healthagent.domain.model.TreatmentData
 import com.antigravity.healthagent.domain.model.GeoCapture
@@ -63,6 +67,10 @@ class HomeViewModelTest {
     private val triggerImmediateSyncUseCase = mockk<TriggerImmediateSyncUseCase>(relaxed = true)
     private val selectDayActivityUseCase = mockk<SelectDayActivityUseCase>(relaxed = true)
     private val updateDayHeaderUseCase = mockk<UpdateDayHeaderUseCase>(relaxed = true)
+    private val dayTransferRepository = mockk<DayTransferRepository>(relaxed = true)
+    private val offerDayTransferUseCase = mockk<OfferDayTransferUseCase>(relaxed = true)
+    private val acceptDayTransferUseCase = mockk<AcceptDayTransferUseCase>(relaxed = true)
+    private val agentRepository = mockk<AgentRepository>(relaxed = true)
 
     private val syncViewModel = mockk<SyncViewModel>(relaxed = true)
     private val dayManagementViewModel = mockk<DayManagementViewModel>(relaxed = true)
@@ -128,7 +136,11 @@ class HomeViewModelTest {
             remoteAgentDelegate = remoteAgentDelegate,
             boletimDataDelegate = boletimDataDelegate,
             initializationDelegate = initializationDelegate,
-            houseEditDelegate = houseEditDelegate
+            houseEditDelegate = houseEditDelegate,
+            dayTransferRepository = dayTransferRepository,
+            offerDayTransferUseCase = offerDayTransferUseCase,
+            acceptDayTransferUseCase = acceptDayTransferUseCase,
+            agentRepository = agentRepository
         )
     }
 

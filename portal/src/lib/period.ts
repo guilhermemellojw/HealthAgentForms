@@ -191,3 +191,50 @@ export function sortRgHouses(houses: HouseDoc[]): HouseDoc[] {
 function dayTsOf(h: HouseDoc): number {
   return rgDayTs((h.data || "").trim());
 }
+
+// ------------------------------------------------------------
+// Helpers p/ RG — paridade getTimestamp/normalize/heal do Android
+// ------------------------------------------------------------
+
+// App StringExtensions.removeAccents(): só tira acentos (p/ comparacao).
+export function removeAccents(text: string): string {
+  return text.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+// App StringExtensions.normalize(): padroniza separadores/casing, MANTEM acentos.
+export function normalizeField(text: unknown): string {
+  if (text === null || text === undefined) return "";
+  return String(text)
+    .trim()
+    .replace(/\//g, "-")
+    .replace(/\./g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/-+/g, "-")
+    .toUpperCase();
+}
+
+// Ano direto do campo data (dd-MM-yyyy), como o Android faz por casa.
+export function houseYear(h: HouseDoc): number | null {
+  const parts = (h.data || "").trim().replace(/\//g, "-").split("-");
+  if (parts.length !== 3) return null;
+  const y = Number(parts[2]);
+  return Number.isFinite(y) && y > 1000 ? y : null;
+}
+
+// Timestamp da data (0 p/ invalida), como getTimestamp() do use case.
+export function houseDateTs(h: HouseDoc): number {
+  const [d, m, y] = (h.data || "").trim().replace(/\//g, "-").split("-").map(Number);
+  if (!y || !m || !d) return 0;
+  const ts = new Date(y, m - 1, d, 12, 0, 0).getTime();
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+// createdAt normalizado p/ ms (number ou { seconds } do Firestore).
+export function createdAtMs(h: HouseDoc): number {
+  const raw = h.createdAt;
+  if (raw == null) return Number.MAX_SAFE_INTEGER;
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : Number.MAX_SAFE_INTEGER;
+  if (typeof raw === "object" && typeof raw.seconds === "number") return raw.seconds * 1000;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+}
