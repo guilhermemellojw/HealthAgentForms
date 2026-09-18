@@ -111,11 +111,11 @@ object BoletimPdfGenerator {
                 }
             }
 
-            // --- Pass 2: All Back Pages ---
-            sortedDates.forEach { date ->
+            // --- Pass 2: All Back Pages (reversed n..1 for manual duplex) ---
+            sortedDates.asReversed().forEach { date ->
                 val houses = weeklyData[date] ?: emptyList()
                 val chunks = dailyChunks[date] ?: emptyList()
-                chunks.forEach { chunk ->
+                chunks.asReversed().forEach { chunk ->
                     val stats = BoletimDataMapper.calculateBlockStats(houses, chunk)
                     val page = pdfDocument.startPage(pageInfo)
                     drawBackPage(page.canvas, chunk, date, stats.quarteiraoConcluido, stats.localidadeConcluida, stats.workedBlocks, stats.completedBlocks)

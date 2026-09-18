@@ -52,11 +52,11 @@ export async function generateWeeklyBatchPdf(
     }
   }
 
-  // Pass 2: todos os versos
-  for (const date of sortedDates) {
+  // Pass 2: todos os versos em ordem reversa (n..1) para duplex manual
+  for (const date of [...sortedDates].reverse()) {
     const houses = weeklyData[date] ?? [];
     const chunks = dailyChunks.get(date) ?? [];
-    for (const chunk of chunks) {
+    for (const chunk of [...chunks].reverse()) {
       const stats = calculateBlockStats(houses, chunk);
       addPage();
       drawBackPage(doc, chunk, date, stats.quarteiraoConcluido, stats.localidadeConcluida, stats.workedBlocks, stats.completedBlocks);
