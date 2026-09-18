@@ -1,0 +1,17 @@
+{
+  "name": "healthagent-supabase-scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Migration/seed tooling Supabase (Fase 0). Nunca commitar .env com segredos.",
+  "scripts": {
+    "apply": "node apply-migration.mjs ../migrations/20260918000001_foundation.sql",
+    "migrate": "node apply-migration.mjs",
+    "seed": "node seed.mjs",
+    "parity": "node parity.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.116.0",
+    "pg": "8.23.0"
+  }
+}

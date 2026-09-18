@@ -68,3 +68,16 @@ google-services.json
 
 # Room schema exports (generated build artifacts)
 schemas/
+
+# Secrets / env (nunca commitar chaves Supabase/Firebase)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Agent skills (reinstaláveis via registry: npx skills add supabase/agent-skills)
+.agents/
+skills-lock.json
+
+# Node
+node_modules/
