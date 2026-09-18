@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { collection, collectionGroup, getDocs, query, where, type QueryDocumentSnapshot } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import { computeStats, dedupHouses, filterByPeriod, monthYearFromPeriod } from "../lib/period";
+import { computeStats, filterByBairro, monthYearFromPeriod, normalizeBairro } from "../lib/period";
 import type { AgentDoc, DayActivityDoc, HouseDoc, HouseStats, MonthlySummaryDoc } from "../lib/types";
 
 function docToData<T>(snap: QueryDocumentSnapshot): T {
@@ -41,12 +41,12 @@ function summaryToStats(s: MonthlySummaryDoc | undefined): HouseStats | null {
   };
 }
 
-export function useSummariesByAgent(agents: AgentDoc[] | undefined, year: number, month: number) {
+export function useSummariesByAgent(agents: AgentDoc[] | undefined, year: number, month: number, enabled = true) {
   const monthYear = monthYearFromPeriod(year, month);
   const agentKey = agents?.map((a) => a.id).sort().join(",") ?? "";
   return useQuery({
     queryKey: ["summaries", agentKey, year, month],
-    enabled: !!agents?.length && monthYear !== null,
+    enabled: enabled && !!agents?.length && monthYear !== null,
     queryFn: async () => {
       const out = new Map<string, MonthlySummaryDoc[]>();
       const target = monthYear as string;
@@ -64,35 +64,24 @@ export function useSummariesByAgent(agents: AgentDoc[] | undefined, year: number
   });
 }
 
-function chunkArray<T>(arr: T[], size: number): T[][] {
-  const result: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) {
-    result.push(arr.slice(i, i + size));
-  }
-  return result;
-}
-
-export function useYearSummariesByAgent(agents: AgentDoc[] | undefined, year: number) {
+export function useYearSummariesByAgent(agents: AgentDoc[] | undefined, year: number, enabled = true) {
   const agentKey = agents?.map((a) => a.id).sort().join(",") ?? "";
   return useQuery({
     queryKey: ["summaries-year", agentKey, year],
-    enabled: !!agents?.length,
+    enabled: enabled && !!agents?.length,
     queryFn: async () => {
       const out = new Map<string, MonthlySummaryDoc[]>();
-      const monthYears = Array.from({ length: 12 }, (_, i) => `${String(i + 1).padStart(2, "0")}-${year}`);
-      const monthChunks = chunkArray(monthYears, 10);
       await Promise.all(
         (agents as AgentDoc[]).map(async (agent) => {
+          // monthYear é "MM-AAAA" (largura fixa): o range cobre exato o ano.
           const ref = collection(db, "agents", agent.id, "monthly_summaries");
-          const snapPromises = monthChunks.map((chunk) =>
-            getDocs(query(ref, where("monthYear", "in", chunk))),
+          const snap = await getDocs(
+            query(ref, where("monthYear", ">=", `01-${year}`), where("monthYear", "<=", `12-${year}`)),
           );
-          const snapResults = await Promise.all(snapPromises);
-          snapResults.forEach((snap) => {
-            snap.docs.forEach((d) => {
-              out.set(agent.id, [...(out.get(agent.id) || []), docToData<MonthlySummaryDoc>(d)]);
-            });
-          });
+          out.set(
+            agent.id,
+            snap.docs.map((d) => docToData<MonthlySummaryDoc>(d)),
+          );
         }),
       );
       return out;
@@ -112,32 +101,34 @@ export function useAgentStatsByPeriod(
   year: number,
   month: number,
   week: number,
+  bairro = "",
+  weekday = -1,
 ): { statsByAgent: Map<string, AgentPeriodStats>; isLoading: boolean } {
-  const summariesMonth = useSummariesByAgent(agents, year, month);
-  const summariesYear = useYearSummariesByAgent(agents, year);
-
+  const bairroFilter = normalizeBairro(bairro);
   const monthRaw = monthYearFromPeriod(year, month);
-  const useRaw = week >= 0 || monthRaw === null;
+  // monthly_summaries não têm quebra por bairro nem por dia da semana:
+  // com esses filtros ativos, força leitura direta.
+  const useRaw = week >= 0 || monthRaw === null || bairroFilter !== "" || weekday !== -1;
+  // Liga só o caminho usado (mês XOR ano; nenhum no modo raw) — nunca os dois.
+  const summariesMonth = useSummariesByAgent(agents, year, month, !useRaw && monthRaw !== null);
+  const summariesYear = useYearSummariesByAgent(agents, year, !useRaw && monthRaw === null);
 
   const agentKey = agents?.map((a) => a.id).sort().join(",") ?? "";
   const raw = useQuery({
-    queryKey: ["raw-period", agentKey, year, month, week],
+    queryKey: ["raw-period", agentKey, year, month, week, bairroFilter],
     enabled: !!agents?.length && useRaw,
     queryFn: async () => {
       const out = new Map<string, { houses: HouseDoc[]; activities: DayActivityDoc[] }>();
-      const { start, end } = week >= 0
-        ? weekRange(year, month, week)
-        : { start: `01-01-${year}`, end: `31-12-${year}` };
+      const ranges = fetchRangesForPeriod(year, month, week);
       await Promise.all(
         (agents as AgentDoc[]).map(async (agent) => {
-          const housesRef = collection(db, "agents", agent.id, "houses");
           const actRef = collection(db, "agents", agent.id, "day_activities");
-          const [hSnap, aSnap] = await Promise.all([
-            getDocs(query(housesRef, where("data", ">=", start), where("data", "<=", end))),
+          const [houses, aSnap] = await Promise.all([
+            fetchHousesInRanges(agent.id, ranges),
             getDocs(actRef),
           ]);
           out.set(agent.id, {
-            houses: hSnap.docs.map((d) => docToData<HouseDoc>(d)),
+            houses,
             activities: aSnap.docs.map((d) => docToData<DayActivityDoc>(d)),
           });
         }),
@@ -153,9 +144,14 @@ export function useAgentStatsByPeriod(
       if (useRaw) {
         const data = raw.data?.get(agent.id);
         if (!data) continue;
-        const { valid } = dedupHouses(data.houses);
+        const bairroHouses = filterByBairro(data.houses, bairroFilter);
+        // Sem dedup por campos: identidade é o doc id (uuid) e os ranges já
+        // dedupam por id — colapsar por campos esconderia visitas legítimas.
+        const stats = computeStats(bairroHouses, data.activities, year, month, week, bairroFilter, weekday);
+        // Oculta agentes sem produção no bairro/período (paridade com modo sumarizado).
+        if (bairroFilter && stats.visits === 0 && stats.activeDays === 0) continue;
         result.set(agent.id, {
-          stats: computeStats(valid, data.activities, year, month, week),
+          stats,
           source: "raw",
           summaries: [],
         });
@@ -184,9 +180,57 @@ export function useAgentStatsByPeriod(
   return { statsByAgent: result, isLoading };
 }
 
-function weekRange(year: number, month: number, week: number): { start: string; end: string } {
-  const fmt = (d: Date) => `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()}`;
-  return { start: fmt(weekStartFor(year, month, week)), end: fmt(weekEndFor(year, month, week)) };
+function monthRange(year: number, month: number): { start: string; end: string } {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  return { start: `01-${pad(month + 1)}-${year}`, end: `${pad(lastDay)}-${pad(month + 1)}-${year}` };
+}
+
+export interface FetchDateRange { start: string; end: string }
+
+// O campo `data` é DD-MM-YYYY e NÃO ordena lexicograficamente entre meses
+// (ex.: semana 26-07-2026..01-08-2026 teria início > fim e retornaria vazio).
+// Para semanas que invadem o mês vizinho, busca cada mês cheio envolvido;
+// o recorte exato da semana é aplicado no cliente via filterByPeriod.
+export function fetchRangesForPeriod(year: number, month: number, week: number): FetchDateRange[] {
+  if (week >= 0 && month !== -1) {
+    const s = weekStartFor(year, month, week);
+    const e = weekEndFor(year, month, week);
+    const first = monthRange(s.getFullYear(), s.getMonth());
+    const last = monthRange(e.getFullYear(), e.getMonth());
+    if (first.start === last.start) return [first];
+    return [first, last];
+  }
+  if (month !== -1) return [monthRange(year, month)];
+  return [{ start: `01-01-${year}`, end: `31-12-${year}` }];
+}
+
+async function fetchSubcollectionInRanges<T>(agentId: string, sub: string, field: string, ranges: FetchDateRange[]): Promise<T[]> {
+  const snaps = await Promise.all(
+    ranges.map((r) =>
+      getDocs(
+        query(
+          collection(db, "agents", agentId, sub),
+          where(field, ">=", r.start),
+          where(field, "<=", r.end),
+        ),
+      ),
+    ),
+  );
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const snap of snaps) {
+    for (const d of snap.docs) {
+      if (seen.has(d.id)) continue;
+      seen.add(d.id);
+      out.push(docToData<T>(d));
+    }
+  }
+  return out;
+}
+
+async function fetchHousesInRanges(agentId: string, ranges: FetchDateRange[]): Promise<HouseDoc[]> {
+  return fetchSubcollectionInRanges<HouseDoc>(agentId, "houses", "data", ranges);
 }
 
 function weekStartFor(year: number, month: number, week: number): Date {
@@ -204,48 +248,30 @@ function weekEndFor(year: number, month: number, week: number): Date {
   return end;
 }
 
-export function useAgentActivitiesByPeriod(agents: AgentDoc[] | undefined, year: number, month: number, week: number) {
-  const agentKey = agents?.map((a) => a.id).sort().join(",") ?? "";
+export function useAgentSnapshot(agentId: string, year: number, month: number, week: number) {
   return useQuery({
-    queryKey: ["activities-period", agentKey, year, month, week],
-    enabled: !!agents?.length,
-    queryFn: async () => {
-      const out = new Map<string, DayActivityDoc[]>();
-      await Promise.all(
-        (agents as AgentDoc[]).map(async (agent) => {
-          const snap = await getDocs(collection(db, "agents", agent.id, "day_activities"));
-          const all = snap.docs.map((d) => docToData<DayActivityDoc>(d));
-          out.set(agent.id, filterByPeriod(all, "date", year, month, week));
-        }),
-      );
-      return out;
-    },
-    staleTime: 30_000,
-  });
-}
-
-export function useAgentSnapshot(agentId: string) {
-  return useQuery({
-    queryKey: ["agent-snapshot", agentId],
+    queryKey: ["agent-snapshot", agentId, year, month, week],
     enabled: !!agentId,
     queryFn: async () => {
-      const [hSnap, aSnap] = await Promise.all([
-        getDocs(collection(db, "agents", agentId, "houses")),
-        getDocs(collection(db, "agents", agentId, "day_activities")),
+      // A aba Produção exibe só a semana selecionada: busca só esse recorte
+      // (leitura do servidor a cada troca, sem dado desatualizado).
+      const ranges = fetchRangesForPeriod(year, month, week);
+      const [houses, activities] = await Promise.all([
+        fetchHousesInRanges(agentId, ranges),
+        fetchSubcollectionInRanges<DayActivityDoc>(agentId, "day_activities", "date", ranges),
       ]);
-      return {
-        houses: hSnap.docs.map((d) => docToData<HouseDoc>(d)),
-        activities: aSnap.docs.map((d) => docToData<DayActivityDoc>(d)),
-      };
+      return { houses, activities };
     },
     staleTime: 30_000,
   });
 }
 // RG multi-agente: todas as casas do ano, de todos os agentes (sem dedup — paridade Android).
 // Alimenta os dropdowns de bairro/quarteirão E a geração do PDF com uma única query.
-export function useRgCoverage(year: number) {
+// `enabled=false` = não busca (para telas que só precisam dela sob demanda).
+export function useRgCoverage(year: number, enabled = true) {
   return useQuery({
     queryKey: ["rg-coverage", year],
+    enabled,
     queryFn: async () => {
       const q = query(
         collectionGroup(db, "houses"),

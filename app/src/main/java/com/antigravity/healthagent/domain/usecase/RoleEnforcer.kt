@@ -7,7 +7,7 @@ import javax.inject.Singleton
  * Centralized role-based access enforcement.
  *
  * Replaces 4+ duplicate role-check blocks in HomeViewModel:
- * addNewHouse, addNewHouseAt, deleteHouse, deduplicateCurrentDay.
+ * addNewHouse, addNewHouseAt, deleteHouse.
  *
  * Enforces the rule that non-admin supervisors cannot modify remote agent data.
  */

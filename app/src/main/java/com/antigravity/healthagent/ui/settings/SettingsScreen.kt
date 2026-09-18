@@ -61,7 +61,6 @@ fun SettingsScreen(
         onNavigateBack()
     }
 
-    val selectedFrequency by viewModel.backupFrequency.collectAsState()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     
     val snackbarHostState = remember { SnackbarHostState() }
@@ -94,12 +93,6 @@ fun SettingsScreen(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let { viewModel.restoreData(context, it) }
-    }
-
-    val importDayLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
-    ) { uri ->
-         uri?.let { viewModel.importDayData(context, it) }
     }
 
     // Audio file pickers for custom sounds

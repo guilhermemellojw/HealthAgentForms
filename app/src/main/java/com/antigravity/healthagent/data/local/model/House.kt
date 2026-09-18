@@ -85,11 +85,11 @@ data class House(
     }
 
     /**
-     * Physical dedup key: NEVER uses uuid. Two inserts producing the same key for the
+     * Physical dedup key: the uuid when present (stable sync identity), otherwise
+     * agent+day+address signature — two inserts producing the same key for the
      * same agent+day represent the same house (same number/sequence/complement on the
      * same street/block/bairro). Used by the duplicate guards and the in-flight merge
-     * so that quickly re-added houses (which get fresh UUIDs) cannot create duplicates.
-     * Sync identity (uuid) is intentionally NOT used here.
+     * so that quickly re-added houses cannot create duplicates.
      */
     fun generatePhysicalKey(): String {
         if (uuid.isNotBlank()) return uuid

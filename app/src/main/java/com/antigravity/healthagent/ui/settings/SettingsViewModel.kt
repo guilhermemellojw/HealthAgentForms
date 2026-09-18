@@ -18,7 +18,6 @@ import com.antigravity.healthagent.domain.usecase.CleanupHistoricalDataUseCase
 import com.antigravity.healthagent.data.sync.SyncFeedbackManager
 import com.antigravity.healthagent.domain.usecase.RestoreDataUseCase
 import com.antigravity.healthagent.utils.SoundManager
-import com.antigravity.healthagent.ui.home.BackupConfirmation
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -95,8 +94,6 @@ class SettingsViewModel @Inject constructor(
     private val _uiEvent = MutableStateFlow<String?>(null)
     val uiEvent: StateFlow<String?> = _uiEvent.asStateFlow()
 
-    private val _backupConfirmation = MutableStateFlow<BackupConfirmation?>(null)
-    val backupConfirmation: StateFlow<BackupConfirmation?> = _backupConfirmation.asStateFlow()
 
     private val _agentName = MutableStateFlow("")
     private val _currentUserUid = MutableStateFlow<String?>(null)
@@ -294,26 +291,6 @@ class SettingsViewModel @Inject constructor(
     fun restoreData(context: Context, uri: android.net.Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val backupData = backupManager.importData(context, uri)
-                val currentAgent = _agentName.value.trim().uppercase()
-                
-                val backupAgent = (backupData.houses.map { it.agentName } + backupData.dayActivities.map { it.agentName })
-                    .filter { it.isNotBlank() }
-                    .distinct()
-                    .firstOrNull()?.trim()?.uppercase() ?: ""
-                
-                if (currentAgent.isNotBlank() && backupAgent.isNotBlank() && currentAgent != backupAgent) {
-                    _backupConfirmation.value = BackupConfirmation(
-                        backupAgentName = backupAgent,
-                        currentAgentName = currentAgent,
-                        housesCount = backupData.houses.size,
-                        activitiesCount = backupData.dayActivities.size,
-                        uri = uri,
-                        isFullRestore = true
-                    )
-                    return@launch
-                }
-
                 performRestore(context, uri)
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
@@ -347,96 +324,6 @@ class SettingsViewModel @Inject constructor(
         } catch (e: Exception) {
             withContext(Dispatchers.Main) {
                 _uiEvent.value = "Erro no restauro: ${e.message}"
-                soundManager.playWarning()
-            }
-        }
-    }
-
-    fun confirmBackupImport(context: Context) {
-        val confirmation = _backupConfirmation.value ?: return
-        val uri = confirmation.uri
-        val isFullRestore = confirmation.isFullRestore
-        _backupConfirmation.value = null
-        
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                if (isFullRestore) {
-                    performRestore(context, uri)
-                } else {
-                    performImportDayData(context, uri)
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _uiEvent.value = "Erro ao processar confirmação: ${e.message}"
-                    soundManager.playWarning()
-                }
-            }
-        }
-    }
-
-    fun cancelBackupImport() {
-        if (_backupConfirmation.value != null) {
-            _backupConfirmation.value = null
-            _uiEvent.value = "Importação cancelada pelo usuário."
-        }
-    }
-
-    fun importDayData(context: Context, uri: android.net.Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val backupData = backupManager.importData(context, uri)
-                
-                // For day import check if it contains any houses
-                if (backupData.houses.isEmpty()) {
-                    withContext(Dispatchers.Main) {
-                        _uiEvent.value = "O arquivo não contém registros de imóveis."
-                        soundManager.playWarning()
-                    }
-                    return@launch
-                }
-
-                performImportDayData(context, uri)
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _uiEvent.value = "Erro ao importar dia: ${e.message}"
-                    soundManager.playWarning()
-                }
-            }
-        }
-    }
-
-    private suspend fun performImportDayData(context: Context, uri: android.net.Uri) {
-        try {
-            val targetUid = _remoteAgentUid.value ?: _currentUserUid.value
-            val existingDates = repository.getHousesByAgentSnapshot(targetUid ?: "").map { it.data }.distinct()
-
-            val result = restoreDataUseCase(
-                context = context,
-                targetUid = targetUid ?: "",
-                fileUri = uri,
-                targetDate = "", // single day import will auto-detect from backupData houses if targetDate is blank or matches
-                existingDates = existingDates,
-                isSingleDayImport = true
-            )
-
-            withContext(Dispatchers.Main) {
-                if (result.isSuccess) {
-                    val isPartial = result.getOrDefault(false)
-                    if (isPartial) {
-                        _uiEvent.value = "Aviso: Importação incompleta. Verifique os dados."
-                        soundManager.playWarning()
-                    } else {
-                        _uiEvent.value = "Dados importados com sucesso!"
-                        soundManager.playPop()
-                    }
-                } else {
-                    _uiEvent.value = "Falha na importação: ${result.exceptionOrNull()?.message}"
-                    soundManager.playWarning()
-                }
-            }
-        } catch (e: Exception) {
-            withContext(Dispatchers.Main) {
-                _uiEvent.value = "Erro na finalização da importação: ${e.message}"
                 soundManager.playWarning()
             }
         }

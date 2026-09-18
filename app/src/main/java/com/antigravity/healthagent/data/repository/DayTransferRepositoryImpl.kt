@@ -110,6 +110,7 @@ class DayTransferRepositoryImpl @Inject constructor(
             val snapshot = transfers()
                 .whereEqualTo("fromUid", fromUid)
                 .orderBy("offeredAt", Query.Direction.DESCENDING)
+                .limit(50)
                 .get().await()
             Result.success(mapDocuments(snapshot.documents))
         } catch (e: Exception) {
@@ -126,6 +127,7 @@ class DayTransferRepositoryImpl @Inject constructor(
                     transfers()
                         .whereEqualTo("status", DayTransferStatus.PENDING.name)
                         .whereEqualTo("toKey", myKey)
+                        .limit(50)
                 )
             }
             if (myUid.isNotBlank()) {
@@ -133,6 +135,7 @@ class DayTransferRepositoryImpl @Inject constructor(
                     transfers()
                         .whereEqualTo("status", DayTransferStatus.PENDING.name)
                         .whereEqualTo("toUid", myUid)
+                        .limit(50)
                 )
             }
             val unique = LinkedHashMap<String, DayTransfer>()
@@ -152,8 +155,10 @@ class DayTransferRepositoryImpl @Inject constructor(
     }
 
     override fun observeOutgoing(fromUid: String): Flow<List<DayTransfer>> = callbackFlow {
+        // limit(50): ofertas por agente são poucas; evita escutar a coleção inteira.
         val listener = transfers()
             .whereEqualTo("fromUid", fromUid)
+            .limit(50)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) return@addSnapshotListener
                 snapshot?.let { trySend(mapDocuments(it.documents)) }
@@ -167,6 +172,7 @@ class DayTransferRepositoryImpl @Inject constructor(
             transfers()
                 .whereEqualTo("status", DayTransferStatus.PENDING.name)
                 .whereEqualTo("toKey", myKey)
+                .limit(50)
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) return@addSnapshotListener
                     snapshot?.let {
@@ -178,6 +184,7 @@ class DayTransferRepositoryImpl @Inject constructor(
             transfers()
                 .whereEqualTo("status", DayTransferStatus.PENDING.name)
                 .whereEqualTo("toUid", myUid)
+                .limit(50)
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) return@addSnapshotListener
                     snapshot?.let { trySend(mapDocuments(it.documents)) }

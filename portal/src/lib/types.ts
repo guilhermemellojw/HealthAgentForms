@@ -47,6 +47,8 @@ export interface HouseDoc {
   lastSyncTime?: number;
   agentName?: string;
   agentUid?: string;
+  editedByAdmin?: boolean;
+  observation?: string;
   municipio?: string;
   bairro?: string;
   categoria?: string;

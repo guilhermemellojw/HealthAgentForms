@@ -915,38 +915,9 @@ footer {
     background: rgba(255,255,255,0.02);
 }
 
-.btn-heal-mini {
-    background: rgba(33, 150, 243, 0.1);
-    color: #2196f3;
-    border: 1px solid rgba(33, 150, 243, 0.3);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 0.6rem;
-    cursor: pointer;
-    transition: 0.2s;
-}
-
-.btn-heal-mini:hover {
-    background: #2196f3;
-    color: white;
-}
-
 .days-active {
     font-size: 0.75rem;
     color: var(--text-secondary);
-}
-
-.heal-btn {
-    background: rgba(33, 150, 243, 0.1); 
-    color: #2196f3; 
-    border: 1px solid rgba(33, 150, 243, 0.3); 
-    padding: 6px 14px; 
-    border-radius: 8px; 
-    font-size: 0.75rem;
-}
-
-.heal-btn:hover {
-    background: rgba(33, 150, 243, 0.2);
 }
 
 /* --- Summary Card (Network Summary) --- */

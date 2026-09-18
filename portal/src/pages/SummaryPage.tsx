@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
-import { useAgents, useAgentStatsByPeriod, useAgentActivitiesByPeriod } from "../hooks/usePortalData";
-import { MONTHS, SITUATION_LABELS } from "../lib/constants";
-import { getWeeksForMonth } from "../lib/period";
-import { DayDetailModal, DaysModal } from "../components/DayModals";
-import type { AgentDoc, HouseStats } from "../lib/types";
+import { useAgents, useAgentStatsByPeriod, useRgCoverage } from "../hooks/usePortalData";
+import { useBairros } from "../hooks/useAdminData";
+import { MONTHS, SITUATION_LABELS, WEEKDAYS } from "../lib/constants";
+import { filterByPeriod, getWeeksForMonth, normalizeBairro } from "../lib/period";
+import type { HouseStats } from "../lib/types";
 
 const ZERO: HouseStats = {
   worked: 0, vacant: 0, closed: 0, abandoned: 0, refused: 0,
@@ -16,27 +16,36 @@ function sumStats(list: HouseStats[]): HouseStats {
   return out;
 }
 
-function formatDateLabel(y: number, m: number, w: number): string {
-  if (w >= 0) {
-    const weeks = getWeeksForMonth(y, m);
-    return weeks[w]?.label.split(" (")[0] ?? "";
-  }
-  return m === -1 ? `Ano ${y}` : `${MONTHS[m + 1]} ${y}`;
-}
-
 export default function SummaryPage() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [week, setWeek] = useState(-1);
+  const [bairro, setBairro] = useState("");
+  const [weekday, setWeekday] = useState(-1);
+  // Cobertura de bairros só é buscada se o usuário tocar no filtro (evita um
+  // collectionGroup sobre todas as casas do ano a cada abertura do Resumo).
+  const [bairroArmed, setBairroArmed] = useState(false);
 
   const { data: agents, isLoading: loadingAgents } = useAgents();
-  const { statsByAgent, isLoading: loadingStats } = useAgentStatsByPeriod(agents, year, month, week);
-  const activitiesByAgent = useAgentActivitiesByPeriod(agents, year, month, week);
+  const { bairros: masterBairros } = useBairros();
+  const { statsByAgent, isLoading: loadingStats } = useAgentStatsByPeriod(agents, year, month, week, bairro, weekday);
+  const rgCoverage = useRgCoverage(year, bairroArmed);
 
-  const [daysAgent, setDaysAgent] = useState<AgentDoc | null>(null);
-  const [detailAgent, setDetailAgent] = useState<AgentDoc | null>(null);
-  const [detailDay, setDetailDay] = useState<string | null>(null);
+  // Bairros realmente trabalhados no período (lidos das casas, como na aba RG),
+  // unidos à lista mestra para não perder bairros cadastrados sem produção ainda.
+  const bairroOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const h of filterByPeriod(rgCoverage.data ?? [], "data", year, month, week)) {
+      const b = normalizeBairro(h.bairro);
+      if (b) set.add(b);
+    }
+    for (const b of masterBairros) {
+      const n = normalizeBairro(b);
+      if (n) set.add(n);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [rgCoverage.data, masterBairros, year, month, week]);
 
   const activeAgents = useMemo(
     () => (agents || []).filter((a) => statsByAgent.has(a.id)),
@@ -100,7 +109,34 @@ export default function SummaryPage() {
             ))}
           </select>
         )}
-        <span className="period-label">{formatDateLabel(year, month, week)}</span>
+        <select
+          className="select"
+          value={weekday}
+          onChange={(e) => setWeekday(Number(e.target.value))}
+          title="Filtrar por dia da semana"
+        >
+          <option value={-1}>Todos os dias</option>
+          {WEEKDAYS.map((d, i) => (
+            <option key={d} value={i}>{d}</option>
+          ))}
+        </select>
+        <select
+          className="select"
+          value={bairro}
+          onChange={(e) => setBairro(e.target.value)}
+          onFocus={() => setBairroArmed(true)}
+          onClick={() => setBairroArmed(true)}
+          title="Filtrar por bairro"
+          disabled={rgCoverage.isLoading && bairroOptions.length === 0}
+        >
+          <option value="">{rgCoverage.isLoading && bairroOptions.length === 0 ? "Carregando bairros…" : "Todos os bairros"}</option>
+          {bairro && !bairroOptions.includes(bairro) && (
+            <option value={bairro}>{bairro}</option>
+          )}
+          {bairroOptions.map((b) => (
+            <option key={b} value={b}>{b}</option>
+          ))}
+        </select>
       </div>
 
       <div className="cards">
@@ -122,21 +158,21 @@ export default function SummaryPage() {
           <table className="table">
             <thead>
               <tr>
-                <th>Agente</th>
-                <th className="num">Visitas</th>
-                <th className="num">Abertos</th>
-                <th className="num">Fechados</th>
-                <th className="num">Recusados</th>
-                <th className="num">Abandonados</th>
-                <th className="num">Vazios</th>
-                <th className="num">Tratados</th>
-                <th className="num">Focos</th>
-                <th className="num">Dias</th>
-                <th className="num">RES</th>
-                <th className="num">COM</th>
-                <th className="num">TB</th>
-                <th className="num">OUT</th>
-                <th className="num">PE</th>
+                <th className="agent-col">Agente</th>
+                <th className="num" title="Visitas">VIS</th>
+                <th className="num" title="Abertos">ABE</th>
+                <th className="num" title="Fechados">FEC</th>
+                <th className="num" title="Recusados">REC</th>
+                <th className="num" title="Abandonados">ABA</th>
+                <th className="num" title="Vazios">VAZ</th>
+                <th className="num" title="Tratados">TRA</th>
+                <th className="num" title="Focos">FOC</th>
+                <th className="num" title="Dias de atividade">Dias</th>
+                <th className="num" title="Residências">RES</th>
+                <th className="num" title="Comércios">COM</th>
+                <th className="num" title="Terrenos baldios">TB</th>
+                <th className="num" title="Outros">OUT</th>
+                <th className="num" title="Pontos estratégicos">PE</th>
               </tr>
             </thead>
             <tbody>
@@ -144,7 +180,7 @@ export default function SummaryPage() {
                 const st = statsByAgent.get(agent.id)!;
                 return (
                   <tr key={agent.id}>
-                    <td>
+                    <td className="agent-col">
                       <span className="agent-name">{agent.agentName || agent.email}</span>
                       <span className={`source-badge ${st.source}`}>
                         {st.source === "summary" ? "sumarizado" : "leitura direta"}
@@ -158,15 +194,7 @@ export default function SummaryPage() {
                     <td className="num">{st.stats.vacant}</td>
                     <td className="num strong">{st.stats.treated}</td>
                     <td className="num strong">{st.stats.focuses}</td>
-                    <td className="num">
-                  <button
-                    className="link-btn"
-                    onClick={() => setDaysAgent(agent)}
-                    title="Ver dias de atividade"
-                  >
-                    {st.stats.activeDays}
-                  </button>
-                </td>
+                    <td className="num">{st.stats.activeDays}</td>
                     <td className="num">{st.stats.res}</td>
                     <td className="num">{st.stats.com}</td>
                     <td className="num">{st.stats.tb}</td>
@@ -198,32 +226,12 @@ export default function SummaryPage() {
           </table>
         )}
         <p className="muted small">
+          Colunas: VIS = Visitas · ABE = Abertos · FEC = Fechados · REC = Recusados · ABA = Abandonados · VAZ = Vazios · TRA = Tratados · FOC = Focos
+        </p>
+        <p className="muted small">
           Situações: {Object.entries(SITUATION_LABELS).filter(([k]) => ["F", "REC", "A", "V"].includes(k)).map(([k, v]) => `${k} = ${v}`).join(" · ")}
         </p>
       </div>
-
-      {daysAgent && (
-        <DaysModal
-          agent={daysAgent}
-          days={activitiesByAgent.data?.get(daysAgent.id) || []}
-          onSelectDay={(date) => {
-            setDetailAgent(daysAgent);
-            setDetailDay(date);
-            setDaysAgent(null);
-          }}
-          onClose={() => setDaysAgent(null)}
-        />
-      )}
-      {detailAgent && detailDay && (
-        <DayDetailModal
-          agent={detailAgent}
-          date={detailDay}
-          onClose={() => {
-            setDetailAgent(null);
-            setDetailDay(null);
-          }}
-        />
-      )}
     </div>
   );
 }

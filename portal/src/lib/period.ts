@@ -92,45 +92,33 @@ export function filterByPeriod<T extends { data?: string; date?: string }>(
   year: number,
   month: number,
   weekIndex = -1,
+  weekday = -1,
 ): T[] {
-  return items.filter((item) => isInPeriod((item[dateField] || "") as string, year, month, weekIndex));
+  return items.filter(
+    (item) =>
+      isInPeriod((item[dateField] || "") as string, year, month, weekIndex) &&
+      matchesWeekday((item[dateField] || "") as string, weekday),
+  );
 }
 
-export interface DedupResult {
-  valid: HouseDoc[];
-  duplicates: number;
+// weekday: -1 = todos os dias, 0 = Domingo ... 6 = Sábado (Date.getDay).
+export function matchesWeekday(dateStr: string, weekday: number): boolean {
+  if (weekday < 0 || weekday > 6) return true;
+  const normalized = (dateStr || "").replace(/\//g, "-");
+  if (normalized.split("-").length !== 3) return false;
+  return parseDate(normalized).getDay() === weekday;
 }
 
-export function dedupHouses(houses: HouseDoc[]): DedupResult {
-  const groups = new Map<string, HouseDoc & { ts: number | string }>();
-  let duplicates = 0;
-  for (const h of houses) {
-    const date = normalizeName(h.data);
-    const street = normalizeName(h.streetName);
-    const num = normalizeName(h.number);
-    const bNum = normalizeName(h.blockNumber);
-    const bSeq = normalizeName(h.blockSequence || "0");
-    const seq = h.sequence || 0;
-    const comp = h.complement || 0;
-    const seg = h.visitSegment || 0;
-    const key = `DEDUP|${date}|${bNum}|${bSeq}|${street}|${num}|${seq}|${comp}|${seg}`;
-    const raw = h.lastUpdated as { seconds?: number } | undefined;
-    const ts = (raw?.seconds ?? h.lastUpdated ?? h.lastSyncTime ?? 0) as number | string;
-    const existing = groups.get(key);
-    if (!existing) {
-      groups.set(key, { ...h, ts });
-    } else {
-      duplicates++;
-      if (ts > existing.ts) groups.set(key, { ...h, ts });
-    }
-  }
-  return { valid: [...groups.values()], duplicates };
-}
-
-export function computeStats(houses: HouseDoc[], activities: { date?: string }[], year: number, month: number, weekIndex = -1): HouseStats {
-  const filteredHouses = filterByPeriod(houses, "data", year, month, weekIndex);
-  const filteredActivities = filterByPeriod(activities, "date", year, month, weekIndex);
+export function computeStats(houses: HouseDoc[], activities: { date?: string }[], year: number, month: number, weekIndex = -1, bairro = "", weekday = -1): HouseStats {
+  const bairroFiltered = filterByBairro(houses, bairro);
+  const filteredHouses = filterByPeriod(bairroFiltered, "data", year, month, weekIndex, weekday);
+  const filteredActivities = filterByPeriod(activities, "date", year, month, weekIndex, weekday);
   const countSituation = (s: string) => filteredHouses.filter((h) => h.situation === s).length;
+  // day_activities não carrega bairro: com filtro ativo, dias = datas distintas
+  // dos imóveis do bairro no período (evita contar dias de outros bairros).
+  const activeDays = normalizeBairro(bairro)
+    ? new Set(filteredHouses.map((h) => (h.data || "").trim()).filter(Boolean)).size
+    : filteredActivities.length;
   return {
     worked: filteredHouses.filter((h) => !WORKED_EXCLUDED.includes(h.situation as never)).length,
     vacant: countSituation(SITUATION.VACANT) + countSituation(SITUATION.L_V),
@@ -145,8 +133,25 @@ export function computeStats(houses: HouseDoc[], activities: { date?: string }[]
     tb: filteredHouses.filter((h) => h.propertyType === PROPERTY_TYPE.TB).length,
     pe: filteredHouses.filter((h) => h.propertyType === PROPERTY_TYPE.PE).length,
     out: filteredHouses.filter((h) => h.propertyType === PROPERTY_TYPE.OUT).length,
-    activeDays: filteredActivities.length,
+    activeDays,
   };
+}
+
+export function normalizeBairro(value: unknown): string {
+  return normalizeField(value);
+}
+
+export function matchesBairro(houseBairro: unknown, selectedBairro: string): boolean {
+  const sel = normalizeBairro(selectedBairro);
+  if (!sel) return true;
+  const house = normalizeBairro(houseBairro);
+  if (!house) return false;
+  return removeAccents(house).toLowerCase() === removeAccents(sel).toLowerCase();
+}
+
+export function filterByBairro<T extends { bairro?: string }>(houses: T[], selectedBairro: string): T[] {
+  if (!normalizeBairro(selectedBairro)) return houses;
+  return houses.filter((h) => matchesBairro(h.bairro, selectedBairro));
 }
 
 export function monthYearFromPeriod(year: number, month: number): string | null {
@@ -214,8 +219,7 @@ export function normalizeField(text: unknown): string {
 }
 
 // Ano direto do campo data (dd-MM-yyyy), como o Android faz por casa.
-export function houseYear(h: HouseDoc): number | null {
-  const parts = (h.data || "").trim().replace(/\//g, "-").split("-");
+export function houseYear(h: HouseDoc): number | null {  const parts = (h.data || "").trim().replace(/\//g, "-").split("-");
   if (parts.length !== 3) return null;
   const y = Number(parts[2]);
   return Number.isFinite(y) && y > 1000 ? y : null;

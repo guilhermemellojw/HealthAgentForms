@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getWeeksForMonth, isInPeriod, dedupHouses, parseDate, weekIndexForDate } from "../period";
+import { getWeeksForMonth, isInPeriod, parseDate, weekIndexForDate, matchesBairro, filterByBairro, computeStats, matchesWeekday, filterByPeriod } from "../period";
 import type { HouseDoc } from "../types";
 
 describe("getWeeksForMonth", () => {
@@ -67,44 +67,101 @@ describe("isInPeriod", () => {
   });
 });
 
-describe("dedupHouses", () => {
-  const base: HouseDoc = {
-    id: "1",
-    data: "15-08-2026",
-    streetName: "Rua A",
-    number: "10",
-    blockNumber: "12",
-    blockSequence: "1",
-    sequence: 1,
-    complement: 0,
-    visitSegment: 0,
-    lastUpdated: { seconds: 100 } as unknown as HouseDoc["lastUpdated"],
-  };
-  it("deduplicates by natural key, keeps latest", () => {
-    const dup: HouseDoc = { ...base, id: "2", lastUpdated: { seconds: 200 } as unknown as HouseDoc["lastUpdated"], situation: "F" };
-    const result = dedupHouses([base, dup]);
-    expect(result.valid).toHaveLength(1);
-    expect(result.duplicates).toBe(1);
-    expect(result.valid[0].id).toBe("2");
-  });
-  it("keeps distinct complements", () => {
-    const other: HouseDoc = { ...base, id: "3", complement: 1, lastUpdated: { seconds: 150 } as unknown as HouseDoc["lastUpdated"] };
-    const result = dedupHouses([base, other]);
-    expect(result.valid).toHaveLength(2);
-    expect(result.duplicates).toBe(0);
-  });
-  it("handles missing blockSequence", () => {
-    const h = { ...base, blockSequence: undefined, id: "4" };
-    const result = dedupHouses([h]);
-    expect(result.valid).toHaveLength(1);
-  });
-});
-
 describe("weekIndexForDate", () => {
   it("returns 0 for Jan 1", () => {
     expect(weekIndexForDate(new Date(2026, 0, 1))).toBe(0);
   });
   it("returns 1 for Jan 8", () => {
     expect(weekIndexForDate(new Date(2026, 0, 8))).toBe(1);
+  });
+});
+
+describe("matchesBairro / filterByBairro", () => {
+  it("empty filter matches everything", () => {
+    expect(matchesBairro("Centro", "")).toBe(true);
+    expect(matchesBairro(undefined, "")).toBe(true);
+  });
+  it("matches case/accent-insensitive", () => {
+    expect(matchesBairro("são josé", "SAO JOSE")).toBe(true);
+    expect(matchesBairro("CENTRO", "centro")).toBe(true);
+  });
+  it("rejects other bairros and blank house bairro", () => {
+    expect(matchesBairro("Centro", "Alto")).toBe(false);
+    expect(matchesBairro("", "Centro")).toBe(false);
+    expect(matchesBairro(undefined, "Centro")).toBe(false);
+  });
+  it("filterByBairro keeps only selected bairro", () => {
+    const houses = [
+      { id: "1", bairro: "Centro" },
+      { id: "2", bairro: "centro" },
+      { id: "3", bairro: "Alto" },
+    ] as HouseDoc[];
+    expect(filterByBairro(houses, "").length).toBe(3);
+    expect(filterByBairro(houses, "CENTRO").map((h) => h.id)).toEqual(["1", "2"]);
+  });
+});
+
+describe("computeStats with bairro", () => {
+  it("filters visits by bairro and counts distinct days", () => {
+    const houses = [
+      { id: "1", data: "10-08-2026", bairro: "Centro", situation: "NONE", propertyType: "R" },
+      { id: "2", data: "10-08-2026", bairro: "Centro", situation: "NONE", propertyType: "R" },
+      { id: "3", data: "11-08-2026", bairro: "Alto", situation: "NONE", propertyType: "R" },
+    ] as HouseDoc[];
+    const activities = [{ date: "10-08-2026" }, { date: "11-08-2026" }, { date: "12-08-2026" }];
+    const all = computeStats(houses, activities, 2026, 7, -1);
+    expect(all.visits).toBe(3);
+    expect(all.activeDays).toBe(3);
+    const filtered = computeStats(houses, activities, 2026, 7, -1, "Centro");
+    expect(filtered.visits).toBe(2);
+    expect(filtered.activeDays).toBe(1);
+  });
+});
+
+describe("matchesWeekday / weekday filter", () => {
+  // 10-08-2026 = segunda-feira, 11-08 = terça, 15-08 = sábado, 16-08 = domingo.
+  it("matches getDay convention (0=Dom..6=Sáb)", () => {
+    expect(matchesWeekday("10-08-2026", 1)).toBe(true);
+    expect(matchesWeekday("10-08-2026", 2)).toBe(false);
+    expect(matchesWeekday("15-08-2026", 6)).toBe(true);
+    expect(matchesWeekday("16-08-2026", 0)).toBe(true);
+    expect(matchesWeekday("10/08/2026", 1)).toBe(true);
+  });
+  it("empty/invalid filter matches everything", () => {
+    expect(matchesWeekday("10-08-2026", -1)).toBe(true);
+    expect(matchesWeekday("10-08-2026", 7)).toBe(true);
+  });
+  it("filterByPeriod narrows by weekday", () => {
+    const houses = [
+      { id: "1", data: "10-08-2026" },
+      { id: "2", data: "11-08-2026" },
+      { id: "3", data: "15-08-2026" },
+    ] as HouseDoc[];
+    expect(filterByPeriod(houses, "data", 2026, 7, -1, 1).map((h) => h.id)).toEqual(["1"]);
+    expect(filterByPeriod(houses, "data", 2026, 7, -1, -1)).toHaveLength(3);
+  });
+  it("computeStats filters visits and activeDays by weekday", () => {
+    const houses = [
+      { id: "1", data: "10-08-2026", situation: "NONE", propertyType: "R" },
+      { id: "2", data: "10-08-2026", situation: "NONE", propertyType: "R" },
+      { id: "3", data: "11-08-2026", situation: "NONE", propertyType: "R" },
+    ] as HouseDoc[];
+    const activities = [{ date: "10-08-2026" }, { date: "11-08-2026" }];
+    const monday = computeStats(houses, activities, 2026, 7, -1, "", 1);
+    expect(monday.visits).toBe(2);
+    expect(monday.activeDays).toBe(1);
+    const tuesday = computeStats(houses, activities, 2026, 7, -1, "", 2);
+    expect(tuesday.visits).toBe(1);
+    expect(tuesday.activeDays).toBe(1);
+  });
+  it("combines bairro + weekday", () => {
+    const houses = [
+      { id: "1", data: "10-08-2026", bairro: "Centro", situation: "NONE", propertyType: "R" },
+      { id: "2", data: "11-08-2026", bairro: "Centro", situation: "NONE", propertyType: "R" },
+      { id: "3", data: "10-08-2026", bairro: "Alto", situation: "NONE", propertyType: "R" },
+    ] as HouseDoc[];
+    const filtered = computeStats(houses, [], 2026, 7, -1, "Centro", 1);
+    expect(filtered.visits).toBe(1);
+    expect(filtered.activeDays).toBe(1);
   });
 });

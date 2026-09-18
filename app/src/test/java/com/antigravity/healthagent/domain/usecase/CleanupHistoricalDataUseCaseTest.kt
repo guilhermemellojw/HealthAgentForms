@@ -71,7 +71,6 @@ class CleanupHistoricalDataUseCaseTest {
         override suspend fun clearAllData() {}
         override suspend fun clearAgentData(agentUid: String) {}
         override suspend fun migrateLocalData(agentName: String, email: String, targetUid: String, isCurrentAgent: Boolean) {}
-        override suspend fun deduplicateAgentData(agentUid: String) {}
         override suspend fun cleanMisattributedData(inspectedUid: String, adminUid: String) {}
         override suspend fun normalizeLocalDates() {}
         override suspend fun fixEmailNamesForUid(uid: String, properName: String) {}

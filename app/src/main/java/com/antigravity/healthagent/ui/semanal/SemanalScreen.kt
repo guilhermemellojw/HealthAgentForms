@@ -15,7 +15,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
@@ -92,8 +91,6 @@ fun SemanalScreen(
 
     Scaffold(
         topBar = {
-            val context = LocalContext.current
-            val scope = rememberCoroutineScope()
             com.antigravity.healthagent.ui.components.GlassTopAppBar(
                 title = { 
                     Text(
@@ -113,37 +110,6 @@ fun SemanalScreen(
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = "Adicionar Atividade",
-                            modifier = Modifier.size(iconSize)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                try {
-                                    val file = viewModel.exportSemanalPdf(context)
-                                    val uri = FileProvider.getUriForFile(
-                                        context,
-                                        "${context.packageName}.fileprovider",
-                                        file
-                                    )
-                                    val intent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "application/pdf"
-                                        putExtra(Intent.EXTRA_STREAM, uri)
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(Intent.createChooser(intent, "Compartilhar Resumo Semanal"))
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Erro ao gerar PDF", Toast.LENGTH_SHORT).show()
-                                    AppLogger.e("SemanalScreen", "Erro ao gerar PDF compartilhado", e)
-                                }
-                            }
-                        },
-                        modifier = Modifier.size(iconButtonSize)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PictureAsPdf,
-                            contentDescription = "Gerar PDF",
                             modifier = Modifier.size(iconSize)
                         )
                     }

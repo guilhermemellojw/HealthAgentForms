@@ -564,61 +564,11 @@ class HouseRepositoryImpl @Inject constructor(
                             dayActivityDao.insertDayActivity(local.copy(agentUid = targetUid, agentName = agentName))
                         }
                 }
-                
-                // 3. Final Deduplication Pass
-                deduplicateAgentData(targetUid)
             } catch (e: Exception) {
                 AppLogger.e("HouseRepository", "Error during migration", e)
             }
         }
     }
-
-    override suspend fun deduplicateAgentData(agentUid: String) {
-        runInTransactionWithRetry {
-            val allHouses = getAllHousesOnce(agentUid)
-            if (allHouses.isEmpty()) return@runInTransactionWithRetry
-
-            // RESTORED: Group by NaturalKey to respect different visitSegments.
-            // Since we now have unified normalization, this will safely unify 
-            // exact duplicates while preserving legitimate multi-turn visits.
-            val groups = allHouses.groupBy { it.generateNaturalKey() }
-            val toDelete = mutableListOf<House>()
-
-            groups.forEach { (_, matches) ->
-                if (matches.size > 1) {
-                    // Keep the best record: prioritize synced, then most recent, then highest listOrder
-                    val kept = matches.sortedWith(
-                        compareByDescending<House> { it.isSynced }
-                            .thenByDescending { it.lastUpdated }
-                            .thenByDescending { it.listOrder }
-                    ).first()
-                    
-                    matches.forEach { house ->
-                        if (house.id != kept.id) {
-                            toDelete.add(house)
-                        }
-                    }
-                }
-            }
-
-            if (toDelete.isNotEmpty()) {
-                // CLOSED DAY GUARD: Preserve duplicates in closed days (let admin handle manually)
-                val closedDatesForDedup = toDelete.map { it.data.toDashDate() }.distinct().filter { date ->
-                    val activity = dayActivityDao.getDayActivity(date, agentUid)
-                    activity?.isClosed == true && !activity.isManualUnlock
-                }.toSet()
-                val safeToDeleteDedup = toDelete.filter { it.data.toDashDate() !in closedDatesForDedup }
-                if (closedDatesForDedup.isNotEmpty()) {
-                    AppLogger.w("HouseRepository", "Dedup: Preserved ${toDelete.size - safeToDeleteDedup.size} duplicates in ${closedDatesForDedup.size} closed days.")
-                }
-                safeToDeleteDedup.forEach { houseDao.deleteHouse(it) }
-                if (safeToDeleteDedup.isNotEmpty()) {
-                    syncSchedulerProvider.get().scheduleSync()
-                }
-            }
-        }
-    }
-
     override suspend fun cleanMisattributedData(inspectedUid: String, adminUid: String) {
         runInTransactionWithRetry {
             // Fetch full local state to allow cross-UID comparison

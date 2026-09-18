@@ -411,125 +411,6 @@ function normalizeName(text) {
         .toUpperCase();
 }
 
-/**
- * Identifies and removes duplicate records for an agent.
- * Safety: Added 'sequence' and 'blockSequence' to the key to prevent 
- * collisions on properties without house numbers (S/N).
- */
-const cleaningAgents = new Set();
-async function cleanupAgentDuplicates(agentUid) {
-    if (cleaningAgents.has(agentUid)) return;
-    
-    const confirmMsg = "🛡️ AVISO DE SEGURANÇA:\n\n" +
-        "Esta ferramenta removerá apenas cópias IDÊNTICAS de visitas (mesma data, quarteirão e sequência).\n" +
-        "Se houver perda de dados imprevista, use a 'Restauração Completa' no App Android do agente para recuperar.\n\n" +
-        "Deseja prosseguir com a limpeza segura?";
-        
-    if (!confirm(confirmMsg)) return;
-    
-    console.log(`%c[SAFE-CLEANUP] Starting for UID: ${agentUid}`, "background: #4caf50; color: white; padding: 2px 5px; font-weight: bold;");
-    
-    const btn = document.querySelector(`.agent-card[data-uid="${agentUid}"] .heal-btn`);
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = "⌛ Analisando...";
-        btn.style.background = "#ff9800";
-    }
-    
-    cleaningAgents.add(agentUid);
-    
-    try {
-        const agentRef = db.collection('agents').doc(agentUid);
-        
-        // 1. CLEANUP HOUSES
-        const housesSnapshot = await agentRef.collection('houses').get();
-        console.log(`-> Analisando ${housesSnapshot.size} documentos de imóveis.`);
-        
-        const houseGroups = {};
-        housesSnapshot.docs.forEach(doc => {
-            const d = doc.data();
-            const date = normalizeName(d.data || d.date);
-            const street = normalizeStr(d.streetName);
-            const block = normalizeStr(d.blockNumber);
-            const bSeq = normalizeStr(d.blockSequence || "0");
-            const num = normalizeStr(d.number);
-            const comp = normalizeStr(d.complement || "0");
-            const seq = d.sequence || 0;
-            const segment = d.visitSegment || 0;
-            
-            // ROCK-SOLID KEY: Matches Android's internal identity logic
-            // Including 'seq' (sequence) is CRITICAL to distinguish S/N houses in the same block.
-            const key = `H_${date}_${block}_${bSeq}_${street}_${num}_${comp}_${seq}_${segment}`;
-            
-            if (!houseGroups[key]) houseGroups[key] = [];
-            
-            let ts = 0;
-            if (d.lastUpdated && d.lastUpdated.seconds) ts = d.lastUpdated.seconds * 1000;
-            else if (typeof d.lastUpdated === 'number') ts = d.lastUpdated;
-            else if (d.lastSyncTime) ts = d.lastSyncTime;
-
-            houseGroups[key].push({ id: doc.id, ref: doc.ref, ts, street, num, seq });
-        });
-
-        const toDelete = [];
-        Object.entries(houseGroups).forEach(([key, group]) => {
-            if (group.length > 1) {
-                // Sort by lastUpdated descending (keep newest)
-                group.sort((a, b) => b.ts - a.ts);
-                const kept = group[0];
-                console.log(`%c[DUPLICATA] Mantendo: ${kept.street} ${kept.num} (Seq: ${kept.seq})`, "color: #4caf50;");
-                
-                group.slice(1).forEach(extra => {
-                    console.log(`%c   -> Removendo duplicata ID: ${extra.id}`, "color: #f44336;");
-                    toDelete.push(extra.ref);
-                });
-            }
-        });
-
-        // 2. CLEANUP ACTIVITIES (Date-based)
-        const activitySnapshot = await agentRef.collection('day_activities').get();
-        const activityGroups = {};
-        activitySnapshot.docs.forEach(doc => {
-            const d = doc.data();
-            const date = normalizeName(d.date || d.data);
-            if (!activityGroups[date]) activityGroups[date] = [];
-            let ts = (d.lastUpdated && d.lastUpdated.seconds) ? d.lastUpdated.seconds * 1000 : (d.lastUpdated || d.lastSyncTime || 0);
-            activityGroups[date].push({ id: doc.id, ref: doc.ref, ts });
-        });
-
-        Object.values(activityGroups).forEach(group => {
-            if (group.length > 1) {
-                group.sort((a, b) => b.ts - a.ts);
-                group.slice(1).forEach(extra => toDelete.push(extra.ref));
-            }
-        });
-
-        if (toDelete.length > 0) {
-            console.log(`%c[AÇÃO] Deletando ${toDelete.length} registros redundantes...`, "color: #ff9800; font-weight: bold;");
-            for (let i = 0; i < toDelete.length; i += 400) {
-                const batch = db.batch();
-                toDelete.slice(i, i + 400).forEach(ref => batch.delete(ref));
-                await batch.commit();
-            }
-            alert(`Limpeza segura concluída! Foram removidas ${toDelete.length} duplicatas.\nOs imóveis agora estão organizados corretamente.`);
-        } else {
-            alert("Nenhuma duplicata encontrada com os novos critérios de segurança.");
-        }
-        
-        await refreshDashboardData();
-    } catch (err) {
-        console.error("!!! Erro Crítico na Limpeza:", err);
-        alert("Erro: " + err.message);
-    } finally {
-        cleaningAgents.delete(agentUid);
-        if (btn) {
-            btn.disabled = false;
-            btn.textContent = "🛡️ Curar";
-            btn.style.background = "rgba(33, 150, 243, 0.1)";
-        }
-    }
-}
-
 // --- Remote Management Functions (Admin Only) ---
 
 async function toggleDayLock(agentUid, date, isLocked) {
@@ -687,7 +568,6 @@ function viewDayDetails(uid, date) {
 }
 
 // Expose to window for console access
-window.cleanupAgentDuplicates = cleanupAgentDuplicates;
 window.normalizeName = normalizeName;
 window.toggleDayLock = toggleDayLock;
 window.viewDayDetails = viewDayDetails;
@@ -1145,9 +1025,6 @@ function getAceListHTML() {
                         <!-- Footer -->
                         <div class="card-footer-compact">
                             <span>Ativo: <strong>${agent.stats.activeDays} dias</strong></span>
-                            ${userProfile.role === 'ADMIN' ? `
-                                <button onclick="cleanupAgentDuplicates('${agent.uid}')" class="btn-heal-mini">🛡️ Curar</button>
-                            ` : ''}
                         </div>
                     </div>
                     `;

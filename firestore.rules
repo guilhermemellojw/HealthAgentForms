@@ -88,6 +88,11 @@ service cloud.firestore {
     match /admins/{uid} {
       allow read, write: if isAdmin();
     }
+
+    // 5b. Auditoria de edições admin na produção (só ADMIN lê/escreve).
+    match /admin_audit/{auditId} {
+      allow read, write: if isAdmin();
+    }
     
     // 6. Permissão de Grupo de Coleções (Collection Group)
     // Qualquer agente logado pode ler imóveis de outros para montar o RG unificado.

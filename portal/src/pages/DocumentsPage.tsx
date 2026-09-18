@@ -22,7 +22,7 @@ export default function DocumentsPage() {
   const [month, setMonth] = useState(now.getMonth());
   const [weekIndex, setWeekIndex] = useState(0);
   const [dailyDate, setDailyDate] = useState("");
-  const snapshot = useAgentSnapshot(agentId);
+  const snapshot = useAgentSnapshot(agentId, year, month, weekIndex);
 
   const weeks = getWeeksForMonth(year, month);
   const week = weeks[weekIndex] ?? null;

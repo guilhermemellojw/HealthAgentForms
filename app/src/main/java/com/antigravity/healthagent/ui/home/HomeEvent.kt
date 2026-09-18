@@ -9,7 +9,6 @@ sealed interface HomeEvent {
     // Sync actions
     data object SyncDataToCloud : HomeEvent
     data object PullDataFromCloud : HomeEvent
-    data object GenerateMockData : HomeEvent
     data class FinishEditSession(val onComplete: () -> Unit) : HomeEvent
 
     // Date/Day Navigation actions
@@ -63,7 +62,4 @@ sealed interface HomeEvent {
     data object ConfirmDuplicateMerge : HomeEvent
     data object DismissDuplicateConfirmation : HomeEvent
     data object ClearUiEvent : HomeEvent
-
-    // Deduplication actions
-    data object DeduplicateCurrentDay : HomeEvent
 }

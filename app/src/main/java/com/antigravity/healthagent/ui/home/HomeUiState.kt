@@ -15,15 +15,6 @@ data class HomeSettingsState(
     val customActivities: Set<String> = emptySet()
 )
 
-data class BackupConfirmation(
-    val backupAgentName: String,
-    val currentAgentName: String,
-    val housesCount: Int,
-    val activitiesCount: Int,
-    val uri: android.net.Uri,
-    val isFullRestore: Boolean
-)
-
 @Immutable
 data class HomeUiState(
     val houses: List<HouseUiState> = emptyList(),
@@ -70,7 +61,6 @@ data class HomeUiState(
     val isSolarMode: Boolean = false,
     val isEditingToolsEnabled: Boolean = false,
     val maxOpenHouses: Int = 25,
-    val backupConfirmation: BackupConfirmation? = null,
     val isDuplicateIds: Set<Int> = emptySet(),
     val highlightedHouseId: Int? = null,
     val isTestUser: Boolean = false,

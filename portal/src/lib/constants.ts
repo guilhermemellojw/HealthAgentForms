@@ -37,6 +37,12 @@ export const MONTHS = [
   "Jul", "Ago", "Set", "Out", "Nov", "Dez",
 ] as const;
 
+// Índice = Date.getDay(): 0 = Domingo ... 6 = Sábado.
+export const WEEKDAYS = [
+  "Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira",
+  "Quinta-feira", "Sexta-feira", "Sábado",
+] as const;
+
 export const SITUATION_LABELS: Record<string, string> = {
   NONE: "Aberto",
   EMPTY: "Aberto",

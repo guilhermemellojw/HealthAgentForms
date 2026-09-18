@@ -14,7 +14,6 @@ import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.ui.home.DaySummary
 import com.antigravity.healthagent.ui.home.WeeklySummaryTotals
 import com.antigravity.healthagent.utils.BoletimPdfGenerator
-import com.antigravity.healthagent.utils.SemanalPdfGenerator
 import com.antigravity.healthagent.domain.repository.UserRole
 import com.antigravity.healthagent.data.sync.SyncFeedbackManager
 import com.antigravity.healthagent.domain.usecase.RoleEnforcer
@@ -473,35 +472,11 @@ class WeeklySummaryViewModel @Inject constructor(
         return status == "NORMAL" || status.isBlank()
     }
 
-    suspend fun exportSemanalPdf(context: Context): File {
-        return withContext(Dispatchers.IO) {
-            clearOldPdfs(context, "Semanal_")
-            val summary = weeklySummary.value
-            val weekDates = summary.map { it.date }
-            val currentAgentName = _agentName.value
-            
-            // Collect houses for the week
-            val effectiveUid = _remoteAgentUid.value ?: _currentUserUid.value ?: ""
-            val rawHouses = repository.getAllHousesOnce(effectiveUid)
-            
-            // Extract the real agent name from the database houses if available, preventing fallback or supervisor names from interfering
-            val resolvedAgentName = rawHouses.firstOrNull { it.agentUid == effectiveUid && it.agentName.isNotBlank() }?.agentName
-                ?: rawHouses.firstOrNull { it.agentName.isNotBlank() }?.agentName
-                ?: currentAgentName
-
-            val filteredHouses = rawHouses.filter { 
-                (it.agentUid == effectiveUid || it.agentName.uppercase() == resolvedAgentName.uppercase()) && weekDates.contains(it.data)
-            }
-                
-            val activities = summary.associate { it.date to it.status }
-            SemanalPdfGenerator.generatePdf(context, weekDates, filteredHouses, activities, resolvedAgentName)
-        }
-    }
-
     suspend fun exportWeeklyBatchPdf(context: Context): File {
         return withContext(Dispatchers.IO) {
             clearOldPdfs(context, "Produção_")
             clearOldPdfs(context, "Boletim_")
+            clearOldPdfs(context, "Semanal_")
             val dates = currentWeekDates.value
             val currentAgentName = _agentName.value
             

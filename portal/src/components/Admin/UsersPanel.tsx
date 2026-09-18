@@ -1,40 +1,12 @@
-import { useEffect, useState } from "react";
-import { collection, getDocs, orderBy, query } from "firebase/firestore";
-import { db } from "../../lib/firebase";
+import { useState } from "react";
 import { useStaffGate } from "../../hooks/useAuth";
-import type { UserDoc } from "../../lib/types";
+import { useAdminUsers } from "../../hooks/useAdminData";
 
 export function UsersPanel() {
   const { isAdmin } = useStaffGate();
-  const [users, setUsers] = useState<(UserDoc & { id: string })[]>([]);
+  // Reaproveita o listener já ativo no Admin (zero leitura extra, tempo real).
+  const { users, loading } = useAdminUsers();
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!isAdmin) {
-      setLoading(false);
-      return;
-    }
-
-    const loadUsers = async () => {
-      setLoading(true);
-      try {
-        const usersRef = collection(db, "users");
-        const snap = await getDocs(query(usersRef, orderBy("displayName")));
-        const userList = snap.docs.map((doc) => ({
-          id: doc.id,
-          ...(doc.data() as Omit<UserDoc, "uid">),
-        })) as (UserDoc & { id: string })[];
-        setUsers(userList);
-      } catch (err) {
-        console.error("Error loading users:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadUsers();
-  }, [isAdmin]);
 
   if (!isAdmin) return null;
 

@@ -37,7 +37,6 @@ interface HouseWriteRepository {
     suspend fun clearAllData()
     suspend fun clearAgentData(agentUid: String)
     suspend fun migrateLocalData(agentName: String, email: String, targetUid: String, isCurrentAgent: Boolean = false)
-    suspend fun deduplicateAgentData(agentUid: String)
     suspend fun cleanMisattributedData(inspectedUid: String, adminUid: String)
     suspend fun normalizeLocalDates()
     suspend fun fixEmailNamesForUid(uid: String, properName: String)

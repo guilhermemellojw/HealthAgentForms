@@ -355,12 +355,6 @@ fun HomeScreen(
         dashboardTotals = uiState.dashboardTotals,
         isDayClosed = uiState.isDayClosed,
         isSupervisor = uiState.isSupervisor,
-        isAdmin = uiState.isAdmin,
-        showDeduplicate = uiState.isDuplicateIds.isNotEmpty(),
-        onDeduplicate = {
-            viewModel.deduplicateCurrentDay()
-            isDashboardOpen = false
-        },
         onCloseProduction = {
             isDashboardOpen = false
             viewModel.startDayClosingFlow()

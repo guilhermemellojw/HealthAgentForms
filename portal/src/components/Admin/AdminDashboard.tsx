@@ -18,6 +18,7 @@ import {
 } from "firebase/firestore";
 import { ref, deleteObject, listAll } from "firebase/storage";
 import { AdminTimeline } from "./AdminTimeline";
+import AgentProductionEditor from "./AgentProductionEditor";
 import { db, storage } from "../../lib/firebase";
 import { MONTHS } from "../../lib/constants";
 import { fetchSystemSettings, useAccessRequests, useAgentNames, useBairros, useUnifiedProfiles } from "../../hooks/useAdminData";
@@ -594,6 +595,14 @@ export function AdminDashboard() {
                     <div className="muted small">
                       UID: {p.uid || "—"} • AgentID: {p.agentId || "—"} • Último sinc: {p.lastSyncTime ? (typeof p.lastSyncTime === "number" ? new Date(p.lastSyncTime).toLocaleString("pt-BR") : p.lastSyncTime.seconds ? new Date(p.lastSyncTime.seconds*1000).toLocaleString("pt-BR") : "—") : "Nunca"} • Fonte: {agentStats?.source === "summary" ? "sumarizado" : agentStats?.source === "raw" ? "leitura direta" : "—"}
                     </div>
+
+                    {p.agentId && p.agentName && (
+                      <AgentProductionEditor
+                        agentId={p.agentId}
+                        agentName={p.agentName}
+                        lastSyncTime={typeof p.lastSyncTime === "number" ? p.lastSyncTime : null}
+                      />
+                    )}
                   </div>
                 )}
               </div>

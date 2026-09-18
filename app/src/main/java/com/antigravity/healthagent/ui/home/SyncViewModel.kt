@@ -3,11 +3,9 @@ package com.antigravity.healthagent.ui.home
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import com.antigravity.healthagent.domain.usecase.CleanupBrokenHousesUseCase
-import com.antigravity.healthagent.domain.usecase.GenerateTestDataUseCase
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.utils.SoundManager
 import com.antigravity.healthagent.data.local.model.House
-import com.antigravity.healthagent.BuildConfig
 import com.antigravity.healthagent.utils.DateUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,7 +28,6 @@ class SyncViewModel @Inject constructor(
     private val settingsManager: SettingsManager,
     private val repository: HouseRepository,
     private val cleanupBrokenHousesUseCase: CleanupBrokenHousesUseCase,
-    private val generateTestDataUseCase: GenerateTestDataUseCase,
     private val soundManager: SoundManager,
     private val feedbackManager: SyncFeedbackManager
 ) {
@@ -205,38 +202,5 @@ class SyncViewModel @Inject constructor(
         }
     }
 
-    fun generateMockData(
-        agentName: String,
-        currentUserUid: String?,
-        currentDate: String
-    ) {
-        scope.launch {
-            if (!BuildConfig.DEBUG) return@launch
 
-            val uid = currentUserUid ?: return@launch
-
-            feedbackManager.syncing(progress = 0.1f, message = "Gerando 100 casas de teste...")
-            val result = generateTestDataUseCase(
-                agentName = agentName,
-                agentUid = uid,
-                currentDate = currentDate,
-                numberOfBlocks = 5,
-                housesPerBlock = 20
-            )
-
-            if (result.isSuccess) {
-                feedbackManager.syncing(progress = 1.0f, message = "Dados gerados! Sincronizando...")
-                delay(1000)
-                try {
-                    val housesToPush = repository.getAllHousesOnce(uid)
-                    val activitiesToPush = repository.getAllDayActivitiesOnce(uid)
-                    syncRepository.pushLocalDataToCloud(housesToPush, activitiesToPush, uid)
-                } catch (e: Exception) {
-                    feedbackManager.error("Erro no push: ${e.message}")
-                }
-            } else {
-                feedbackManager.error("Erro: ${result.exceptionOrNull()?.message}")
-            }
-        }
-    }
 }

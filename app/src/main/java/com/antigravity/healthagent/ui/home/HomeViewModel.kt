@@ -531,12 +531,6 @@ class HomeViewModel @Inject constructor(
         uiEvent = uiEvent
     )
 
-    fun generateMockData() = syncViewModel.generateMockData(
-        agentName = agentName.value,
-        currentUserUid = currentUserUid.value,
-        currentDate = data.value
-    )
-
     fun finishEditSession(onComplete: () -> Unit = {}) = syncViewModel.finishEditSession(
         remoteAgent = remoteAgent.value,
         remoteAgentUid = remoteAgentUid.value,
@@ -905,8 +899,6 @@ class HomeViewModel @Inject constructor(
         localAgentNameBackup = _localAgentNameBackup,
         onBackupChanged = { _localAgentNameBackup = it }
     )
-
-    fun deduplicateCurrentDay() = remoteAgentDelegate.deduplicateCurrentDay(viewModelScope, this)
 
     fun addNewHouseAt(afterId: Int) = houseEditDelegate.addNewHouseAt(viewModelScope, this, afterId, houses.value)
 

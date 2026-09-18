@@ -210,13 +210,6 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun `generateMockData delegates to syncViewModel`() {
-        val vm = createViewModel()
-        vm.generateMockData()
-        verify { syncViewModel.generateMockData(any(), any(), any()) }
-    }
-
-    @Test
     fun `finishEditSession delegates to syncViewModel with callback`() {
         val vm = createViewModel()
         var called = false
@@ -374,13 +367,6 @@ class HomeViewModelTest {
         val vm = createViewModel()
         vm.setRemoteAgent(null)
         verify { remoteAgentDelegate.setRemoteAgent(any(), any(), null, any(), any()) }
-    }
-
-    @Test
-    fun `deduplicateCurrentDay delegates to remoteAgentDelegate`() {
-        val vm = createViewModel()
-        vm.deduplicateCurrentDay()
-        verify { remoteAgentDelegate.deduplicateCurrentDay(any(), any()) }
     }
 
     @Test

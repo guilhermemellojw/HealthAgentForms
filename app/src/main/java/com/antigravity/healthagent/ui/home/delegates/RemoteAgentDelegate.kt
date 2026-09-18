@@ -4,7 +4,6 @@ import com.antigravity.healthagent.domain.repository.AgentData
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
 import com.antigravity.healthagent.domain.usecase.CleanMisattributedDataUseCase
-import com.antigravity.healthagent.domain.usecase.DeduplicateAgentDataUseCase
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.utils.SoundManager
 import com.antigravity.healthagent.domain.logger.AppLogger
@@ -20,8 +19,7 @@ class RemoteAgentDelegate @Inject constructor(
     private val syncRepository: SyncRepository,
     private val settingsManager: SettingsManager,
     private val soundManager: SoundManager,
-    private val cleanMisattributedDataUseCase: CleanMisattributedDataUseCase,
-    private val deduplicateAgentDataUseCase: DeduplicateAgentDataUseCase
+    private val cleanMisattributedDataUseCase: CleanMisattributedDataUseCase
 ) {
 
     fun setRemoteAgent(
@@ -93,40 +91,4 @@ class RemoteAgentDelegate @Inject constructor(
         }
     }
 
-    fun deduplicateCurrentDay(scope: CoroutineScope, state: HomeState) {
-        scope.launch {
-            if (!state.isAdmin.value) {
-                state.uiEvent.value = "Apenas administradores podem executar deduplicação."
-                soundManager.playWarning()
-                return@launch
-            }
-
-            state.isSyncing.value = true
-            state.uiEvent.value = "Iniciando deduplicação..."
-
-            try {
-                val currentAgent = state.agentName.value
-                val currentUid = state.remoteAgentUid.value ?: state.currentUserUid.value
-
-                if (currentAgent.isNotBlank() && (currentUid ?: "").isNotBlank()) {
-                    deduplicateAgentDataUseCase(currentUid ?: "")
-
-                    // If we are inspecting, also do a cross-identity surgical clean
-                    if (state.remoteAgentUid.value != null) {
-                        cleanMisattributedDataUseCase(currentUid ?: "", state.currentUserUid.value ?: "")
-                    }
-
-                    state.uiEvent.value = "Deduplicação concluída. Imóveis conflitantes removidos."
-                    soundManager.playSuccess()
-                } else {
-                    state.uiEvent.value = "Erro: Identidade do agente não localizada."
-                }
-            } catch (e: Exception) {
-                state.uiEvent.value = "Erro na deduplicação: ${e.message}"
-                soundManager.playWarning()
-            } finally {
-                state.isSyncing.value = false
-            }
-        }
-    }
 }
