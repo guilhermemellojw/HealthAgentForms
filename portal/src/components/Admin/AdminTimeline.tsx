@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, deleteField, doc, getDocs, query, orderBy, updateDoc, writeBatch } from "firebase/firestore";
-import { getDownloadURL, ref } from "firebase/storage";
-import { db, storage } from "../../lib/firebase";
+import { must, supabase } from "../../lib/supabase";
 
 // Replicates Kotlin StringExtensions.normalize(): trim, "/"->"-", "."->"-", collapse spaces/dashes, UPPERCASE
 function normalizeKey(value: unknown): string {
@@ -44,6 +42,59 @@ interface TimelineItem {
   activityCount?: number;
 }
 
+const str = (v: unknown): string | null => {
+  if (v === null || v === undefined) return null;
+  const s = String(v);
+  return s === "" ? null : s;
+};
+const num = (v: unknown, dflt: number | null = null): number | null => {
+  if (v === null || v === undefined || v === "") return dflt;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : dflt;
+};
+
+/** Backup do app (formato domain, address aninhado) -> linha houses. */
+function backupHouseToRow(h: Record<string, unknown>, agentId: string, agentNameUpper: string) {
+  const addr = (h.address ?? {}) as Record<string, unknown>;
+  const pick = (...vals: unknown[]): string | null => {
+    for (const v of vals) {
+      const s = str(v);
+      if (s !== null) return s;
+    }
+    return null;
+  };
+  return {
+    agent_id: agentId,
+    natural_key: houseDocId(h, agentId, agentNameUpper),
+    data_text: String(h.data ?? "").trim().replace(/\//g, "-"),
+    street_name: pick(h.streetName, addr.streetName),
+    number: pick(h.number, addr.number),
+    block_number: pick(h.blockNumber, addr.blockNumber),
+    block_sequence: pick(h.blockSequence, addr.blockSequence),
+    sequence: num(h.sequence ?? addr.sequence),
+    complement: num(h.complement ?? addr.complement),
+    visit_segment: num(h.visitSegment),
+    list_order: num(h.listOrder),
+    situation: pick(h.situation),
+    property_type: pick(h.propertyType),
+    com_foco: typeof h.comFoco === "boolean" ? h.comFoco : null,
+    a1: num(h.a1, 0) ?? 0, a2: num(h.a2, 0) ?? 0, b: num(h.b, 0) ?? 0, c: num(h.c, 0) ?? 0,
+    d1: num(h.d1, 0) ?? 0, d2: num(h.d2, 0) ?? 0, e: num(h.e, 0) ?? 0,
+    eliminados: num(h.eliminados, 0) ?? 0, larvicida: num(h.larvicida, 0) ?? 0,
+    latitude: num(h.latitude), longitude: num(h.longitude),
+    observation: pick(h.observation),
+    municipio: pick(h.municipio), bairro: pick(h.bairro, addr.bairro),
+    categoria: pick(h.categoria), zona: pick(h.zona),
+    tipo: h.tipo == null ? null : String(h.tipo),
+    atividade: h.atividade == null ? null : String(h.atividade),
+    ciclo: pick(h.ciclo),
+    agent_name: agentNameUpper,
+    agent_uid: agentId,
+    client_uuid: str(h.uuid),
+    edited_by_admin: true,
+  };
+}
+
 export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentName: string; onClose: () => void }) {
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,29 +112,17 @@ export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentN
     setLoading(true);
     setError(null);
     try {
-      console.log("AdminTimeline load:", { uid });
-      // Android parity: query Firestore only (never list Storage directly)
-      const backupsRef = collection(db, "agents", uid, "backups");
-      const q = query(backupsRef, orderBy("timestamp", "desc"));
-      const snap = await getDocs(q);
-      console.log("Firestore backup count:", snap.docs.length);
-
-      let mapped: TimelineItem[] = [];
-      snap.docs.forEach((d) => {
-        const data = d.data();
-        const storagePath = data.storagePath as string;
-        const ts = data.timestamp ? Number(data.timestamp) : 0;
-        mapped.push({
-          id: d.id,
-          storagePath,
-          timestamp: ts,
-          houseCount: data.houseCount != null ? Number(data.houseCount) : undefined,
-          activityCount: data.activityCount != null ? Number(data.activityCount) : undefined,
-        });
-      });
-      mapped.sort((a, b) => b.timestamp - a.timestamp);
-      setItems(mapped);
-      console.log("Using Firestore backups:", mapped.length);
+      const res = await supabase.from("backups").select("*").eq("agent_id", uid).order("ts", { ascending: false });
+      const rows = must(res);
+      setItems(
+        rows.map((r) => ({
+          id: String(r.ts),
+          storagePath: r.storage_path as string,
+          timestamp: Number(r.ts) || 0,
+          houseCount: r.house_count != null ? Number(r.house_count) : undefined,
+          activityCount: r.activity_count != null ? Number(r.activity_count) : undefined,
+        })),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       console.error("AdminTimeline load error:", e);
@@ -106,9 +145,10 @@ export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentN
     if (!confirm(`Restaurar backup ${new Date(item.timestamp).toLocaleString("pt-BR")}?\nIsso substituirá os dados atuais da nuvem. O agente receberá reset.`)) return;
     setRestoring(item.id);
     try {
-      const url = await getDownloadURL(ref(storage, item.storagePath));
-      const res = await fetch(url);
-      const json = await res.text();
+      const rel = item.storagePath.replace(/^backups\//, "");
+      const { data: blob, error: dlError } = await supabase.storage.from("backups").download(rel);
+      if (dlError || !blob) throw new Error(dlError?.message || "Falha ao baixar backup");
+      const json = await blob.text();
       // Encrypted backups (EncryptedFile AES256 from app) are binary — detect before parsing
       if (!json.trimStart().startsWith("{")) {
         throw new Error("Backup criptografado pelo app (AES) não pode ser restaurado no portal. Use o app para restaurar este backup.");
@@ -123,56 +163,37 @@ export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentN
       const activities = (data.dayActivities as Array<Record<string, unknown>>) || [];
       const agentNameUpper = agentName.toUpperCase();
       // For safety, do not wipe before success parse
-      const existingHouses = await getDocs(collection(db, "agents", uid, "houses"));
-      const existingActs = await getDocs(collection(db, "agents", uid, "day_activities"));
-      const existingSummaries = await getDocs(collection(db, "agents", uid, "monthly_summaries"));
-      const allExisting = [...existingHouses.docs, ...existingActs.docs, ...existingSummaries.docs];
-      for (let i = 0; i < allExisting.length; i += 400) {
-        const chunk = allExisting.slice(i, i + 400);
-        const batch = writeBatch(db);
-        chunk.forEach((d) => batch.delete(d.ref));
-        await batch.commit();
+      for (const table of ["houses", "day_activities", "monthly_summaries"] as const) {
+        const del = await supabase.from(table).delete().eq("agent_id", uid);
+        if (del.error) throw new Error(del.error.message);
       }
-      // Clear sync tombstones so restored data is not re-deleted by the app on next pull,
-      // and refresh lastSyncTime (parity with Android wipeMetadata)
-      try {
-        await updateDoc(doc(db, "agents", uid), {
-          deleted_house_ids: deleteField(),
-          deleted_activity_dates: deleteField(),
-          lastSyncError: deleteField(),
-          lastSyncTime: Date.now(),
-        });
-      } catch {
-        // agents doc may not exist yet
+      // Write houses using Android-compatible natural keys (uuid or generated)
+      const DATE_RE = /^[0-9]{2}-[0-9]{2}-[0-9]{4}$/;
+      const rows = houses.map((h) => backupHouseToRow(h, uid, agentNameUpper));
+      const bad = rows.filter((r) => !DATE_RE.test(r.data_text)).length;
+      const good = rows.filter((r) => DATE_RE.test(r.data_text));
+      for (let i = 0; i < good.length; i += 500) {
+        const ins = await supabase.from("houses").insert(good.slice(i, i + 500));
+        if (ins.error) throw new Error(ins.error.message);
       }
-      // Write houses using Android-compatible doc IDs (uuid or natural key)
-      for (let i = 0; i < houses.length; i += 400) {
-        const chunk = houses.slice(i, i + 400);
-        const batch = writeBatch(db);
-        chunk.forEach((h) => {
-          const id = houseDocId(h, uid, agentNameUpper);
-          batch.set(doc(db, "agents", uid, "houses", id), { ...h, id, agentUid: uid, agentName: agentNameUpper });
-        });
-        await batch.commit();
-      }
-      // Activities use date as doc ID (matches Android dateKey)
-      for (let i = 0; i < activities.length; i += 400) {
-        const chunk = activities.slice(i, i + 400);
-        const batch = writeBatch(db);
-        chunk.forEach((a, idx) => {
-          const dateKey = String(a.date ?? "").trim().replace(/\//g, "-");
-          const id = dateKey || `act_${Date.now()}_${i + idx}`;
-          batch.set(doc(db, "agents", uid, "day_activities", id), { ...a, agentUid: uid, agentName: agentNameUpper });
-        });
-        await batch.commit();
+      // Activities use date as id (matches Android dateKey)
+      const actRows = activities.map((a, idx) => ({
+        agent_id: uid,
+        date_text: String(a.date ?? "").trim().replace(/\//g, "-") || `act_${Date.now()}_${idx}`,
+        status: str(a.status),
+        is_closed: typeof a.isClosed === "boolean" ? a.isClosed : null,
+        is_manual_unlock: typeof a.isManualUnlock === "boolean" ? a.isManualUnlock : null,
+        agent_name: agentNameUpper,
+        agent_uid: uid,
+        edited_by_admin: true,
+      }));
+      for (let i = 0; i < actRows.length; i += 500) {
+        const ins = await supabase.from("day_activities").insert(actRows.slice(i, i + 500));
+        if (ins.error) throw new Error(ins.error.message);
       }
       // mark requireDataReset for app to pull
-      try {
-        await updateDoc(doc(db, "users", uid), { requireDataReset: true });
-      } catch {
-        // ignore
-      }
-      showToast(`Restaurado: ${houses.length} imóveis, ${activities.length} dias`);
+      await supabase.from("profiles").update({ require_data_reset: true }).eq("id", uid);
+      showToast(`Restaurado: ${good.length} imóveis, ${actRows.length} dias${bad ? ` (${bad} ignorados por data inválida)` : ""}`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
     } finally {
@@ -184,31 +205,32 @@ export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentN
     if (!confirm("Limpeza cirúrgica: removerá registros vazios (sem rua/número/quarteirão) que não estão em dias fechados. Continuar?")) return;
     setCleaning(true);
     try {
-      const housesSnap = await getDocs(collection(db, "agents", uid, "houses"));
-      const actsSnap = await getDocs(collection(db, "agents", uid, "day_activities"));
+      const [hRes, aRes] = await Promise.all([
+        supabase.from("houses").select("natural_key,street_name,number,block_number,data_text").eq("agent_id", uid).is("deleted_at", null),
+        supabase.from("day_activities").select("date_text,is_closed,is_manual_unlock").eq("agent_id", uid).is("deleted_at", null),
+      ]);
+      const houses = must(hRes);
+      const acts = must(aRes);
       const closedDates = new Set(
-        actsSnap.docs
-          .map((d) => d.data() as { date?: string; isClosed?: boolean; isManualUnlock?: boolean })
-          .filter((a) => a.isClosed && !a.isManualUnlock)
-          .map((a) => (a.date || "").replace(/\//g, "-"))
+        acts
+          .filter((a) => a.is_closed && !a.is_manual_unlock)
+          .map((a) => (a.date_text || "").replace(/\//g, "-"))
           .filter(Boolean),
       );
-      const broken = housesSnap.docs.filter((d) => {
-        const h = d.data() as { streetName?: string; number?: string; blockNumber?: string; data?: string };
-        const isEmpty = !h.streetName?.trim() && !h.number?.trim() && !h.blockNumber?.trim();
+      const broken = houses.filter((h) => {
+        const isEmpty = !h.street_name?.trim() && !h.number?.trim() && !h.block_number?.trim();
         if (!isEmpty) return false;
-        const dateDash = (h.data || "").replace(/\//g, "-");
+        const dateDash = (h.data_text || "").replace(/\//g, "-");
         return !closedDates.has(dateDash);
       });
       if (broken.length === 0) {
         showToast("Nenhum registro quebrado encontrado");
         return;
       }
-      for (let i = 0; i < broken.length; i += 400) {
-        const chunk = broken.slice(i, i + 400);
-        const batch = writeBatch(db);
-        chunk.forEach((d) => batch.delete(d.ref));
-        await batch.commit();
+      for (let i = 0; i < broken.length; i += 200) {
+        const keys = broken.slice(i, i + 200).map((h) => h.natural_key);
+        const del = await supabase.from("houses").delete().eq("agent_id", uid).in("natural_key", keys);
+        if (del.error) throw new Error(del.error.message);
       }
       showToast(`Limpeza: ${broken.length} removidos`);
       await load();

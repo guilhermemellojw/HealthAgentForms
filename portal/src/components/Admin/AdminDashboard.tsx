@@ -1,29 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  arrayRemove,
-  arrayUnion,
-  collection,
-  deleteDoc,
-  doc,
-  documentId,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  setDoc,
-  startAfter,
-  updateDoc,
-  writeBatch,
-} from "firebase/firestore";
-import { ref, deleteObject, listAll } from "firebase/storage";
 import { AdminTimeline } from "./AdminTimeline";
 import AgentProductionEditor from "./AgentProductionEditor";
-import { db, storage } from "../../lib/firebase";
+import { getMetaValue, mutateMetaArray, setMetaValue, supabase } from "../../lib/supabase";
 import { MONTHS } from "../../lib/constants";
 import { fetchSystemSettings, useAccessRequests, useAgentNames, useBairros, useUnifiedProfiles } from "../../hooks/useAdminData";
 import { useAgents, useAgentStatsByPeriod } from "../../hooks/usePortalData";
 import type { UnifiedProfile } from "../../lib/adminTypes";
+
+async function throwOn(res: { error: unknown }) {
+  if (res.error) throw new Error((res.error as { message?: string }).message || "Erro Supabase");
+}
 
 export function AdminDashboard() {
   const [tab, setTab] = useState<"gestao" | "config">("gestao");
@@ -39,9 +25,7 @@ export function AdminDashboard() {
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"AGENT" | "SUPERVISOR" | "ADMIN">("AGENT");
   const [inviteAgentName, setInviteAgentName] = useState("");
-  const [inviteAuthorized, setInviteAuthorized] = useState(true);
   const [transferFrom, setTransferFrom] = useState<UnifiedProfile | null>(null);
   const [transferTo, setTransferTo] = useState<string>("");
   const [wiping, setWiping] = useState<string | null>(null);
@@ -62,7 +46,7 @@ export function AdminDashboard() {
   const handleAuthorize = async (p: UnifiedProfile, value: boolean) => {
     if (!p.uid) return showToast("Perfil sem UID não pode ser autorizado");
     try {
-      await updateDoc(doc(db, "users", p.uid), { isAuthorized: value });
+      await throwOn(await supabase.from("profiles").update({ is_authorized: value }).eq("id", p.uid));
       showToast(value ? "Autorizado" : "Autorização removida");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -72,21 +56,8 @@ export function AdminDashboard() {
   const handleRoleChange = async (p: UnifiedProfile, role: string) => {
     if (!p.uid) return showToast("Sem UID");
     try {
-      const batch = writeBatch(db);
-      batch.update(doc(db, "users", p.uid), { role });
-      const adminRef = doc(db, "admins", p.uid);
-      const supRef = doc(db, "supervisors", p.uid);
-      if (role === "ADMIN") {
-        batch.set(adminRef, { email: p.email.toLowerCase() });
-        batch.delete(supRef);
-      } else if (role === "SUPERVISOR") {
-        batch.set(supRef, { email: p.email.toLowerCase() });
-        batch.delete(adminRef);
-      } else {
-        batch.delete(adminRef);
-        batch.delete(supRef);
-      }
-      await batch.commit();
+      // Papel vive só em profiles (sem coleções admins/supervisors no Supabase).
+      await throwOn(await supabase.from("profiles").update({ role }).eq("id", p.uid));
       showToast(`Função alterada para ${role}`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -98,23 +69,21 @@ export function AdminDashboard() {
     const upper = name.trim().toUpperCase();
     if (!upper) return;
     try {
-      const shouldRename = await (async () => {
-        try {
-          const snap = await getDoc(doc(db, "agents", p.uid!));
-          const existing = snap.exists() ? (snap.data() as { agentName?: string }).agentName?.trim().toUpperCase() : null;
-          return !existing || existing !== upper;
-        } catch {
-          return true;
-        }
-      })();
-      await updateDoc(doc(db, "users", p.uid!), { agentName: upper });
       const agentId = p.agentId || p.uid!;
-      await setDoc(doc(db, "agents", agentId), { agentName: upper, email: p.email.toLowerCase() }, { merge: true });
-      await setDoc(doc(db, "metadata", "agent_info"), { names: arrayUnion(upper) }, { merge: true });
+      const { data: ag } = await supabase.from("agents").select("agent_name").eq("id", agentId).maybeSingle();
+      const existing = (ag?.agent_name as string | null)?.trim().toUpperCase() || null;
+      const shouldRename = !existing || existing !== upper;
+      await throwOn(await supabase.from("profiles").update({ agent_name: upper }).eq("id", p.uid!));
+      await throwOn(
+        await supabase.from("agents").upsert(
+          { id: agentId, agent_name: upper, email: p.email.toLowerCase() },
+          { onConflict: "id" },
+        ),
+      );
+      await mutateMetaArray("agent_info", "names", upper);
       if (shouldRename && agentId) {
-        await renameCollectionField(agentId, "houses", "agentName", upper);
-        await renameCollectionField(agentId, "day_activities", "agentName", upper);
-        await renameCollectionField(agentId, "monthly_summaries", "agentName", upper);
+        await renameAgentField(agentId, "houses", upper);
+        await renameAgentField(agentId, "day_activities", upper);
       }
       showToast(`Vinculado a ${upper}${shouldRename ? " (produção renomeada)" : ""}`);
     } catch (e) {
@@ -122,25 +91,15 @@ export function AdminDashboard() {
     }
   };
 
-  async function renameCollectionField(agentId: string, subcollection: string, field: string, value: string) {
-    let lastDoc: unknown = null;
-    while (true) {
-      const coll = collection(db, "agents", agentId, subcollection);
-      const q = lastDoc ? query(coll, orderBy(documentId()), startAfter(lastDoc), limit(450)) : query(coll, orderBy(documentId()), limit(450));
-      const snap = await getDocs(q);
-      if (snap.empty) break;
-      const batch = writeBatch(db);
-      snap.docs.forEach((d) => batch.update(d.ref, { [field]: value }));
-      await batch.commit();
-      if (snap.docs.length < 450) break;
-      lastDoc = snap.docs[snap.docs.length - 1];
-    }
+  async function renameAgentField(agentId: string, table: "houses" | "day_activities", value: string) {
+    // Um UPDATE relacional substitui a paginação 450/400 do Firestore.
+    await throwOn(await supabase.from(table).update({ agent_name: value }).eq("agent_id", agentId));
   }
 
   const handleClearVinculo = async (p: UnifiedProfile) => {
     if (!p.uid) return;
     try {
-      await updateDoc(doc(db, "users", p.uid), { agentName: null });
+      await throwOn(await supabase.from("profiles").update({ agent_name: null }).eq("id", p.uid));
       showToast("Vínculo removido");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -151,7 +110,7 @@ export function AdminDashboard() {
     if (!p.uid && !p.agentId) {
       if (p.agentName) {
         try {
-          await updateDoc(doc(db, "metadata", "agent_info"), { names: arrayRemove(p.agentName) });
+          await mutateMetaArray("agent_info", "names", undefined, p.agentName);
           showToast("Nome removido da lista mestra");
         } catch (e) {
           showToast(e instanceof Error ? e.message : String(e));
@@ -160,13 +119,17 @@ export function AdminDashboard() {
       return;
     }
     const uid = p.uid || p.agentId!;
-    if (!confirm(`Excluir ${p.displayName}? ${deleteCloud ? "Dados da nuvem também serão apagados (irreversível)." : ""}`)) return;
+    if (!confirm(`Excluir ${p.displayName}? Perfil e produção vinculada serão removidos (login futuro recria o perfil).${deleteCloud ? " Arquivos de backup também serão apagados (irreversível)." : ""}`)) return;
     try {
-      await deleteDoc(doc(db, "users", uid));
-      await deleteDoc(doc(db, "admins", uid));
-      await deleteDoc(doc(db, "supervisors", uid));
-      if (deleteCloud && p.agentId) {
-        await purgeAgentCompletely(p.agentId);
+      if (deleteCloud && p.agentId) await purgeAgentCompletely(p.agentId);
+      else {
+        // Excluir perfil: produção vai junto (FK profiles->agents em cascata).
+        await throwOn(await supabase.from("houses").delete().eq("agent_id", uid));
+        await throwOn(await supabase.from("day_activities").delete().eq("agent_id", uid));
+        await throwOn(await supabase.from("monthly_summaries").delete().eq("agent_id", uid));
+        await throwOn(await supabase.from("backups").delete().eq("agent_id", uid));
+        await throwOn(await supabase.from("agents").delete().eq("id", uid));
+        await throwOn(await supabase.from("profiles").delete().eq("id", uid));
       }
       showToast("Excluído");
     } catch (e) {
@@ -175,39 +138,16 @@ export function AdminDashboard() {
   };
 
   async function purgeAgentCompletely(agentId: string) {
-    const subs = ["houses", "day_activities", "monthly_summaries"] as const;
-    for (const sub of subs) {
-      let lastDoc: unknown = null;
-      while (true) {
-        const coll = collection(db, "agents", agentId, sub);
-        const q = lastDoc ? query(coll, orderBy(documentId()), startAfter(lastDoc), limit(400)) : query(coll, orderBy(documentId()), limit(400));
-        const snap = await getDocs(q);
-        if (snap.empty) break;
-        const batch = writeBatch(db);
-        snap.docs.forEach((d) => batch.delete(d.ref));
-        await batch.commit();
-        if (snap.docs.length < 400) break;
-        lastDoc = snap.docs[snap.docs.length - 1];
-      }
+    for (const table of ["houses", "day_activities", "monthly_summaries", "backups"] as const) {
+      await throwOn(await supabase.from(table).delete().eq("agent_id", agentId));
     }
-    try {
-      await deleteDoc(doc(db, "agents", agentId));
-    } catch {
-      // already deleted or not exists
-    }
+    await throwOn(await supabase.from("agents").delete().eq("id", agentId));
     // Cleanup storage backups folder
     try {
-      const storageRef = ref(storage, `backups/${agentId}`);
-      const listResult = await listAll(storageRef);
-      for (const item of listResult.items) {
-        await deleteObject(item);
-      }
-      for (const prefix of listResult.prefixes) {
-        // Delete all files under each prefix
-        const innerList = await listAll(prefix);
-        for (const item of innerList.items) {
-          await deleteObject(item);
-        }
+      const { data } = await supabase.storage.from("backups").list(agentId, { limit: 1000 });
+      const files = (data || []).filter((e) => e.id !== null).map((e) => `${agentId}/${e.name}`);
+      for (let i = 0; i < files.length; i += 100) {
+        await supabase.storage.from("backups").remove(files.slice(i, i + 100));
       }
     } catch {
       // ignore if bucket not configured or error
@@ -218,41 +158,26 @@ export function AdminDashboard() {
     const upper = newMasterName.trim().toUpperCase();
     if (!upper) return;
     try {
-      await updateDoc(doc(db, "metadata", "agent_info"), { names: arrayUnion(upper) });
+      await mutateMetaArray("agent_info", "names", upper);
       setNewMasterName("");
       showToast("Nome adicionado");
     } catch (e) {
-      try {
-        await setDoc(doc(db, "metadata", "agent_info"), { names: arrayUnion(upper) }, { merge: true });
-        setNewMasterName("");
-        showToast("Nome adicionado");
-      } catch {
-        showToast(e instanceof Error ? e.message : String(e));
-      }
+      showToast(e instanceof Error ? e.message : String(e));
     }
   };
 
   const handleInvite = async () => {
     const email = inviteEmail.trim().toLowerCase();
     if (!email || !email.includes("@")) return showToast("Email inválido");
-    const preId = `pre_${email.replace(/\./g, "_").replace(/@/g, "_")}`;
-    const data: Record<string, unknown> = {
-      email,
-      role: inviteRole,
-      isAuthorized: inviteAuthorized,
-      isPreRegistered: true,
-      displayName: inviteAgentName.trim().toUpperCase() || email,
-      agentName: inviteAgentName.trim().toUpperCase() || null,
-      createdAt: Date.now(),
-    };
+    // Sem pré-cadastro em tabela: o perfil nasce no primeiro login (trigger) e o
+    // claim por e-mail vincula ao nome mestre. Papel/autorização se definem aqui após o login.
     try {
-      await setDoc(doc(db, "users", preId), data, { merge: true });
       if (inviteAgentName.trim()) {
-        await setDoc(doc(db, "metadata", "agent_info"), { names: arrayUnion(inviteAgentName.trim().toUpperCase()) }, { merge: true });
+        await mutateMetaArray("agent_info", "names", inviteAgentName.trim().toUpperCase());
       }
       setInviteEmail("");
       setInviteAgentName("");
-      showToast(`Convite criado para ${email}`);
+      showToast(`Anotado para ${email}. Peça o login com Google e autorize o perfil aqui.`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
     }
@@ -260,7 +185,7 @@ export function AdminDashboard() {
 
   const handleRemoveMaster = async (name: string) => {
     try {
-      await updateDoc(doc(db, "metadata", "agent_info"), { names: arrayRemove(name) });
+      await mutateMetaArray("agent_info", "names", undefined, name);
       showToast("Removido");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -269,12 +194,19 @@ export function AdminDashboard() {
 
   const handleApproveRequest = async (reqId: string, _email: string, agentName: string) => {
     try {
-      const batch = writeBatch(db);
-      batch.update(doc(db, "access_requests", reqId), { status: "APPROVED" });
-      const uid = reqId;
-      batch.update(doc(db, "users", uid), { isAuthorized: true, agentName: agentName.toUpperCase(), role: "AGENT" });
-      batch.set(doc(db, "metadata", "agent_info"), { names: arrayUnion(agentName.toUpperCase()) }, { merge: true });
-      await batch.commit();
+      await throwOn(await supabase.from("access_requests").update({ status: "APPROVED" }).eq("id", reqId));
+      const { data: req } = await supabase.from("access_requests").select("requester_id,email").eq("id", reqId).maybeSingle();
+      const upper = agentName.toUpperCase();
+      if (req?.requester_id) {
+        await throwOn(
+          await supabase.from("profiles").update({ is_authorized: true, agent_name: upper, role: "AGENT" }).eq("id", req.requester_id as string),
+        );
+      } else if (req?.email) {
+        await throwOn(
+          await supabase.from("profiles").update({ is_authorized: true, agent_name: upper, role: "AGENT" }).eq("email", (req.email as string).toLowerCase()),
+        );
+      }
+      await mutateMetaArray("agent_info", "names", upper);
       showToast("Aprovado");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -283,7 +215,7 @@ export function AdminDashboard() {
 
   const handleRejectRequest = async (reqId: string) => {
     try {
-      await updateDoc(doc(db, "access_requests", reqId), { status: "REJECTED" });
+      await throwOn(await supabase.from("access_requests").update({ status: "REJECTED" }).eq("id", reqId));
       showToast("Rejeitado");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -300,54 +232,13 @@ export function AdminDashboard() {
     if (!confirm(`Transferir TODOS os dados de ${transferFrom.displayName} para ${targetProfile?.displayName || toUid}? Irreversível.`)) return;
     try {
       showToast("Transferindo…");
-      // copy houses
-      const fromHousesSnap = await getDocs(collection(db, "agents", fromUid, "houses"));
-      const fromActsSnap = await getDocs(collection(db, "agents", fromUid, "day_activities"));
-      const toHouseIds: string[] = [];
-      const toDates: string[] = [];
-      // chunk 100
-      const houses = fromHousesSnap.docs;
-      for (let i = 0; i < houses.length; i += 100) {
-        const chunk = houses.slice(i, i + 100);
-        const batch = writeBatch(db);
-        for (const d of chunk) {
-          const data = d.data() as Record<string, unknown>;
-          const newData = { ...data, agentUid: toUid, agentName: targetName || data.agentName };
-          batch.set(doc(db, "agents", toUid, "houses", d.id), newData);
-          batch.delete(d.ref);
-          toHouseIds.push(d.id);
-          const date = (data.data as string) || "";
-          if (date) toDates.push(date);
-        }
-        await batch.commit();
-      }
-      const acts = fromActsSnap.docs;
-      for (let i = 0; i < acts.length; i += 100) {
-        const chunk = acts.slice(i, i + 100);
-        const batch = writeBatch(db);
-        for (const d of chunk) {
-          const data = d.data() as Record<string, unknown>;
-          const newData = { ...data, agentUid: toUid, agentName: targetName || data.agentName };
-          batch.set(doc(db, "agents", toUid, "day_activities", d.id), newData);
-          batch.delete(d.ref);
-        }
-        await batch.commit();
-      }
-      if (toHouseIds.length || toDates.length) {
-        const fromRef = doc(db, "agents", fromUid);
-        // tombstones (optional, for app sync)
-        try {
-          await updateDoc(fromRef, {
-            deleted_house_ids: arrayUnion(...toHouseIds.slice(0, 10)),
-            deleted_activity_dates: arrayUnion(...Array.from(new Set(toDates)).slice(0, 10)),
-          });
-        } catch {
-          // ignore if not exists
-        }
-        await setDoc(doc(db, "users", fromUid), { requireDataReset: true }, { merge: true });
-      }
-      await setDoc(doc(db, "agents", toUid), { lastSyncTime: Date.now() }, { merge: true });
-      showToast(`Transferência concluída: ${toHouseIds.length} imóveis`);
+      // Move relacional: dois UPDATEs substituem cópia+delete em chunks de 100.
+      const movedRes = await supabase.from("houses").update({ agent_id: toUid, agent_uid: toUid, agent_name: targetName || undefined }).eq("agent_id", fromUid).select("natural_key");
+      if (movedRes.error) throw new Error(movedRes.error.message);
+      const moved = movedRes.data ?? [];
+      await throwOn(await supabase.from("day_activities").update({ agent_id: toUid, agent_uid: toUid, agent_name: targetName || undefined }).eq("agent_id", fromUid));
+      await throwOn(await supabase.from("profiles").update({ require_data_reset: true }).eq("id", fromUid));
+      showToast(`Transferência concluída: ${moved.length} imóveis`);
       setTransferFrom(null);
       setTransferTo("");
     } catch (e) {
@@ -360,9 +251,10 @@ export function AdminDashboard() {
     if (!confirm(`Wipe remoto de ${p.displayName}? Nuvem será apagada e app fará reset no próximo acesso. Perfil mantido.`)) return;
     setWiping(uid);
     try {
-      await purgeAgentCompletely(uid);
-      await setDoc(doc(db, "users", uid), { requireDataReset: true }, { merge: true });
-      await setDoc(doc(db, "agents", uid), { lastSyncTime: Date.now() }, { merge: true });
+      for (const table of ["houses", "day_activities", "monthly_summaries", "backups"] as const) {
+        await throwOn(await supabase.from(table).delete().eq("agent_id", uid));
+      }
+      await throwOn(await supabase.from("profiles").update({ require_data_reset: true }).eq("id", uid));
       showToast("Wipe concluído — nuvem limpa e reset agendado");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -375,7 +267,7 @@ export function AdminDashboard() {
     const upper = newBairro.trim().toUpperCase();
     if (!upper) return;
     try {
-      await setDoc(doc(db, "metadata", "locations"), { bairros: arrayUnion(upper) }, { merge: true });
+      await mutateMetaArray("locations", "bairros", upper);
       setNewBairro("");
       showToast("Bairro adicionado");
     } catch (e) {
@@ -384,7 +276,7 @@ export function AdminDashboard() {
   };
   const handleRemoveBairro = async (b: string) => {
     try {
-      await updateDoc(doc(db, "metadata", "locations"), { bairros: arrayRemove(b) });
+      await mutateMetaArray("locations", "bairros", undefined, b);
       showToast("Bairro removido");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -397,7 +289,8 @@ export function AdminDashboard() {
       const cur = (settings.custom_activities as string[] | string | undefined);
       const list = Array.isArray(cur) ? cur : typeof cur === "string" && cur ? cur.split(",").map((s) => s.trim()).filter(Boolean) : [];
       const next = [...list, val];
-      await setDoc(doc(db, "metadata", "settings"), { custom_activities: next }, { merge: true });
+      const merged = { ...(await getMetaValue("settings").catch(() => ({} as Record<string, unknown>))), custom_activities: next };
+      await setMetaValue("settings", merged);
       setSettings((s) => ({ ...s, custom_activities: next }));
       setNewActivity("");
       showToast("Atividade adicionada");
@@ -410,7 +303,8 @@ export function AdminDashboard() {
       const cur = (settings.custom_activities as string[] | string | undefined);
       const list = Array.isArray(cur) ? cur : typeof cur === "string" && cur ? cur.split(",").map((s) => s.trim()).filter(Boolean) : [];
       const next = list.filter((a) => a !== act);
-      await setDoc(doc(db, "metadata", "settings"), { custom_activities: next }, { merge: true });
+      const merged = { ...(await getMetaValue("settings").catch(() => ({} as Record<string, unknown>))), custom_activities: next };
+      await setMetaValue("settings", merged);
       setSettings((s) => ({ ...s, custom_activities: next }));
       showToast("Atividade removida");
     } catch (e) {
@@ -419,7 +313,8 @@ export function AdminDashboard() {
   };
   const handleSettingChange = async (key: string, value: unknown) => {
     try {
-      await setDoc(doc(db, "metadata", "settings"), { [key]: value }, { merge: true });
+      const merged = { ...(await getMetaValue("settings").catch(() => ({} as Record<string, unknown>))), [key]: value };
+      await setMetaValue("settings", merged);
       setSettings((s) => ({ ...s, [key]: value }));
       showToast("Configuração salva");
     } catch (e) {
@@ -490,21 +385,13 @@ export function AdminDashboard() {
       {/* Invite */}
       <div className="card" style={{ marginBottom: 16 }}>
         <h3>Convidar usuário (pré-cadastro)</h3>
-        <p className="muted small">Cria um perfil `pre_` que será vinculado automaticamente quando o usuário fizer login.</p>
+        <p className="muted small">Anota o nome na lista mestra. O perfil nasce no primeiro login com Google e é vinculado por e-mail — depois autorize aqui.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 8, marginTop: 8 }}>
           <input className="input" placeholder="Email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
-          <select className="select" value={inviteRole} onChange={(e) => setInviteRole(e.target.value as never)}>
-            <option value="AGENT">AGENT</option>
-            <option value="SUPERVISOR">SUPERVISOR</option>
-            <option value="ADMIN">ADMIN</option>
-          </select>
           <select className="select" value={inviteAgentName} onChange={(e) => setInviteAgentName(e.target.value)}>
             <option value="">Agente (opcional)</option>
             {masterNames.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-            <input type="checkbox" checked={inviteAuthorized} onChange={(e) => setInviteAuthorized(e.target.checked)} /> Já autorizado
-          </label>
         </div>
         <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} onClick={handleInvite}>Criar convite</button>
       </div>
@@ -593,7 +480,7 @@ export function AdminDashboard() {
                     </div>
 
                     <div className="muted small">
-                      UID: {p.uid || "—"} • AgentID: {p.agentId || "—"} • Último sinc: {p.lastSyncTime ? (typeof p.lastSyncTime === "number" ? new Date(p.lastSyncTime).toLocaleString("pt-BR") : p.lastSyncTime.seconds ? new Date(p.lastSyncTime.seconds*1000).toLocaleString("pt-BR") : "—") : "Nunca"} • Fonte: {agentStats?.source === "summary" ? "sumarizado" : agentStats?.source === "raw" ? "leitura direta" : "—"}
+                      UID: {p.uid || "—"} • AgentID: {p.agentId || "—"} • Último sinc: {typeof p.lastSyncTime === "number" ? new Date(p.lastSyncTime).toLocaleString("pt-BR") : "Nunca"} • Fonte: {agentStats?.source === "summary" ? "sumarizado" : agentStats?.source === "raw" ? "leitura direta" : "—"}
                     </div>
 
                     {p.agentId && p.agentName && (

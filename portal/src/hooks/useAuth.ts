@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth";
-import { doc, onSnapshot } from "firebase/firestore";
-import { auth, db, BOOTSTRAP_ADMINS, googleProvider } from "../lib/firebase";
+import { supabase, toUserDoc, BOOTSTRAP_ADMINS, type ProfileRow, type User } from "../lib/supabase";
 import type { UserDoc } from "../lib/types";
 
 export interface StaffInfo {
@@ -17,11 +15,21 @@ export function useStaffGate(): StaffInfo {
   const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
+      setUser(data.session?.user ?? null);
       setAuthReady(true);
     });
-    return unsub;
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) return;
+      setUser(session?.user ?? null);
+      setAuthReady(true);
+    });
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -29,19 +37,35 @@ export function useStaffGate(): StaffInfo {
       setUserDoc(null);
       return;
     }
-    const ref = doc(db, "users", user.uid);
-    const unsub = onSnapshot(
-      ref,
-      (snap) => {
-        setUserDoc(snap.exists() ? ({ uid: user.uid, ...snap.data() } as UserDoc) : null);
-      },
-      (err) => {
-        console.error("useStaffGate onSnapshot error:", err);
-        setUserDoc(null);
-      },
-    );
-    return unsub;
-  }, [user]);
+    let cancelled = false;
+    const load = async () => {
+      // Primeiro login pós-migração: o auth.uid() novo assume a linha seed (match por e-mail).
+      await supabase.rpc("claim_migrated_profile").then(
+        () => undefined,
+        () => undefined, // best-effort: perfil stub do trigger cobre o resto
+      );
+      if (cancelled) return;
+      const { data } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+      if (!cancelled) setUserDoc(data ? toUserDoc(data as ProfileRow) : null);
+    };
+    void load();
+    // Perfil ao vivo (role/autorização alterados pelo admin refletem sem reload).
+    const ch = supabase
+      .channel(`profile-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "profiles", filter: `id=eq.${user.id}` },
+        (payload) => {
+          const row = (payload.new ?? payload.old) as ProfileRow | Record<string, never>;
+          if (row && "id" in row) setUserDoc(toUserDoc(row as ProfileRow));
+        },
+      )
+      .subscribe();
+    return () => {
+      cancelled = true;
+      void supabase.removeChannel(ch);
+    };
+  }, [user?.id]);
 
   if (!authReady) return { user: null, userDoc: null, status: "loading", isAdmin: false };
   if (!user) return { user: null, userDoc: null, status: "signed-out", isAdmin: false };
@@ -61,10 +85,14 @@ export function useStaffGate(): StaffInfo {
   };
 }
 
-export function loginWithGoogle(): Promise<User> {
-  return signInWithPopup(auth, googleProvider).then((r) => r.user);
+export async function loginWithGoogle(): Promise<void> {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: window.location.origin, queryParams: { prompt: "select_account" } },
+  });
+  if (error) throw error;
 }
 
-export function logout(): Promise<void> {
-  return signOut(auth);
+export function logout(): Promise<{ error: unknown }> {
+  return supabase.auth.signOut() as Promise<{ error: unknown }>;
 }

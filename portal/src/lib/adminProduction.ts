@@ -1,7 +1,6 @@
-import { serverTimestamp, collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, where } from "firebase/firestore";
-import { db } from "./firebase";
+import { supabase, must, toHouseDoc, toActivityDoc, dashToIso } from "./supabase";
 import { normalizeField } from "./period";
-import type { DayActivityDoc, HouseDoc } from "./types";
+import type { HouseDoc } from "./types";
 
 // Paridade com o app Android (SyncPushHandler agregação + HouseMapper.toFirestoreMap).
 // Enums atuais do app (domain/model/Enums.kt): Situation {EMPTY, NONE, F, REC, A, V},
@@ -333,16 +332,20 @@ export function buildUpdatePayload(orig: HouseDoc, form: VisitForm): Record<stri
   put("visitSegment", form.visitSegment, base.visitSegment);
   put("listOrder", form.listOrder, base.listOrder);
   out["editedByAdmin"] = true;
-  out["lastUpdated"] = serverTimestamp();
+  out["lastUpdated"] = new Date().toISOString();
   return out;
 }
 
 export type AuditAction = "update" | "delete";
 
-/** lastUpdated (Timestamp|nº|ausente) -> ms (nº) ou null. */
+/** lastUpdated (ISO string|Timestamp|nº|ausente) -> ms (nº) ou null. */
 export function lastUpdatedMs(v: unknown): number | null {
   if (v == null) return null;
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string") {
+    const ms = Date.parse(v);
+    return Number.isFinite(ms) ? ms : null;
+  }
   if (typeof v === "object") {
     const o = v as { seconds?: number; nanoseconds?: number; toMillis?: () => number };
     if (typeof o.toMillis === "function") {
@@ -365,35 +368,46 @@ export function buildAuditEntry(args: {
   before?: unknown;
   after?: unknown;
 }): Record<string, unknown> {
-  return { ...args, createdAt: serverTimestamp() };
-}
-
-function docToHouse(id: string, data: Record<string, unknown>): HouseDoc {
-  return { id, ...data } as HouseDoc;
+  // createdAt é default now() no banco.
+  return { ...args };
 }
 
 /**
  * Recalcula e grava o monthly_summary do mês (formato exato do app).
- * Apaga também a variante legada "MM/AAAA" se existir a leitura.
+ * Apaga também a variante legada "MM/AAAA" se existir.
  * Retorna o summary gravado.
  */
 export async function refreshMonthSummary(agentId: string, monthYear: string): Promise<RecomputedSummary> {
   const bounds = monthDateBounds(monthYear);
   if (!bounds) throw new Error(`Mês inválido: ${monthYear}`);
+  const start = dashToIso(bounds.start);
+  const end = dashToIso(bounds.end);
+  if (!start || !end) throw new Error(`Mês inválido: ${monthYear}`);
   const todayInt = todayIntSP();
-  const housesRef = collection(db, "agents", agentId, "houses");
-  const actsRef = collection(db, "agents", agentId, "day_activities");
-  const [hSnap, aSnap] = await Promise.all([
-    getDocs(query(housesRef, where("data", ">=", bounds.start), where("data", "<=", bounds.end))),
-    getDocs(query(actsRef, where("date", ">=", bounds.start), where("date", "<=", bounds.end))),
+  const [hRes, aRes] = await Promise.all([
+    supabase.from("houses").select("*").eq("agent_id", agentId).is("deleted_at", null)
+      .gte("data_date", start).lte("data_date", end),
+    supabase.from("day_activities").select("*").eq("agent_id", agentId).is("deleted_at", null)
+      .gte("date_value", start).lte("date_value", end),
   ]);
-  const houses = hSnap.docs.map((d) => docToHouse(d.id, d.data()));
-  const activities = aSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as DayActivityDoc);
+  const houses = must(hRes).map(toHouseDoc);
+  const activities = must(aRes).map(toActivityDoc);
   const summary = computeMonthlySummary(houses, activities, monthYear, todayInt);
-  await setDoc(doc(db, "agents", agentId, "monthly_summaries", monthYear), summary);
+  const upRes = await supabase.from("monthly_summaries").upsert({
+    agent_id: agentId,
+    month_year: monthYear,
+    treated_count: summary.treatedCount,
+    focus_count: summary.focusCount,
+    total_houses: summary.totalHouses,
+    days_worked: summary.daysWorked,
+    situation_counts: summary.situationCounts,
+    property_type_counts: summary.propertyTypeCounts,
+  }, { onConflict: "agent_id,month_year" });
+  if (upRes.error) throw new Error(upRes.error.message);
   // Variante legada "MM/AAAA" (o app ainda a lê como fallback): remove se existir.
   const legacyId = monthYear.replace("-", "/");
-  const legacyRef = doc(db, "agents", agentId, "monthly_summaries", legacyId);
-  if ((await getDoc(legacyRef)).exists()) await deleteDoc(legacyRef);
+  const delRes = await supabase.from("monthly_summaries")
+    .delete().eq("agent_id", agentId).eq("month_year", legacyId);
+  if (delRes.error) throw new Error(delRes.error.message);
   return summary;
 }

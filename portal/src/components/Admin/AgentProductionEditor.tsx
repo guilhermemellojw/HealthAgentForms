@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  arrayUnion, collection, doc, getDoc, getDocs,
-  query, where, writeBatch,
-} from "firebase/firestore";
-import { addDoc } from "firebase/firestore";
-import { auth, db } from "../../lib/firebase";
+import { must, supabase, toActivityDoc, toHouseDoc, toSnakePayload } from "../../lib/supabase";
 import { useBairros } from "../../hooks/useAdminData";
 import {
   buildAuditEntry, buildUpdatePayload, computeDayTotals,
@@ -14,7 +9,7 @@ import {
   todayDashSP, treatmentSummary, validateRowLabels,
   type VisitForm,
 } from "../../lib/adminProduction";
-import type { DayActivityDoc, HouseDoc } from "../../lib/types";
+import type { HouseDoc } from "../../lib/types";
 
 interface Props {
   agentId: string;
@@ -79,12 +74,13 @@ export default function AgentProductionEditor({ agentId, agentName, lastSyncTime
     queryKey: ["admin-day", agentId, day],
     enabled: !!agentId && /^\d{2}-\d{2}-\d{4}$/.test(day),
     queryFn: async () => {
-      const housesRef = collection(db, "agents", agentId, "houses");
-      // Sem orderBy (evita índice composto): ordena no cliente abaixo.
-      const hSnap = await getDocs(query(housesRef, where("data", "==", day)));
-      const houses = hSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as HouseDoc);
-      const actSnap = await getDoc(doc(db, "agents", agentId, "day_activities", day));
-      const activity = (actSnap.exists() ? { id: actSnap.id, ...actSnap.data() } : null) as DayActivityDoc | null;
+      const hRes = await supabase.from("houses").select("*").eq("agent_id", agentId)
+        .eq("data_text", day).is("deleted_at", null).order("list_order");
+      const houses = must(hRes).map(toHouseDoc);
+      const aRes = await supabase.from("day_activities").select("*").eq("agent_id", agentId)
+        .eq("date_text", day).is("deleted_at", null).maybeSingle();
+      if (aRes.error) throw new Error(aRes.error.message);
+      const activity = aRes.data ? toActivityDoc(aRes.data) : null;
       return { houses, activity };
     },
     staleTime: 0,
@@ -184,8 +180,8 @@ export default function AgentProductionEditor({ agentId, agentName, lastSyncTime
   }
 
   async function handleSaveDay() {
-    const actor = auth.currentUser;
-    if (!actor?.uid) {
+    const { data: { user: actor } } = await supabase.auth.getUser();
+    if (!actor?.id) {
       setError("Sessão expirada. Entre novamente.");
       return;
     }
@@ -204,12 +200,10 @@ export default function AgentProductionEditor({ agentId, agentName, lastSyncTime
     try {
       // 1) Re-lê as alteradas (concorrência otimista por linha).
       const fresh = new Map<string, HouseDoc>();
-      await Promise.all(
-        dirtyIds.map(async (id) => {
-          const snap = await getDoc(doc(db, "agents", agentId, "houses", id));
-          if (snap.exists()) fresh.set(id, { id: snap.id, ...snap.data() } as HouseDoc);
-        }),
-      );
+      if (dirtyIds.length > 0) {
+        const reRes = await supabase.from("houses").select("*").eq("agent_id", agentId).in("natural_key", dirtyIds);
+        for (const r of must(reRes)) fresh.set(r.natural_key, toHouseDoc(r));
+      }
       const missing = dirtyIds.filter((id) => !fresh.has(id));
       if (missing.length > 0) {
         for (const id of missing) perRowError[id] = "Não existe mais na nuvem.";
@@ -229,38 +223,34 @@ export default function AgentProductionEditor({ agentId, agentName, lastSyncTime
         return;
       }
 
-      // 2) Batch único: updates + deletes + lastSyncTime.
-      const batch = writeBatch(db);
+      // 2) Updates + deletes (sem batch cross-tabela no REST; linhas independentes em paralelo).
       const audits: Record<string, unknown>[] = [];
-      for (const id of dirtyIds) {
+      await Promise.all(dirtyIds.map(async (id) => {
         const f = fresh.get(id);
-        if (!f) continue;
+        if (!f) return;
         const payload = buildUpdatePayload(f, rows.find((r) => r.id === id)!.form);
         if (Object.keys(payload).length > 2) {
-          batch.update(doc(db, "agents", agentId, "houses", id), payload);
+          const upd = await supabase.from("houses").update(toSnakePayload(payload)).eq("agent_id", agentId).eq("natural_key", id);
+          if (upd.error) throw new Error(upd.error.message);
           audits.push(buildAuditEntry({
-            actorUid: actor.uid, actorEmail: actor.email || "",
+            actorUid: actor.id, actorEmail: actor.email || "",
             action: "update", agentUid: agentId, agentName,
             houseId: id, date: day, monthYear: monthYearOf(day) || undefined,
             before: f, after: payload,
           }));
         }
-      }
-      for (const id of deleteMarked) {
+      }));
+      await Promise.all(deleteMarked.map(async (id) => {
         const h = houses.find((x) => x.id === id);
-        batch.delete(doc(db, "agents", agentId, "houses", id));
+        const del = await supabase.from("houses").delete().eq("agent_id", agentId).eq("natural_key", id);
+        if (del.error) throw new Error(del.error.message);
         audits.push(buildAuditEntry({
-          actorUid: actor.uid, actorEmail: actor.email || "",
+          actorUid: actor.id, actorEmail: actor.email || "",
           action: "delete", agentUid: agentId, agentName,
           houseId: id, date: day, monthYear: monthYearOf(day) || undefined,
           before: h ? { ...h } : undefined,
         }));
-      }
-      batch.update(doc(db, "agents", agentId), {
-        ...(deleteMarked.length > 0 ? { deleted_house_ids: arrayUnion(...deleteMarked) } : {}),
-        lastSyncTime: Date.now(),
-      });
-      await batch.commit();
+      }));
 
       // 3) Resumo do mês (formato exato do app; nunca apaga sem regravar).
       const my = monthYearOf(day);
@@ -276,7 +266,22 @@ export default function AgentProductionEditor({ agentId, agentName, lastSyncTime
 
       // 4) Audit (best-effort explícito: não desfaz o dado).
       try {
-        await Promise.all(audits.map((a) => addDoc(collection(db, "admin_audit"), a)));
+        const rows = audits.map((a) => {
+          const r = a as Record<string, unknown>;
+          return {
+            actor_uid: r.actorUid as string,
+            actor_email: r.actorEmail as string,
+            action: r.action as string,
+            payload: {
+              agent_uid: r.agentUid, agent_name: r.agentName, house_id: r.houseId,
+              date: r.date, month_year: r.monthYear, before: r.before, after: r.after,
+            },
+          };
+        });
+        if (rows.length) {
+          const ins = await supabase.from("admin_audit").insert(rows);
+          if (ins.error) throw new Error(ins.error.message);
+        }
       } catch (e) {
         setError(`Dia salvo, mas auditoria falhou: ${e instanceof Error ? e.message : String(e)}. Avise o suporte.`);
       }

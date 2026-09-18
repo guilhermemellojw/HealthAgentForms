@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDoc, onSnapshot, orderBy, query, where } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { useEffect, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { must, supabase, toAccessRequest, toAgentDoc, toUserDoc } from "../lib/supabase";
 import type { AgentDoc, UserDoc } from "../lib/types";
 import type { AccessRequest, UnifiedProfile } from "../lib/adminTypes";
 
@@ -8,106 +8,89 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-export function useAdminUsers() {
-  const [users, setUsers] = useState<(UserDoc & { id: string })[]>([]);
-  const [loading, setLoading] = useState(true);
+/** Realtime (postgres_changes) -> invalida a query; substitui onSnapshot. */
+function useRealtimeInvalidate(table: string, queryKey: string[], filter?: string) {
+  const qc = useQueryClient();
   useEffect(() => {
-    const q = query(collection(db, "users"), orderBy("displayName"));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setUsers(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<UserDoc, "uid">) } as UserDoc & { id: string })));
-        setLoading(false);
-      },
-      () => setLoading(false),
-    );
-    return unsub;
-  }, []);
-  return { users, loading };
+    const ch = supabase
+      .channel(`rt-${queryKey[0]}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table, ...(filter ? { filter } : {}) },
+        () => qc.invalidateQueries({ queryKey }),
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(ch);
+    };
+  }, [table, queryKey.join("|")]);
+}
+
+export function useAdminUsers() {
+  useRealtimeInvalidate("profiles", ["admin-users"]);
+  const q = useQuery({
+    queryKey: ["admin-users"],
+    queryFn: async () => {
+      const res = await supabase.from("profiles").select("*").order("display_name");
+      return must(res).map((r) => ({ ...toUserDoc(r), id: r.id }));
+    },
+  });
+  return { users: (q.data ?? []) as (UserDoc & { id: string })[], loading: q.isLoading };
 }
 
 export function useAdminAgents() {
-  const [agents, setAgents] = useState<(AgentDoc & { id: string })[]>([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    const q = query(collection(db, "agents"), orderBy("agentName"));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setAgents(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AgentDoc, "id">) } as AgentDoc & { id: string })));
-        setLoading(false);
-      },
-      () => setLoading(false),
-    );
-    return unsub;
-  }, []);
-  return { agents, loading };
+  useRealtimeInvalidate("agents", ["admin-agents"]);
+  const q = useQuery({
+    queryKey: ["admin-agents"],
+    queryFn: async () => {
+      const res = await supabase.from("agents").select("*").order("agent_name");
+      return must(res).map((r) => toAgentDoc(r));
+    },
+  });
+  return { agents: (q.data ?? []) as (AgentDoc & { id: string })[], loading: q.isLoading };
+}
+
+function upperSorted(list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  return list.map((n) => String(n).trim().toUpperCase()).filter(Boolean).sort();
 }
 
 export function useAgentNames() {
-  const [names, setNames] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    const ref = doc(db, "metadata", "agent_info");
-    const unsub = onSnapshot(
-      ref,
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data() as { names?: string[] };
-          const list = (data.names || []).map((n) => n.trim().toUpperCase()).filter(Boolean).sort();
-          setNames(list.length ? list : []);
-        } else {
-          setNames([]);
-        }
-        setLoading(false);
-      },
-      () => setLoading(false),
-    );
-    return unsub;
-  }, []);
-  // fallback fetch once if empty
-  useEffect(() => {
-    if (names.length === 0) {
-      getDoc(doc(db, "metadata", "agent_info")).then((snap) => {
-        if (snap.exists()) {
-          const data = snap.data() as { names?: string[] };
-          const list = (data.names || []).map((n) => n.trim().toUpperCase()).filter(Boolean).sort();
-          if (list.length) setNames(list);
-        }
-      });
-    }
-  }, [names.length]);
-  return { names, loading };
+  useRealtimeInvalidate("metadata", ["meta-agent-info"], "key=eq.agent_info");
+  const q = useQuery({
+    queryKey: ["meta-agent-info"],
+    queryFn: async () => {
+      const res = await supabase.from("metadata").select("value").eq("key", "agent_info").maybeSingle();
+      if (res.error) throw new Error(res.error.message);
+      return upperSorted((res.data?.value as { names?: unknown })?.names);
+    },
+  });
+  return { names: q.data ?? [], loading: q.isLoading };
 }
 
 export function useBairros() {
-  const [bairros, setBairros] = useState<string[]>([]);
-  useEffect(() => {
-    const ref = doc(db, "metadata", "locations");
-    const unsub = onSnapshot(ref, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data() as { bairros?: string[] };
-        const list = (data.bairros || []).map((b) => b.trim().toUpperCase()).filter(Boolean).sort();
-        setBairros(list);
-      }
-    });
-    return unsub;
-  }, []);
-  return { bairros };
+  useRealtimeInvalidate("metadata", ["meta-locations"], "key=eq.locations");
+  const q = useQuery({
+    queryKey: ["meta-locations"],
+    queryFn: async () => {
+      const res = await supabase.from("metadata").select("value").eq("key", "locations").maybeSingle();
+      if (res.error) throw new Error(res.error.message);
+      return upperSorted((res.data?.value as { bairros?: unknown })?.bairros);
+    },
+  });
+  return { bairros: q.data ?? [] };
 }
 
 export function useAccessRequests() {
-  const [requests, setRequests] = useState<AccessRequest[]>([]);
-  useEffect(() => {
-    const q = query(collection(db, "access_requests"), where("status", "==", "PENDING"));
-    const unsub = onSnapshot(
-      q,
-      (snap) => setRequests(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AccessRequest, "id">) }))),
-      () => setRequests([]),
-    );
-    return unsub;
-  }, []);
-  return { requests };
+  useRealtimeInvalidate("access_requests", ["access-requests"]);
+  const q = useQuery({
+    queryKey: ["access-requests"],
+    queryFn: async () => {
+      const res = await supabase.from("access_requests").select("*").eq("status", "PENDING");
+      return must(res).map(toAccessRequest);
+    },
+  });
+  return { requests: (q.data ?? []) as AccessRequest[] };
 }
 
 export function useUnifiedProfiles(search: string): { profiles: UnifiedProfile[]; loading: boolean } {
@@ -135,17 +118,17 @@ export function useUnifiedProfiles(search: string): { profiles: UnifiedProfile[]
       if (u.uid && byUid.has(u.uid)) agent = byUid.get(u.uid);
       else if (email && byEmail.has(email)) agent = byEmail.get(email);
       const uid = u.uid || u.id;
-      const displayName = u.displayName || (u as unknown as { agentName?: string }).agentName || agent?.agentName || u.email || "Sem nome";
+      const displayName = u.displayName || u.agentName || agent?.agentName || u.email || "Sem nome";
       result.push({
         uid,
         email: u.email || email,
         displayName,
-        agentName: (u as unknown as { agentName?: string }).agentName || agent?.agentName || null,
+        agentName: u.agentName || agent?.agentName || null,
         role: (u.role as UnifiedProfile["role"]) || "AGENT",
         isAuthorized: !!u.isAuthorized,
         isPreRegistered: !!isPre,
         photoUrl: agent?.photoUrl || null,
-        lastSyncTime: agent?.lastSyncTime || null,
+        lastSyncTime: agent?.lastSyncTime ?? null,
         agentId: agent?.id || null,
       });
       seenEmails.add(email);
@@ -165,7 +148,7 @@ export function useUnifiedProfiles(search: string): { profiles: UnifiedProfile[]
         isAuthorized: false,
         isPreRegistered: !!ag.isPreRegistered,
         photoUrl: ag.photoUrl,
-        lastSyncTime: ag.lastSyncTime,
+        lastSyncTime: ag.lastSyncTime ?? null,
         agentId: ag.id,
       });
       if (email) seenEmails.add(email);
@@ -200,6 +183,7 @@ export function useUnifiedProfiles(search: string): { profiles: UnifiedProfile[]
 }
 
 export async function fetchSystemSettings(): Promise<Record<string, unknown>> {
-  const snap = await getDoc(doc(db, "metadata", "settings"));
-  return snap.exists() ? (snap.data() as Record<string, unknown>) : {};
+  const { data, error } = await supabase.from("metadata").select("value").eq("key", "settings").maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data?.value as Record<string, unknown>) ?? {};
 }
