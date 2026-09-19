@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AdminTimeline } from "./AdminTimeline";
 import AgentProductionEditor from "./AgentProductionEditor";
 import { getMetaValue, mutateMetaArray, setMetaValue, supabase } from "../../lib/supabase";
@@ -31,6 +32,7 @@ export function AdminDashboard() {
   const [wiping, setWiping] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<{ uid: string; name: string } | null>(null);
 
+  const qc = useQueryClient();
   const { profiles, loading } = useUnifiedProfiles(search);
   const { names: masterNames } = useAgentNames();
   const { requests } = useAccessRequests();
@@ -43,10 +45,19 @@ export function AdminDashboard() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  // Realtime pode falhar/atrasar: após mutação, invalida explicitamente.
+  const refreshLists = () => {
+    void qc.invalidateQueries({ queryKey: ["admin-users"] });
+    void qc.invalidateQueries({ queryKey: ["admin-agents"] });
+    void qc.invalidateQueries({ queryKey: ["meta-agent-info"] });
+    void qc.invalidateQueries({ queryKey: ["access-requests"] });
+  };
+
   const handleAuthorize = async (p: UnifiedProfile, value: boolean) => {
     if (!p.uid) return showToast("Perfil sem UID não pode ser autorizado");
     try {
       await throwOn(await supabase.from("profiles").update({ is_authorized: value }).eq("id", p.uid));
+      refreshLists();
       showToast(value ? "Autorizado" : "Autorização removida");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -58,6 +69,7 @@ export function AdminDashboard() {
     try {
       // Papel vive só em profiles (sem coleções admins/supervisors no Supabase).
       await throwOn(await supabase.from("profiles").update({ role }).eq("id", p.uid));
+      refreshLists();
       showToast(`Função alterada para ${role}`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -85,6 +97,7 @@ export function AdminDashboard() {
         await renameAgentField(agentId, "houses", upper);
         await renameAgentField(agentId, "day_activities", upper);
       }
+      refreshLists();
       showToast(`Vinculado a ${upper}${shouldRename ? " (produção renomeada)" : ""}`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -100,6 +113,7 @@ export function AdminDashboard() {
     if (!p.uid) return;
     try {
       await throwOn(await supabase.from("profiles").update({ agent_name: null }).eq("id", p.uid));
+      refreshLists();
       showToast("Vínculo removido");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -121,8 +135,11 @@ export function AdminDashboard() {
     const uid = p.uid || p.agentId!;
     if (!confirm(`Excluir ${p.displayName}? Perfil e produção vinculada serão removidos (login futuro recria o perfil).${deleteCloud ? " Arquivos de backup também serão apagados (irreversível)." : ""}`)) return;
     try {
-      if (deleteCloud && p.agentId) await purgeAgentCompletely(p.agentId);
-      else {
+      if (deleteCloud && p.agentId) {
+        await purgeAgentCompletely(p.agentId);
+        // Purge remove agents + produção; o perfil também sai (paridade Firebase).
+        if (p.uid) await throwOn(await supabase.from("profiles").delete().eq("id", p.uid));
+      } else {
         // Excluir perfil: produção vai junto (FK profiles->agents em cascata).
         await throwOn(await supabase.from("houses").delete().eq("agent_id", uid));
         await throwOn(await supabase.from("day_activities").delete().eq("agent_id", uid));
@@ -131,6 +148,7 @@ export function AdminDashboard() {
         await throwOn(await supabase.from("agents").delete().eq("id", uid));
         await throwOn(await supabase.from("profiles").delete().eq("id", uid));
       }
+      refreshLists();
       showToast("Excluído");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -207,6 +225,7 @@ export function AdminDashboard() {
         );
       }
       await mutateMetaArray("agent_info", "names", upper);
+      refreshLists();
       showToast("Aprovado");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -216,6 +235,7 @@ export function AdminDashboard() {
   const handleRejectRequest = async (reqId: string) => {
     try {
       await throwOn(await supabase.from("access_requests").update({ status: "REJECTED" }).eq("id", reqId));
+      refreshLists();
       showToast("Rejeitado");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
@@ -260,6 +280,7 @@ export function AdminDashboard() {
       if (movedRes.error) throw new Error(movedRes.error.message);
       await throwOn(await supabase.from("day_activities").update({ agent_id: toUid, agent_uid: toUid, agent_name: targetName || undefined }).eq("agent_id", fromUid));
       await throwOn(await supabase.from("profiles").update({ require_data_reset: true }).eq("id", fromUid));
+      refreshLists();
       showToast(`Transferência concluída: ${fromCount ?? "?"} imóveis`);
       setTransferFrom(null);
       setTransferTo("");
@@ -277,6 +298,7 @@ export function AdminDashboard() {
         await throwOn(await supabase.from(table).delete().eq("agent_id", uid));
       }
       await throwOn(await supabase.from("profiles").update({ require_data_reset: true }).eq("id", uid));
+      refreshLists();
       showToast("Wipe concluído — nuvem limpa e reset agendado");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e));
