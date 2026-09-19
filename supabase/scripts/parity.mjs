@@ -33,26 +33,62 @@ const tableCount = async (t) => {
 const srcHouses = snap.reduce((n, a) => n + (a.houses || []).length, 0);
 const srcAct = snap.reduce((n, a) => n + (a.activities || []).length, 0);
 const srcSum = snap.reduce((n, a) => n + (a.summaries || []).length, 0);
-check("profiles = users(5) + agent-only(2)", (await tableCount("profiles")) === 7);
-check(`agents = 6`, (await tableCount("agents")) === 6);
+const srcEmails = new Set();
+for (const u of top.users) if (u.email) srcEmails.add(String(u.email).toLowerCase());
+for (const a of snap) if (a.agent?.email) srcEmails.add(String(a.agent.email).toLowerCase());
+for (const r of top.access_requests) if (r.email) srcEmails.add(String(r.email).toLowerCase());
+check(`profiles = ${srcEmails.size} e-mails distintos`, (await tableCount("profiles")) === srcEmails.size);
+const srcAgentsWithEmail = snap.filter((a) => a.agent?.email).length; // sem e-mail = sem perfil (seed ignora)
+check(`agents = ${srcAgentsWithEmail} (com e-mail)`, (await tableCount("agents")) === srcAgentsWithEmail);
 check(`houses = ${srcHouses}`, (await tableCount("houses")) === srcHouses, `src=${srcHouses}`);
 check(`day_activities = ${srcAct}`, (await tableCount("day_activities")) === srcAct);
 check(`monthly_summaries = ${srcSum}`, (await tableCount("monthly_summaries")) === srcSum);
-check("backups meta = 171 (retenção 50/agente)", (await tableCount("backups")) === 171);
+check("backups meta = retenção 50/agente (poda aplicada)", await (async () => {
+  // reconstrói o conjunto esperado com a mesma regra do seed
+  const byAgent = new Map();
+  for (const b of top.backups || []) {
+    if (!byAgent.has(b.agentId)) byAgent.set(b.agentId, []);
+    byAgent.get(b.agentId).push(b);
+  }
+  const { data: agents } = await sb.from("agents").select("id,firebase_uid");
+  const fbToUuid = Object.fromEntries(agents.map((a) => [a.firebase_uid, a.id]));
+  const expected = new Map(); // uuid -> Set(ts)
+  for (const [aid, list] of byAgent) {
+    const uuid = fbToUuid[aid];
+    if (!uuid) continue; // sem perfil: seed ignora
+    list.sort((x, y) => Number(y.timestamp ?? y.id) - Number(x.timestamp ?? x.id));
+    expected.set(uuid, new Set(list.slice(0, 50).map((b) => String(b.timestamp ?? b.id))));
+  }
+  const { data: rows } = await sb.from("backups").select("agent_id,ts");
+  const actual = new Map();
+  for (const r of rows || []) {
+    if (!actual.has(r.agent_id)) actual.set(r.agent_id, new Set());
+    actual.get(r.agent_id).add(String(r.ts));
+  }
+  let ok = actual.size === expected.size;
+  for (const [uuid, set] of expected) {
+    const got = actual.get(uuid) || new Set();
+    if (got.size !== set.size || [...set].some((ts) => !got.has(ts))) { ok = false; break; }
+  }
+  return ok;
+})(), "conjuntos (agente,ts) idênticos à fonte");
 check("metadata = 2", (await tableCount("metadata")) === 2);
 check("access_requests = 2", (await tableCount("access_requests")) === 2);
 check("day_transfers = 1", (await tableCount("day_transfers")) === 1);
 {
-  const { data, error } = await sb.storage.from("backups").list("", { limit: 100 });
-  if (error) throw new Error("storage list: " + error.message);
-  const prefixes = data.filter((e) => e.id === null).length; // pastas por agente
-  let files = 0;
-  for (const d of data) {
-    if (d.id !== null) continue;
-    const { data: f } = await sb.storage.from("backups").list(d.name, { limit: 1000 });
-    files += (f || []).filter((e) => e.id !== null).length;
+  const { data: agents } = await sb.from("agents").select("id");
+  let filesTotal = 0, rowsTotal = 0, orphans = [], strays = [];
+  for (const a of agents || []) {
+    const { data: listed } = await sb.storage.from("backups").list(a.id, { limit: 1000 });
+    const files = new Set((listed || []).filter((e) => e.id !== null).map((e) => e.name.replace(/\.json$/, "")));
+    const { data: rows } = await sb.from("backups").select("ts").eq("agent_id", a.id);
+    const tsSet = new Set((rows || []).map((r) => String(r.ts)));
+    filesTotal += files.size; rowsTotal += tsSet.size;
+    for (const ts of tsSet) if (!files.has(ts)) orphans.push(`${a.id.slice(0, 6)}/${ts}`);
+    for (const f of files) if (!tsSet.has(f)) strays.push(`${a.id.slice(0, 6)}/${f}`);
   }
-  check("storage backups/ = 150 arquivos (21 órfãos documentados)", files === 150, `files=${files} agentes=${prefixes}`);
+  if (orphans.length) console.log(`  (aviso) metadados sem arquivo (órfãos na origem): ${orphans.length}`);
+  check("storage consistente (sem arquivos sem metadado)", strays.length === 0, `files=${filesTotal} rows=${rowsTotal} órfãos-aviso=${orphans.length}`);
 }
 
 // ---- 2. conteúdo: tabelas pequenas integral ------------------------------------
@@ -185,7 +221,7 @@ const cmpObj = (label, a, b, fields) => {
     finally { await db.query("RESET ROLE"); }
   };
   const housesTotal = (await asUser(`SELECT count(*)::int AS n FROM houses`)).rows[0].n;
-  check("autenticado lê RG unificado (2991)", housesTotal === srcHouses, `n=${housesTotal}`);
+  check(`autenticado lê RG unificado (${srcHouses})`, housesTotal === srcHouses, `n=${housesTotal}`);
   const profN = (await asUser(`SELECT count(*)::int AS n FROM profiles`)).rows[0].n;
   check("autenticado vê só próprio profile", profN === 1, `n=${profN}`);
   try {

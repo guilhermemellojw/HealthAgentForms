@@ -330,6 +330,25 @@ for (const b of keptBackups) {
 }
 await upsertUniform("backups", storageJobs.map((j) => j.row), "agent_id,ts");
 console.log(`backups meta: ok (${bakOk})`);
+// Poda: remove linhas fora da retenção (ex. histórico limpo na origem).
+{
+  const keptByAgent = new Map();
+  for (const j of storageJobs) {
+    if (!keptByAgent.has(j.agentId)) keptByAgent.set(j.agentId, new Set());
+    keptByAgent.get(j.agentId).add(String(j.ts));
+  }
+  let pruned = 0;
+  for (const [agentId, kept] of keptByAgent) {
+    const { data: rows } = await sb.from("backups").select("ts").eq("agent_id", agentId);
+    const stale = (rows || []).map((r) => String(r.ts)).filter((ts) => !kept.has(ts));
+    for (let i = 0; i < stale.length; i += 100) {
+      const { error } = await sb.from("backups").delete().eq("agent_id", agentId).in("ts", stale.slice(i, i + 100).map(Number));
+      if (error) throw new Error("backups prune: " + error.message);
+    }
+    pruned += stale.length;
+  }
+  if (pruned) note(`backups podados (fora da retenção/fonte): ${pruned}`);
+}
 
 // ---- 8. metadata / access_requests / day_transfers ------------------------------
 const metaRows = [];

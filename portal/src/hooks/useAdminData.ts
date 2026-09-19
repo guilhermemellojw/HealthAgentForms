@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useId, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { must, supabase, toAccessRequest, toAgentDoc, toUserDoc } from "../lib/supabase";
 import type { AgentDoc, UserDoc } from "../lib/types";
@@ -11,9 +11,14 @@ function normalizeEmail(email: string): string {
 /** Realtime (postgres_changes) -> invalida a query; substitui onSnapshot. */
 function useRealtimeInvalidate(table: string, queryKey: string[], filter?: string) {
   const qc = useQueryClient();
+  // Nome único por instância: o mesmo hook pode montar 2× (ex. useAgentNames
+  // no dashboard + dentro de useUnifiedProfiles); canal duplicado com .on()
+  // após subscribe() lança erro no realtime-js.
+  const inst = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const key = queryKey.join("|");
   useEffect(() => {
     const ch = supabase
-      .channel(`rt-${queryKey[0]}`)
+      .channel(`rt-${queryKey[0]}-${inst}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table, ...(filter ? { filter } : {}) },
@@ -23,7 +28,7 @@ function useRealtimeInvalidate(table: string, queryKey: string[], filter?: strin
     return () => {
       void supabase.removeChannel(ch);
     };
-  }, [table, queryKey.join("|")]);
+  }, [table, key]);
 }
 
 export function useAdminUsers() {
