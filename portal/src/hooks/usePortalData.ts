@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { dashToIso, must, supabase, toActivityDoc, toAgentDoc, toHouseDoc, toSummaryDoc } from "../lib/supabase";
+import { dashToIso, fetchPaged, must, supabase, toActivityDoc, toAgentDoc, toHouseDoc, toSummaryDoc } from "../lib/supabase";
 import { computeStats, filterByBairro, monthYearFromPeriod, normalizeBairro } from "../lib/period";
 import type { AgentDoc, DayActivityDoc, HouseDoc, HouseStats, MonthlySummaryDoc } from "../lib/types";
 
@@ -104,23 +104,32 @@ function isoBounds(ranges: FetchDateRange[]): { start: string; end: string } | n
 async function fetchHousesInRanges(agentId: string, ranges: FetchDateRange[]): Promise<HouseDoc[]> {
   const b = isoBounds(ranges);
   if (!b) return [];
-  const res = await supabase
-    .from("houses")
-    .select("*")
-    .eq("agent_id", agentId)
-    .is("deleted_at", null)
-    .gte("data_date", b.start)
-    .lte("data_date", b.end);
-  return must(res).map(toHouseDoc);
+  const rows = await fetchPaged((from, to) =>
+    supabase
+      .from("houses")
+      .select("*")
+      .eq("agent_id", agentId)
+      .is("deleted_at", null)
+      .gte("data_date", b.start)
+      .lte("data_date", b.end)
+      .order("data_date")
+      .order("natural_key")
+      .range(from, to),
+  );
+  return rows.map(toHouseDoc);
 }
 
 async function fetchAllActivities(agentId: string): Promise<DayActivityDoc[]> {
-  const res = await supabase
-    .from("day_activities")
-    .select("*")
-    .eq("agent_id", agentId)
-    .is("deleted_at", null);
-  return must(res).map(toActivityDoc);
+  const rows = await fetchPaged((from, to) =>
+    supabase
+      .from("day_activities")
+      .select("*")
+      .eq("agent_id", agentId)
+      .is("deleted_at", null)
+      .order("date_value")
+      .range(from, to),
+  );
+  return rows.map(toActivityDoc);
 }
 
 export function useAgentStatsByPeriod(
@@ -253,21 +262,33 @@ export function useAgentSnapshot(agentId: string, year: number, month: number, w
       // (leitura do servidor a cada troca, sem dado desatualizado).
       const ranges = fetchRangesForPeriod(year, month, week);
       const b = isoBounds(ranges);
-      const houseRes = await supabase
-        .from("houses")
-        .select("*")
-        .eq("agent_id", agentId)
-        .is("deleted_at", null)
-        .gte("data_date", b?.start ?? "0001-01-01")
-        .lte("data_date", b?.end ?? "9999-12-31");
-      const actRes = await supabase
-        .from("day_activities")
-        .select("*")
-        .eq("agent_id", agentId)
-        .is("deleted_at", null)
-        .gte("date_value", b?.start ?? "0001-01-01")
-        .lte("date_value", b?.end ?? "9999-12-31");
-      return { houses: must(houseRes).map(toHouseDoc), activities: must(actRes).map(toActivityDoc) };
+      const isoStart = b?.start ?? "0001-01-01";
+      const isoEnd = b?.end ?? "9999-12-31";
+      const [houseRows, actRows] = await Promise.all([
+        fetchPaged((from, to) =>
+          supabase
+            .from("houses")
+            .select("*")
+            .eq("agent_id", agentId)
+            .is("deleted_at", null)
+            .gte("data_date", isoStart)
+            .lte("data_date", isoEnd)
+            .order("list_order")
+            .range(from, to),
+        ),
+        fetchPaged((from, to) =>
+          supabase
+            .from("day_activities")
+            .select("*")
+            .eq("agent_id", agentId)
+            .is("deleted_at", null)
+            .gte("date_value", isoStart)
+            .lte("date_value", isoEnd)
+            .order("date_value")
+            .range(from, to),
+        ),
+      ]);
+      return { houses: houseRows.map(toHouseDoc), activities: actRows.map(toActivityDoc) };
     },
     staleTime: 30_000,
   });
@@ -281,13 +302,19 @@ export function useRgCoverage(year: number, enabled = true) {
     queryKey: ["rg-coverage", year],
     enabled,
     queryFn: async () => {
-      const res = await supabase
-        .from("houses")
-        .select("*")
-        .is("deleted_at", null)
-        .gte("data_date", `${year}-01-01`)
-        .lte("data_date", `${year}-12-31`);
-      return must(res).map(toHouseDoc);
+      const rows = await fetchPaged((from, to) =>
+        supabase
+          .from("houses")
+          .select("*")
+          .is("deleted_at", null)
+          .gte("data_date", `${year}-01-01`)
+          .lte("data_date", `${year}-12-31`)
+          .order("agent_id")
+          .order("data_date")
+          .order("natural_key")
+          .range(from, to),
+      );
+      return rows.map(toHouseDoc);
     },
     staleTime: 5 * 60_000,
   });

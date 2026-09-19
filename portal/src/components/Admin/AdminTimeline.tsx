@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { must, supabase } from "../../lib/supabase";
+import { must, supabase, fetchPaged } from "../../lib/supabase";
 
 // Replicates Kotlin StringExtensions.normalize(): trim, "/"->"-", "."->"-", collapse spaces/dashes, UPPERCASE
 function normalizeKey(value: unknown): string {
@@ -205,12 +205,14 @@ export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentN
     if (!confirm("Limpeza cirúrgica: removerá registros vazios (sem rua/número/quarteirão) que não estão em dias fechados. Continuar?")) return;
     setCleaning(true);
     try {
-      const [hRes, aRes] = await Promise.all([
-        supabase.from("houses").select("natural_key,street_name,number,block_number,data_text").eq("agent_id", uid).is("deleted_at", null),
-        supabase.from("day_activities").select("date_text,is_closed,is_manual_unlock").eq("agent_id", uid).is("deleted_at", null),
+      const [houses, acts] = await Promise.all([
+        fetchPaged((from, to) =>
+          supabase.from("houses").select("natural_key,street_name,number,block_number,data_text").eq("agent_id", uid).is("deleted_at", null).order("natural_key").range(from, to),
+        ),
+        fetchPaged((from, to) =>
+          supabase.from("day_activities").select("date_text,is_closed,is_manual_unlock").eq("agent_id", uid).is("deleted_at", null).order("date_text").range(from, to),
+        ),
       ]);
-      const houses = must(hRes);
-      const acts = must(aRes);
       const closedDates = new Set(
         acts
           .filter((a) => a.is_closed && !a.is_manual_unlock)

@@ -232,13 +232,14 @@ export function AdminDashboard() {
     if (!confirm(`Transferir TODOS os dados de ${transferFrom.displayName} para ${targetProfile?.displayName || toUid}? Irreversível.`)) return;
     try {
       showToast("Transferindo…");
+      // Conta a origem antes (o RETURNING do UPDATE pode vir truncado em moves grandes).
+      const { count: fromCount } = await supabase.from("houses").select("*", { count: "exact", head: true }).eq("agent_id", fromUid);
       // Move relacional: dois UPDATEs substituem cópia+delete em chunks de 100.
       const movedRes = await supabase.from("houses").update({ agent_id: toUid, agent_uid: toUid, agent_name: targetName || undefined }).eq("agent_id", fromUid).select("natural_key");
       if (movedRes.error) throw new Error(movedRes.error.message);
-      const moved = movedRes.data ?? [];
       await throwOn(await supabase.from("day_activities").update({ agent_id: toUid, agent_uid: toUid, agent_name: targetName || undefined }).eq("agent_id", fromUid));
       await throwOn(await supabase.from("profiles").update({ require_data_reset: true }).eq("id", fromUid));
-      showToast(`Transferência concluída: ${moved.length} imóveis`);
+      showToast(`Transferência concluída: ${fromCount ?? "?"} imóveis`);
       setTransferFrom(null);
       setTransferTo("");
     } catch (e) {

@@ -24,6 +24,29 @@ export function must<T>(res: { data: T | null; error: unknown }): T {
   return res.data as T;
 }
 
+type PageResult<T> = { data: T[] | null; error: unknown };
+
+/**
+ * Leituras sem teto: o PostgREST limita respostas a 1000 linhas por padrão
+ * (o Firestore retornava tudo). Pagina com .range() até esgotar.
+ * O chamador deve aplicar .order() determinístico dentro de `build`.
+ */
+export async function fetchPaged<T>(
+  build: (from: number, to: number) => PromiseLike<PageResult<T>>,
+  pageSize = 1000,
+): Promise<T[]> {
+  const out: T[] = [];
+  let from = 0;
+  for (;;) {
+    const res = await build(from, from + pageSize - 1);
+    const rows = must(res);
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+  return out;
+}
+
 /** ISO timestamptz -> ms (compat com campos legados number). */
 export function isoMs(v: string | null | undefined): number | null {
   if (!v) return null;
