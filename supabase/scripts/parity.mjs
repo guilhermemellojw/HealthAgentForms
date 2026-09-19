@@ -177,6 +177,7 @@ const cmpObj = (label, a, b, fields) => {
   }
   const db = new pg.Client({ connectionString: process.env.SUPABASE_DB_URL.replace(/sslmode=[^&]*/, "sslmode=no-verify") });
   await db.connect();
+  await db.query("RESET ROLE"); // pooler inicia como authenticated; matriz é ground truth (bypass RLS)
   const { rows } = await db.query(
     `SELECT left(a.firebase_uid,6) AS ag, extract(year FROM h.data_date)::int AS y, count(*) AS n
      FROM houses h JOIN agents a ON a.id = h.agent_id

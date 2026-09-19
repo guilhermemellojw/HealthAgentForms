@@ -330,7 +330,8 @@ for (const b of keptBackups) {
 }
 await upsertUniform("backups", storageJobs.map((j) => j.row), "agent_id,ts");
 console.log(`backups meta: ok (${bakOk})`);
-// Poda: remove linhas fora da retenção (ex. histórico limpo na origem).
+// Poda: remove linhas fora da retenção (ex. histórico limpo na origem)
+// + os arquivos correspondentes no Storage.
 {
   const keptByAgent = new Map();
   for (const j of storageJobs) {
@@ -338,6 +339,7 @@ console.log(`backups meta: ok (${bakOk})`);
     keptByAgent.get(j.agentId).add(String(j.ts));
   }
   let pruned = 0;
+  const prunedFiles = [];
   for (const [agentId, kept] of keptByAgent) {
     const { data: rows } = await sb.from("backups").select("ts").eq("agent_id", agentId);
     const stale = (rows || []).map((r) => String(r.ts)).filter((ts) => !kept.has(ts));
@@ -346,8 +348,13 @@ console.log(`backups meta: ok (${bakOk})`);
       if (error) throw new Error("backups prune: " + error.message);
     }
     pruned += stale.length;
+    for (const ts of stale) prunedFiles.push(`${agentId}/${ts}.json`);
   }
-  if (pruned) note(`backups podados (fora da retenção/fonte): ${pruned}`);
+  for (let i = 0; i < prunedFiles.length; i += 100) {
+    const { error } = await sb.storage.from("backups").remove(prunedFiles.slice(i, i + 100));
+    if (error) note(`storage prune: ${error.message}`);
+  }
+  if (pruned) note(`backups podados (fora da retenção/fonte): ${pruned} linhas/arquivos`);
 }
 
 // ---- 8. metadata / access_requests / day_transfers ------------------------------

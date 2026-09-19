@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useStaffGate, loginWithGoogle, logout } from "./hooks/useAuth";
+import { assertSupabaseEnv } from "./lib/supabase";
 import SummaryPage from "./pages/SummaryPage";
 import DocumentsPage from "./pages/DocumentsPage";
 import { AdminDashboard } from "./components/Admin/AdminDashboard";
@@ -41,6 +42,7 @@ const queryClient = new QueryClient({
 type Tab = "resumo" | "documentos" | "admin";
 
 function AppShell() {
+  assertSupabaseEnv();
   const gate = useStaffGate();
   const [tab, setTab] = useState<Tab>("resumo");
   const [mobileOpen, setMobileOpen] = useState(false);

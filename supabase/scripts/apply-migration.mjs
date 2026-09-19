@@ -33,9 +33,18 @@ const client = new pg.Client({ connectionString });
 
 try {
   await client.connect();
-  console.log("Conectado. Aplicando migration em transação implícita...");
-  await client.query(sql);
-  console.log("Migration aplicada.");
+  // Pooler inicia como role authenticated; migrations exigem o dono (postgres).
+  await client.query("RESET ROLE");
+  console.log("Conectado. Aplicando migration em transação explícita...");
+  await client.query("BEGIN");
+  try {
+    await client.query(sql);
+    await client.query("COMMIT");
+  } catch (e) {
+    try { await client.query("ROLLBACK"); } catch (_) {}
+    throw e;
+  }
+  console.log("Migration aplicada (COMMIT).");
 
   const checks = {
     tabelas: `SELECT tablename FROM pg_tables WHERE schemaname='public'

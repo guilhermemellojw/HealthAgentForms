@@ -229,11 +229,14 @@ export function AdminTimeline({ uid, agentName, onClose }: { uid: string; agentN
         showToast("Nenhum registro quebrado encontrado");
         return;
       }
-      for (let i = 0; i < broken.length; i += 200) {
-        const keys = broken.slice(i, i + 200).map((h) => h.natural_key);
+      // Chunks pequenos: natural_keys geradas são longas e URL tem limite.
+      for (let i = 0; i < broken.length; i += 50) {
+        const keys = broken.slice(i, i + 50).map((h) => h.natural_key);
         const del = await supabase.from("houses").delete().eq("agent_id", uid).in("natural_key", keys);
         if (del.error) throw new Error(del.error.message);
       }
+      // Hard delete sem tombstone: força reset para convergir no próximo pull.
+      await supabase.from("profiles").update({ require_data_reset: true }).eq("id", uid);
       showToast(`Limpeza: ${broken.length} removidos`);
       await load();
     } catch (e) {

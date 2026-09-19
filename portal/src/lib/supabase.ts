@@ -2,10 +2,22 @@ import { createClient, type SupabaseClient, type User } from "@supabase/supabase
 import type { AccessRequest } from "./adminTypes";
 import type { AgentDoc, DayActivityDoc, HouseDoc, MonthlySummaryDoc, UserDoc } from "./types";
 
-const url = import.meta.env.VITE_SUPABASE_URL ?? "https://jgvwiqrvkqkugqtycgbv.supabase.co";
-const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_LP0VVL4NsruINN05X9rFdg_y9ryqM5X";
+const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
 
-export const supabase: SupabaseClient = createClient(url, key);
+// Fail-closed: sem credencial válida o client aponta para endpoint inválido
+// (nunca para outro backend — o fallback para o shadow foi removido).
+export const supabase: SupabaseClient = createClient(
+  url ?? "https://invalid.supabase.co",
+  key ?? "invalid",
+);
+
+/** Chamado no boot (App): falha visível antes de qualquer query sem env. */
+export function assertSupabaseEnv(): void {
+  if (!url || !key) {
+    throw new Error("Supabase não configurado: defina VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY em portal/.env.local");
+  }
+}
 
 export const BOOTSTRAP_ADMINS: string[] =
   (import.meta.env.VITE_BOOTSTRAP_ADMINS as string | undefined)

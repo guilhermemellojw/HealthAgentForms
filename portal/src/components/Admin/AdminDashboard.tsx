@@ -232,8 +232,29 @@ export function AdminDashboard() {
     if (!confirm(`Transferir TODOS os dados de ${transferFrom.displayName} para ${targetProfile?.displayName || toUid}? Irreversível.`)) return;
     try {
       showToast("Transferindo…");
+      // Destino precisa de linha agents (FK) — garante antes do move.
+      const { data: destProf } = await supabase.from("profiles").select("id,email,agent_name").eq("id", toUid).maybeSingle();
+      if (!destProf) throw new Error("Perfil de destino não encontrado");
+      await throwOn(
+        await supabase.from("agents").upsert(
+          { id: toUid, email: (destProf.email as string).toLowerCase(), agent_name: targetName || (destProf.agent_name as string | null) },
+          { onConflict: "id" },
+        ),
+      );
       // Conta a origem antes (o RETURNING do UPDATE pode vir truncado em moves grandes).
-      const { count: fromCount } = await supabase.from("houses").select("*", { count: "exact", head: true }).eq("agent_id", fromUid);
+      const [srcHouses, dstHouses] = await Promise.all([
+        supabase.from("houses").select("natural_key").eq("agent_id", fromUid),
+        supabase.from("houses").select("natural_key").eq("agent_id", toUid),
+      ]);
+      if (srcHouses.error) throw new Error(srcHouses.error.message);
+      if (dstHouses.error) throw new Error(dstHouses.error.message);
+      const fromCount = (srcHouses.data || []).length;
+      if (fromCount === 0) throw new Error("Origem sem imóveis para mover");
+      const dstKeys = new Set((dstHouses.data || []).map((r) => r.natural_key as string));
+      const clash = (srcHouses.data || []).filter((r) => dstKeys.has(r.natural_key as string));
+      if (clash.length > 0) {
+        throw new Error(`Destino já tem ${clash.length} imóvel(is) com mesma chave — abortado para não sobrescrever`);
+      }
       // Move relacional: dois UPDATEs substituem cópia+delete em chunks de 100.
       const movedRes = await supabase.from("houses").update({ agent_id: toUid, agent_uid: toUid, agent_name: targetName || undefined }).eq("agent_id", fromUid).select("natural_key");
       if (movedRes.error) throw new Error(movedRes.error.message);

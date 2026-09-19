@@ -198,10 +198,10 @@ export default function AgentProductionEditor({ agentId, agentName, lastSyncTime
     setNotice(null);
     const perRowError: Record<string, string> = {};
     try {
-      // 1) Re-lê as alteradas (concorrência otimista por linha).
+      // 1) Re-lê as alteradas (concorrência otimista por linha; apagadas somem do mapa).
       const fresh = new Map<string, HouseDoc>();
       if (dirtyIds.length > 0) {
-        const reRes = await supabase.from("houses").select("*").eq("agent_id", agentId).in("natural_key", dirtyIds);
+        const reRes = await supabase.from("houses").select("*").eq("agent_id", agentId).is("deleted_at", null).in("natural_key", dirtyIds);
         for (const r of must(reRes)) fresh.set(r.natural_key, toHouseDoc(r));
       }
       const missing = dirtyIds.filter((id) => !fresh.has(id));
@@ -223,34 +223,47 @@ export default function AgentProductionEditor({ agentId, agentName, lastSyncTime
         return;
       }
 
-      // 2) Updates + deletes (sem batch cross-tabela no REST; linhas independentes em paralelo).
+      // 2) Updates + soft-deletes SEQUENCIAIS (sem batch atômico no REST):
+      // cada linha sucede/falha isolada; resumo e auditoria refletem o real.
+      // Exclusão é soft (deleted_at) para convergir no pull delta do app;
+      // bulk (wipe/restore/purge) continua hard + require_data_reset.
       const audits: Record<string, unknown>[] = [];
-      await Promise.all(dirtyIds.map(async (id) => {
+      for (const id of dirtyIds) {
         const f = fresh.get(id);
-        if (!f) return;
+        if (!f) continue;
         const payload = buildUpdatePayload(f, rows.find((r) => r.id === id)!.form);
         if (Object.keys(payload).length > 2) {
-          const upd = await supabase.from("houses").update(toSnakePayload(payload)).eq("agent_id", agentId).eq("natural_key", id);
-          if (upd.error) throw new Error(upd.error.message);
+          try {
+            const upd = await supabase.from("houses").update(toSnakePayload(payload)).eq("agent_id", agentId).eq("natural_key", id).is("deleted_at", null).select("natural_key");
+            if (upd.error) throw new Error(upd.error.message);
+            if (!upd.data?.length) throw new Error("linha alterada/apagada por outro — recarregue");
+            audits.push(buildAuditEntry({
+              actorUid: actor.id, actorEmail: actor.email || "",
+              action: "update", agentUid: agentId, agentName,
+              houseId: id, date: day, monthYear: monthYearOf(day) || undefined,
+              before: f, after: payload,
+            }));
+          } catch (e) {
+            perRowError[id] = e instanceof Error ? e.message : String(e);
+          }
+        }
+      }
+      for (const id of deleteMarked) {
+        const h = houses.find((x) => x.id === id);
+        try {
+          const del = await supabase.from("houses").update({ deleted_at: new Date().toISOString(), edited_by_admin: true }).eq("agent_id", agentId).eq("natural_key", id).is("deleted_at", null).select("natural_key");
+          if (del.error) throw new Error(del.error.message);
+          if (!del.data?.length) throw new Error("linha já alterada/apagada — recarregue");
           audits.push(buildAuditEntry({
             actorUid: actor.id, actorEmail: actor.email || "",
-            action: "update", agentUid: agentId, agentName,
+            action: "delete", agentUid: agentId, agentName,
             houseId: id, date: day, monthYear: monthYearOf(day) || undefined,
-            before: f, after: payload,
+            before: h ? { ...h } : undefined,
           }));
+        } catch (e) {
+          perRowError[id] = e instanceof Error ? e.message : String(e);
         }
-      }));
-      await Promise.all(deleteMarked.map(async (id) => {
-        const h = houses.find((x) => x.id === id);
-        const del = await supabase.from("houses").delete().eq("agent_id", agentId).eq("natural_key", id);
-        if (del.error) throw new Error(del.error.message);
-        audits.push(buildAuditEntry({
-          actorUid: actor.id, actorEmail: actor.email || "",
-          action: "delete", agentUid: agentId, agentName,
-          houseId: id, date: day, monthYear: monthYearOf(day) || undefined,
-          before: h ? { ...h } : undefined,
-        }));
-      }));
+      }
 
       // 3) Resumo do mês (formato exato do app; nunca apaga sem regravar).
       const my = monthYearOf(day);
@@ -289,9 +302,14 @@ export default function AgentProductionEditor({ agentId, agentName, lastSyncTime
       setLastEditAt(Date.now());
       setForceIds([]);
       setDeleteMarked([]);
-      if (!error) {
-        const nUpd = audits.filter((a) => (a as { action: string }).action === "update").length;
-        const nDel = audits.filter((a) => (a as { action: string }).action === "delete").length;
+      const nUpd = audits.filter((a) => (a as { action: string }).action === "update").length;
+      const nDel = audits.filter((a) => (a as { action: string }).action === "delete").length;
+      if (Object.keys(perRowError).length > 0) {
+        setRowErrors(perRowError);
+        const nFail = Object.keys(perRowError).length;
+        setError(`Dia parcialmente salvo (${nUpd + nDel} linha(s) ok, ${nFail} com falha). Revise as linhas marcadas.`);
+        setNotice(null);
+      } else if (!error) {
         setNotice(`Dia salvo: ${nUpd} editada(s), ${nDel} excluída(s). Resumo do mês recalculado.`);
       }
       await qc.invalidateQueries({ queryKey: ["admin-day", agentId] });
