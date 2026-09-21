@@ -10,6 +10,10 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.antigravity.healthagent.utils.normalize
 import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.toDashDate
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -272,6 +276,78 @@ fun DayActivity.toFirestoreMap(): Map<String, Any?> {
         "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
         "editedByAdmin" to editedByAdmin
     )
+}
+
+private val isoWriteFmt = ThreadLocal.withInitial {
+    SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+}
+
+fun epochMsToIso(ms: Long): String = isoWriteFmt.get()!!.format(java.util.Date(ms))
+
+fun nowIsoUtc(): String = epochMsToIso(com.antigravity.healthagent.utils.TimeManager.currentTimeMillis())
+
+/**
+ * House -> linha houses (snake_case) p/ upsert PostgREST.
+ * Sem updated_at (trigger carimba), sem data_date (derivada), sem deleted_at
+ * (linhas ativas). tipo/atividade como texto (colunas TEXT).
+ */
+fun House.toSupabaseRow(agentUid: String, agentName: String, editedByAdmin: Boolean): kotlinx.serialization.json.JsonObject {
+    return kotlinx.serialization.json.buildJsonObject {
+        put("agent_id", agentUid)
+        put("natural_key", generateNaturalKey())
+        put("data_text", data.toDashDate())
+        put("street_name", address.streetName)
+        put("number", address.number)
+        put("block_number", address.blockNumber)
+        put("block_sequence", address.blockSequence)
+        put("sequence", address.sequence)
+        put("complement", address.complement)
+        put("visit_segment", visitSegment)
+        put("list_order", listOrder)
+        put("situation", situation.name)
+        put("property_type", propertyType.name)
+        put("com_foco", treatment.comFoco)
+        put("a1", treatment.a1)
+        put("a2", treatment.a2)
+        put("b", treatment.b)
+        put("c", treatment.c)
+        put("d1", treatment.d1)
+        put("d2", treatment.d2)
+        put("e", treatment.e)
+        put("eliminados", treatment.eliminados)
+        put("larvicida", treatment.larvicida)
+        if (geo.latitude != null) put("latitude", geo.latitude!!) else put("latitude", kotlinx.serialization.json.JsonNull)
+        if (geo.longitude != null) put("longitude", geo.longitude!!) else put("longitude", kotlinx.serialization.json.JsonNull)
+        if (geo.focusCaptureTime != null) put("focus_capture_time", epochMsToIso(geo.focusCaptureTime!!)) else put("focus_capture_time", kotlinx.serialization.json.JsonNull)
+        put("observation", observation)
+        put("municipio", context.municipio)
+        put("bairro", address.bairro)
+        put("categoria", context.categoria)
+        put("zona", context.zona)
+        put("tipo", context.tipo.toString())
+        put("atividade", context.atividade.toString())
+        put("ciclo", context.ciclo)
+        put("localidade_concluida", localidadeConcluida)
+        put("quarteirao_concluido", quarteiraoConcluido)
+        put("agent_name", agentName)
+        put("agent_uid", agentUid)
+        put("client_uuid", uuid)
+        put("edited_by_admin", editedByAdmin)
+        put("created_at", epochMsToIso(createdAt))
+    }
+}
+
+fun DayActivity.toSupabaseRow(agentUid: String, agentName: String, editedByAdmin: Boolean): kotlinx.serialization.json.JsonObject {
+    return kotlinx.serialization.json.buildJsonObject {
+        put("agent_id", agentUid)
+        put("date_text", date.replace("/", "-"))
+        put("status", status)
+        put("is_closed", isClosed)
+        put("is_manual_unlock", isManualUnlock)
+        put("agent_name", agentName)
+        put("agent_uid", agentUid)
+        put("edited_by_admin", editedByAdmin)
+    }
 }
 
 private fun normalizeAgentName(name: String): String {

@@ -8,6 +8,7 @@ import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.local.model.TombstoneType
 import com.antigravity.healthagent.data.settings.SettingsManager
+import com.antigravity.healthagent.data.sync.PushHandler
 import com.antigravity.healthagent.data.util.toDayActivitySafe
 import com.antigravity.healthagent.data.util.toHouseSafe
 import com.antigravity.healthagent.data.util.toFirestoreMap
@@ -36,14 +37,14 @@ class SyncPushHandler @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val houseRepository: HouseRepository,
     private val settingsManager: SettingsManager
-) {
+) : PushHandler {
 
-    suspend fun pushLocalDataToCloud(
+    override suspend fun pushLocalDataToCloud(
         houses: List<House>,
         activities: List<DayActivity>,
         targetUid: String?,
         shouldReplace: Boolean,
-        isFullWipe: Boolean = false,
+        isFullWipe: Boolean,
         syncMutex: Mutex
     ): Result<Unit> {
         val result = withTimeoutOrNull(600000L) {

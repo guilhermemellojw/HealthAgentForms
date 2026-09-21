@@ -2,9 +2,12 @@ package com.antigravity.healthagent.di
 
 import com.antigravity.healthagent.BuildConfig
 import com.antigravity.healthagent.data.repository.SupabaseSyncPullHandler
+import com.antigravity.healthagent.data.repository.SupabaseSyncPushHandler
 import com.antigravity.healthagent.data.repository.SyncPullHandler
+import com.antigravity.healthagent.data.repository.SyncPushHandler
 import com.antigravity.healthagent.data.sync.FirestoreSystemSettingsSource
 import com.antigravity.healthagent.data.sync.PullHandler
+import com.antigravity.healthagent.data.sync.PushHandler
 import com.antigravity.healthagent.data.sync.SystemSettingsSource
 import dagger.Binds
 import dagger.Module
@@ -32,6 +35,15 @@ abstract class SyncModule {
         ): PullHandler {
             // Switch Fase 2.3 (local.properties, padrão false). Lazy preserva o
             // path Firebase em máquinas sem client Supabase.
+            return if (BuildConfig.USE_SUPABASE_SYNC) supabase.get() else firebase
+        }
+
+        @Provides
+        @Singleton
+        fun providePushHandler(
+            firebase: SyncPushHandler,
+            supabase: dagger.Lazy<SupabaseSyncPushHandler>
+        ): PushHandler {
             return if (BuildConfig.USE_SUPABASE_SYNC) supabase.get() else firebase
         }
     }
