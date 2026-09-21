@@ -4,6 +4,7 @@ plugins {
     id("com.google.dagger.hilt.android")
     id("com.google.gms.google-services")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 import java.util.Properties
@@ -11,7 +12,9 @@ import java.io.FileInputStream
 
 android {
     namespace = "com.antigravity.healthagent"
-    compileSdk = 34
+    // 36 exigido pelas transitivas do supabase-kt (androidx.browser 1.10, compose 1.9);
+    // targetSdk/minSdk intocados = sem mudança de comportamento em runtime.
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.antigravity.healthagent"
@@ -33,6 +36,16 @@ android {
         }
         val mapsApiKey = properties.getProperty("MAPS_API_KEY") ?: ""
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
+
+        // Supabase (shadow). Chaves via local.properties (gitignored); sem fallback
+        // hardcoded — BuildConfig vazio falha explícito no provider. USE_SUPABASE_AUTH
+        // seleciona a implementação Supabase no Hilt (padrão: Firebase).
+        val supabaseUrl = properties.getProperty("SUPABASE_URL") ?: ""
+        val supabaseKey = properties.getProperty("SUPABASE_PUBLISHABLE_KEY") ?: ""
+        val useSupabaseAuth = properties.getProperty("USE_SUPABASE_AUTH")?.toBoolean() ?: false
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_KEY", "\"$supabaseKey\"")
+        buildConfigField("boolean", "USE_SUPABASE_AUTH", "$useSupabaseAuth")
     }
 
     buildTypes {
@@ -131,6 +144,11 @@ dependencies {
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-storage")
+
+    // Supabase (Fase 2 — auth + postgrest; realtime/storage nas próximas fatias)
+    implementation("io.github.jan-tennert.supabase:auth-kt:3.8.0")
+    implementation("io.github.jan-tennert.supabase:postgrest-kt:3.8.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     
     // Auth (Google Sign-In via Credential Manager)
     implementation("androidx.credentials:credentials:1.2.1")

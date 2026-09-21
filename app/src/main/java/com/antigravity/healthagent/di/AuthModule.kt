@@ -1,6 +1,8 @@
 package com.antigravity.healthagent.di
 
+import com.antigravity.healthagent.BuildConfig
 import com.antigravity.healthagent.data.repository.AuthRepositoryImpl
+import com.antigravity.healthagent.data.repository.SupabaseAuthRepositoryImpl
 import com.antigravity.healthagent.data.repository.SyncRepositoryImpl
 import com.antigravity.healthagent.domain.repository.AuthRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
@@ -19,17 +21,15 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.Auth
+import io.github.jan.supabase.createSupabaseClient
+import io.github.jan.supabase.postgrest.Postgrest
 import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class AuthModule {
-
-    @Binds
-    @Singleton
-    abstract fun bindAuthRepository(
-        authRepositoryImpl: AuthRepositoryImpl
-    ): AuthRepository
 
     @Binds
     @Singleton
@@ -44,6 +44,32 @@ abstract class AuthModule {
     ): SyncRepository
 
     companion object {
+        @Provides
+        @Singleton
+        fun provideAuthRepository(
+            firebase: AuthRepositoryImpl,
+            supabase: dagger.Lazy<SupabaseAuthRepositoryImpl>
+        ): AuthRepository {
+            // Switch Fase 2: BuildConfig.USE_SUPABASE_AUTH (local.properties, padrão false).
+            // Lazy: o client Supabase só é criado quando selecionado (Firebase segue
+            // bootando em máquinas sem as chaves configuradas).
+            return if (BuildConfig.USE_SUPABASE_AUTH) supabase.get() else firebase
+        }
+
+        @Provides
+        @Singleton
+        fun provideSupabaseClient(): SupabaseClient {
+            val url = BuildConfig.SUPABASE_URL.trim()
+            val key = BuildConfig.SUPABASE_KEY.trim()
+            require(url.startsWith("https://") && key.isNotBlank()) {
+                "Supabase não configurado: defina SUPABASE_URL e SUPABASE_PUBLISHABLE_KEY em local.properties"
+            }
+            return createSupabaseClient(url, key) {
+                install(Auth)
+                install(Postgrest)
+            }
+        }
+
         @Provides
         @Singleton
         fun provideFirebaseAuth(): FirebaseAuth {
