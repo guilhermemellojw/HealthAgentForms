@@ -4,6 +4,9 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // Base relativa: funciona em localhost, Firebase Hosting (raiz) e
+  // GitHub Pages (subpath /HealthAgentForms) sem rebuild por destino.
+  base: "./",
   build: {
     rollupOptions: {
       output: {
