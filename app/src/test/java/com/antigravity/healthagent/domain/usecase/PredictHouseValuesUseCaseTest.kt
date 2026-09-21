@@ -101,4 +101,46 @@ class PredictHouseValuesUseCaseTest {
         assertEquals("100", prediction.number)
         assertEquals(4, prediction.complement)
     }
+
+    @Test
+    fun `predictNextHouseValues - chronological isolation ignores future houses`() {
+        val pastDate = "13-05-2026"
+        val futureDate = "14-05-2026"
+        
+        val pastHouse = House(
+            id = 1,
+            data = pastDate,
+            address = VisitAddress(
+                bairro = "Centro",
+                streetName = street,
+                blockNumber = block,
+                number = "100"
+            ),
+            listOrder = 1L,
+            propertyType = PropertyType.R,
+            situation = Situation.NONE
+        )
+        
+        val futureHouse = House(
+            id = 2,
+            data = futureDate,
+            address = VisitAddress(
+                bairro = "Centro",
+                streetName = street,
+                blockNumber = block,
+                number = "200"
+            ),
+            listOrder = 2L,
+            propertyType = PropertyType.R,
+            situation = Situation.NONE
+        )
+        
+        val houses = listOf(pastHouse, futureHouse)
+        
+        // When predicting for the past date, it should only consider pastHouse (number 100)
+        // and return next number 101, NOT 201 (which would be based on the future house)
+        val prediction = useCase.predictNextHouseValues(houses, pastDate, block, street)
+        
+        assertEquals("101", prediction.number)
+    }
 }

@@ -14,29 +14,35 @@ class TeamworkSyncHandler @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val houseRepository: HouseRepository
 ) {
-    private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        return houseRepository.runInTransaction { block() }
-    }
-
     suspend fun performTeamworkSync(
         uid: String,
         cloudHouses: MutableList<House>,
-        isTargetDifferentUser: Boolean
+        isTargetDifferentUser: Boolean,
+        fetchRemote: (suspend (bairros: List<String>) -> List<House>)? = null
     ): List<House> {
         val teammateHouses = mutableListOf<House>()
         if (isTargetDifferentUser) return teammateHouses
 
         try {
-            val activeBairros = (houseRepository.getActiveBairros(uid) + cloudHouses.map { it.address.bairro })
-                .map { it.trim().uppercase() }
+            val rawActiveBairros = (houseRepository.getActiveBairros(uid) + cloudHouses.map { it.address.bairro })
+                .map { it.trim() }
                 .filter { it.isNotBlank() }
                 .distinct()
-            if (activeBairros.isNotEmpty()) {
-                val teamHouses = activeBairros.chunked(10).flatMap { bairroChunk ->
-                    firestore.collectionGroup("houses")
-                        .whereIn("bairro", bairroChunk)
-                        .get().await().documents
-                }.mapNotNull { it.toHouseSafe(it.getString("agentUid") ?: "", it.getString("agentName") ?: "") }
+            val activeBairros = rawActiveBairros.map { it.uppercase() }.distinct()
+            if (rawActiveBairros.isNotEmpty()) {
+                val teamHouses = if (fetchRemote != null) {
+                    // Fonte alternativa (Supabase): busca única, sem chunk 10.
+                    fetchRemote((rawActiveBairros + rawActiveBairros.map { it.uppercase() }).distinct())
+                } else {
+                    // Tolerate legacy casing drift: query both raw and uppercase, chunked to respect the 10-value cap
+                    // (raw + uppercase doubling keeps each chunk within Firestore's 30-value limit).
+                    val bairroQueryValues = (rawActiveBairros + rawActiveBairros.map { it.uppercase() }).distinct()
+                    bairroQueryValues.chunked(10).flatMap { bairroChunk ->
+                        firestore.collectionGroup("houses")
+                            .whereIn("bairro", bairroChunk)
+                            .get().await().documents
+                    }.mapNotNull { it.toHouseSafe(it.getString("agentUid") ?: "", it.getString("agentName") ?: "") }
+                }
                 
                 val remoteForeignHouses = teamHouses.filter { it.agentUid != uid }
                 
@@ -61,7 +67,7 @@ class TeamworkSyncHandler @Inject constructor(
                     }
                     if (safeToDeleteTeam.isNotEmpty()) {
                         AppLogger.i("TeamworkSyncHandler", "Team Sync: Deleting ${safeToDeleteTeam.size} houses removed by colleagues.")
-                        runInTransactionWithRetry {
+                        houseRepository.runInTransaction {
                             safeToDeleteTeam.forEach { houseRepository.deleteHouse(it) }
                         }
                     }

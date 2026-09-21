@@ -16,9 +16,12 @@ import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.domain.repository.AuthRepository
 import com.antigravity.healthagent.domain.repository.MapRepository
 import com.antigravity.healthagent.data.util.KmlStorageService
+import com.antigravity.healthagent.domain.logger.AppLogger
 import kotlinx.coroutines.flow.*
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.MapType
+
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
 
 @HiltViewModel
 class QuarteiroesViewModel @Inject constructor(
@@ -28,7 +31,8 @@ class QuarteiroesViewModel @Inject constructor(
     private val settingsManager: SettingsManager,
     private val authRepository: AuthRepository,
     private val mapRepository: MapRepository,
-    private val kmlStorageService: KmlStorageService
+    private val kmlStorageService: KmlStorageService,
+    private val feedbackManager: SyncFeedbackManager
 ) : ViewModel() {
     
     val focusHouses: StateFlow<List<House>> = combine(
@@ -61,7 +65,7 @@ class QuarteiroesViewModel @Inject constructor(
     
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
-
+    
     val kmlUri: StateFlow<android.net.Uri?> = mapRepository.kmlUri
     val mapType: StateFlow<com.google.maps.android.compose.MapType> = mapRepository.mapType
 
@@ -132,7 +136,7 @@ class QuarteiroesViewModel @Inject constructor(
                             }
                         },
                         onFailure = { e ->
-                            e.printStackTrace()
+                            AppLogger.e("QuarteiroesViewModel", "Falha ao ler KML", e)
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                 android.widget.Toast.makeText(context, "Erro ao ler KML: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
                             }
@@ -140,10 +144,10 @@ class QuarteiroesViewModel @Inject constructor(
                     )
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                AppLogger.e("QuarteiroesViewModel", "Erro ao abrir arquivo KML", e)
                 if (e is SecurityException || e.message?.contains("Permission Denial", ignoreCase = true) == true) {
                     if (uri.scheme != "file") {
-                         android.util.Log.e("QuarteiroesViewModel", "Permission denied on external URI, internal copy failure.")
+                         AppLogger.e("QuarteiroesViewModel", "Permission denied on external URI, internal copy failure.")
                     } else {
                          mapRepository.clearKmlConfig()
                          _kmlFolders.value = emptyList()
@@ -198,8 +202,10 @@ class QuarteiroesViewModel @Inject constructor(
     }
 
     fun refreshData() {
+        if (feedbackManager.isSyncing) return
         viewModelScope.launch {
             _isLoading.value = true
+            feedbackManager.syncing(progress = 0.5f, message = "Atualizando dados...", isDownloading = true)
             try {
                 // Reload KML from local path in repository
                 mapRepository.kmlLocalPath.value?.let { path ->
@@ -209,6 +215,9 @@ class QuarteiroesViewModel @Inject constructor(
                     }
                 }
                 kotlinx.coroutines.delay(1000)
+                feedbackManager.success(recordTimestamp = false)
+            } catch (e: Exception) {
+                feedbackManager.error(message = e.message ?: "Erro ao atualizar")
             } finally {
                 _isLoading.value = false
             }

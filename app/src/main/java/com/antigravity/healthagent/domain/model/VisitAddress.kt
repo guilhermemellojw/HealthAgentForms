@@ -1,7 +1,9 @@
 package com.antigravity.healthagent.domain.model
 
+import androidx.compose.runtime.Immutable
 import com.antigravity.healthagent.utils.normalize
 
+@Immutable
 data class VisitAddress(
     val blockNumber: String = "",
     val blockSequence: String = "",

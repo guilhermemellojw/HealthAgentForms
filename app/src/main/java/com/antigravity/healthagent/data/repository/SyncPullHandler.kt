@@ -8,6 +8,7 @@ import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.data.util.toDayActivitySafe
 import com.antigravity.healthagent.data.util.toHouseSafe
+import com.antigravity.healthagent.data.util.tombstoneKeys
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -24,9 +25,12 @@ import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 import com.antigravity.healthagent.data.sync.VersionChecker
+import com.antigravity.healthagent.data.sync.PullHandler
+import com.antigravity.healthagent.data.sync.RemoteSyncFlags
 import com.antigravity.healthagent.data.sync.IdentityDiscoveryService
 import com.antigravity.healthagent.data.sync.TeamworkSyncHandler
 import com.antigravity.healthagent.data.sync.SyncReconciler
+import com.antigravity.healthagent.domain.repository.SyncRepository
 
 @Singleton
 class SyncPullHandler @Inject constructor(
@@ -39,9 +43,9 @@ class SyncPullHandler @Inject constructor(
     private val identityDiscoveryService: IdentityDiscoveryService,
     private val teamworkSyncHandler: TeamworkSyncHandler,
     private val syncReconciler: SyncReconciler
-) {
+) : PullHandler {
 
-    suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean, syncMutex: Mutex): Result<Unit> {
+    override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean, syncMutex: Mutex): Result<SyncRepository.SyncResult> {
         val result = withTimeoutOrNull(600000L) {
             syncMutex.withLock {
                 withContext(Dispatchers.IO) {
@@ -78,8 +82,11 @@ class SyncPullHandler @Inject constructor(
                         val localUnsyncedCount = houseRepository.getUnsyncedHouses(uid).size + houseRepository.getUnsyncedActivities(uid).size
                         
                         val requireReset = versionChecker.isWipeRequired(
-                            userDoc = userDoc,
-                            agentDocSnapshot = agentDocSnapshot,
+                            flags = RemoteSyncFlags(
+                                requireDataResetFromUser = userDoc.getBoolean("requireDataReset") ?: false,
+                                requireDataResetFromAgent = agentDocSnapshot.getBoolean("requireDataReset") ?: false,
+                                agentDocExists = agentDocSnapshot.exists()
+                            ),
                             hasSyncHistory = hasSyncHistory,
                             isTargetDifferentUser = isTargetDifferentUser,
                             localUnsyncedCount = localUnsyncedCount
@@ -190,12 +197,8 @@ class SyncPullHandler @Inject constructor(
                                         settingsManager.setClockSkewMs(0L)
                                     }
 
-                                    @Suppress("UNCHECKED_CAST")
-                                    val deletedHouses = (agentDoc?.get("deleted_house_ids") as? List<String> ?: emptyList())
-                                        .map { it.replace("/", "-") }
-                                    @Suppress("UNCHECKED_CAST")
-                                    val deletedActivities = (agentDoc?.get("deleted_activity_dates") as? List<String> ?: emptyList())
-                                        .map { it.replace("/", "-") }
+                                    val deletedHouses = agentDoc?.tombstoneKeys("deleted_house_ids") ?: emptySet()
+                                    val deletedActivities = agentDoc?.tombstoneKeys("deleted_activity_dates") ?: emptySet()
                                     
                                     Triple(houses, activities, deletedHouses to deletedActivities)
                                 }
@@ -237,10 +240,20 @@ class SyncPullHandler @Inject constructor(
                         if (!isTargetDifferentUser) {
                             val maxObservedTime = (cloudHouses.map { it.lastUpdated } + cloudDayActivities.map { it.lastUpdated }).maxOrNull() ?: 0L
                             val safetyAnchor = serverTime - 600000L 
-                            settingsManager.setLastSyncTimestamp(maxOf(maxObservedTime, safetyAnchor))
+                            val finalSyncTime = maxOf(maxObservedTime, safetyAnchor)
+                            settingsManager.setLastSyncTimestamp(finalSyncTime)
+                            
+                            val currentDeviceTime = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis()
+                            val skew = maxObservedTime - currentDeviceTime
+                            settingsManager.setClockSkewMs(skew)
+                            
+                            Result.success(SyncRepository.SyncResult(
+                                cloudMaxTime = finalSyncTime,
+                                clockSkewMs = skew
+                            ))
+                        } else {
+                            Result.success(SyncRepository.SyncResult())
                         }
-
-                        Result.success(Unit)
                     } catch (e: Exception) {
                         AppLogger.e("SyncPullHandler", "Pull failed", e)
                         Result.failure(e)

@@ -194,28 +194,23 @@ fun HomeHeader(
                             readOnly = true,
                             enabled = false
                         )
-                        CompactDropdown(
-                            currentValue = ciclo.uppercase(),
-                            options = (1..6).map { "${it}º" },
-                            onOptionSelected = { 
-                                onUpdateHeader(municipio, bairro, "BRR", zona, tipo, data, it.uppercase(), atividade)
-                            },
+                        CompactInputBox(
+                            value = ciclo.uppercase(),
+                            onValueChange = {},
                             label = "Ciclo",
                             modifier = Modifier.weight(1f),
+                            readOnly = true,
                             enabled = false
                         )
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CompactDropdown(
-                            currentValue = (AppConstants.TIPO_OPTIONS.find { it.startsWith("$tipo -") } ?: tipo.toString()).uppercase(),
-                            options = AppConstants.TIPO_OPTIONS.map { it.uppercase() },
-                            onOptionSelected = { 
-                                val intVal = it.split(" - ").firstOrNull()?.toIntOrNull() ?: 0
-                                onUpdateHeader(municipio, bairro, "BRR", zona, intVal, data, ciclo, atividade)
-                            },
+                        CompactInputBox(
+                            value = (AppConstants.TIPO_OPTIONS.find { it.startsWith("$tipo -") } ?: tipo.toString()).uppercase(),
+                            onValueChange = {},
                             label = "Tipo Visit.",
                             modifier = Modifier.weight(1f),
+                            readOnly = true,
                             enabled = false
                         )
                         CompactDropdown(

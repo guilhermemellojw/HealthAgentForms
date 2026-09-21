@@ -3,30 +3,15 @@ package com.antigravity.healthagent.data.sync
 import android.content.Context
 import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.utils.AppConstants
-import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class VersionChecker @Inject constructor(
-    private val firestore: FirebaseFirestore
+    private val settingsSource: SystemSettingsSource
 ) {
     suspend fun fetchSystemSettings(): Result<Map<String, Any>> {
-        return try {
-            val snapshot = withTimeoutOrNull(5000) {
-                firestore.collection("metadata").document("settings")
-                    .get().await()
-            }
-            if (snapshot == null) return Result.success(emptyMap())
-            val settings = snapshot.data ?: emptyMap()
-            Result.success(settings)
-        } catch (e: Exception) {
-            AppLogger.w("VersionChecker", "fetchSystemSettings offline fallback: ${e.message}")
-            Result.success(emptyMap())
-        }
+        return settingsSource.fetchSystemSettings()
     }
 
     fun checkVersion(context: Context, sysSettings: Map<String, Any>): Result<Unit> {
@@ -42,16 +27,11 @@ class VersionChecker @Inject constructor(
     }
 
     fun isWipeRequired(
-        userDoc: DocumentSnapshot,
-        agentDocSnapshot: DocumentSnapshot,
+        flags: RemoteSyncFlags,
         hasSyncHistory: Boolean,
         isTargetDifferentUser: Boolean,
         localUnsyncedCount: Int
     ): Boolean {
-        val requireResetFromUser = userDoc.getBoolean("requireDataReset") ?: false
-        val requireResetFromAgent = agentDocSnapshot.getBoolean("requireDataReset") ?: false
-        val agentDocExists = agentDocSnapshot.exists()
-        
-        return (requireResetFromUser || requireResetFromAgent || (!isTargetDifferentUser && hasSyncHistory && !agentDocExists)) && localUnsyncedCount == 0
+        return (flags.requireDataReset || (!isTargetDifferentUser && hasSyncHistory && !flags.agentDocExists)) && localUnsyncedCount == 0
     }
 }

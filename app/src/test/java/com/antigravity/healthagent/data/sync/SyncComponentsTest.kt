@@ -3,8 +3,6 @@ package com.antigravity.healthagent.data.sync
 import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
-import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FirebaseFirestore
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.Assert.assertEquals
@@ -12,12 +10,15 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private class FakeSettingsSource : SystemSettingsSource {
+    override suspend fun fetchSystemSettings(): Result<Map<String, Any>> = Result.success(emptyMap())
+}
+
 class SyncComponentsTest {
 
     @Test
     fun testVersionChecker_CheckVersionSuccess() {
-        val firestore = mockk<FirebaseFirestore>()
-        val checker = VersionChecker(firestore)
+        val checker = VersionChecker(FakeSettingsSource())
 
         val context = mockk<Context>()
         val packageManager = mockk<PackageManager>()
@@ -37,8 +38,7 @@ class SyncComponentsTest {
 
     @Test
     fun testVersionChecker_CheckVersionOutdated() {
-        val firestore = mockk<FirebaseFirestore>()
-        val checker = VersionChecker(firestore)
+        val checker = VersionChecker(FakeSettingsSource())
 
         val context = mockk<Context>()
         val packageManager = mockk<PackageManager>()
@@ -59,20 +59,17 @@ class SyncComponentsTest {
 
     @Test
     fun testVersionChecker_WipeRequired() {
-        val firestore = mockk<FirebaseFirestore>()
-        val checker = VersionChecker(firestore)
+        val checker = VersionChecker(FakeSettingsSource())
 
-        val userDoc = mockk<DocumentSnapshot>()
-        val agentDoc = mockk<DocumentSnapshot>()
-
-        every { userDoc.getBoolean("requireDataReset") } returns true
-        every { agentDoc.getBoolean("requireDataReset") } returns false
-        every { agentDoc.exists() } returns true
+        val flags = RemoteSyncFlags(
+            requireDataResetFromUser = true,
+            requireDataResetFromAgent = false,
+            agentDocExists = true
+        )
 
         // localUnsyncedCount == 0, requireResetFromUser == true -> wipe required
         val wipeRequired = checker.isWipeRequired(
-            userDoc = userDoc,
-            agentDocSnapshot = agentDoc,
+            flags = flags,
             hasSyncHistory = true,
             isTargetDifferentUser = false,
             localUnsyncedCount = 0
@@ -81,8 +78,7 @@ class SyncComponentsTest {
 
         // localUnsyncedCount > 0 -> wipe should not be required (prevent deleting unsynced work)
         val wipeRequiredWithUnsynced = checker.isWipeRequired(
-            userDoc = userDoc,
-            agentDocSnapshot = agentDoc,
+            flags = flags,
             hasSyncHistory = true,
             isTargetDifferentUser = false,
             localUnsyncedCount = 3

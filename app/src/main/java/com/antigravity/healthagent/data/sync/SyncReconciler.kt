@@ -23,10 +23,6 @@ class SyncReconciler @Inject constructor(
         val identityKey: String = house.generateIdentityKey()
     )
 
-    private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        return houseRepository.runInTransaction { block() }
-    }
-
     suspend fun reconcile(
         uid: String,
         finalAgentName: String,
@@ -35,7 +31,8 @@ class SyncReconciler @Inject constructor(
         cloudDayActivities: List<DayActivity>,
         cloudDeletedHouses: MutableSet<String>,
         cloudDeletedActivities: MutableSet<String>,
-        teammateHouses: List<House>
+        teammateHouses: List<House>,
+        healRemoteTombstones: Boolean = true
     ): Result<Unit> {
         return try {
             // --- SELF-HEALING: Clean up zombie tombstones in Firestore ---
@@ -49,7 +46,7 @@ class SyncReconciler @Inject constructor(
             }
             val zombieHouses = cloudDeletedHouses.filter { it in validCloudHouseKeys }
 
-            if (zombieActivities.isNotEmpty() || zombieHouses.isNotEmpty()) {
+            if ((zombieActivities.isNotEmpty() || zombieHouses.isNotEmpty()) && healRemoteTombstones) {
                 cloudDeletedActivities.removeAll(zombieActivities.toSet())
                 cloudDeletedHouses.removeAll(zombieHouses.toSet())
 
@@ -118,7 +115,7 @@ class SyncReconciler @Inject constructor(
 
             allLocalActivities.filter { it.date.replace("/", "-") in cloudDeletedActivities && it.date.replace("/", "-") !in closedDates }.forEach {
                 AppLogger.i("SyncReconciler", "Cloud Deletion Sync: Deleting local activity ${it.date} for $finalAgentName")
-                runInTransactionWithRetry {
+                houseRepository.runInTransaction {
                     houseRepository.deleteDayActivity(it.date, it.agentUid)
                 }
             }
@@ -156,7 +153,7 @@ class SyncReconciler @Inject constructor(
                 dateKey !in cloudDeletedActivities && dateKey !in localActivityTombstoneKeys
             }
 
-            runInTransactionWithRetry {
+            houseRepository.runInTransaction {
                 if (housesToDelete.isNotEmpty()) {
                     val tombstonesToInsert = mutableListOf<Tombstone>()
                     for (house in housesToDelete) {
@@ -207,7 +204,8 @@ class SyncReconciler @Inject constructor(
                         val dayActivity = localActivities[dateKey]?.firstOrNull()
                         val cloudActivity = activitiesDelta.find { it.date.replace("/", "-") == normalizedDate }
 
-                        val isCloudUnlocked = cloudActivity?.isManualUnlock == true
+                        val isCloudUnlocked = cloudActivity?.isManualUnlock == true &&
+                            cloudActivity.lastUpdated > (dayActivity?.lastUpdated ?: 0L) + AppConstants.SYNC_CONFLICT_THRESHOLD_MS
                         val isLocallyClosed = dayActivity?.isClosed == true && dayActivity.isManualUnlock != true
 
                         if (isLocallyClosed && !isCloudUnlocked && !cloudHouse.editedByAdmin && !isTargetDifferentUser) {
@@ -228,10 +226,7 @@ class SyncReconciler @Inject constructor(
                             (System.currentTimeMillis() - existing.lastUpdated > 120000L)
 
                         if (!isAdminOverride) {
-                            val threshold = AppConstants.SYNC_CONFLICT_THRESHOLD_MS
-                            if (existing.lastUpdated > (cloudHouse.lastUpdated + threshold)) {
-                                return@mapNotNull null
-                            }
+                            return@mapNotNull null
                         }
                     }
 
@@ -255,11 +250,12 @@ class SyncReconciler @Inject constructor(
                     val existing = localActivities[key]?.firstOrNull()
 
                     if (existing != null && !existing.isSynced) {
-                        val isRemoteUnlock = activity.isManualUnlock && !existing.isManualUnlock
+                        val threshold = AppConstants.SYNC_CONFLICT_THRESHOLD_MS
+
+                        val isRemoteUnlock = activity.isManualUnlock && !existing.isManualUnlock &&
+                            activity.lastUpdated > (existing.lastUpdated + threshold)
                         val isAdminOverride = activity.editedByAdmin && !existing.editedByAdmin &&
                             (System.currentTimeMillis() - existing.lastUpdated > 120000L)
-
-                        val threshold = AppConstants.SYNC_CONFLICT_THRESHOLD_MS
 
                         if (!isRemoteUnlock && !isAdminOverride && existing.lastUpdated > (activity.lastUpdated + threshold)) {
                             return@mapNotNull null

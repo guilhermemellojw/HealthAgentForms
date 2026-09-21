@@ -1,10 +1,10 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
     id("com.google.gms.google-services")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 import java.util.Properties
@@ -12,7 +12,9 @@ import java.io.FileInputStream
 
 android {
     namespace = "com.antigravity.healthagent"
-    compileSdk = 34
+    // 36 exigido pelas transitivas do supabase-kt (androidx.browser 1.10, compose 1.9);
+    // targetSdk/minSdk intocados = sem mudança de comportamento em runtime.
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.antigravity.healthagent"
@@ -34,11 +36,24 @@ android {
         }
         val mapsApiKey = properties.getProperty("MAPS_API_KEY") ?: ""
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
+
+        // Supabase (shadow). Chaves via local.properties (gitignored); sem fallback
+        // hardcoded — BuildConfig vazio falha explícito no provider. USE_SUPABASE_AUTH
+        // seleciona a implementação Supabase no Hilt (padrão: Firebase).
+        val supabaseUrl = properties.getProperty("SUPABASE_URL") ?: ""
+        val supabaseKey = properties.getProperty("SUPABASE_PUBLISHABLE_KEY") ?: ""
+        val useSupabaseAuth = properties.getProperty("USE_SUPABASE_AUTH")?.toBoolean() ?: false
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_KEY", "\"$supabaseKey\"")
+        buildConfigField("boolean", "USE_SUPABASE_AUTH", "$useSupabaseAuth")
+        val useSupabaseSync = properties.getProperty("USE_SUPABASE_SYNC")?.toBoolean() ?: false
+        buildConfigField("boolean", "USE_SUPABASE_SYNC", "$useSupabaseSync")
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -46,14 +61,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
     buildFeatures {
+        buildConfig = true
         compose = true
-    }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.4"
     }
     packaging {
         resources {
@@ -77,6 +87,16 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
 
     implementation("androidx.core:core-ktx:1.12.0")
@@ -93,14 +113,14 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.5")
 
     // Room
-    val roomVersion = "2.6.1"
+    val roomVersion = "2.7.0-alpha13"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 
     // Hilt
-    implementation("com.google.dagger:hilt-android:2.51.1")
-    ksp("com.google.dagger:hilt-android-compiler:2.51.1")
+    implementation("com.google.dagger:hilt-android:2.60.1")
+    ksp("com.google.dagger:hilt-android-compiler:2.60.1")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
     
     // JSON
@@ -126,6 +146,13 @@ dependencies {
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-storage")
+
+    // Supabase (Fase 2 — auth + postgrest; realtime/storage nas próximas fatias)
+    implementation("io.github.jan-tennert.supabase:auth-kt:3.8.0")
+    implementation("io.github.jan-tennert.supabase:postgrest-kt:3.8.0")
+    implementation("io.github.jan-tennert.supabase:realtime-kt:3.8.0")
+    implementation("io.github.jan-tennert.supabase:storage-kt:3.8.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     
     // Auth (Google Sign-In via Credential Manager)
     implementation("androidx.credentials:credentials:1.2.1")
@@ -142,6 +169,8 @@ dependencies {
     testImplementation("androidx.test:rules:1.6.1")
     testImplementation("androidx.test.ext:junit-ktx:1.2.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    testImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
     androidTestImplementation(platform("androidx.compose:compose-bom:2023.08.00"))
@@ -161,13 +190,16 @@ dependencies {
     // Splash Screen
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("com.google.android.material:material:1.11.0")
+
+    // Security & Cryptography
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 }
     // Custom task for data audit (local export + comparison)
-    val exportLocalDb by tasks.registering(Exec::class) {
+    val exportLocalDb = tasks.register<Exec>("exportLocalDb") {
         commandLine("bash", "./scripts/export_local_db.sh")
     }
 
-    val compareDatasets by tasks.registering(Exec::class) {
+    val compareDatasets = tasks.register<Exec>("compareDatasets") {
         commandLine("python3", "../scripts/compare_datasets.py", "guigomelo9@gmail.com")
     }
 

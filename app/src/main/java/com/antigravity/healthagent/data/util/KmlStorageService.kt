@@ -1,5 +1,6 @@
 package com.antigravity.healthagent.data.util
 
+import com.antigravity.healthagent.domain.logger.AppLogger
 import android.content.Context
 import android.net.Uri
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -22,7 +23,7 @@ class KmlStorageService @Inject constructor(
             }
             internalFile.absolutePath
         } catch (e: Exception) {
-            android.util.Log.e("KmlStorageService", "Error copying KML", e)
+            AppLogger.e("KmlStorageService", "Error copying KML", e)
             null
         }
     }
@@ -32,7 +33,7 @@ class KmlStorageService @Inject constructor(
             val takeFlags: Int = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
             context.contentResolver.takePersistableUriPermission(uri, takeFlags)
         } catch (e: SecurityException) {
-            android.util.Log.e("KmlStorageService", "SecurityException taking permission", e)
+            AppLogger.e("KmlStorageService", "SecurityException taking permission", e)
         }
     }
 }

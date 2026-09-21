@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.antigravity.healthagent.domain.repository.AuthRepository
 import com.antigravity.healthagent.domain.repository.AuthUser
 import com.antigravity.healthagent.domain.repository.AccessRequest
+import com.antigravity.healthagent.domain.logger.AppLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,7 +47,8 @@ class LoginViewModel @Inject constructor(
                         try {
                             syncRepository.pullCloudDataToLocal()
                         } catch (e: Exception) {
-                            android.util.Log.e("LoginViewModel", "Background sync failed", e)
+                            AppLogger.e("LoginViewModel", "Background sync failed", e)
+                            setError("Sincronização inicial falhou: ${e.message}")
                         }
                     }
                 }
@@ -83,6 +85,7 @@ class LoginViewModel @Inject constructor(
     }
 
     fun signOut() {
+        _requestSent.value = false
         viewModelScope.launch {
             authRepository.signOut()
         }
@@ -91,8 +94,12 @@ class LoginViewModel @Inject constructor(
     private val _requestSent = MutableStateFlow(false)
     val requestSent: StateFlow<Boolean> = _requestSent.asStateFlow()
 
+    private val _isRequesting = MutableStateFlow(false)
+    val isRequesting: StateFlow<Boolean> = _isRequesting.asStateFlow()
+
     fun requestAccess(requestedName: String? = null) {
         val user = (authState.value as? AuthState.WaitingForAuthorization)?.user ?: return
+        _isRequesting.value = true
         viewModelScope.launch {
             val result = accessControlRepository.requestAccess(user.uid, user.email ?: "", user.displayName, requestedName)
             if (result.isSuccess) {
@@ -100,6 +107,7 @@ class LoginViewModel @Inject constructor(
             } else {
                 setError("Erro ao solicitar acesso: ${result.exceptionOrNull()?.message}")
             }
+            _isRequesting.value = false
         }
     }
 }

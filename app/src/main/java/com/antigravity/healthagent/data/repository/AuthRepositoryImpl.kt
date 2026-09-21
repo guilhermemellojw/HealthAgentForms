@@ -1,5 +1,7 @@
 package com.antigravity.healthagent.data.repository
 
+import com.antigravity.healthagent.domain.logger.AppLogger
+
 import com.antigravity.healthagent.domain.repository.AuthRepository
 import com.antigravity.healthagent.domain.repository.AuthUser
 import com.google.firebase.auth.FirebaseAuth
@@ -22,6 +24,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import com.antigravity.healthagent.domain.repository.AgentRepository
 import com.antigravity.healthagent.domain.repository.SyncRepository
+import com.antigravity.healthagent.data.sync.reclaimLocalIdentity
 
 
 @Singleton
@@ -36,7 +39,7 @@ class AuthRepositoryImpl @Inject constructor(
     private val workManager: androidx.work.WorkManager
 ) : AuthRepository {
 
-    private val BOOTSTRAP_ADMINS = listOf("guigomelo9@gmail.com", "gmellobkp@gmail.com")
+    private val BOOTSTRAP_ADMINS = listOf("gmellobkp@gmail.com")
 
     init {
         // Explicitly enable network to ensure Firestore doesn't stay in offline mode
@@ -93,11 +96,11 @@ class AuthRepositoryImpl @Inject constructor(
                                     // Proactively update cache with the latest cloud data
                                     launch { settingsManager.saveUserProfile(updatedUser) }
                                 } catch (e: Exception) {
-                                    android.util.Log.e("AuthRepository", "Crash prevented in SnapshotListener: ${e.message}", e)
+                                    AppLogger.e("AuthRepository", "Crash prevented in SnapshotListener: ${e.message}", e)
                                 }
                             }
                     } catch (e: Exception) {
-                        android.util.Log.e("AuthRepository", "Error fetching user data, trying cache fallback", e)
+                        AppLogger.e("AuthRepository", "Error fetching user data, trying cache fallback", e)
                         
                         // DEEP FALLBACK: If getFullUserData fails (e.g. timeout + cache error), 
                         // try one last time to get ANYTHING from cache to avoid kicking user out.
@@ -140,20 +143,26 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun signOut() {
-        android.util.Log.i("AuthRepository", "SignOut requested - Performing immediate session clear...")
+        AppLogger.i("AuthRepository", "SignOut requested - Performing immediate session clear...")
         
         // 1. CANCEL ACTIVE SYNC WORK
         workManager.cancelAllWorkByTag("sync")
         
         // 2. IMMEDIATE FIREBASE SIGNOUT (Safety First)
-        // We sign out here to ensure that any subsequent login immediately sees a fresh context
         auth.signOut()
 
         // 3. CLEAR SESSION SETTINGS (UI Sync)
         settingsManager.clearSessionSettings()
         
-        // 4. ENQUEUE BACKGROUND DATABASE WIPE
-        // We still use LogoutWorker to ensure the database is wiped even if the app is killed.
+        // 4. SYNCHRONOUS DATABASE WIPE
+        try {
+            syncRepository.clearLocalData()
+            AppLogger.i("AuthRepository", "Immediate synchronous database wipe completed.")
+        } catch (e: Exception) {
+            AppLogger.e("AuthRepository", "Immediate database wipe failed: ${e.message}")
+        }
+        
+        // 5. ENQUEUE BACKGROUND DATABASE WIPE (Double-check safety)
         val logoutRequest = androidx.work.OneTimeWorkRequestBuilder<com.antigravity.healthagent.data.sync.LogoutWorker>()
             .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
@@ -173,7 +182,7 @@ class AuthRepositoryImpl @Inject constructor(
         
         // 0. CHECK BOOTSTRAP ADMINS
         if (BOOTSTRAP_ADMINS.contains(email)) {
-            android.util.Log.i("AuthRepository", "Bootstrap Admin detected: $email")
+            AppLogger.i("AuthRepository", "Bootstrap Admin detected: $email")
             // Proactively ensure they are in the 'admins' collection and authorized with timeout
             try {
                 withTimeoutOrNull(2000) {
@@ -184,7 +193,7 @@ class AuthRepositoryImpl @Inject constructor(
                     ).await()
                 }
             } catch (e: Exception) {
-                android.util.Log.e("AuthRepository", "Failed to persist bootstrap admin status or timed out", e)
+                AppLogger.e("AuthRepository", "Failed to persist bootstrap admin status or timed out", e)
                 // If update fails, user might not exist yet, try to create with timeout
                 try {
                     withTimeoutOrNull(2000) {
@@ -205,7 +214,7 @@ class AuthRepositoryImpl @Inject constructor(
                         ), com.google.firebase.firestore.SetOptions.merge()).await()
                     }
                 } catch(e2: Exception) {
-                    android.util.Log.e("AuthRepository", "Failed to create bootstrap admin profile or timed out", e2)
+                    AppLogger.e("AuthRepository", "Failed to create bootstrap admin profile or timed out", e2)
                 }
             }
             val bootstrapUser = AuthUser(
@@ -224,7 +233,7 @@ class AuthRepositoryImpl @Inject constructor(
         // 1. Immediate Cache Check
         val cached = settingsManager.cachedUser.firstOrNull()
         if (cached != null && cached.uid == uid) {
-             android.util.Log.i("AuthRepository", "Checking for updates for $email (cached role: ${cached.role})")
+             AppLogger.i("AuthRepository", "Checking for updates for $email (cached role: ${cached.role})")
              // Performance Optimization: If we have a cached user, we can return it if the network is likely off
              // But we still want to try a refresh to ensure roles/permissions are up to date.
         }
@@ -242,7 +251,7 @@ class AuthRepositoryImpl @Inject constructor(
                 val doc = try {
                     firestore.collection("users").document(uid).get(Source.SERVER).await()
                 } catch (e: Exception) {
-                    android.util.Log.w("AuthRepository", "Failed to fetch user doc: ${e.message}")
+                    AppLogger.w("AuthRepository", "Failed to fetch user doc: ${e.message}")
                     null
                 }
 
@@ -250,13 +259,13 @@ class AuthRepositoryImpl @Inject constructor(
                 val isAdminInColl = try {
                     firestore.collection("admins").document(uid).get().await().exists()
                 } catch (e: Exception) {
-                    android.util.Log.w("AuthRepository", "Admin check bypassed/restricted: ${e.message}")
+                    AppLogger.w("AuthRepository", "Admin check bypassed/restricted: ${e.message}")
                     false
                 }
                 
                 Triple(true, doc, isAdminInColl)
             } catch (e: Exception) { 
-                android.util.Log.e("AuthRepository", "Online check failed entirely: ${e.message}")
+                AppLogger.e("AuthRepository", "Online check failed entirely: ${e.message}")
                 null 
             }
         }
@@ -285,13 +294,13 @@ class AuthRepositoryImpl @Inject constructor(
                 // Use a predictable document ID for pre-registration based on email
                 val normalizedEmail = email.trim().lowercase()
                 val preDocId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
-                android.util.Log.i("AuthRepository", "Checking for pre-registration invitations: $preDocId")
+                AppLogger.i("AuthRepository", "Checking for pre-registration invitations: $preDocId")
                 
                 // Fetch the invited profile if it exists
                 val preUserDoc = withTimeoutOrNull(3000) { firestore.collection("users").document(preDocId).get().await() }
                 
                 if (preUserDoc != null && preUserDoc.exists()) {
-                    android.util.Log.i("AuthRepository", "INVITATION FOUND: Pre-registered user profile for $email")
+                    AppLogger.i("AuthRepository", "INVITATION FOUND: Pre-registered user profile for $email")
                     
                     // CRITICAL: Perform phase 1 migration (Authorization) immediately
                     val migrationResult = migratePreRegistration(email, uid)
@@ -304,13 +313,13 @@ class AuthRepositoryImpl @Inject constructor(
                     // 2. Check direct 'agents' pre-registration doc (from legacy restoration)
                     val preAgentDoc = withTimeoutOrNull(3000) { firestore.collection("agents").document(preDocId).get().await() }
                     if (preAgentDoc != null && preAgentDoc.exists()) {
-                        android.util.Log.i("AuthRepository", "LEGACY DATA FOUND: Pre-registered agent data for $email")
+                        AppLogger.i("AuthRepository", "LEGACY DATA FOUND: Pre-registered agent data for $email")
                         migratePreRegistration(email, uid)
                         userDoc = withTimeoutOrNull(2000) { firestore.collection("users").document(uid).get().await() }
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.w("AuthRepository", "Migration attempt bypassed: ${e.message}")
+                AppLogger.w("AuthRepository", "Migration attempt bypassed: ${e.message}")
             }
         }
 
@@ -319,11 +328,11 @@ class AuthRepositoryImpl @Inject constructor(
             try {
                 val cached = settingsManager.cachedUser.first()
                 if (cached != null && cached.uid == uid) {
-                    android.util.Log.i("AuthRepository", "Using CACHED user profile for $email")
+                    AppLogger.i("AuthRepository", "Using CACHED user profile for $email")
                     return cached
                 }
             } catch (e: Exception) {
-                android.util.Log.e("AuthRepository", "Error reading cached user", e)
+                AppLogger.e("AuthRepository", "Error reading cached user", e)
             }
 
             // Emergency Fallback: If we couldn't fetch data but it's the admin email, 
@@ -333,7 +342,7 @@ class AuthRepositoryImpl @Inject constructor(
             } else false
 
             if (isAdminEmail) {
-                android.util.Log.w("AuthRepository", "EMERGENCY: Admin mode via email match (Doc not found)")
+                AppLogger.w("AuthRepository", "EMERGENCY: Admin mode via email match (Doc not found)")
                 val emergencyUser = AuthUser(
                     uid = uid,
                     email = email,
@@ -377,7 +386,7 @@ class AuthRepositoryImpl @Inject constructor(
                         "isPreRegistered" to false
                     ), com.google.firebase.firestore.SetOptions.merge()).await()
                 } catch(e: Exception) {
-                    android.util.Log.e("AuthRepository", "Failed to create new user profile", e)
+                    AppLogger.e("AuthRepository", "Failed to create new user profile", e)
                 }
             }
             
@@ -415,7 +424,27 @@ class AuthRepositoryImpl @Inject constructor(
                 finalRole = UserRole.ADMIN
                 isAuthorized = true
             } catch (e: Exception) {
-                android.util.Log.e("AuthRepository", "Failed to self-correct admin permissions", e)
+                AppLogger.e("AuthRepository", "Failed to self-correct admin permissions", e)
+            }
+        }
+
+        // Self-correction: downgrade non-verified elevated roles to AGENT
+        if (finalRole != UserRole.AGENT) {
+            val isVerified = try {
+                when (finalRole) {
+                    UserRole.ADMIN -> isAdminInCollection || BOOTSTRAP_ADMINS.contains(email)
+                    UserRole.SUPERVISOR -> firestore.collection("supervisors").document(uid).get().await().exists()
+                    else -> false
+                }
+            } catch (e: Exception) { false }
+            if (!isVerified) {
+                AppLogger.w("AuthRepository", "Self-correction: role $finalRole not verified for $email, downgrading to AGENT")
+                finalRole = UserRole.AGENT
+                try {
+                    firestore.collection("users").document(uid).update("role", UserRole.AGENT.name).await()
+                } catch (e: Exception) {
+                    AppLogger.e("AuthRepository", "Failed to self-correct role for $email", e)
+                }
             }
         }
         
@@ -431,37 +460,14 @@ class AuthRepositoryImpl @Inject constructor(
 
         // Proactive ID Recovery: Link any orphaned local data to this real UID
         if (isAuthorized) {
-            try {
-                val emailPrefix = user.email?.substringBefore("@")?.uppercase() ?: ""
-                val properName = user.standardName
-                
-                // 1. House Migration & Reclamation
-                val misattributedHouses = houseDao.getHousesToReclaim(user.email ?: "", emailPrefix, user.uid, properName)
-                for (house in misattributedHouses) {
-                    val hasClash = houseDao.checkClash(
-                        user.uid, house.data, house.address.blockNumber, house.address.blockSequence, 
-                        house.address.streetName, house.address.number, house.address.sequence, house.address.complement, house.address.bairro, house.visitSegment
-                    ) > 0
-                    
-                    if (hasClash) {
-                        houseDao.deleteHouseById(house.id)
-                    } else {
-                        houseDao.updateHouseIdentity(house.id, user.uid, properName)
-                    }
-                }
-
-                // We already reclaimed houses above during the clash check.
-
-                // 2. Day Activity Migration & Reclamation
-                val activitiesToReclaim = activityDao.getActivitiesToReclaim(user.email ?: "", emailPrefix, user.uid, properName)
-                if (activitiesToReclaim.isNotEmpty()) {
-                    android.util.Log.i("AuthRepository", "Reclaiming ${activitiesToReclaim.size} activities for ${user.email}")
-                    activityDao.reclaimActivities(user.displayName ?: "", user.email ?: "", emailPrefix, user.uid)
-                }
-
-            } catch (e: Exception) {
-                android.util.Log.e("AuthRepository", "Proactive migration failed", e)
-            }
+            reclaimLocalIdentity(
+                houseDao = houseDao,
+                activityDao = activityDao,
+                email = user.email ?: "",
+                uid = user.uid,
+                displayName = user.displayName,
+                standardName = user.standardName
+            )
         }
 
         // Cache the successful profile
@@ -471,7 +477,7 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     private suspend fun getAdminFallback(firebaseUser: FirebaseUser, uid: String, email: String): AuthUser {
-        android.util.Log.i("AuthRepository", "Returning safety admin fallback for $email")
+        AppLogger.i("AuthRepository", "Returning safety admin fallback for $email")
         val fallbackUser = AuthUser(
             uid = uid,
             email = email,
@@ -495,7 +501,7 @@ class AuthRepositoryImpl @Inject constructor(
     override suspend fun migratePreRegistration(email: String, targetUid: String, preferredAgentName: String?): Result<Unit> {
         val normalizedEmail = email.trim().lowercase()
         val preDocId = "pre_${normalizedEmail.replace(".", "_").replace("@", "_")}"
-        android.util.Log.i("AuthRepository", "Starting atomic migration for $email to $targetUid")
+        AppLogger.i("AuthRepository", "Starting atomic migration for $email to $targetUid")
         
         var preAgentName: String? = null
         // Dialog choice wins over the pre-registered name; blank keeps old behavior.
@@ -520,7 +526,7 @@ class AuthRepositoryImpl @Inject constructor(
                 android.util.Log.i("AuthRepository", "No pre-registered user doc $preDocId: metadata migration skipped (idempotent)")
             }
         } catch (e: Exception) {
-            android.util.Log.e("AuthRepository", "Error preparing metadata migration", e)
+            AppLogger.e("AuthRepository", "Error preparing metadata migration", e)
         }
 
         // Resolved display name: preferred > pre-registered. Used for the agent
@@ -576,7 +582,7 @@ class AuthRepositoryImpl @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("AuthRepository", "Error preparing agent data migration", e)
+            AppLogger.e("AuthRepository", "Error preparing agent data migration", e)
         }
 
         // 3. Perform Local Migration (Very Important for offline visibility)
@@ -589,13 +595,42 @@ class AuthRepositoryImpl @Inject constructor(
             // 1. House Migration
             val housesToReclaim = houseDao.getHousesToReclaim(email, emailPrefix, targetUid, matchName)
             for (house in housesToReclaim) {
-                val hasClash = houseDao.checkClash(
-                    targetUid, house.data, house.address.blockNumber, house.address.blockSequence, 
-                    house.address.streetName, house.address.number, house.address.sequence, house.address.complement, house.address.bairro, house.visitSegment
-                ) > 0
+                val dateDash = house.data.replace("/", "-")
+                val conflicts = houseDao.getHousesByDateAndAgent(house.data, targetUid)
+                val conflict = conflicts.find { conflict ->
+                    conflict.address.blockNumber.equals(house.address.blockNumber, ignoreCase = true) &&
+                    conflict.address.blockSequence.equals(house.address.blockSequence, ignoreCase = true) &&
+                    conflict.address.streetName.equals(house.address.streetName, ignoreCase = true) &&
+                    conflict.address.number.equals(house.address.number, ignoreCase = true) &&
+                    conflict.address.sequence == house.address.sequence &&
+                    conflict.address.complement == house.address.complement &&
+                    conflict.address.bairro.equals(house.address.bairro, ignoreCase = true) &&
+                    conflict.visitSegment == house.visitSegment
+                }
                 
-                if (hasClash) {
-                    houseDao.deleteHouseById(house.id)
+                if (conflict != null) {
+                    val isHouseClosed = activityDao.getDayActivity(dateDash, house.agentUid)?.let { it.isClosed && !it.isManualUnlock } ?: false
+                    val isConflictClosed = activityDao.getDayActivity(dateDash, targetUid)?.let { it.isClosed && !it.isManualUnlock } ?: false
+                    
+                    if (isHouseClosed || isConflictClosed) {
+                        // CLOSED-DAY GUARD: skip deletion of duplicate conflict or house
+                        if (!isHouseClosed) {
+                            houseDao.updateHouseIdentity(house.id, targetUid, properName)
+                        }
+                    } else {
+                        // MERGE LOGIC: Prefer the house that has actual fieldwork data (treatment)
+                        val localHasWork = house.treatment.a1 > 0 || house.treatment.a2 > 0 || house.treatment.comFoco || house.observation.isNotBlank()
+                        val conflictHasWork = conflict.treatment.a1 > 0 || conflict.treatment.a2 > 0 || conflict.treatment.comFoco || conflict.observation.isNotBlank()
+                        
+                        if (localHasWork && !conflictHasWork) {
+                            AppLogger.i("AuthRepository", "Migration: Overwriting empty cloud skeleton with local production for ${house.id}")
+                            houseDao.deleteHouse(conflict)
+                            houseDao.updateHouseIdentity(house.id, targetUid, properName)
+                        } else {
+                            // Conflict already has work or local is also empty
+                            houseDao.deleteHouseById(house.id)
+                        }
+                    }
                 } else {
                     houseDao.updateHouseIdentity(house.id, targetUid, properName)
                 }
@@ -604,7 +639,7 @@ class AuthRepositoryImpl @Inject constructor(
             // 2. Activity Migration
             activityDao.reclaimActivities(properName, email, emailPrefix, targetUid)
         } catch (e: Exception) {
-            android.util.Log.e("AuthRepository", "Local migration failed", e)
+            AppLogger.e("AuthRepository", "Local migration failed", e)
         }
         return Result.success(Unit)
     }

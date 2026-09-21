@@ -2,6 +2,7 @@ package com.antigravity.healthagent.ui.quarteiroes
 
 import android.Manifest
 import android.content.pm.PackageManager
+import com.antigravity.healthagent.domain.logger.AppLogger
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -37,10 +38,15 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import com.antigravity.healthagent.utils.formatStreetName
@@ -52,6 +58,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import com.antigravity.healthagent.ui.quarteiroes.FolderItem
+import com.antigravity.healthagent.ui.quarteiroes.LayerItem
+import com.antigravity.healthagent.ui.quarteiroes.RenderGeometry
+import com.antigravity.healthagent.ui.quarteiroes.RenderKmlFolders
+import com.antigravity.healthagent.ui.quarteiroes.RenderPlacemark
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.android.gms.location.LocationServices
@@ -92,7 +104,8 @@ fun QuarteiroesScreen(
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val context = LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -131,7 +144,7 @@ fun QuarteiroesScreen(
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
             } catch (e: Exception) {
-                android.util.Log.e("QuarteiroesScreen", "Failed to take persistable permission", e)
+                AppLogger.e("QuarteiroesScreen", "Failed to take persistable permission", e)
             }
             viewModel.setKmlUri(it)
         }
@@ -192,13 +205,33 @@ fun QuarteiroesScreen(
         val isLoading by viewModel.isLoading.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
 
+        val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isLoading
+
         PullToRefreshBox(
             isRefreshing = isLoading,
             onRefresh = { viewModel.refreshData() },
             state = pullToRefreshState,
+            indicator = {
+                CustomSyncPullIndicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isLoading,
+                    isSolarMode = false
+                )
+            },
             modifier = Modifier.padding(padding).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
+                if (!isPullActive) {
+                    SyncCompactBalloon(
+                        feedbackManager = feedbackManager,
+                        isEasyMode = isEasyMode,
+                        isSolarMode = false,
+                        isPullActive = isPullActive,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(3000f)
+                    )
+                }
                 GoogleMap(
                     modifier = Modifier.fillMaxSize(),
                     cameraPositionState = cameraPositionState,
@@ -459,240 +492,4 @@ fun QuarteiroesScreen(
 }
 }
 
-@Composable
-fun RenderKmlFolders(folders: List<KmlFolder>) {
-    folders.forEach { folder ->
-        if (folder.isVisible) {
-            // Render Children Folders
-            RenderKmlFolders(folders = folder.children)
-            // Render Placemarks
-            folder.placemarks.forEach { placemark ->
-                RenderPlacemark(placemark)
-            }
-        }
-    }
-}
 
-@Composable
-fun RenderPlacemark(placemark: KmlPlacemark) {
-    val style = placemark.style
-    
-    when (val geometry = placemark.geometry) {
-        is KmlGeometry.LineString -> {
-             Polyline(
-                 points = geometry.coordinates,
-                 color = androidx.compose.ui.graphics.Color(style?.lineStyle?.color ?: android.graphics.Color.BLACK),
-                 width = style?.lineStyle?.width ?: 5f
-             )
-        }
-        is KmlGeometry.Polygon -> {
-            Polygon(
-                points = geometry.outerBoundary,
-                fillColor = androidx.compose.ui.graphics.Color(style?.polyStyle?.color ?: android.graphics.Color.TRANSPARENT),
-                strokeColor = androidx.compose.ui.graphics.Color(style?.lineStyle?.color ?: android.graphics.Color.BLACK),
-                strokeWidth = style?.lineStyle?.width ?: 2f,
-                visible = true
-            )
-        }
-        is KmlGeometry.Point -> {
-            // Updated to use MarkerComposable for custom icons
-            RenderGeometry(geometry, style, placemark.name, placemark.description)
-        }
-        is KmlGeometry.MultiGeometry -> {
-             geometry.geometries.forEach { subGeom ->
-                 RenderGeometry(subGeom, style, placemark.name, placemark.description)
-             }
-        }
-    }
-}
-
-@Composable
-fun RenderGeometry(geometry: KmlGeometry, style: KmlStyle?, name: String, description: String?) {
-    when (geometry) {
-        is KmlGeometry.LineString -> {
-             Polyline(
-                 points = geometry.coordinates,
-                 color = androidx.compose.ui.graphics.Color(style?.lineStyle?.color ?: android.graphics.Color.BLACK),
-                 width = style?.lineStyle?.width?.coerceAtLeast(3f) ?: 5f // Ensure visibility
-             )
-        }
-        is KmlGeometry.Polygon -> {
-            Polygon(
-                points = geometry.outerBoundary,
-                fillColor = if (style?.polyStyle?.fill == true) androidx.compose.ui.graphics.Color(style.polyStyle.color) else androidx.compose.ui.graphics.Color.Transparent,
-                strokeColor = androidx.compose.ui.graphics.Color(style?.lineStyle?.color ?: android.graphics.Color.BLACK),
-                strokeWidth = style?.lineStyle?.width ?: 2f,
-                visible = true
-            )
-        }
-        is KmlGeometry.Point -> {
-            val iconStyle = style?.iconStyle
-            
-            // Determine effective color
-            val parsedColor = if (iconStyle != null && iconStyle.color != 0) iconStyle.color else -1 // -1 is White
-            
-            val fallbackColor = if (parsedColor == -1 || parsedColor == 0) androidx.compose.ui.graphics.Color.Red else androidx.compose.ui.graphics.Color(parsedColor)
-            val tintColor = if (parsedColor != -1 && parsedColor != 0) androidx.compose.ui.graphics.Color(parsedColor) else null
-
-            // Explicit Image Loading logic
-            var iconBitmap by remember(iconStyle?.href) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-            val context = LocalContext.current
-            
-            LaunchedEffect(iconStyle?.href) {
-                if (iconStyle?.href != null) {
-                    val request = ImageRequest.Builder(context)
-                        .data(iconStyle.href)
-                        .allowHardware(false) // Important for Canvas drawing usually
-                        .build()
-                    val result = ImageLoader(context).execute(request)
-                    if (result is SuccessResult) {
-                         iconBitmap = result.drawable.toBitmap().asImageBitmap()
-                    }
-                }
-            }
-
-            MarkerComposable(
-                keys = arrayOf(iconBitmap ?: Unit, geometry.coordinate), // Force Re-render when bitmap loads
-                state = remember(geometry.coordinate) { MarkerState(position = geometry.coordinate) },
-                title = name,
-                snippet = description,
-                alpha = if (tintColor != null) tintColor.alpha else 1f
-            ) {
-                 if (iconStyle?.href != null) {
-                     val sizeDp = (32 * (iconStyle.scale)).coerceAtLeast(24f).dp // Ensure minimum size
-                     
-                     val currentIcon = iconBitmap
-                     
-                     if (currentIcon != null) {
-                         Image(
-                             bitmap = currentIcon,
-                             contentDescription = name,
-                             modifier = Modifier.size(sizeDp),
-                             contentScale = ContentScale.Fit,
-                             colorFilter = if (tintColor != null) ColorFilter.tint(tintColor) else null
-                         )
-                     } else {
-                         // Loading State
-                         Icon(
-                             imageVector = Icons.Default.Place,
-                             contentDescription = null,
-                             tint = Color.Blue, // Debug: Blue for Loading
-                             modifier = Modifier.size(sizeDp)
-                         )
-                     }
-                 } else {
-                     // Fallback to default Icon
-                      Icon(
-                         imageVector = Icons.Default.Place,
-                         contentDescription = name,
-                         tint = fallbackColor,
-                         modifier = Modifier.size(48.dp)
-                     )
-                 }
-            }
-        }
-        is KmlGeometry.MultiGeometry -> {
-             geometry.geometries.forEach { subGeom ->
-                 RenderGeometry(subGeom, style, name, description)
-             }
-        }
-    }
-}
-
-@Composable
-fun FolderItem(
-    folder: KmlFolder,
-    onToggle: (String, Boolean) -> Unit,
-    indentLevel: Int = 0,
-    isEasyMode: Boolean = false
-) {
-    var isExpanded by androidx.compose.runtime.saveable.rememberSaveable(folder.id) { mutableStateOf(false) }
-
-    Column {
-        LayerItem(
-            name = folder.name,
-            isVisible = folder.isVisible,
-            hasChildren = folder.children.isNotEmpty(),
-            isExpanded = isExpanded,
-            onExpandToggle = { isExpanded = !isExpanded },
-            onVisibilityToggle = { isVisible -> onToggle(folder.id, isVisible) },
-            indentLevel = indentLevel,
-            isEasyMode = isEasyMode
-        )
-        
-        if (isExpanded) {
-            folder.children.forEach { child ->
-                FolderItem(
-                    folder = child,
-                    onToggle = onToggle,
-                    indentLevel = indentLevel + 1,
-                    isEasyMode = isEasyMode
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun LayerItem(
-    name: String,
-    isVisible: Boolean,
-    hasChildren: Boolean,
-    isExpanded: Boolean,
-    onExpandToggle: () -> Unit,
-    onVisibilityToggle: (Boolean) -> Unit,
-    indentLevel: Int,
-    isEasyMode: Boolean
-) {
-    val verticalPadding = if (isEasyMode) 12.dp else 4.dp
-    val textStyle = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium
-    val iconSize = if (isEasyMode) 40.dp else 32.dp
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { 
-                onVisibilityToggle(!isVisible) 
-            }
-            .padding(vertical = verticalPadding, horizontal = 8.dp)
-    ) {
-        // Indentation
-        Spacer(modifier = Modifier.size((indentLevel * 16).dp))
-
-        // Expand/Collapse Chevron
-        if (hasChildren) {
-            androidx.compose.material3.IconButton(
-                onClick = onExpandToggle,
-                modifier = Modifier.size(iconSize)
-            ) {
-                Icon(
-                    imageVector = if (isExpanded) androidx.compose.material.icons.Icons.Default.ExpandLess else androidx.compose.material.icons.Icons.Default.ExpandMore,
-                    contentDescription = if (isExpanded) "Recolher" else "Expandir",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(if (isEasyMode) 28.dp else 24.dp)
-                )
-            }
-        } else {
-            // Placeholder for alignment
-            Spacer(modifier = Modifier.size(iconSize))
-        }
-
-        // Name
-        Text(
-            text = name,
-            style = textStyle,
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = 8.dp),
-            fontWeight = if (hasChildren) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal
-        )
-
-        // Visibility Switch
-        androidx.compose.material3.Switch(
-            checked = isVisible,
-            onCheckedChange = onVisibilityToggle,
-            modifier = Modifier.padding(start = 8.dp).then(if (isEasyMode) Modifier.scale(1.2f) else Modifier)
-        )
-    }
-}

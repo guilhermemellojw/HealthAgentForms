@@ -13,7 +13,6 @@ import androidx.compose.material.icons.Icons
 
 import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -44,19 +43,25 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
+import com.antigravity.healthagent.domain.logger.AppLogger
+import com.antigravity.healthagent.ui.state.SyncUiState
 import com.antigravity.healthagent.ui.home.HomeViewModel
 import com.antigravity.healthagent.ui.home.BoletimSummary
 import com.antigravity.healthagent.ui.home.BlockSummary
 import com.antigravity.healthagent.ui.home.DashboardTotals
 import com.antigravity.healthagent.data.local.model.House
 
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.PremiumCard
 import com.antigravity.healthagent.ui.components.CompactDropdown
 import com.antigravity.healthagent.ui.components.MeshGradient
-import com.antigravity.healthagent.ui.components.SyncStatusOverlay
 import com.antigravity.healthagent.ui.components.GlassTopAppBar
-import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
 import com.antigravity.healthagent.utils.formatStreetName
+import com.antigravity.healthagent.domain.repository.DayTransfer
+import com.antigravity.healthagent.domain.repository.DayTransferStatus
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -66,10 +71,12 @@ fun BoletimScreen(
     onOpenSettings: () -> Unit = {},
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
-    onSwitchAccount: () -> Unit = {}
+    onSwitchAccount: () -> Unit = {},
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val boletimList by viewModel.boletimList.collectAsState()
+    val maxOpenHouses by viewModel.maxOpenHouses.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -77,31 +84,34 @@ fun BoletimScreen(
     
     // Logic for Manual Date Transfer
     var moveSourceDate by remember { mutableStateOf("") }
-    if (moveSourceDate.isNotBlank()) {
-        val calendar = java.util.Calendar.getInstance()
-        try {
-            val parts = moveSourceDate.split("-")
-            if (parts.size == 3) {
-                calendar.set(parts[2].toInt(), parts[1].toInt() - 1, parts[0].toInt())
-            }
-        } catch (e: Exception) { e.printStackTrace() }
+    var showMoveDatePicker by remember { mutableStateOf(false) }
 
-        DatePickerDialog(
-            context,
-            { _, year, month, dayOfMonth ->
-                val newDate = String.format(java.util.Locale("pt", "BR"), "%02d-%02d-%04d", dayOfMonth, month + 1, year)
-                if (newDate != moveSourceDate) {
-                    viewModel.moveHousesToDate(moveSourceDate, newDate)
-                    // Snackbar removed here; ViewModel's uiEvent will handle success/error feedback
+    if (showMoveDatePicker && moveSourceDate.isNotBlank()) {
+        LaunchedEffect(moveSourceDate) {
+            val calendar = java.util.Calendar.getInstance()
+            try {
+                val parts = moveSourceDate.split("-")
+                if (parts.size == 3) {
+                    calendar.set(parts[2].toInt(), parts[1].toInt() - 1, parts[0].toInt())
                 }
-                moveSourceDate = ""
-            },
-            calendar.get(java.util.Calendar.YEAR),
-            calendar.get(java.util.Calendar.MONTH),
-            calendar.get(java.util.Calendar.DAY_OF_MONTH)
-        ).apply {
-            setOnDismissListener { moveSourceDate = "" }
-            show()
+            } catch (e: Exception) { AppLogger.e("BoletimScreen", "Erro no DatePickerDialog", e) }
+
+            val dialog = DatePickerDialog(
+                context,
+                { _, year, month, dayOfMonth ->
+                    val newDate = String.format(java.util.Locale("pt", "BR"), "%02d-%02d-%04d", dayOfMonth, month + 1, year)
+                    if (newDate != moveSourceDate) {
+                        viewModel.moveHousesToDate(moveSourceDate, newDate)
+                    }
+                    moveSourceDate = ""
+                },
+                calendar.get(java.util.Calendar.YEAR),
+                calendar.get(java.util.Calendar.MONTH),
+                calendar.get(java.util.Calendar.DAY_OF_MONTH)
+            )
+            dialog.setOnDismissListener { moveSourceDate = "" }
+            showMoveDatePicker = false
+            dialog.show()
         }
     }
     
@@ -123,8 +133,17 @@ fun BoletimScreen(
     // Delete Confirmation Dialog
     var showDeleteDialog by remember { mutableStateOf(false) }
     var deleteDate by remember { mutableStateOf("") }
+
+    // Transfer Day to another agent
+    var showTransferDialog by remember { mutableStateOf(false) }
+    var transferDate by remember { mutableStateOf("") }
+    var transferTargetName by remember { mutableStateOf("") }
+
+    val incomingTransfers by viewModel.incomingTransfers.collectAsState()
+    val outgoingTransfers by viewModel.outgoingTransfers.collectAsState()
+    val agentNames by viewModel.agentNames.collectAsState()
     
-    val dateSdf = remember { java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.US) }
+    val dateSdf = com.antigravity.healthagent.utils.DateUtils.DASH_DATE.get()
     
     fun isDateOld(dateStr: String): Boolean {
         return try {
@@ -241,7 +260,21 @@ fun BoletimScreen(
         )
     }
 
-
+    if (showTransferDialog) {
+        TransferDayDialog(
+            date = transferDate,
+            agentNames = agentNames,
+            houseCount = viewModel.getHousesForDate(transferDate).size,
+            onTargetChange = { transferTargetName = it },
+            onConfirm = {
+                if (transferTargetName.isNotBlank()) {
+                    viewModel.offerDayTransfer(transferDate, transferTargetName)
+                }
+                showTransferDialog = false
+            },
+            onDismiss = { showTransferDialog = false }
+        )
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -262,16 +295,40 @@ fun BoletimScreen(
         }
     ) { paddingValues ->
         val isSyncing by viewModel.isSyncing.collectAsState()
+        val syncFeedback by feedbackManager.feedback.collectAsState()
+        val isRefreshing = syncFeedback is SyncUiState.Syncing || isSyncing
         val pullToRefreshState = rememberPullToRefreshState()
 
+        val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
+
         PullToRefreshBox(
-            isRefreshing = isSyncing,
+            isRefreshing = isRefreshing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
+            indicator = {
+                CustomSyncPullIndicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    isSolarMode = uiState.isSolarMode,
+                    syncStatus = syncFeedback
+                )
+            },
             modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-            com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
+                if (!isPullActive) {
+                    SyncCompactBalloon(
+                        feedbackManager = feedbackManager,
+                        isEasyMode = uiState.isEasyMode,
+                        isSolarMode = uiState.isSolarMode,
+                        isPullActive = isPullActive,
+                        showWhenIdle = true,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(3000f)
+                    )
+                }
+                com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
             
             Column(modifier = Modifier.fillMaxSize()) {
                 
@@ -280,6 +337,20 @@ fun BoletimScreen(
                     contentPadding = PaddingValues(top = 12.dp, start = 12.dp, end = 12.dp, bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+            if (incomingTransfers.isNotEmpty() || outgoingTransfers.isNotEmpty()) {
+                item(key = "day_transfers") {
+                    DayTransferSection(
+                        incoming = incomingTransfers,
+                        outgoing = outgoingTransfers,
+                        isEasyMode = uiState.isEasyMode,
+                        isSolarMode = uiState.isSolarMode,
+                        onAccept = { viewModel.acceptIncoming(it) },
+                        onDecline = { viewModel.declineIncoming(it) },
+                        onCancel = { viewModel.cancelTransfer(it) },
+                        onDeleteDay = { viewModel.deleteDayAfterTransfer(it) }
+                    )
+                }
+            }
             itemsIndexed(boletimList, key = { _, summary -> "${summary.date}|${summary.agentName}" }) { index, summary ->
                 PremiumCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -384,15 +455,14 @@ fun BoletimScreen(
                                          }
                                      }
                                      
-                                     // Individual Status Badge
-                                     StatusBadge(
-                                         text = if (block.isCompleted) "CONCLUÍDO" else "EM ABERTO",
-                                         containerColor = if (block.isCompleted) 
-                                             androidx.compose.ui.graphics.Color(0xFF4CAF50) // Green 
-                                         else 
-                                             androidx.compose.ui.graphics.Color(0xFFFF9800), // Orange
-                                         contentColor = androidx.compose.ui.graphics.Color.White
-                                     )
+                                      StatusBadge(
+                                          text = if (summary.totals.worked >= maxOpenHouses) "CONCLUÍDO" else "EM ABERTO",
+                                          containerColor = if (summary.totals.worked >= maxOpenHouses)
+                                              androidx.compose.ui.graphics.Color(0xFF4CAF50)
+                                          else
+                                              androidx.compose.ui.graphics.Color(0xFFFF9800),
+                                          contentColor = androidx.compose.ui.graphics.Color.White
+                                      )
                                  }
                                  
                                  if (index < summary.blocks.size - 1) {
@@ -440,7 +510,7 @@ fun BoletimScreen(
                                                 context.startActivity(Intent.createChooser(intent, "Compartilhar FAD"))
                                             } catch (e: Exception) {
                                                 scope.launch { snackbarHostState.showSnackbar("Erro ao gerar PDF") }
-                                                e.printStackTrace()
+                                                AppLogger.e("BoletimScreen", "Erro ao gerar PDF", e)
                                             }
                                         }
                                     }
@@ -467,7 +537,7 @@ fun BoletimScreen(
                                                 shareToWhatsApp(context, shareName, summary.date, houses)
                                             } catch (e: Exception) {
                                                 Toast.makeText(context, "Erro ao compartilhar.", Toast.LENGTH_SHORT).show()
-                                                e.printStackTrace()
+                                                AppLogger.e("BoletimScreen", "Erro ao compartilhar WhatsApp", e)
                                             }
                                         }
                                     }
@@ -505,17 +575,21 @@ fun BoletimScreen(
                                             showMenu = false
                                             checkHistoryAndProceed(summary.date) {
                                                 moveSourceDate = summary.date
+                                                showMoveDatePicker = true
                                             }
                                         }
                                     )
-                                    // Export JSON
+                                    // Transfer to another agent
                                     DropdownMenuItem(
-                                        text = { Text("Exportar JSON") },
-                                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                                        text = { Text("Transferir p/ Agente") },
+                                        leadingIcon = { Icon(Icons.Default.SwapHoriz, contentDescription = null) },
                                         onClick = {
                                             showMenu = false
                                             checkHistoryAndProceed(summary.date) {
-                                                viewModel.exportDayDataAndShare(context, summary.date)
+                                                viewModel.refreshAgentNames()
+                                                transferDate = summary.date
+                                                transferTargetName = ""
+                                                showTransferDialog = true
                                             }
                                         }
                                     )
@@ -548,10 +622,9 @@ fun BoletimScreen(
                         )
                     }
                 }
-            }
-
         }
     }
+}
 }
 }
 }
@@ -599,6 +672,13 @@ private fun shareToWhatsApp(
     val abandonados = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.A }
     val vazios = houses.count { it.situation == com.antigravity.healthagent.data.local.model.Situation.V }
     val comFoco = houses.count { it.treatment.comFoco }
+    val bairros = houses
+        .filter { it.situation == com.antigravity.healthagent.data.local.model.Situation.NONE || it.situation == com.antigravity.healthagent.data.local.model.Situation.EMPTY }
+        .map { it.address.bairro.uppercase() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .sorted()
+    val totalLarvicida = houses.sumOf { it.treatment.larvicida }
 
     // Format WhatsApp message
     val sb = StringBuilder()
@@ -613,6 +693,11 @@ private fun shareToWhatsApp(
     sb.append("🚫 Recusados: $recusados\n")
     sb.append("🏚️ Abandonados: $abandonados\n")
     sb.append("📭 Vazios: $vazios\n")
+    sb.append("🧪 Larvicida: ${String.format(java.util.Locale("pt", "BR"), "%.1f", totalLarvicida)}g\n")
+
+    if (bairros.isNotEmpty()) {
+        sb.append("\n📍 *Bairro(s):* ${bairros.joinToString("/ ")}\n")
+    }
 
 
     val message = sb.toString().trim()
@@ -633,5 +718,182 @@ private fun shareToWhatsApp(
             putExtra(Intent.EXTRA_TEXT, message)
         }
         context.startActivity(Intent.createChooser(genericIntent, "Compartilhar via"))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TransferDayDialog(
+    date: String,
+    agentNames: List<String>,
+    houseCount: Int,
+    onTargetChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var target by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "Transferir dia $date",
+                fontWeight = FontWeight.ExtraBold,
+                style = MaterialTheme.typography.titleLarge
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    "Produção a transferir: $houseCount imóveis. Após o aceite, quem recebe fica responsável pelo dia.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded }
+                ) {
+                    OutlinedTextField(
+                        value = target,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Agente de destino") },
+                        placeholder = { Text("Selecione o agente") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        agentNames.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = {
+                                    target = name
+                                    onTargetChange(name)
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = target.isNotBlank()
+            ) {
+                Text("Enviar Oferta", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancelar", fontWeight = FontWeight.Bold)
+            }
+        },
+        shape = RoundedCornerShape(24.dp)
+    )
+}
+
+@Composable
+private fun DayTransferSection(
+    incoming: List<DayTransfer>,
+    outgoing: List<DayTransfer>,
+    isEasyMode: Boolean,
+    isSolarMode: Boolean,
+    onAccept: (DayTransfer) -> Unit,
+    onDecline: (DayTransfer) -> Unit,
+    onCancel: (DayTransfer) -> Unit,
+    onDeleteDay: (DayTransfer) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        incoming.forEach { transfer ->
+            PremiumCard(
+                modifier = Modifier.fillMaxWidth(),
+                isSolarMode = isSolarMode
+            ) {
+                Column(Modifier.padding(if (isEasyMode) 16.dp else 14.dp)) {
+                    Text(
+                        "📥 ${transfer.fromName} quer transferir ${transfer.fromDate} (${transfer.houseCount} imóveis)",
+                        fontWeight = FontWeight.Bold,
+                        style = if (isEasyMode) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelLarge
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { onAccept(transfer) },
+                            modifier = Modifier.weight(1f).height(if (isEasyMode) 48.dp else 40.dp),
+                            shape = RoundedCornerShape(if (isEasyMode) 14.dp else 10.dp)
+                        ) {
+                            Text("Aceitar", fontWeight = FontWeight.Bold)
+                        }
+                        OutlinedButton(
+                            onClick = { onDecline(transfer) },
+                            modifier = Modifier.weight(1f).height(if (isEasyMode) 48.dp else 40.dp),
+                            shape = RoundedCornerShape(if (isEasyMode) 14.dp else 10.dp)
+                        ) {
+                            Text("Recusar", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Text(
+                        "Receber em ${transfer.fromDate} se estiver livre; senão no próximo dia útil.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        outgoing.forEach { transfer ->
+            val reachedTerminal = transfer.statusEnum == DayTransferStatus.ACCEPTED ||
+                    transfer.statusEnum == DayTransferStatus.DECLINED ||
+                    transfer.statusEnum == DayTransferStatus.CANCELLED ||
+                    transfer.statusEnum == DayTransferStatus.EXPIRED
+            if (!reachedTerminal || transfer.statusEnum == DayTransferStatus.ACCEPTED) {
+                PremiumCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    isSolarMode = isSolarMode
+                ) {
+                    Column(Modifier.padding(if (isEasyMode) 16.dp else 14.dp)) {
+                        when (transfer.statusEnum) {
+                            DayTransferStatus.PENDING -> {
+                                Text(
+                                    "📤 Aguardando ${transfer.toAgentName} aceitar ${transfer.fromDate} (${transfer.houseCount} imóveis)",
+                                    fontWeight = FontWeight.Bold,
+                                    style = if (isEasyMode) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelLarge
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                OutlinedButton(
+                                    onClick = { onCancel(transfer) },
+                                    modifier = Modifier.height(if (isEasyMode) 48.dp else 40.dp),
+                                    shape = RoundedCornerShape(if (isEasyMode) 14.dp else 10.dp)
+                                ) {
+                                    Text("Cancelar oferta", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            DayTransferStatus.ACCEPTED -> {
+                                Text(
+                                    "✅ ${transfer.toAgentName} recebeu ${transfer.fromDate} (transferido para ${transfer.finalDate.ifBlank { transfer.fromDate }})",
+                                    fontWeight = FontWeight.Bold,
+                                    style = if (isEasyMode) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelLarge
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Button(
+                                    onClick = { onDeleteDay(transfer) },
+                                    modifier = Modifier.height(if (isEasyMode) 48.dp else 40.dp),
+                                    shape = RoundedCornerShape(if (isEasyMode) 14.dp else 10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                ) {
+                                    Text("Apagar meu dia", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            else -> Unit
+                        }
+                    }
+                }
+            }
+        }
     }
 }

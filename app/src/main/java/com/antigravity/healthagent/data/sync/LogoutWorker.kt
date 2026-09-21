@@ -1,5 +1,6 @@
 package com.antigravity.healthagent.data.sync
 
+import com.antigravity.healthagent.domain.logger.AppLogger
 import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
@@ -23,7 +24,7 @@ class LogoutWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        android.util.Log.i("LogoutWorker", "Starting guaranteed logout cleanup...")
+        AppLogger.i("LogoutWorker", "Starting guaranteed logout cleanup...")
         
         try {
             val firebaseUser = auth.currentUser
@@ -36,21 +37,21 @@ class LogoutWorker @AssistedInject constructor(
                 if (agentName.isNotBlank()) {
                     val houses = houseRepository.getUnsyncedHouses(uid)
                     if (houses.isNotEmpty()) {
-                        android.util.Log.i("LogoutWorker", "Performing final sync for $agentName (${houses.size} houses)...")
+                        AppLogger.i("LogoutWorker", "Performing final sync for $agentName (${houses.size} houses)...")
                         syncRepository.pushLocalDataToCloud(houses, emptyList(), uid)
                     }
                 }
             }
 
             // 2. WIPE LOCAL DATA
-            android.util.Log.i("LogoutWorker", "Wiping local database...")
+            AppLogger.i("LogoutWorker", "Wiping local database...")
             syncRepository.clearLocalData()
 
             // 3. WIPE SUCCESSFUL
-            android.util.Log.i("LogoutWorker", "Cleanup completed successfully.")
+            AppLogger.i("LogoutWorker", "Cleanup completed successfully.")
             return Result.success()
         } catch (e: Exception) {
-            android.util.Log.e("LogoutWorker", "Cleanup failed: ${e.message}")
+            AppLogger.e("LogoutWorker", "Cleanup failed: ${e.message}")
             // Even if sync fails, we MUST try to wipe data
             try {
                 syncRepository.clearLocalData()

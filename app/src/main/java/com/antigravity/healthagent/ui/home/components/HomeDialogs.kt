@@ -153,9 +153,6 @@ fun DashboardSummaryDialog(
     dashboardTotals: DashboardTotals,
     isDayClosed: Boolean,
     isSupervisor: Boolean,
-    isAdmin: Boolean,
-    showDeduplicate: Boolean,
-    onDeduplicate: () -> Unit,
     onCloseProduction: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -190,15 +187,6 @@ fun DashboardSummaryDialog(
                         colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF00C853)) // Green
                     ) {
                         Text("FECHAR PRODUÇÃO", fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                if (isAdmin && showDeduplicate) {
-                    TextButton(
-                        onClick = onDeduplicate,
-                        colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFFF9800)) // Orange
-                    ) {
-                        Text("DEDUPLICAR AGORA", fontWeight = FontWeight.Bold)
                     }
                 }
 

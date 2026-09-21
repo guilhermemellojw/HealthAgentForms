@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.runtime.*
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.antigravity.healthagent.ui.state.SyncUiState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -14,7 +15,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.DoorFront
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
@@ -34,12 +35,11 @@ import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.antigravity.healthagent.ui.semanal.WeeklySummaryViewModel
+import com.antigravity.healthagent.data.sync.SyncFeedbackManager
+import com.antigravity.healthagent.data.sync.rememberSyncFeedbackManager
 import com.antigravity.healthagent.ui.components.CompactDropdown
-import com.antigravity.healthagent.ui.components.SyncStatusOverlay
-import com.antigravity.healthagent.ui.home.DaySummary
-import com.antigravity.healthagent.utils.AppConstants
-import kotlinx.coroutines.launch
-import com.antigravity.healthagent.ui.components.SyncFloatingBalloon
+import com.antigravity.healthagent.ui.components.CustomSyncPullIndicator
+import com.antigravity.healthagent.ui.components.SyncCompactBalloon
 import com.antigravity.healthagent.ui.components.PremiumCard
 
 
@@ -47,6 +47,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.zIndex
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,7 +57,8 @@ fun SemanalScreen(
     user: com.antigravity.healthagent.domain.repository.AuthUser? = null,
     onLogout: () -> Unit = {},
     onSwitchAccount: () -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    feedbackManager: SyncFeedbackManager = rememberSyncFeedbackManager()
 ) {
     val weeklySummary by viewModel.weeklySummary.collectAsState()
     val weeklySummaryTotals by viewModel.weeklySummaryTotals.collectAsState()
@@ -89,8 +91,6 @@ fun SemanalScreen(
 
     Scaffold(
         topBar = {
-            val context = LocalContext.current
-            val scope = rememberCoroutineScope()
             com.antigravity.healthagent.ui.components.GlassTopAppBar(
                 title = { 
                     Text(
@@ -110,37 +110,6 @@ fun SemanalScreen(
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = "Adicionar Atividade",
-                            modifier = Modifier.size(iconSize)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                try {
-                                    val file = viewModel.exportSemanalPdf(context)
-                                    val uri = FileProvider.getUriForFile(
-                                        context,
-                                        "${context.packageName}.fileprovider",
-                                        file
-                                    )
-                                    val intent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "application/pdf"
-                                        putExtra(Intent.EXTRA_STREAM, uri)
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(Intent.createChooser(intent, "Compartilhar Resumo Semanal"))
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Erro ao gerar PDF", Toast.LENGTH_SHORT).show()
-                                    e.printStackTrace()
-                                }
-                            }
-                        },
-                        modifier = Modifier.size(iconButtonSize)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PictureAsPdf,
-                            contentDescription = "Gerar PDF",
                             modifier = Modifier.size(iconSize)
                         )
                     }
@@ -173,7 +142,7 @@ fun SemanalScreen(
                             context.startActivity(Intent.createChooser(intent, "Imprimir Boletins da Semana"))
                         } catch (e: Exception) {
                             Toast.makeText(context, "Erro ao gerar PDF", Toast.LENGTH_SHORT).show()
-                            e.printStackTrace()
+                            AppLogger.e("SemanalScreen", "Erro ao gerar PDF em lote", e)
                         }
                     }
                 },
@@ -184,16 +153,38 @@ fun SemanalScreen(
             )
         }
     ) { paddingValues ->
-        val syncState by viewModel.syncState.collectAsState()
+        val syncFeedback by feedbackManager.feedback.collectAsState()
         val pullToRefreshState = rememberPullToRefreshState()
 
+        val isRefreshing = syncFeedback is SyncUiState.Syncing
+        val isPullActive = pullToRefreshState.distanceFraction > 0.01f || isRefreshing
+
         PullToRefreshBox(
-            isRefreshing = syncState is SyncUiState.Syncing,
+            isRefreshing = isRefreshing,
             onRefresh = { viewModel.syncDataToCloud() },
             state = pullToRefreshState,
+            indicator = {
+                CustomSyncPullIndicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    isSolarMode = isSolarMode,
+                    syncStatus = syncFeedback
+                )
+            },
             modifier = Modifier.padding(paddingValues).fillMaxSize()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
+                if (!isPullActive) {
+                    SyncCompactBalloon(
+                        feedbackManager = feedbackManager,
+                        isEasyMode = isEasyMode,
+                        isSolarMode = isSolarMode,
+                        isPullActive = isPullActive,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(3000f)
+                    )
+                }
                 com.antigravity.healthagent.ui.components.MeshGradient(modifier = Modifier.fillMaxSize())
                 
                 Column(
@@ -307,10 +298,11 @@ fun SemanalScreen(
                                 day = day,
                                 options = activityOptions,
                                 onStatusChange = { viewModel.updateDayStatus(day.date, it) },
+                                onToggleLock = { viewModel.toggleDayLock(day.date) },
                                 onClick = { onNavigateToDate(day.date) },
                                 isEasyMode = isEasyMode,
                                 isSolarMode = isSolarMode,
-                                enabled = !day.editedByAdmin || isAdmin
+                                enabled = true
                             )
                         }
 
@@ -438,208 +430,4 @@ fun SemanalScreen(
     }
 }
 
-@Composable
-fun WeeklyDayRow(
-    day: DaySummary,
-    options: List<String>,
-    onStatusChange: (String) -> Unit,
-    onClick: () -> Unit,
-    isEasyMode: Boolean = false,
-    isSolarMode: Boolean = false,
-    enabled: Boolean = true,
-    modifier: Modifier = Modifier
-) {
-    val dayOfWeek = remember(day.date) {
-        val cal = java.util.Calendar.getInstance()
-        val parts = day.date.split("-")
-        if (parts.size == 3) {
-            cal.set(parts[2].toInt(), parts[1].toInt() - 1, parts[0].toInt())
-            when (cal.get(java.util.Calendar.DAY_OF_WEEK)) {
-                java.util.Calendar.MONDAY -> "Segunda-feira"
-                java.util.Calendar.TUESDAY -> "Terça-feira"
-                java.util.Calendar.WEDNESDAY -> "Quarta-feira"
-                java.util.Calendar.THURSDAY -> "Quinta-feira"
-                java.util.Calendar.FRIDAY -> "Sexta-feira"
-                else -> ""
-            }
-        } else ""
-    }
 
-    PremiumCard(
-        modifier = Modifier.fillMaxWidth().then(modifier),
-        onClick = onClick,
-        isSolarMode = isSolarMode,
-        contentPadding = if (isEasyMode) PaddingValues(8.dp) else PaddingValues(16.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Column(modifier = Modifier.weight(1.2f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = dayOfWeek.uppercase(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Black,
-                        fontSize = if (isEasyMode) 12.sp else 10.sp
-                    )
-                    if (day.editedByAdmin) {
-                        Spacer(Modifier.width(4.dp))
-                        Icon(
-                            imageVector = androidx.compose.material.icons.Icons.Default.Lock,
-                            contentDescription = "Homologado",
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(10.dp)
-                        )
-                    }
-                }
-                Text(
-                    text = day.date,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = if (isEasyMode) 18.sp else 16.sp
-                )
-            }
-
-            Surface(
-                color = Color.Transparent,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.width(if (isEasyMode) 72.dp else 64.dp).height(if (isEasyMode) 56.dp else 50.dp)
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        "ABERTOS", 
-                        style = MaterialTheme.typography.labelSmall, 
-                        color = MaterialTheme.colorScheme.primary, 
-                        fontSize = (if (isEasyMode) 10.sp else 8.sp), 
-                        fontWeight = FontWeight.Black
-                    )
-                    Text(
-                        day.totalWorked.toString(), 
-                        style = MaterialTheme.typography.titleMedium, 
-                        fontWeight = FontWeight.Black, 
-                        color = MaterialTheme.colorScheme.primary,
-                        fontSize = if (isEasyMode) 20.sp else 16.sp
-                    )
-                }
-            }
-
-            CompactDropdown(
-                label = "Status",
-                currentValue = day.status.ifEmpty { "NORMAL" },
-                options = options,
-                onOptionSelected = onStatusChange,
-                modifier = Modifier.weight(2f),
-                isEasyMode = isEasyMode,
-                enabled = enabled
-            )
-        }
-    }
-}
-
-@Composable
-fun ObservationCard(
-    house: com.antigravity.healthagent.data.local.model.House,
-    isEasyMode: Boolean = false,
-    isSolarMode: Boolean = false,
-    onClick: () -> Unit = {}
-) {
-    PremiumCard(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = onClick,
-        isSolarMode = isSolarMode,
-        contentPadding = if (isEasyMode) PaddingValues(8.dp) else PaddingValues(12.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(4.dp)
-                ) {
-                    Text(
-                        text = house.data,
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-                
-                Text(
-                    text = "${house.address.bairro.uppercase()}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-            
-            Spacer(modifier = Modifier.height(6.dp))
-            
-            Text(
-                text = "${house.address.streetName}, ${house.address.number}${if (house.address.sequence > 0) "-${house.address.sequence}" else ""}",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            
-            Spacer(modifier = Modifier.height(4.dp))
-            
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = house.observation,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(8.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun CompactStatItem(
-    label: String,
-    value: String,
-    icon: ImageVector,
-    color: Color = MaterialTheme.colorScheme.primary,
-    isEasyMode: Boolean = false
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(vertical = 2.dp, horizontal = 4.dp)
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = color.copy(alpha = 0.7f),
-            modifier = Modifier.size(if (isEasyMode) 24.dp else 20.dp)
-        )
-        Text(
-            text = value,
-            style = if (isEasyMode) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Black,
-            color = color
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            fontSize = 9.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-    }
-}

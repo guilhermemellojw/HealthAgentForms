@@ -33,10 +33,10 @@ class SyncRepositoryImpl @Inject constructor(
     private val settingsManager: SettingsManager,
     private val backupRepository: BackupRepository,
     private val syncSchedulerProvider: Provider<SyncScheduler>,
-    private val syncPushHandler: SyncPushHandler,
-    private val syncPullHandler: SyncPullHandler,
-    private val syncDeletionHandler: SyncDeletionHandler,
-    private val syncAdminHandler: SyncAdminHandler
+    private val syncPushHandler: com.antigravity.healthagent.data.sync.PushHandler,
+    private val syncPullHandler: com.antigravity.healthagent.data.sync.PullHandler,
+    private val syncDeletionHandler: com.antigravity.healthagent.data.sync.DeletionHandler,
+    private val syncAdminHandler: com.antigravity.healthagent.data.sync.AdminHandler
 ) : SyncRepository {
 
     private val syncMutex = Mutex()
@@ -45,23 +45,30 @@ class SyncRepositoryImpl @Inject constructor(
         houses: List<House>,
         activities: List<DayActivity>,
         targetUid: String?,
-        shouldReplace: Boolean
+        shouldReplace: Boolean,
+        isFullWipe: Boolean
     ): Result<Unit> {
         return syncPushHandler.pushLocalDataToCloud(
             houses = houses,
             activities = activities,
             targetUid = targetUid,
             shouldReplace = shouldReplace,
+            isFullWipe = isFullWipe,
             syncMutex = syncMutex
         )
     }
 
-    override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<Unit> {
+    override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean): Result<SyncRepository.SyncResult> {
         return syncPullHandler.pullCloudDataToLocal(
             targetUid = targetUid,
             force = force,
             syncMutex = syncMutex
-        )
+        ).map { 
+            SyncRepository.SyncResult(
+                cloudMaxTime = it.cloudMaxTime,
+                clockSkewMs = it.clockSkewMs
+            )
+        }
     }
 
     override suspend fun clearLocalData(): Result<Unit> {

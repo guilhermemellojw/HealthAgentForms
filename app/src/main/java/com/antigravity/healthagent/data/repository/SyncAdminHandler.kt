@@ -4,6 +4,8 @@ import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.House
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.settings.SettingsManager
+import com.antigravity.healthagent.data.sync.AdminHandler
+import com.antigravity.healthagent.domain.logger.AppLogger
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -14,30 +16,30 @@ class SyncAdminHandler @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val houseRepository: HouseRepository,
     private val settingsManager: SettingsManager
-) {
+) : AdminHandler {
 
-    suspend fun clearLocalDataInternal(): Result<Unit> {
+    override suspend fun clearLocalDataInternal(): Result<Unit> {
         return try {
             houseRepository.clearAllData()
             settingsManager.setLastSyncTimestamp(0L)
             Result.success(Unit)
         } catch (e: Exception) {
-            android.util.Log.e("SyncRepository", "Internal Wipe Failed: ${e.message}")
+            AppLogger.e("SyncRepository", "Internal Wipe Failed: ${e.message}")
             Result.failure(e)
         }
     }
 
-    suspend fun clearAgentDataInternal(agentUid: String): Result<Unit> {
+    override suspend fun clearAgentDataInternal(agentUid: String): Result<Unit> {
         return try {
             houseRepository.clearAgentData(agentUid)
             Result.success(Unit)
         } catch (e: Exception) {
-            android.util.Log.e("SyncRepository", "Surgical Wipe Failed for $agentUid: ${e.message}")
+            AppLogger.e("SyncRepository", "Surgical Wipe Failed for $agentUid: ${e.message}")
             Result.failure(e)
         }
     }
 
-    suspend fun performDataCleanup(): Result<Unit> {
+    override suspend fun performDataCleanup(): Result<Unit> {
         return try {
             houseRepository.cleanupZeroValues()
             Result.success(Unit)
@@ -46,7 +48,7 @@ class SyncAdminHandler @Inject constructor(
         }
     }
 
-    suspend fun restoreLocalData(houses: List<House>, activities: List<DayActivity>, agentUid: String?): Result<Unit> {
+    override suspend fun restoreLocalData(houses: List<House>, activities: List<DayActivity>, agentUid: String?): Result<Unit> {
         return try {
             houseRepository.restoreAgentData(houses, activities, agentUid)
             Result.success(Unit)
@@ -55,7 +57,7 @@ class SyncAdminHandler @Inject constructor(
         }
     }
 
-    suspend fun fetchSystemSettings(): Result<Map<String, Any>> {
+    override suspend fun fetchSystemSettings(): Result<Map<String, Any>> {
         return try {
             val snapshot = withTimeoutOrNull(5000) {
                 firestore.collection("metadata").document("settings")
@@ -67,12 +69,12 @@ class SyncAdminHandler @Inject constructor(
             val settings = snapshot.data ?: emptyMap()
             Result.success(settings)
         } catch (e: Exception) {
-            android.util.Log.w("SyncRepository", "fetchSystemSettings offline fallback: ${e.message}")
+            AppLogger.w("SyncRepository", "fetchSystemSettings offline fallback: ${e.message}")
             Result.success(emptyMap())
         }
     }
 
-    suspend fun updateSystemSetting(key: String, value: Any): Result<Unit> {
+    override suspend fun updateSystemSetting(key: String, value: Any): Result<Unit> {
         return try {
             firestore.collection("metadata").document("settings")
                 .update(key, value)
@@ -114,7 +116,7 @@ class SyncAdminHandler @Inject constructor(
         }
     }
 
-    suspend fun deleteAllCloudData(): Result<Unit> {
+    override suspend fun deleteAllCloudData(): Result<Unit> {
         return try {
             val agentsSnapshot = firestore.collection("agents").get().await()
             for (agentDoc in agentsSnapshot.documents) {
@@ -143,7 +145,7 @@ class SyncAdminHandler @Inject constructor(
         }
     }
 
-    suspend fun clearSyncError(uid: String): Result<Unit> {
+    override suspend fun clearSyncError(uid: String): Result<Unit> {
         return try {
             firestore.collection("agents").document(uid)
                 .update("lastSyncError", FieldValue.delete())
@@ -154,7 +156,7 @@ class SyncAdminHandler @Inject constructor(
         }
     }
     
-    suspend fun pruneOldTombstones(): Result<Unit> {
+    override suspend fun pruneOldTombstones(): Result<Unit> {
         return try {
             val thirtyDaysAgo = com.antigravity.healthagent.utils.TimeManager.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
             houseRepository.pruneOldTombstones(thirtyDaysAgo)

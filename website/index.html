@@ -33,6 +33,7 @@
             <div class="nav-links">
                 <a href="#features">Recursos</a>
                 <a href="#about">Sobre</a>
+                <a href="#usuarios" class="nav-link usuario" id="nav-usuarios">Usuários</a>
                 <button class="btn-primary" id="login-nav-btn">Entrar</button>
             </div>
         </div>
@@ -73,6 +74,18 @@
                 <h3>Controle de Metas</h3>
                 <p>Identifique áreas prioritárias e monitore o alcance das metas semanais.</p>
             </div>
+        </div>
+    </section>
+
+    <section id="usuarios" class="container" style="display: none;">
+        <h2 class="section-title" style="text-align: left; margin-bottom: 30px;">Gestão de Usuários</h2>
+        <div class="user-management-grid" style="margin-top: 40px; gap: 24px;">
+            <div id="user-loading" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                <div class="spinner" style="width: 40px; height: 40px; border: 3px solid rgba(76, 175, 80, 0.1); border-top: 3px solid var(--primary-green); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 16px auto;"></div>
+                <p>Carregando usuários...</p>
+            </div>
+            <div id="user-error" style="text-align: center; padding: 20px; color: var(--error-red); display: none;"></div>
+            <div id="user-list" style="display: grid; gap: 24px; min-height: 300px;"></div>
         </div>
     </section>
 

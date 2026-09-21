@@ -5,6 +5,7 @@ import com.antigravity.healthagent.data.local.model.Tombstone
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.local.model.TombstoneType
 import com.antigravity.healthagent.data.settings.SettingsManager
+import com.antigravity.healthagent.data.sync.DeletionHandler
 import com.antigravity.healthagent.data.sync.SyncScheduler
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
@@ -20,12 +21,8 @@ class SyncDeletionHandler @Inject constructor(
     private val houseRepository: HouseRepository,
     private val settingsManager: SettingsManager,
     private val syncSchedulerProvider: Provider<SyncScheduler>
-) {
-    private suspend fun <T> runInTransactionWithRetry(block: suspend () -> T): T {
-        return houseRepository.runInTransaction { block() }
-    }
-
-    suspend fun deleteAgentHouse(agentUid: String, houseId: String): Result<Unit> {
+) : DeletionHandler {
+    override suspend fun deleteAgentHouse(agentUid: String, houseId: String): Result<Unit> {
         return try {
             val agentRef = firestore.collection("agents").document(agentUid)
             val batch = firestore.batch()
@@ -40,7 +37,7 @@ class SyncDeletionHandler @Inject constructor(
         }
     }
 
-    suspend fun deleteAgentActivity(agentUid: String, activityDate: String): Result<Unit> {
+    override suspend fun deleteAgentActivity(agentUid: String, activityDate: String): Result<Unit> {
         return try {
             val agentRef = firestore.collection("agents").document(agentUid)
             
@@ -91,7 +88,7 @@ class SyncDeletionHandler @Inject constructor(
         }
     }
 
-    suspend fun recordHouseDeletion(house: House): Result<Unit> {
+    override suspend fun recordHouseDeletion(house: House): Result<Unit> {
         return try {
             val naturalId = house.generateNaturalKey()
             houseRepository.insertTombstone(
@@ -109,7 +106,7 @@ class SyncDeletionHandler @Inject constructor(
         }
     }
 
-    suspend fun recordActivityDeletion(date: String, agentUid: String): Result<Unit> {
+    override suspend fun recordActivityDeletion(date: String, agentUid: String): Result<Unit> {
         return try {
             houseRepository.insertTombstone(
                 Tombstone(
@@ -126,7 +123,7 @@ class SyncDeletionHandler @Inject constructor(
         }
     }
 
-    suspend fun recordBulkDeletions(houseKeys: List<String>, activityDates: List<String>, targetUid: String?): Result<Unit> {
+    override suspend fun recordBulkDeletions(houseKeys: List<String>, activityDates: List<String>, targetUid: String?): Result<Unit> {
         val isLocalUser = targetUid == null || targetUid == auth.currentUser?.uid
         
         if (isLocalUser) {
@@ -153,7 +150,7 @@ class SyncDeletionHandler @Inject constructor(
                         agentUid = currentUid
                     )
                 }
-                runInTransactionWithRetry {
+                houseRepository.runInTransaction {
                     houseRepository.insertTombstones(houseTombstones)
                     houseRepository.insertTombstones(activityTombstones)
                 }
@@ -239,7 +236,7 @@ class SyncDeletionHandler @Inject constructor(
         }
     }
 
-    suspend fun deleteHousesSurgically(agentUid: String, houses: List<House>): Result<Unit> {
+    override suspend fun deleteHousesSurgically(agentUid: String, houses: List<House>): Result<Unit> {
         if (houses.isEmpty()) return Result.success(Unit)
         
         return try {
@@ -247,7 +244,7 @@ class SyncDeletionHandler @Inject constructor(
             
             recordBulkDeletions(houseKeys, emptyList(), agentUid)
             
-            runInTransactionWithRetry {
+            houseRepository.runInTransaction {
                 houses.forEach { house ->
                     houseRepository.deleteHouseById(house.id)
                 }
