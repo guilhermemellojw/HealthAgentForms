@@ -31,7 +31,8 @@ class SyncReconciler @Inject constructor(
         cloudDayActivities: List<DayActivity>,
         cloudDeletedHouses: MutableSet<String>,
         cloudDeletedActivities: MutableSet<String>,
-        teammateHouses: List<House>
+        teammateHouses: List<House>,
+        healRemoteTombstones: Boolean = true
     ): Result<Unit> {
         return try {
             // --- SELF-HEALING: Clean up zombie tombstones in Firestore ---
@@ -45,7 +46,7 @@ class SyncReconciler @Inject constructor(
             }
             val zombieHouses = cloudDeletedHouses.filter { it in validCloudHouseKeys }
 
-            if (zombieActivities.isNotEmpty() || zombieHouses.isNotEmpty()) {
+            if ((zombieActivities.isNotEmpty() || zombieHouses.isNotEmpty()) && healRemoteTombstones) {
                 cloudDeletedActivities.removeAll(zombieActivities.toSet())
                 cloudDeletedHouses.removeAll(zombieHouses.toSet())
 

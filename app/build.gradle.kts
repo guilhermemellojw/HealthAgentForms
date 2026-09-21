@@ -46,6 +46,8 @@ android {
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_KEY", "\"$supabaseKey\"")
         buildConfigField("boolean", "USE_SUPABASE_AUTH", "$useSupabaseAuth")
+        val useSupabaseSync = properties.getProperty("USE_SUPABASE_SYNC")?.toBoolean() ?: false
+        buildConfigField("boolean", "USE_SUPABASE_SYNC", "$useSupabaseSync")
     }
 
     buildTypes {

@@ -46,21 +46,18 @@ fun parseRemoteTimestampOrNull(value: Any?): Long? {
                 val s = value.trim()
                 if (s.isEmpty()) return null
                 s.toLongOrNull()?.let { return if (it in 1..9999999999L) it * 1000 else it }
-                var norm = s.replace("Z", "+0000").replace(":", "")
-                // "+0000" virou "+0000"? corrige "+HHMM" colado após remover ":"
-                if (norm.endsWith("+0000") || norm.endsWith("-0000")) {
-                    // ok
-                }
+                // Normaliza só o timezone: "Z" -> "+0000", "+HH:MM" -> "+HHMM".
+                // (Nunca toca nos ":" das horas.)
+                var norm = s
+                if (norm.endsWith("Z", ignoreCase = true)) norm = norm.dropLast(1) + "+0000"
+                norm = norm.replace(Regex("([+-]\\d{2}):(\\d{2})$"), "$1$2")
                 for (f in isoFormats) {
                     try {
                         val ms = f.get()?.parse(norm)?.time
                         if (ms != null) return ms
                     } catch (_: Exception) { }
                 }
-                // última tentativa: sem timezone, interpreta como UTC
-                try {
-                    isoFormats.last().get()?.parse(s.substringBefore("+").substringBefore("Z"))?.time
-                } catch (_: Exception) { null }
+                null
             }
             else -> null
         }

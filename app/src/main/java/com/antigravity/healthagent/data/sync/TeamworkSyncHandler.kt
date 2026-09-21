@@ -17,7 +17,8 @@ class TeamworkSyncHandler @Inject constructor(
     suspend fun performTeamworkSync(
         uid: String,
         cloudHouses: MutableList<House>,
-        isTargetDifferentUser: Boolean
+        isTargetDifferentUser: Boolean,
+        fetchRemote: (suspend (bairros: List<String>) -> List<House>)? = null
     ): List<House> {
         val teammateHouses = mutableListOf<House>()
         if (isTargetDifferentUser) return teammateHouses
@@ -29,14 +30,19 @@ class TeamworkSyncHandler @Inject constructor(
                 .distinct()
             val activeBairros = rawActiveBairros.map { it.uppercase() }.distinct()
             if (rawActiveBairros.isNotEmpty()) {
-                // Tolerate legacy casing drift: query both raw and uppercase, chunked to respect the 10-value cap
-                // (raw + uppercase doubling keeps each chunk within Firestore's 30-value limit).
-                val bairroQueryValues = (rawActiveBairros + rawActiveBairros.map { it.uppercase() }).distinct()
-                val teamHouses = bairroQueryValues.chunked(10).flatMap { bairroChunk ->
-                    firestore.collectionGroup("houses")
-                        .whereIn("bairro", bairroChunk)
-                        .get().await().documents
-                }.mapNotNull { it.toHouseSafe(it.getString("agentUid") ?: "", it.getString("agentName") ?: "") }
+                val teamHouses = if (fetchRemote != null) {
+                    // Fonte alternativa (Supabase): busca única, sem chunk 10.
+                    fetchRemote((rawActiveBairros + rawActiveBairros.map { it.uppercase() }).distinct())
+                } else {
+                    // Tolerate legacy casing drift: query both raw and uppercase, chunked to respect the 10-value cap
+                    // (raw + uppercase doubling keeps each chunk within Firestore's 30-value limit).
+                    val bairroQueryValues = (rawActiveBairros + rawActiveBairros.map { it.uppercase() }).distinct()
+                    bairroQueryValues.chunked(10).flatMap { bairroChunk ->
+                        firestore.collectionGroup("houses")
+                            .whereIn("bairro", bairroChunk)
+                            .get().await().documents
+                    }.mapNotNull { it.toHouseSafe(it.getString("agentUid") ?: "", it.getString("agentName") ?: "") }
+                }
                 
                 val remoteForeignHouses = teamHouses.filter { it.agentUid != uid }
                 

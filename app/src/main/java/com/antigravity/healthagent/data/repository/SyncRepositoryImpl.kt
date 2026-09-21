@@ -34,7 +34,7 @@ class SyncRepositoryImpl @Inject constructor(
     private val backupRepository: BackupRepository,
     private val syncSchedulerProvider: Provider<SyncScheduler>,
     private val syncPushHandler: SyncPushHandler,
-    private val syncPullHandler: SyncPullHandler,
+    private val syncPullHandler: com.antigravity.healthagent.data.sync.PullHandler,
     private val syncDeletionHandler: SyncDeletionHandler,
     private val syncAdminHandler: SyncAdminHandler
 ) : SyncRepository {

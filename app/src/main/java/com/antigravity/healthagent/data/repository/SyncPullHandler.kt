@@ -8,6 +8,7 @@ import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.data.settings.SettingsManager
 import com.antigravity.healthagent.data.util.toDayActivitySafe
 import com.antigravity.healthagent.data.util.toHouseSafe
+import com.antigravity.healthagent.data.util.tombstoneKeys
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -24,11 +25,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 import com.antigravity.healthagent.data.sync.VersionChecker
+import com.antigravity.healthagent.data.sync.PullHandler
 import com.antigravity.healthagent.data.sync.RemoteSyncFlags
 import com.antigravity.healthagent.data.sync.IdentityDiscoveryService
 import com.antigravity.healthagent.data.sync.TeamworkSyncHandler
 import com.antigravity.healthagent.data.sync.SyncReconciler
-import com.antigravity.healthagent.data.util.tombstoneKeys
 import com.antigravity.healthagent.domain.repository.SyncRepository
 
 @Singleton
@@ -42,9 +43,9 @@ class SyncPullHandler @Inject constructor(
     private val identityDiscoveryService: IdentityDiscoveryService,
     private val teamworkSyncHandler: TeamworkSyncHandler,
     private val syncReconciler: SyncReconciler
-) {
+) : PullHandler {
 
-    suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean, syncMutex: Mutex): Result<SyncRepository.SyncResult> {
+    override suspend fun pullCloudDataToLocal(targetUid: String?, force: Boolean, syncMutex: Mutex): Result<SyncRepository.SyncResult> {
         val result = withTimeoutOrNull(600000L) {
             syncMutex.withLock {
                 withContext(Dispatchers.IO) {
