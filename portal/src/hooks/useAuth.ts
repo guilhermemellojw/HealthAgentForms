@@ -86,9 +86,12 @@ export function useStaffGate(): StaffInfo {
 }
 
 export async function loginWithGoogle(): Promise<void> {
+  // Retorna para o path atual (não só origin): no Pages o app vive em subpath
+  // (/HealthAgentForms) e voltar para a raiz cairia em 404 sem trocar o code.
+  const returnTo = window.location.origin + window.location.pathname;
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
-    options: { redirectTo: window.location.origin, queryParams: { prompt: "select_account" } },
+    options: { redirectTo: returnTo, queryParams: { prompt: "select_account" } },
   });
   if (error) throw error;
 }
