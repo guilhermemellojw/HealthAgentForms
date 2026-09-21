@@ -74,13 +74,14 @@ export function useStaffGate(): StaffInfo {
   const bootstrapLower = BOOTSTRAP_ADMINS.map((e) => e.toLowerCase());
   const isAdmin =
     (emailLower && bootstrapLower.includes(emailLower)) || userDoc?.role === "ADMIN";
-  const isStaff =
-    isAdmin || (userDoc?.isAuthorized === true && userDoc?.role === "SUPERVISOR");
 
+  // Portal aberto a qualquer usuário autenticado; só o painel Admin exige isAdmin.
+  // (RLS continua governando o que cada um enxerga: produção alheia no RG é
+  // aberta, resumos/listas restritas seguem owner||staff no banco.)
   return {
     user,
     userDoc,
-    status: isStaff ? "allowed" : "denied",
+    status: "allowed",
     isAdmin,
   };
 }
