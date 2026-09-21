@@ -1,11 +1,16 @@
 package com.antigravity.healthagent.di
 
+import com.antigravity.healthagent.BuildConfig
 import com.antigravity.healthagent.domain.repository.HouseRepository
 import com.antigravity.healthagent.domain.repository.HouseReadRepository
 import com.antigravity.healthagent.domain.repository.HouseWriteRepository
 import com.antigravity.healthagent.data.repository.HouseRepositoryImpl
+import com.antigravity.healthagent.data.repository.DayTransferRepositoryImpl
+import com.antigravity.healthagent.data.repository.SupabaseDayTransferRepository
+import com.antigravity.healthagent.domain.repository.DayTransferRepository
 import dagger.Binds
 import dagger.Module
+import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
@@ -68,9 +73,15 @@ abstract class RepositoryModule {
         streetRepositoryImpl: com.antigravity.healthagent.data.repository.StreetRepository
     ): com.antigravity.healthagent.domain.repository.StreetRepository
 
-    @Binds
-    @Singleton
-    abstract fun bindDayTransferRepository(
-        dayTransferRepositoryImpl: com.antigravity.healthagent.data.repository.DayTransferRepositoryImpl
-    ): com.antigravity.healthagent.domain.repository.DayTransferRepository
+    companion object {
+        @Provides
+        @Singleton
+        fun provideDayTransferRepository(
+            firebase: DayTransferRepositoryImpl,
+            supabase: dagger.Lazy<SupabaseDayTransferRepository>
+        ): DayTransferRepository {
+            // Switch Fase 2.5 (local.properties, padrão false).
+            return if (BuildConfig.USE_SUPABASE_SYNC) supabase.get() else firebase
+        }
+    }
 }

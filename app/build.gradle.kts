@@ -150,6 +150,7 @@ dependencies {
     // Supabase (Fase 2 — auth + postgrest; realtime/storage nas próximas fatias)
     implementation("io.github.jan-tennert.supabase:auth-kt:3.8.0")
     implementation("io.github.jan-tennert.supabase:postgrest-kt:3.8.0")
+    implementation("io.github.jan-tennert.supabase:realtime-kt:3.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     
     // Auth (Google Sign-In via Credential Manager)

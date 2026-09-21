@@ -35,8 +35,8 @@ class SyncRepositoryImpl @Inject constructor(
     private val syncSchedulerProvider: Provider<SyncScheduler>,
     private val syncPushHandler: com.antigravity.healthagent.data.sync.PushHandler,
     private val syncPullHandler: com.antigravity.healthagent.data.sync.PullHandler,
-    private val syncDeletionHandler: SyncDeletionHandler,
-    private val syncAdminHandler: SyncAdminHandler
+    private val syncDeletionHandler: com.antigravity.healthagent.data.sync.DeletionHandler,
+    private val syncAdminHandler: com.antigravity.healthagent.data.sync.AdminHandler
 ) : SyncRepository {
 
     private val syncMutex = Mutex()
