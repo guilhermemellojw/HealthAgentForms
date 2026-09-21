@@ -5,92 +5,177 @@ import com.antigravity.healthagent.data.local.model.DayActivity
 import com.antigravity.healthagent.data.local.model.PropertyType
 import com.antigravity.healthagent.data.local.model.Situation
 import com.antigravity.healthagent.domain.logger.AppLogger
+import com.antigravity.healthagent.utils.TimeManager
 import com.google.firebase.firestore.DocumentSnapshot
 import com.antigravity.healthagent.utils.normalize
 import com.antigravity.healthagent.utils.formatStreetName
 import com.antigravity.healthagent.utils.toDashDate
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
-fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): House? {
+private val isoFormats: List<ThreadLocal<SimpleDateFormat>> = listOf(
+    "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+    "yyyy-MM-dd'T'HH:mm:ssZ",
+    "yyyy-MM-dd'T'HH:mm:ss.SSS",
+    "yyyy-MM-dd'T'HH:mm:ss"
+).map { pattern ->
+    ThreadLocal.withInitial {
+        SimpleDateFormat(pattern, Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+    }
+}
+
+/**
+ * Timestamp remoto (Firestore Timestamp, epoch ms/segundos ou ISO-8601 do
+ * Supabase) -> epoch ms. Usado pelo pull das duas fontes.
+ */
+fun parseRemoteTimestamp(value: Any?, fallback: Long = 0L): Long {
+    return parseRemoteTimestampOrNull(value) ?: fallback
+}
+
+fun parseRemoteTimestampOrNull(value: Any?): Long? {
     return try {
-        val firestoreLastUpdated = this.getTimestamp("lastUpdated")?.toDate()?.time ?: 0L
-        val rawData = (this.getString("data") ?: "").replace("/", "-")
-        val sourceName = this.getString("agentName") ?: agentName
+        when (value) {
+            null -> null
+            is com.google.firebase.Timestamp -> value.toDate().time
+            is Number -> {
+                val n = value.toLong()
+                if (n in 1..9999999999L) n * 1000 else n // segundos -> ms
+            }
+            is String -> {
+                val s = value.trim()
+                if (s.isEmpty()) return null
+                s.toLongOrNull()?.let { return if (it in 1..9999999999L) it * 1000 else it }
+                var norm = s.replace("Z", "+0000").replace(":", "")
+                // "+0000" virou "+0000"? corrige "+HHMM" colado após remover ":"
+                if (norm.endsWith("+0000") || norm.endsWith("-0000")) {
+                    // ok
+                }
+                for (f in isoFormats) {
+                    try {
+                        val ms = f.get()?.parse(norm)?.time
+                        if (ms != null) return ms
+                    } catch (_: Exception) { }
+                }
+                // última tentativa: sem timezone, interpreta como UTC
+                try {
+                    isoFormats.last().get()?.parse(s.substringBefore("+").substringBefore("Z"))?.time
+                } catch (_: Exception) { null }
+            }
+            else -> null
+        }
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private fun Map<String, Any?>.mapInt(key: String, default: Int): Int {
+    return when (val v = this[key]) {
+        is Number -> v.toInt()
+        is String -> v.toIntOrNull() ?: default
+        else -> default
+    }
+}
+
+private fun Map<String, Any?>.mapLong(key: String, default: Long): Long {
+    return when (val v = this[key]) {
+        is Number -> v.toLong()
+        is String -> v.toLongOrNull() ?: default
+        else -> default
+    }
+}
+
+private fun Map<String, Any?>.mapDouble(key: String, default: Double): Double {
+    return when (val v = this[key]) {
+        is Number -> v.toDouble()
+        is String -> v.toDoubleOrNull() ?: default
+        else -> default
+    }
+}
+
+/**
+ * Chaves de tombstone (deleted_house_ids / deleted_activity_dates) — backend-neutro.
+ * No Supabase virão das linhas com deleted_at; mesma forma de saída.
+ */
+fun Map<String, Any?>.tombstoneKeys(field: String): Set<String> {
+    @Suppress("UNCHECKED_CAST")
+    return ((this[field] as? List<String>) ?: emptyList())
+        .map { it.replace("/", "-") }
+        .toSet()
+}
+
+fun DocumentSnapshot.tombstoneKeys(field: String): Set<String> {
+    return (this.data ?: emptyMap()).tombstoneKeys(field)
+}
+
+fun Map<String, Any?>.toHouseSafe(docId: String, agentUid: String, agentName: String = ""): House? {
+    return try {
+        val firestoreLastUpdated = parseRemoteTimestamp(this["lastUpdated"], 0L)
+        val rawData = ((this["data"] as? String) ?: "").replace("/", "-")
+        val sourceName = (this["agentName"] as? String) ?: agentName
         val rawAgentName = normalizeAgentName(sourceName)
-        
+
         val baseHouse = House(
             address = com.antigravity.healthagent.domain.model.VisitAddress(
-                blockNumber = (this.getString("blockNumber") ?: "").normalize(),
-                streetName = (this.getString("streetName") ?: "").trim().formatStreetName(),
-                number = (this.getString("number") ?: "").trim().uppercase(),
-                sequence = when (val s = this.get("sequence")) {
-                    is Number -> s.toInt()
-                    is String -> s.toIntOrNull() ?: 0
-                    else -> 0
-                },
-                complement = when (val c = this.get("complement")) {
-                    is Number -> c.toInt()
-                    is String -> c.toIntOrNull() ?: 0
-                    else -> 0
-                },
-                bairro = (this.getString("bairro") ?: "").normalize(),
-                blockSequence = (this.getString("blockSequence") ?: "").normalize()
+                blockNumber = ((this["blockNumber"] as? String) ?: "").normalize(),
+                streetName = ((this["streetName"] as? String) ?: "").trim().formatStreetName(),
+                number = ((this["number"] as? String) ?: "").trim().uppercase(),
+                sequence = this.mapInt("sequence", 0),
+                complement = this.mapInt("complement", 0),
+                bairro = ((this["bairro"] as? String) ?: "").normalize(),
+                blockSequence = ((this["blockSequence"] as? String) ?: "").normalize()
             ),
             context = com.antigravity.healthagent.domain.model.DailyContext(
-                municipio = this.getString("municipio") ?: "Bom Jardim",
-                categoria = this.getString("categoria") ?: "BRR",
-                zona = this.getString("zona") ?: "URB",
-                tipo = (this.get("tipo") as? Number)?.toInt() ?: 2,
-                ciclo = this.getString("ciclo") ?: "1º",
-                atividade = (this.get("atividade") as? Number)?.toInt() ?: 4
+                municipio = this["municipio"] as? String ?: "Bom Jardim",
+                categoria = this["categoria"] as? String ?: "BRR",
+                zona = this["zona"] as? String ?: "URB",
+                tipo = this.mapInt("tipo", 2),
+                ciclo = this["ciclo"] as? String ?: "1º",
+                atividade = this.mapInt("atividade", 4)
             ),
             treatment = com.antigravity.healthagent.domain.model.TreatmentData(
-                a1 = (this.get("a1") as? Number)?.toInt() ?: 0,
-                a2 = (this.get("a2") as? Number)?.toInt() ?: 0,
-                b = (this.get("b") as? Number)?.toInt() ?: 0,
-                c = (this.get("c") as? Number)?.toInt() ?: 0,
-                d1 = (this.get("d1") as? Number)?.toInt() ?: 0,
-                d2 = (this.get("d2") as? Number)?.toInt() ?: 0,
-                e = (this.get("e") as? Number)?.toInt() ?: 0,
-                eliminados = (this.get("eliminados") as? Number)?.toInt() ?: 0,
-                larvicida = (this.get("larvicida") as? Number)?.toDouble() ?: 0.0,
-                comFoco = this.getBoolean("comFoco") ?: false
+                a1 = this.mapInt("a1", 0),
+                a2 = this.mapInt("a2", 0),
+                b = this.mapInt("b", 0),
+                c = this.mapInt("c", 0),
+                d1 = this.mapInt("d1", 0),
+                d2 = this.mapInt("d2", 0),
+                e = this.mapInt("e", 0),
+                eliminados = this.mapInt("eliminados", 0),
+                larvicida = this.mapDouble("larvicida", 0.0),
+                comFoco = this["comFoco"] as? Boolean ?: false
             ),
-            localidadeConcluida = this.getBoolean("localidadeConcluida") ?: false,
-            quarteiraoConcluido = this.getBoolean("quarteiraoConcluido") ?: false,
-            listOrder = (this.get("listOrder") as? Number)?.toLong() ?: 0L,
-            visitSegment = (this.get("visitSegment") as? Number)?.toInt() ?: 0,
-            observation = this.getString("observation") ?: "",
+            localidadeConcluida = this["localidadeConcluida"] as? Boolean ?: false,
+            quarteiraoConcluido = this["quarteiraoConcluido"] as? Boolean ?: false,
+            listOrder = this.mapLong("listOrder", 0L),
+            visitSegment = this.mapInt("visitSegment", 0),
+            observation = this["observation"] as? String ?: "",
             geo = com.antigravity.healthagent.domain.model.GeoCapture(
-                latitude = this.get("latitude") as? Double,
-                longitude = this.get("longitude") as? Double,
-                focusCaptureTime = (this.get("focusCaptureTime") as? Number)?.toLong()
+                latitude = (this["latitude"] as? Number)?.toDouble(),
+                longitude = (this["longitude"] as? Number)?.toDouble(),
+                focusCaptureTime = parseRemoteTimestampOrNull(this["focusCaptureTime"])
             ),
-            editedByAdmin = this.getBoolean("editedByAdmin") ?: false
-        ).copy(id = 0, uuid = this@toHouseSafe.getString("uuid") ?: "")
+            editedByAdmin = this["editedByAdmin"] as? Boolean ?: false
+        ).copy(id = 0, uuid = this["uuid"] as? String ?: "")
 
-        val createdAtRaw = this.get("createdAt")
-        val createdAt = when(createdAtRaw) {
-            is com.google.firebase.Timestamp -> createdAtRaw.toDate().time
-            is Long -> createdAtRaw
-            else -> baseHouse.createdAt
-        }
+        val createdAt = parseRemoteTimestamp(this["createdAt"], baseHouse.createdAt)
 
-        val rawSituation = this.getString("situation")
+        val rawSituation = this["situation"] as? String
         val coercedSituation = coerceSituation(rawSituation)
         val finalSituation = if (coercedSituation == Situation.EMPTY) Situation.NONE else coercedSituation
 
         val finalHouse = baseHouse.apply {
-            this.cloudId = this@toHouseSafe.id
+            this.cloudId = docId
         }.copy(
             agentUid = agentUid,
             agentName = rawAgentName,
             data = rawData,
             createdAt = createdAt,
             lastUpdated = firestoreLastUpdated,
-            propertyType = coercePropertyType(this.getString("propertyType")),
+            propertyType = coercePropertyType(this["propertyType"] as? String),
             situation = finalSituation
         ).apply {
-            this.cloudId = this@toHouseSafe.id
+            this.cloudId = docId
         }
 
         val isBroken = finalHouse.address.streetName.isBlank() && 
@@ -99,51 +184,43 @@ fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): Hous
                        finalHouse.address.sequence <= 0
         
         if (isBroken) {
-            AppLogger.w("HouseMapper", "Discarded broken house from cloud: ${this.id}")
+            AppLogger.w("HouseMapper", "Discarded broken house from cloud: $docId")
             return null
         }
 
         return finalHouse
     } catch (e: Exception) {
-        AppLogger.e("HouseMapper", "toHouseSafe CRITICAL error for doc ${this.id}: ${e.message}")
+        AppLogger.e("HouseMapper", "toHouseSafe CRITICAL error for doc $docId: ${e.message}")
+        null
+    }
+}
+
+fun DocumentSnapshot.toHouseSafe(agentUid: String, agentName: String = ""): House? {
+    return (this.data ?: emptyMap()).toHouseSafe(this.id, agentUid, agentName)
+}
+
+fun Map<String, Any?>.toDayActivitySafe(docId: String, uid: String, agentName: String = ""): DayActivity? {
+    return try {
+        val rawDate = ((this["date"] as? String) ?: "").ifBlank { docId }.replace("/", "-")
+        val sourceName = if (agentName.isNotBlank()) agentName else ((this["agentName"] as? String) ?: "")
+        DayActivity(
+            date = rawDate,
+            status = (this["status"] as? String) ?: "",
+            isClosed = this["isClosed"] as? Boolean ?: false,
+            isManualUnlock = this["isManualUnlock"] as? Boolean ?: false,
+            agentName = normalizeAgentName(sourceName),
+            agentUid = uid,
+            editedByAdmin = this["editedByAdmin"] as? Boolean ?: false,
+            lastUpdated = parseRemoteTimestamp(this["lastUpdated"], TimeManager.currentTimeMillis())
+        )
+    } catch (e: Exception) {
+        AppLogger.e("HouseMapper", "toDayActivitySafe: Error mapping $docId", e)
         null
     }
 }
 
 fun DocumentSnapshot.toDayActivitySafe(uid: String, agentName: String = ""): DayActivity? {
-    return try {
-        val activity = this.toObject(DayActivity::class.java) ?: return null
-        val lastUpdatedRaw = this.get("lastUpdated")
-        
-        val lastUpdated = when(lastUpdatedRaw) {
-            is com.google.firebase.Timestamp -> lastUpdatedRaw.toDate().time
-            is Long -> lastUpdatedRaw
-            else -> activity.lastUpdated
-        }
-        val isClosed = this.getBoolean("isClosed") ?: activity.isClosed
-        val isManualUnlock = this.getBoolean("isManualUnlock") ?: activity.isManualUnlock
-        val finalStatus = this.getString("status") ?: activity.status
-
-        val rawDate = this.getString("date") ?: activity.date
-        val finalDate = rawDate.ifBlank { this.id }.replace("/", "-")
-
-        val sourceName = if (agentName.isNotBlank()) agentName else (activity.agentName.ifBlank { "" })
-        val finalAgentName = normalizeAgentName(sourceName)
-        
-        activity.copy(
-            status = finalStatus,
-            date = finalDate,
-            isClosed = isClosed,
-            isManualUnlock = isManualUnlock,
-            lastUpdated = lastUpdated, 
-            agentUid = uid,
-            agentName = finalAgentName,
-            editedByAdmin = this.getBoolean("editedByAdmin") ?: activity.editedByAdmin
-        )
-    } catch (e: Exception) {
-        AppLogger.e("HouseMapper", "toDayActivitySafe: Error mapping ${this.id}", e)
-        null
-    }
+    return (this.data ?: emptyMap()).toDayActivitySafe(this.id, uid, agentName)
 }
 
 fun House.toFirestoreMap(): Map<String, Any?> {

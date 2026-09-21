@@ -24,9 +24,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 import com.antigravity.healthagent.data.sync.VersionChecker
+import com.antigravity.healthagent.data.sync.RemoteSyncFlags
 import com.antigravity.healthagent.data.sync.IdentityDiscoveryService
 import com.antigravity.healthagent.data.sync.TeamworkSyncHandler
 import com.antigravity.healthagent.data.sync.SyncReconciler
+import com.antigravity.healthagent.data.util.tombstoneKeys
 import com.antigravity.healthagent.domain.repository.SyncRepository
 
 @Singleton
@@ -79,8 +81,11 @@ class SyncPullHandler @Inject constructor(
                         val localUnsyncedCount = houseRepository.getUnsyncedHouses(uid).size + houseRepository.getUnsyncedActivities(uid).size
                         
                         val requireReset = versionChecker.isWipeRequired(
-                            userDoc = userDoc,
-                            agentDocSnapshot = agentDocSnapshot,
+                            flags = RemoteSyncFlags(
+                                requireDataResetFromUser = userDoc.getBoolean("requireDataReset") ?: false,
+                                requireDataResetFromAgent = agentDocSnapshot.getBoolean("requireDataReset") ?: false,
+                                agentDocExists = agentDocSnapshot.exists()
+                            ),
                             hasSyncHistory = hasSyncHistory,
                             isTargetDifferentUser = isTargetDifferentUser,
                             localUnsyncedCount = localUnsyncedCount
@@ -191,12 +196,8 @@ class SyncPullHandler @Inject constructor(
                                         settingsManager.setClockSkewMs(0L)
                                     }
 
-                                    @Suppress("UNCHECKED_CAST")
-                                    val deletedHouses = (agentDoc?.get("deleted_house_ids") as? List<String> ?: emptyList())
-                                        .map { it.replace("/", "-") }
-                                    @Suppress("UNCHECKED_CAST")
-                                    val deletedActivities = (agentDoc?.get("deleted_activity_dates") as? List<String> ?: emptyList())
-                                        .map { it.replace("/", "-") }
+                                    val deletedHouses = agentDoc?.tombstoneKeys("deleted_house_ids") ?: emptySet()
+                                    val deletedActivities = agentDoc?.tombstoneKeys("deleted_activity_dates") ?: emptySet()
                                     
                                     Triple(houses, activities, deletedHouses to deletedActivities)
                                 }
