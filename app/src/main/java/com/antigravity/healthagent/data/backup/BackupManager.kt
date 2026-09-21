@@ -126,6 +126,18 @@ class BackupManager @Inject constructor() {
         }
     }
 
+    /**
+     * JSON puro (sem AES) p/ backups restauráveis no portal. O AES segue como
+     * cópia vinculada ao aparelho; ambos sobem no modo Supabase (duplo formato).
+     */
+    fun toPlainJson(data: BackupData): String {
+        return gson.toJson(data.copy(isComplete = true))
+    }
+
+    fun importPlainJson(json: String): BackupData {
+        return gson.fromJson(json, BackupData::class.java)
+    }
+
     // Overload for backward compatibility (Exporting only houses - though we should migrate to BackupData everywhere)
     fun exportData(context: Context, uri: Uri, houses: List<House>) {
          exportData(context, uri, BackupData(houses, emptyList()))

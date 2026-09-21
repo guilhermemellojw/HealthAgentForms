@@ -57,12 +57,6 @@ abstract class RepositoryModule {
 
     @Binds
     @Singleton
-    abstract fun bindBackupRepository(
-        backupRepositoryImpl: com.antigravity.healthagent.data.repository.BackupRepositoryImpl
-    ): com.antigravity.healthagent.domain.repository.BackupRepository
-
-    @Binds
-    @Singleton
     abstract fun bindAppLogger(
         androidLoggerImpl: com.antigravity.healthagent.data.util.AndroidLoggerImpl
     ): com.antigravity.healthagent.domain.logger.AppLogger
@@ -74,6 +68,16 @@ abstract class RepositoryModule {
     ): com.antigravity.healthagent.domain.repository.StreetRepository
 
     companion object {
+        @Provides
+        @Singleton
+        fun provideBackupRepository(
+            firebase: com.antigravity.healthagent.data.repository.BackupRepositoryImpl,
+            supabase: dagger.Lazy<com.antigravity.healthagent.data.repository.SupabaseBackupRepository>
+        ): com.antigravity.healthagent.domain.repository.BackupRepository {
+            // Switch Fase 2.6 (local.properties, padrão false).
+            return if (BuildConfig.USE_SUPABASE_SYNC) supabase.get() else firebase
+        }
+
         @Provides
         @Singleton
         fun provideDayTransferRepository(
